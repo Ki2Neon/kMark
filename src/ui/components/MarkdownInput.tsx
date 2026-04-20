@@ -1,13 +1,11 @@
 import { memo, type ChangeEvent, type KeyboardEvent } from "react";
-import { type EditorStats } from "../../domain/editor";
 
 type MarkdownInputProps = {
   readonly content: string;
-  readonly stats: EditorStats;
   readonly onContentChange: (content: string) => void;
 };
 
-function MarkdownInputComponent({ content, stats, onContentChange }: MarkdownInputProps) {
+function MarkdownInputComponent({ content, onContentChange }: MarkdownInputProps) {
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     onContentChange(event.currentTarget.value);
   };
@@ -32,23 +30,20 @@ function MarkdownInputComponent({ content, stats, onContentChange }: MarkdownInp
   };
 
   return (
-    <section className="panel panel--editor" aria-labelledby="editor-title">
-      <div className="panel__header">
+    <section className="section section--draft" aria-labelledby="draft-title">
+      <div className="section__head section__head--compact">
         <div>
-          <span className="panel__eyebrow">write</span>
-          <h2 id="editor-title">Draft</h2>
+          <span className="section__eyebrow">draft</span>
+          <h2 id="draft-title" className="section__title">
+            Draft
+          </h2>
         </div>
 
-        <div className="panel__metrics" aria-label="ドキュメント統計">
-          <span>{stats.words} words</span>
-          <span>{stats.characters} chars</span>
-          <span>{stats.lines} lines</span>
-          <span>{stats.readingMinutes} min read</span>
-        </div>
+        <p className="section__note section__note--compact">Tab キーで 2 スペースを挿入します。</p>
       </div>
 
       <textarea
-        className="panel__textarea"
+        className="draft-section__textarea"
         value={content}
         onChange={handleChange}
         onKeyDown={handleKeyDown}

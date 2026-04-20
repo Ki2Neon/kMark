@@ -1,9 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer } from "react";
-import {
-  createInitialEditorState,
-  deriveEditorStats,
-  type EditorMode,
-} from "../../domain/editor";
+import { createInitialEditorState, deriveEditorStats } from "../../domain/editor";
 import { downloadMarkdownDocument, readMarkdownFile } from "../../infra/fileTransfer";
 import { loadLocalDraft, persistLocalDraft } from "../../infra/localDraft";
 import { renderMarkdown } from "../../infra/markdown";
@@ -71,10 +67,6 @@ export function useMarkdownEditor() {
     dispatch({ type: "editor/fileNameChanged", fileName });
   }, []);
 
-  const handleModeChange = useCallback((mode: EditorMode) => {
-    dispatch({ type: "editor/modeChanged", mode });
-  }, []);
-
   const handlePickedFile = useCallback(async (file: File | null) => {
     if (file === null) {
       return;
@@ -124,7 +116,6 @@ export function useMarkdownEditor() {
     errorMessage: state.errorMessage,
     fileName: state.fileName,
     isDirty: state.isDirty,
-    mode: state.mode,
     previewHtml,
     stats,
     statusLabel,
@@ -132,7 +123,6 @@ export function useMarkdownEditor() {
     handleContentChange,
     handleErrorClear,
     handleFileNameChange,
-    handleModeChange,
     handlePickedFile,
     handleResetDocument,
     handleSaveDocument,

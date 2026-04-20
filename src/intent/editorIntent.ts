@@ -1,7 +1,6 @@
 import {
   createInitialEditorState,
   ensureMarkdownExtension,
-  type EditorMode,
   type EditorState,
 } from "../domain/editor";
 
@@ -14,7 +13,6 @@ export type EditorAction =
       readonly content: string;
       readonly loadedAt: number | null;
     }
-  | { readonly type: "editor/modeChanged"; readonly mode: EditorMode }
   | { readonly type: "editor/documentReset" }
   | { readonly type: "editor/saveSucceeded"; readonly savedAt: number }
   | { readonly type: "editor/errorRaised"; readonly message: string }
@@ -55,17 +53,6 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         isDirty: false,
         lastSavedAt: action.loadedAt,
         errorMessage: null,
-      };
-    }
-
-    case "editor/modeChanged": {
-      if (state.mode === action.mode) {
-        return state;
-      }
-
-      return {
-        ...state,
-        mode: action.mode,
       };
     }
 

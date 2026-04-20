@@ -1,9 +1,8 @@
-export type EditorMode = "split" | "write" | "preview";
+export type LayoutMode = "desktop" | "mobile";
 
 export type EditorState = {
   readonly content: string;
   readonly fileName: string;
-  readonly mode: EditorMode;
   readonly isDirty: boolean;
   readonly lastSavedAt: number | null;
   readonly errorMessage: string | null;
@@ -40,11 +39,25 @@ export function createInitialEditorState(): EditorState {
   return {
     content: DEFAULT_MARKDOWN,
     fileName: DEFAULT_FILE_NAME,
-    mode: "split",
     isDirty: false,
     lastSavedAt: null,
     errorMessage: null,
   };
+}
+
+export function selectStartupLayoutMode(options: {
+  readonly viewportWidth: number;
+  readonly isMobileUserAgent: boolean;
+}): LayoutMode {
+  if (options.isMobileUserAgent) {
+    return "mobile";
+  }
+
+  if (options.viewportWidth <= 640) {
+    return "mobile";
+  }
+
+  return "desktop";
 }
 
 export function ensureMarkdownExtension(fileName: string): string {
