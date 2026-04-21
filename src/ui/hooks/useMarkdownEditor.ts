@@ -1,12 +1,17 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
 import { createInitialEditorState } from "../../domain/editor";
+import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
 import {
+  clearPendingTauriMarkdownOpenRequests,
+  listenForTauriMarkdownOpenRequests,
   overwriteMarkdownDocument,
+  overwriteMarkdownDocumentAtPath,
   pickMarkdownDocument,
   readMarkdownFile,
   saveMarkdownDocumentAs,
   supportsNativeOpenPicker,
+  takePendingTauriMarkdownOpenRequests,
   type MarkdownFileHandle,
 } from "../../infra/fileTransfer";
 import { loadLocalDraft, persistLocalDraft } from "../../infra/localDraft";
@@ -26,6 +31,7 @@ export function useMarkdownEditor() {
   const [state, dispatch] = useReducer(editorReducer, undefined, createInitialEditorState);
   const deferredContent = useDeferredValue(state.content);
   const currentFileHandleRef = useRef<MarkdownFileHandle | null>(null);
+  const currentExternalFilePathRef = useRef<string | null>(null);
 
   useEffect(() => {
     const draft = loadLocalDraft();
@@ -66,6 +72,7 @@ export function useMarkdownEditor() {
       }
 
       currentFileHandleRef.current = result.fileHandle;
+      currentExternalFilePathRef.current = null;
       dispatch({
         type: "editor/documentLoaded",
         fileName: result.fileName,
@@ -85,6 +92,7 @@ export function useMarkdownEditor() {
     try {
       const result = await readMarkdownFile(file);
       currentFileHandleRef.current = null;
+      currentExternalFilePathRef.current = null;
 
       dispatch({
         type: "editor/documentLoaded",
@@ -111,6 +119,18 @@ export function useMarkdownEditor() {
         return;
       }
 
+      const currentExternalFilePath = currentExternalFilePathRef.current;
+
+      if (currentExternalFilePath !== null) {
+        await overwriteMarkdownDocumentAtPath(currentExternalFilePath, state.content);
+        dispatch({
+          type: "editor/saveSucceeded",
+          fileName: state.fileName,
+          savedAt: Date.now(),
+        });
+        return;
+      }
+
       const result = await saveMarkdownDocumentAs(state.fileName, state.content);
 
       if (result === null) {
@@ -118,6 +138,7 @@ export function useMarkdownEditor() {
       }
 
       currentFileHandleRef.current = result.fileHandle;
+      currentExternalFilePathRef.current = null;
       dispatch({
         type: "editor/saveSucceeded",
         fileName: result.fileName,
@@ -137,6 +158,7 @@ export function useMarkdownEditor() {
       }
 
       currentFileHandleRef.current = result.fileHandle;
+      currentExternalFilePathRef.current = null;
       dispatch({
         type: "editor/saveSucceeded",
         fileName: result.fileName,
@@ -146,6 +168,39 @@ export function useMarkdownEditor() {
       dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
     }
   }, [state.content, state.fileName]);
+
+  const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {
+    currentFileHandleRef.current = null;
+    currentExternalFilePathRef.current = document.filePath;
+
+    dispatch({
+      type: "editor/documentLoaded",
+      fileName: document.fileName,
+      content: document.content,
+      loadedAt: null,
+    });
+  }, []);
+
+  const handleTakePendingExternalDocuments = useCallback(async () => {
+    try {
+      return await takePendingTauriMarkdownOpenRequests();
+    } catch (error) {
+      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
+      return [];
+    }
+  }, []);
+
+  const handleClearPendingExternalDocuments = useCallback(async () => {
+    try {
+      await clearPendingTauriMarkdownOpenRequests();
+    } catch (error) {
+      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
+    }
+  }, []);
+
+  const subscribeToExternalDocumentRequests = useCallback((callback: () => void) => {
+    return listenForTauriMarkdownOpenRequests(callback);
+  }, []);
 
   const handlePrintDocument = useCallback(async (
     previewDisplayMode: PreviewDisplayMode,
@@ -166,6 +221,7 @@ export function useMarkdownEditor() {
 
   const handleResetDocument = useCallback(() => {
     currentFileHandleRef.current = null;
+    currentExternalFilePathRef.current = null;
     dispatch({ type: "editor/documentReset" });
   }, []);
 
@@ -194,14 +250,18 @@ export function useMarkdownEditor() {
     previewHtml,
     previewPageHtmls,
     confirmDiscard,
+    handleClearPendingExternalDocuments,
     handleContentChange,
     handleErrorClear,
     handleErrorRaise,
+    handleLoadExternalDocument,
     handleOpenDocumentFromPicker,
     handlePickedFile,
     handleResetDocument,
     handleOverwriteSaveDocument,
     handlePrintDocument,
     handleSaveDocumentAs,
+    handleTakePendingExternalDocuments,
+    subscribeToExternalDocumentRequests,
   };
 }

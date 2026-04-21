@@ -1,3 +1,6 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { type ExternalMarkdownDocument } from "../domain/externalMarkdownDocument";
 import { ensureMarkdownExtension } from "../domain/editor";
 
 type MarkdownPickerType = {
@@ -38,6 +41,8 @@ const MARKDOWN_PICKER_TYPES: readonly MarkdownPickerType[] = [
     },
   },
 ];
+
+const MARKDOWN_OPEN_REQUESTED_EVENT = "markdown-open-requested";
 
 function getPickerWindow(): PickerWindow {
   return window as PickerWindow;
@@ -94,11 +99,48 @@ export async function overwriteMarkdownDocument(fileHandle: MarkdownFileHandle, 
   await writable.close();
 }
 
+export async function overwriteMarkdownDocumentAtPath(filePath: string, content: string): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Tauri 環境でのみ利用できます。");
+  }
+
+  await invoke("write_markdown_document", {
+    path: filePath,
+    content,
+  });
+}
+
 export async function readMarkdownFile(file: File): Promise<{ fileName: string; content: string }> {
   return {
     fileName: file.name,
     content: await file.text(),
   };
+}
+
+export async function takePendingTauriMarkdownOpenRequests(): Promise<readonly ExternalMarkdownDocument[]> {
+  if (!isTauri()) {
+    return [];
+  }
+
+  return invoke<ExternalMarkdownDocument[]>("take_pending_markdown_open_requests");
+}
+
+export async function clearPendingTauriMarkdownOpenRequests(): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+
+  await invoke("clear_pending_markdown_open_requests");
+}
+
+export async function listenForTauriMarkdownOpenRequests(callback: () => void): Promise<() => void> {
+  if (!isTauri()) {
+    return () => {};
+  }
+
+  return listen(MARKDOWN_OPEN_REQUESTED_EVENT, () => {
+    callback();
+  });
 }
 
 export function downloadMarkdownDocument(fileName: string, content: string): void {

@@ -11,6 +11,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { selectMostRecentExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
 import { type AppFontId, type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
@@ -120,15 +121,19 @@ export function MarkdownEditorScreen({
     fileName,
     isDirty,
     previewHtml,
+    handleClearPendingExternalDocuments,
     previewPageHtmls,
     confirmDiscard,
     handleContentChange,
+    handleLoadExternalDocument,
     handleOpenDocumentFromPicker,
     handlePickedFile,
     handleResetDocument,
     handleOverwriteSaveDocument,
     handlePrintDocument,
     handleSaveDocumentAs,
+    handleTakePendingExternalDocuments,
+    subscribeToExternalDocumentRequests,
     handleErrorClear,
     handleErrorRaise,
   } = useMarkdownEditor();
@@ -462,6 +467,53 @@ export function MarkdownEditorScreen({
     },
     [blurActiveElement, isPreviewVisible, mobileSection],
   );
+
+  const loadPendingExternalDocumentEvent = useEffectEvent(async (requiresDiscardConfirmation: boolean) => {
+    if (requiresDiscardConfirmation && !confirmDiscard()) {
+      await handleClearPendingExternalDocuments();
+      return;
+    }
+
+    const pendingDocuments = await handleTakePendingExternalDocuments();
+    const nextDocument = selectMostRecentExternalMarkdownDocument(pendingDocuments);
+
+    if (nextDocument === null) {
+      return;
+    }
+
+    if (layoutMode === "desktop") {
+      closeDesktopMenu();
+    } else {
+      handleMobileSectionRequest("draft");
+    }
+
+    handleLoadExternalDocument(nextDocument);
+  });
+
+  useEffect(() => {
+    void loadPendingExternalDocumentEvent(false);
+  }, [loadPendingExternalDocumentEvent]);
+
+  useEffect(() => {
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void subscribeToExternalDocumentRequests(() => {
+      void loadPendingExternalDocumentEvent(true);
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    });
+
+    return () => {
+      isDisposed = true;
+      unlisten?.();
+    };
+  }, [loadPendingExternalDocumentEvent, subscribeToExternalDocumentRequests]);
 
   const handlePreviewVisibilityChange = useCallback((nextIsPreviewVisible: boolean) => {
     setIsPreviewVisible(nextIsPreviewVisible);
