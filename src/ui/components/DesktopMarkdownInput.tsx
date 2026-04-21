@@ -4,7 +4,7 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
-import { type MultiCursorModifier } from "../../domain/editorPreferences";
+import { resolveDraftFontFamily, type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 const monacoEnvironmentTarget = self as typeof self & {
@@ -141,6 +141,7 @@ function handleMarkdownTab(editor: monaco.editor.IStandaloneCodeEditor, isOutden
 type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly content: string;
+  readonly draftFontId: DraftFontId;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly onContentChange: (content: string) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
@@ -154,6 +155,7 @@ type DesktopMarkdownInputProps = {
 function DesktopMarkdownInputComponent({
   appThemeId,
   content,
+  draftFontId,
   multiCursorModifier,
   onContentChange,
   onCursorLineChange,
@@ -249,7 +251,7 @@ function DesktopMarkdownInputComponent({
     autoClosingBrackets: "languageDefined",
     autoClosingQuotes: "languageDefined",
     folding: false,
-    fontFamily: '"Iosevka Term", "Cascadia Code", Consolas, monospace',
+    fontFamily: resolveDraftFontFamily(draftFontId),
     fontSize: 15,
     glyphMargin: false,
     hideCursorInOverviewRuler: true,
@@ -277,7 +279,7 @@ function DesktopMarkdownInputComponent({
     wordBasedSuggestions: "off",
     wordWrap: "on",
     wrappingIndent: "same",
-  } as const), [multiCursorModifier]);
+  } as const), [draftFontId, multiCursorModifier]);
 
   return (
     <Editor

@@ -1,5 +1,7 @@
 import {
   DEFAULT_EDITOR_PREFERENCES,
+  deserializeAppFontId,
+  deserializeDraftFontId,
   isMultiCursorModifier,
   type EditorPreferences,
 } from "../domain/editorPreferences";
@@ -17,6 +19,8 @@ export function loadEditorPreferences(): EditorPreferences {
     const parsedValue = JSON.parse(storedValue) as Partial<EditorPreferences>;
 
     return {
+      appFontId: deserializeAppFontId(parsedValue.appFontId),
+      draftFontId: deserializeDraftFontId(parsedValue.draftFontId),
       multiCursorModifier:
         typeof parsedValue.multiCursorModifier === "string" && isMultiCursorModifier(parsedValue.multiCursorModifier)
           ? parsedValue.multiCursorModifier

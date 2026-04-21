@@ -16,8 +16,11 @@
   --preview-text-soft: #555555;
   --preview-border: #d7d7d7;
   --preview-code-bg: #f5f5f5;
+  --app-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --draft-font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
+  --preview-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
   --mobile-nav-height: 32px;
-  font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-family: var(--app-font-family);
   line-height: 1.5;
   font-weight: 400;
   color: var(--text);
@@ -139,6 +142,14 @@
   --overlay: rgba(39, 35, 31, 0.12);
   --selection: rgba(59, 92, 204, 0.16);
   color-scheme: light;
+}
+
+:root[data-preview-colors="app"] {
+  --preview-surface: var(--surface);
+  --preview-text: var(--text);
+  --preview-text-soft: var(--text-soft);
+  --preview-border: var(--border);
+  --preview-code-bg: var(--surface-muted);
 }
 
 * {
@@ -433,6 +444,13 @@ input:focus-visible,
   gap: 10px;
 }
 
+.menu-section__field-label {
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-soft);
+}
+
 .menu-section__mode-switch {
   display: inline-flex;
   align-items: center;
@@ -520,7 +538,7 @@ input:focus-visible,
   color: var(--text);
   overflow: auto;
   resize: none;
-  font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
+  font-family: var(--draft-font-family);
   font-size: 0.95rem;
   line-height: 1.7;
 }
@@ -627,6 +645,7 @@ input:focus-visible,
 .markdown-body {
   max-width: none;
   padding: 16px;
+  font-family: var(--preview-font-family);
   color: var(--preview-text);
 }
 

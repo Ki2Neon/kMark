@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, type ChangeEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
+import { type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
-import { type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 const DesktopMarkdownInput = lazy(async () => {
@@ -15,6 +15,7 @@ const DesktopMarkdownInput = lazy(async () => {
 type MarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly content: string;
+  readonly draftFontId: DraftFontId;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly onContentChange: (content: string) => void;
@@ -59,6 +60,7 @@ function getCursorOffsetForLine(content: string, lineNumber: number): number {
 function MarkdownInputComponent({
   appThemeId,
   content,
+  draftFontId,
   layoutMode,
   multiCursorModifier,
   onContentChange,
@@ -189,6 +191,7 @@ function MarkdownInputComponent({
             <DesktopMarkdownInput
               appThemeId={appThemeId}
               content={content}
+              draftFontId={draftFontId}
               multiCursorModifier={multiCursorModifier}
               onContentChange={onContentChange}
               onCursorLineChange={onCursorLineChange}

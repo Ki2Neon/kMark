@@ -1,8 +1,12 @@
 import { memo, type ChangeEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
 import {
+  APP_FONT_OPTIONS,
+  DRAFT_FONT_OPTIONS,
   MULTI_CURSOR_MODIFIER_OPTIONS,
   isMultiCursorModifier,
+  type AppFontId,
+  type DraftFontId,
   type MultiCursorModifier,
 } from "../../domain/editorPreferences";
 import {
@@ -13,12 +17,17 @@ import {
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
 
 type MenuSectionProps = {
+  readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
+  readonly draftFontId: DraftFontId;
   readonly previewDisplayMode: PreviewDisplayMode;
+  readonly previewUsesAppThemeColors: boolean;
   readonly isPreviewVisible: boolean;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
+  readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
+  readonly onDraftFontChange: (draftFontId: DraftFontId) => void;
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onNewDocument: () => void;
@@ -27,17 +36,26 @@ type MenuSectionProps = {
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
+  readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
   readonly onPreviewVisibilityChange: (isPreviewVisible: boolean) => void;
   readonly onSaveDocumentAs: () => void;
 };
 
+const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
+const DRAFT_FONT_DATALIST_ID = "menu-section-draft-fonts";
+
 function MenuSectionComponent({
+  appFontId,
   appThemeId,
+  draftFontId,
   previewDisplayMode,
+  previewUsesAppThemeColors,
   isPreviewVisible,
   layoutMode,
   multiCursorModifier,
+  onAppFontChange,
   onAppThemeChange,
+  onDraftFontChange,
   onLayoutModeChange,
   onMultiCursorModifierChange,
   onNewDocument,
@@ -46,6 +64,7 @@ function MenuSectionComponent({
   onOverwriteSaveDocument,
   onPrintDocument,
   onPreviewDisplayModeChange,
+  onPreviewUsesAppThemeColorsChange,
   onPreviewVisibilityChange,
   onSaveDocumentAs,
 }: MenuSectionProps) {
@@ -85,6 +104,18 @@ function MenuSectionComponent({
     }
 
     onPreviewDisplayModeChange(nextPreviewDisplayMode);
+  };
+
+  const handlePreviewUsesAppThemeColorsSwitch = (event: ChangeEvent<HTMLInputElement>) => {
+    onPreviewUsesAppThemeColorsChange(event.currentTarget.checked);
+  };
+
+  const handleAppFontInput = (event: ChangeEvent<HTMLInputElement>) => {
+    onAppFontChange(event.currentTarget.value);
+  };
+
+  const handleDraftFontInput = (event: ChangeEvent<HTMLInputElement>) => {
+    onDraftFontChange(event.currentTarget.value);
   };
 
   return (
@@ -149,6 +180,23 @@ function MenuSectionComponent({
           </span>
         </label>
 
+        <label className="menu-section__mode-switch">
+          <span className={!previewUsesAppThemeColors ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+            固定色
+          </span>
+          <input
+            type="checkbox"
+            className="menu-section__switch-input"
+            checked={previewUsesAppThemeColors}
+            onChange={handlePreviewUsesAppThemeColorsSwitch}
+            aria-label="プレビューでアプリテーマ色を使うか切り替え"
+          />
+          <span className="menu-section__switch" aria-hidden="true" />
+          <span className={previewUsesAppThemeColors ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+            アプリテーマ色
+          </span>
+        </label>
+
         <label className="menu-section__label">
           <select
             value={previewDisplayMode}
@@ -169,6 +217,47 @@ function MenuSectionComponent({
             別ウィンドウで表示
           </button>
         </div>
+      </div>
+
+      <div className="menu-section__group">
+        <h2 className="menu-section__group-title">フォント</h2>
+        <label className="menu-section__label">
+          <span className="menu-section__field-label">アプリ</span>
+          <input
+            type="text"
+            value={appFontId}
+            onChange={handleAppFontInput}
+            aria-label="アプリフォント"
+            className="menu-section__select"
+            list={APP_FONT_DATALIST_ID}
+            placeholder='例: Aptos, "Segoe UI", sans-serif'
+            spellCheck={false}
+          />
+          <datalist id={APP_FONT_DATALIST_ID}>
+            {APP_FONT_OPTIONS.map((fontOption) => (
+              <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
+            ))}
+          </datalist>
+        </label>
+
+        <label className="menu-section__label">
+          <span className="menu-section__field-label">ドラフト</span>
+          <input
+            type="text"
+            value={draftFontId}
+            onChange={handleDraftFontInput}
+            aria-label="ドラフトフォント"
+            className="menu-section__select"
+            list={DRAFT_FONT_DATALIST_ID}
+            placeholder='例: Iosevka Term, "Fira Code", monospace'
+            spellCheck={false}
+          />
+          <datalist id={DRAFT_FONT_DATALIST_ID}>
+            {DRAFT_FONT_OPTIONS.map((fontOption) => (
+              <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
+            ))}
+          </datalist>
+        </label>
       </div>
 
       <div className="menu-section__group">

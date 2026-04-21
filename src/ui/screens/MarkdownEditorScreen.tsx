@@ -13,7 +13,7 @@ import {
 } from "react";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
-import { type MultiCursorModifier } from "../../domain/editorPreferences";
+import { type AppFontId, type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 import {
   DEFAULT_DESKTOP_SPLIT_RATIO,
@@ -43,10 +43,16 @@ const MOBILE_SLIDE_TRANSITION_MS = 60;
 type MobileSectionId = "menu" | "draft" | "preview";
 
 type MarkdownEditorScreenProps = {
+  readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
+  readonly draftFontId: DraftFontId;
   readonly multiCursorModifier: MultiCursorModifier;
+  readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
+  readonly onDraftFontChange: (draftFontId: DraftFontId) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
+  readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
+  readonly previewUsesAppThemeColors: boolean;
 };
 
 function getMobileSectionIndex(section: MobileSectionId, sectionOrder: readonly MobileSectionId[]): number {
@@ -95,10 +101,16 @@ function detectLayoutMode(): LayoutMode {
 }
 
 export function MarkdownEditorScreen({
+  appFontId,
   appThemeId,
+  draftFontId,
   multiCursorModifier,
+  onAppFontChange,
   onAppThemeChange,
+  onDraftFontChange,
   onMultiCursorModifierChange,
+  onPreviewUsesAppThemeColorsChange,
+  previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
   const { previewDisplayMode, onPreviewDisplayModeChange } = usePreviewPreferences();
   const {
@@ -876,6 +888,7 @@ export function MarkdownEditorScreen({
               <MarkdownInput
                 appThemeId={appThemeId}
                 content={content}
+                draftFontId={draftFontId}
                 layoutMode={layoutMode}
                 multiCursorModifier={multiCursorModifier}
                 onContentChange={handleContentChange}
@@ -936,12 +949,17 @@ export function MarkdownEditorScreen({
             >
               <div className="editor-shell__sidebar" role="dialog" aria-modal="true" aria-label="メニュー">
                 <MenuSection
+                  appFontId={appFontId}
                   appThemeId={appThemeId}
+                  draftFontId={draftFontId}
                   previewDisplayMode={previewDisplayMode}
+                  previewUsesAppThemeColors={previewUsesAppThemeColors}
                   isPreviewVisible={isPreviewVisible}
                   layoutMode={layoutMode}
                   multiCursorModifier={multiCursorModifier}
+                  onAppFontChange={onAppFontChange}
                   onAppThemeChange={onAppThemeChange}
+                  onDraftFontChange={onDraftFontChange}
                   onLayoutModeChange={handleLayoutModeChange}
                   onMultiCursorModifierChange={onMultiCursorModifierChange}
                   onNewDocument={handleRequestNew}
@@ -950,6 +968,7 @@ export function MarkdownEditorScreen({
                   onOverwriteSaveDocument={handleRequestOverwriteSave}
                   onPrintDocument={handleRequestPrint}
                   onPreviewDisplayModeChange={onPreviewDisplayModeChange}
+                  onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
                   onPreviewVisibilityChange={handlePreviewVisibilityChange}
                   onSaveDocumentAs={handleRequestSaveAs}
                 />
@@ -974,12 +993,17 @@ export function MarkdownEditorScreen({
                 <div key={section} className="editor-shell__mobile-slide">
                   {section === "menu" ? (
                     <MenuSection
+                      appFontId={appFontId}
                       appThemeId={appThemeId}
+                      draftFontId={draftFontId}
                       previewDisplayMode={previewDisplayMode}
+                      previewUsesAppThemeColors={previewUsesAppThemeColors}
                       isPreviewVisible={isPreviewVisible}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
+                      onAppFontChange={onAppFontChange}
                       onAppThemeChange={onAppThemeChange}
+                      onDraftFontChange={onDraftFontChange}
                       onLayoutModeChange={handleLayoutModeChange}
                       onMultiCursorModifierChange={onMultiCursorModifierChange}
                       onNewDocument={handleRequestNew}
@@ -988,6 +1012,7 @@ export function MarkdownEditorScreen({
                       onOverwriteSaveDocument={handleRequestOverwriteSave}
                       onPrintDocument={handleRequestPrint}
                       onPreviewDisplayModeChange={onPreviewDisplayModeChange}
+                      onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
                       onPreviewVisibilityChange={handlePreviewVisibilityChange}
                       onSaveDocumentAs={handleRequestSaveAs}
                     />
@@ -995,6 +1020,7 @@ export function MarkdownEditorScreen({
                     <MarkdownInput
                       appThemeId={appThemeId}
                       content={content}
+                      draftFontId={draftFontId}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
                       onContentChange={handleContentChange}

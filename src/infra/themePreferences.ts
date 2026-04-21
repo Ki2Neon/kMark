@@ -4,7 +4,7 @@ import {
   type ThemePreferences,
 } from "../domain/theme";
 
-const THEME_PREFERENCES_STORAGE_KEY = "kmark:theme-preferences:v1";
+export const THEME_PREFERENCES_STORAGE_KEY = "kmark:theme-preferences:v1";
 
 export function loadThemePreferences(): ThemePreferences {
   try {
@@ -22,6 +22,10 @@ export function loadThemePreferences(): ThemePreferences {
           ? parsedValue.appThemeId
           : DEFAULT_THEME_PREFERENCES.appThemeId,
       previewThemeId: typeof parsedValue.previewThemeId === "string" ? parsedValue.previewThemeId : null,
+      previewUsesAppThemeColors:
+        typeof parsedValue.previewUsesAppThemeColors === "boolean"
+          ? parsedValue.previewUsesAppThemeColors
+          : DEFAULT_THEME_PREFERENCES.previewUsesAppThemeColors,
     };
   } catch {
     return DEFAULT_THEME_PREFERENCES;

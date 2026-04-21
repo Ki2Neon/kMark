@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { type EditorPreferences, type MultiCursorModifier } from "../../domain/editorPreferences";
+import {
+  type AppFontId,
+  type DraftFontId,
+  type EditorPreferences,
+  type MultiCursorModifier,
+} from "../../domain/editorPreferences";
 import { loadEditorPreferences, persistEditorPreferences } from "../../infra/editorPreferences";
 
 export function useEditorPreferences() {
@@ -22,8 +27,38 @@ export function useEditorPreferences() {
     });
   }, []);
 
+  const handleAppFontChange = useCallback((appFontId: AppFontId) => {
+    setEditorPreferences((currentPreferences) => {
+      if (currentPreferences.appFontId === appFontId) {
+        return currentPreferences;
+      }
+
+      return {
+        ...currentPreferences,
+        appFontId,
+      };
+    });
+  }, []);
+
+  const handleDraftFontChange = useCallback((draftFontId: DraftFontId) => {
+    setEditorPreferences((currentPreferences) => {
+      if (currentPreferences.draftFontId === draftFontId) {
+        return currentPreferences;
+      }
+
+      return {
+        ...currentPreferences,
+        draftFontId,
+      };
+    });
+  }, []);
+
   return {
+    appFontId: editorPreferences.appFontId,
+    draftFontId: editorPreferences.draftFontId,
     multiCursorModifier: editorPreferences.multiCursorModifier,
+    onAppFontChange: handleAppFontChange,
+    onDraftFontChange: handleDraftFontChange,
     onMultiCursorModifierChange: handleMultiCursorModifierChange,
   };
 }

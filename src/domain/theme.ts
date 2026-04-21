@@ -16,6 +16,7 @@ export type AppThemeOption = {
 export type ThemePreferences = {
   readonly appThemeId: AppThemeId;
   readonly previewThemeId: string | null;
+  readonly previewUsesAppThemeColors: boolean;
 };
 
 export const APP_THEME_OPTIONS: readonly AppThemeOption[] = [
@@ -32,6 +33,7 @@ export const APP_THEME_OPTIONS: readonly AppThemeOption[] = [
 export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
   appThemeId: "vscode-dark",
   previewThemeId: null,
+  previewUsesAppThemeColors: false,
 };
 
 const APP_THEME_ID_SET = new Set<AppThemeId>(APP_THEME_OPTIONS.map((themeOption) => themeOption.id));
