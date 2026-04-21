@@ -1,16 +1,27 @@
+import {
+  A4_MARGIN_BOTTOM_MM,
+  A4_MARGIN_LEFT_MM,
+  A4_MARGIN_RIGHT_MM,
+  A4_MARGIN_TOP_MM,
+  A4_PAGE_HEIGHT_MM,
+  A4_PAGE_WIDTH_MM,
+  A4_VIEWPORT_OVERSCAN_PX,
+  type PreviewDisplayMode,
+  type RenderedA4PreviewPage,
+} from "../domain/preview";
+
 type PrintMarkdownDocumentOptions = {
+  readonly displayMode: PreviewDisplayMode;
   readonly title: string;
   readonly html: string;
+  readonly pageHtmls?: readonly string[];
+  readonly renderedA4PreviewPages?: readonly RenderedA4PreviewPage[];
 };
 
 const PRINT_DOCUMENT_LOAD_TIMEOUT_MS = 3000;
 const PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 2000;
 
-const PRINT_DOCUMENT_STYLE = `
-  @page {
-    margin: 12mm;
-  }
-
+const PRINT_DOCUMENT_BASE_STYLE = `
   * {
     box-sizing: border-box;
   }
@@ -115,6 +126,122 @@ const PRINT_DOCUMENT_STYLE = `
   }
 `;
 
+const STANDARD_PRINT_DOCUMENT_STYLE = `
+  @page {
+    margin: 12mm;
+  }
+
+  ${PRINT_DOCUMENT_BASE_STYLE}
+`;
+
+const A4_PRINT_DOCUMENT_STYLE = `
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  ${PRINT_DOCUMENT_BASE_STYLE}
+
+  .print-document--a4 {
+    background: #ffffff;
+  }
+
+  .print-page-frame {
+    position: relative;
+    width: ${A4_PAGE_WIDTH_MM}mm;
+    height: ${A4_PAGE_HEIGHT_MM}mm;
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .print-page-frame:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .print-page-viewport {
+    position: absolute;
+    top: ${A4_MARGIN_TOP_MM}mm;
+    left: ${A4_MARGIN_LEFT_MM}mm;
+    width: calc(${A4_PAGE_WIDTH_MM}mm - ${A4_MARGIN_LEFT_MM + A4_MARGIN_RIGHT_MM}mm + ${A4_VIEWPORT_OVERSCAN_PX}px);
+    height: calc(${A4_PAGE_HEIGHT_MM}mm - ${A4_MARGIN_TOP_MM + A4_MARGIN_BOTTOM_MM}mm);
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .print-page-viewport::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: ${A4_VIEWPORT_OVERSCAN_PX}px;
+    background: #ffffff;
+  }
+
+  .markdown-body--a4 {
+    padding: 0;
+  }
+
+  .markdown-body--a4-flow {
+    width: calc(${A4_PAGE_WIDTH_MM}mm - ${A4_MARGIN_LEFT_MM + A4_MARGIN_RIGHT_MM}mm);
+    height: calc(${A4_PAGE_HEIGHT_MM}mm - ${A4_MARGIN_TOP_MM + A4_MARGIN_BOTTOM_MM}mm);
+    column-width: calc(${A4_PAGE_WIDTH_MM}mm - ${A4_MARGIN_LEFT_MM + A4_MARGIN_RIGHT_MM}mm);
+    column-gap: 0;
+    column-fill: auto;
+    overflow: visible;
+    orphans: 3;
+    widows: 3;
+  }
+
+  .markdown-body--a4-flow h1,
+  .markdown-body--a4-flow h2,
+  .markdown-body--a4-flow h3,
+  .markdown-body--a4-flow h4,
+  .markdown-body--a4-flow h5,
+  .markdown-body--a4-flow h6 {
+    break-after: avoid-column;
+    page-break-after: avoid;
+  }
+
+  .markdown-body--a4-flow blockquote,
+  .markdown-body--a4-flow figure,
+  .markdown-body--a4-flow pre,
+  .markdown-body--a4-flow tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .markdown-body--a4-flow table {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .markdown-body--a4-flow thead {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-page-content {
+    position: relative;
+    overflow: visible;
+  }
+
+  .print-page {
+    min-height: 0;
+  }
+
+  .print-page-break {
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .print-page-break:last-child {
+    display: none;
+  }
+`;
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/gu, "&amp;")
@@ -124,17 +251,56 @@ function escapeHtml(value: string): string {
     .replace(/'/gu, "&#39;");
 }
 
+function createA4PrintDocumentBodyMarkup(options: PrintMarkdownDocumentOptions): string {
+  if (options.renderedA4PreviewPages !== undefined && options.renderedA4PreviewPages.length > 0) {
+    const renderedPageMarkup = options.renderedA4PreviewPages
+      .map((renderedA4PreviewPage) => `
+        <section class="print-page-frame">
+          <div class="print-page-viewport">
+            <div class="markdown-body markdown-body--a4 markdown-body--a4-flow print-page-content" style="left: -${renderedA4PreviewPage.offsetPx}px">
+              ${renderedA4PreviewPage.html}
+            </div>
+          </div>
+        </section>
+      `)
+      .join("");
+
+    return `<div class="print-document print-document--a4">${renderedPageMarkup}</div>`;
+  }
+
+  const pageHtmls = options.pageHtmls !== undefined && options.pageHtmls.length > 0
+    ? options.pageHtmls
+    : [options.html];
+
+  const pageMarkup = pageHtmls
+    .map((pageHtml) => `
+      <section class="print-page-frame">
+        <div class="print-page-viewport">
+          <article class="markdown-body print-page">${pageHtml}</article>
+        </div>
+      </section>
+    `)
+    .join("");
+
+  return `<div class="print-document print-document--a4">${pageMarkup}</div>`;
+}
+
 function createPrintDocumentMarkup(options: PrintMarkdownDocumentOptions): string {
+  const documentStyle = options.displayMode === "a4" ? A4_PRINT_DOCUMENT_STYLE : STANDARD_PRINT_DOCUMENT_STYLE;
+  const bodyMarkup = options.displayMode === "a4"
+    ? createA4PrintDocumentBodyMarkup(options)
+    : `<article class="markdown-body">${options.html}</article>`;
+
   return `<!doctype html>
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(options.title)}</title>
-    <style>${PRINT_DOCUMENT_STYLE}</style>
+    <style>${documentStyle}</style>
   </head>
   <body>
-    <article class="markdown-body">${options.html}</article>
+    ${bodyMarkup}
   </body>
 </html>`;
 }

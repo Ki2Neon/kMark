@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_FILE_NAME, DEFAULT_MARKDOWN } from "../../domain/editor";
 import { LOCAL_DRAFT_STORAGE_KEY, loadLocalDraft } from "../../infra/localDraft";
-import { renderMarkdown } from "../../infra/markdown";
+import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
 import { MarkdownPreview } from "../components/MarkdownPreview";
+import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 
 type PreviewSnapshot = {
   readonly content: string;
@@ -26,9 +27,11 @@ function loadPreviewSnapshot(): PreviewSnapshot {
 }
 
 export function PreviewWindowScreen() {
+  const { previewDisplayMode } = usePreviewPreferences();
   const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot>(() => loadPreviewSnapshot());
 
   const previewHtml = useMemo(() => renderMarkdown(previewSnapshot.content), [previewSnapshot.content]);
+  const previewPageHtmls = useMemo(() => renderMarkdownPages(previewSnapshot.content), [previewSnapshot.content]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -54,7 +57,7 @@ export function PreviewWindowScreen() {
 
   return (
     <main className="editor-shell preview-window">
-      <MarkdownPreview html={previewHtml} />
+      <MarkdownPreview displayMode={previewDisplayMode} html={previewHtml} pageHtmls={previewPageHtmls} />
     </main>
   );
 }

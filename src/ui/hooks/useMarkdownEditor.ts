@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
 import { createInitialEditorState } from "../../domain/editor";
+import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
 import {
   overwriteMarkdownDocument,
   pickMarkdownDocument,
@@ -9,7 +10,7 @@ import {
   type MarkdownFileHandle,
 } from "../../infra/fileTransfer";
 import { loadLocalDraft, persistLocalDraft } from "../../infra/localDraft";
-import { renderMarkdown } from "../../infra/markdown";
+import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
 import { printMarkdownDocument } from "../../infra/printDocument";
 import { editorReducer } from "../../intent/editorIntent";
 
@@ -50,6 +51,7 @@ export function useMarkdownEditor() {
   }, [state.content, state.fileName, state.lastSavedAt]);
 
   const previewHtml = useMemo(() => renderMarkdown(deferredContent), [deferredContent]);
+  const previewPageHtmls = useMemo(() => renderMarkdownPages(deferredContent), [deferredContent]);
 
   const handleContentChange = useCallback((content: string) => {
     dispatch({ type: "editor/contentChanged", content });
@@ -145,11 +147,17 @@ export function useMarkdownEditor() {
     }
   }, [state.content, state.fileName]);
 
-  const handlePrintDocument = useCallback(async () => {
+  const handlePrintDocument = useCallback(async (
+    previewDisplayMode: PreviewDisplayMode,
+    renderedA4PreviewPages?: readonly RenderedA4PreviewPage[],
+  ) => {
     try {
       await printMarkdownDocument({
+        displayMode: previewDisplayMode,
         title: state.fileName,
         html: renderMarkdown(state.content),
+        pageHtmls: renderMarkdownPages(state.content),
+        renderedA4PreviewPages,
       });
     } catch (error) {
       dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
@@ -184,6 +192,7 @@ export function useMarkdownEditor() {
     fileName: state.fileName,
     isDirty: state.isDirty,
     previewHtml,
+    previewPageHtmls,
     confirmDiscard,
     handleContentChange,
     handleErrorClear,

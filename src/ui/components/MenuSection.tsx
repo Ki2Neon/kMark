@@ -5,10 +5,16 @@ import {
   isMultiCursorModifier,
   type MultiCursorModifier,
 } from "../../domain/editorPreferences";
+import {
+  PREVIEW_DISPLAY_MODE_OPTIONS,
+  isPreviewDisplayMode,
+  type PreviewDisplayMode,
+} from "../../domain/preview";
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
 
 type MenuSectionProps = {
   readonly appThemeId: AppThemeId;
+  readonly previewDisplayMode: PreviewDisplayMode;
   readonly isPreviewVisible: boolean;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
@@ -20,12 +26,14 @@ type MenuSectionProps = {
   readonly onOpenDocument: () => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
+  readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
   readonly onPreviewVisibilityChange: (isPreviewVisible: boolean) => void;
   readonly onSaveDocumentAs: () => void;
 };
 
 function MenuSectionComponent({
   appThemeId,
+  previewDisplayMode,
   isPreviewVisible,
   layoutMode,
   multiCursorModifier,
@@ -37,6 +45,7 @@ function MenuSectionComponent({
   onOpenDocument,
   onOverwriteSaveDocument,
   onPrintDocument,
+  onPreviewDisplayModeChange,
   onPreviewVisibilityChange,
   onSaveDocumentAs,
 }: MenuSectionProps) {
@@ -66,6 +75,16 @@ function MenuSectionComponent({
 
   const handlePreviewVisibilitySwitch = (event: ChangeEvent<HTMLInputElement>) => {
     onPreviewVisibilityChange(event.currentTarget.checked);
+  };
+
+  const handlePreviewDisplayModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextPreviewDisplayMode = event.currentTarget.value;
+
+    if (!isPreviewDisplayMode(nextPreviewDisplayMode)) {
+      return;
+    }
+
+    onPreviewDisplayModeChange(nextPreviewDisplayMode);
   };
 
   return (
@@ -128,6 +147,21 @@ function MenuSectionComponent({
           <span className={isPreviewVisible ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
             表示
           </span>
+        </label>
+
+        <label className="menu-section__label">
+          <select
+            value={previewDisplayMode}
+            onChange={handlePreviewDisplayModeSelect}
+            aria-label="プレビュー表示モード"
+            className="menu-section__select"
+          >
+            {PREVIEW_DISPLAY_MODE_OPTIONS.map((previewDisplayModeOption) => (
+              <option key={previewDisplayModeOption.id} value={previewDisplayModeOption.id}>
+                {previewDisplayModeOption.label}
+              </option>
+            ))}
+          </select>
         </label>
 
         <div className="menu-section__actions" role="group" aria-label="プレビュー操作">

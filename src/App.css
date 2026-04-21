@@ -267,9 +267,9 @@ input:focus-visible,
 .workspace-grid {
   display: grid;
   grid-template-columns:
-    minmax(280px, calc((100% - 8px) * var(--desktop-split-ratio, 50) / 100))
+    minmax(180px, calc((100% - 8px) * var(--desktop-split-ratio, 50) / 100))
     8px
-    minmax(280px, 1fr);
+    minmax(180px, 1fr);
   flex: 1;
   min-height: 0;
   background: var(--surface);
@@ -324,6 +324,17 @@ input:focus-visible,
 .editor-shell__overlay[data-visible="true"] .editor-shell__sidebar {
   opacity: 1;
   transform: translateX(0);
+}
+
+.editor-shell__hidden-preview-probe {
+  position: fixed;
+  top: 0;
+  left: -200vw;
+  width: 960px;
+  height: 720px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 .editor-shell__mobile-track {
@@ -538,10 +549,122 @@ input:focus-visible,
   background: var(--preview-surface);
 }
 
+.preview-section__body--a4 {
+  padding: 20px;
+  background: var(--surface-muted);
+}
+
+.preview-section__measure {
+  position: fixed;
+  top: 0;
+  left: -320mm;
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.preview-section__measure-page {
+  min-height: 0;
+  overflow: visible;
+}
+
+.preview-section__page-stack {
+  display: grid;
+  justify-items: center;
+  gap: 24px;
+}
+
+.preview-section__page-frame {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.preview-section__cursor-target {
+  scroll-margin-block: 72px;
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.preview-section__body [data-source-line-start][data-source-line-end] {
+  cursor: text;
+}
+
+.preview-section__page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid var(--preview-border);
+  background: var(--preview-surface);
+  overflow: hidden;
+  transform-origin: top left;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+}
+
+.preview-section__page-viewport {
+  position: absolute;
+  background: var(--preview-surface);
+  overflow: hidden;
+}
+
+.preview-section__page-viewport::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--preview-surface);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.preview-section__page-content {
+  position: relative;
+  overflow: visible;
+}
+
 .markdown-body {
   max-width: none;
   padding: 16px;
   color: var(--preview-text);
+}
+
+.markdown-body--a4 {
+  padding: 0;
+}
+
+.markdown-body--a4-flow {
+  orphans: 3;
+  widows: 3;
+}
+
+.markdown-body--a4-flow h1,
+.markdown-body--a4-flow h2,
+.markdown-body--a4-flow h3,
+.markdown-body--a4-flow h4,
+.markdown-body--a4-flow h5,
+.markdown-body--a4-flow h6 {
+  break-after: avoid-column;
+  page-break-after: avoid;
+}
+
+.markdown-body--a4-flow blockquote,
+.markdown-body--a4-flow figure,
+.markdown-body--a4-flow pre,
+.markdown-body--a4-flow tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.markdown-body--a4-flow table {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
+.markdown-body--a4-flow thead {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .markdown-body > :first-child {
@@ -627,6 +750,14 @@ input:focus-visible,
 @media (max-width: 640px) {
   .menu-section {
     padding: 14px;
+  }
+
+  .preview-section__body--a4 {
+    padding: 12px;
+  }
+
+  .preview-section__page-stack {
+    gap: 16px;
   }
 
   .draft-section__textarea,

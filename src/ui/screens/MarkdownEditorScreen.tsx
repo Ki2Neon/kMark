@@ -11,6 +11,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
 import { type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
@@ -26,12 +27,13 @@ import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const MOBILE_SECTION_ORDER_WITH_PREVIEW = ["menu", "draft", "preview"] as const;
 const MOBILE_SECTION_ORDER_WITHOUT_PREVIEW = ["menu", "draft"] as const;
 const DESKTOP_DIVIDER_WIDTH = 8;
-const DESKTOP_MIN_PANEL_WIDTH = 280;
+const DESKTOP_MIN_PANEL_WIDTH = 180;
 const DESKTOP_SPLIT_KEYBOARD_STEP = 5;
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
@@ -98,6 +100,7 @@ export function MarkdownEditorScreen({
   onAppThemeChange,
   onMultiCursorModifierChange,
 }: MarkdownEditorScreenProps) {
+  const { previewDisplayMode, onPreviewDisplayModeChange } = usePreviewPreferences();
   const {
     canOpenDocumentWithNativePicker,
     content,
@@ -105,6 +108,7 @@ export function MarkdownEditorScreen({
     fileName,
     isDirty,
     previewHtml,
+    previewPageHtmls,
     confirmDiscard,
     handleContentChange,
     handleOpenDocumentFromPicker,
@@ -126,19 +130,23 @@ export function MarkdownEditorScreen({
   const mobileSwipeStartIndexRef = useRef(0);
   const mobileSwipeAxisRef = useRef<"horizontal" | "vertical" | null>(null);
   const mobileDragOffsetPxRef = useRef(0);
+  const mobileSectionBeforeMenuRef = useRef<Exclude<MobileSectionId, "menu">>("draft");
   const pendingMobileSectionRef = useRef<MobileSectionId | null>(null);
+  const draftSelectionRequestIdRef = useRef(0);
   const activeDividerPointerIdRef = useRef<number | null>(null);
   const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
   const desktopMenuOpenFrameRef = useRef<number | null>(null);
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
-  const [hasManualLayoutModeOverride, setHasManualLayoutModeOverride] = useState(false);
   const [isDesktopMenuMounted, setIsDesktopMenuMounted] = useState(false);
   const [isDesktopMenuVisible, setIsDesktopMenuVisible] = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [isDesktopResizing, setIsDesktopResizing] = useState(false);
   const [isDraftFocused, setIsDraftFocused] = useState(false);
   const [isMobileDragging, setIsMobileDragging] = useState(false);
+  const [activeDraftCursorLine, setActiveDraftCursorLine] = useState<number | null>(1);
+  const [draftSelectionRequest, setDraftSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
+  const [renderedA4PreviewPages, setRenderedA4PreviewPages] = useState<readonly RenderedA4PreviewPage[]>([]);
   const [mobileDragOffsetPx, setMobileDragOffsetPx] = useState(0);
   const [mobileSection, setMobileSection] = useState<MobileSectionId>("draft");
   const [mobileViewportWidth, setMobileViewportWidth] = useState<number>(() => {
@@ -266,21 +274,17 @@ export function MarkdownEditorScreen({
     openDesktopMenu();
   }, [closeDesktopMenu, isDesktopMenuMounted, isDesktopMenuVisible, openDesktopMenu]);
 
-  const handleLayoutSync = useCallback(() => {
-    if (!hasManualLayoutModeOverride) {
-      setLayoutMode(detectLayoutMode());
-    }
-
+  const handleViewportResize = useCallback(() => {
     syncMobileViewportWidth();
-  }, [hasManualLayoutModeOverride, syncMobileViewportWidth]);
+  }, [syncMobileViewportWidth]);
 
   useEffect(() => {
-    window.addEventListener("resize", handleLayoutSync);
+    window.addEventListener("resize", handleViewportResize);
 
     return () => {
-      window.removeEventListener("resize", handleLayoutSync);
+      window.removeEventListener("resize", handleViewportResize);
     };
-  }, [handleLayoutSync]);
+  }, [handleViewportResize]);
 
   useEffect(() => {
     if (layoutMode === "desktop") {
@@ -314,6 +318,12 @@ export function MarkdownEditorScreen({
       setIsDraftFocused(false);
     }
   }, [layoutMode]);
+
+  useEffect(() => {
+    if (mobileSection !== "menu") {
+      mobileSectionBeforeMenuRef.current = mobileSection;
+    }
+  }, [mobileSection]);
 
   useEffect(() => {
     if (isPreviewVisible || mobileSection !== "preview") {
@@ -387,8 +397,8 @@ export function MarkdownEditorScreen({
 
   const handleRequestPrint = useCallback(() => {
     closeDesktopMenu();
-    void handlePrintDocument();
-  }, [closeDesktopMenu, handlePrintDocument]);
+    void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
+  }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode, renderedA4PreviewPages]);
 
   const handleRequestOpenPreviewWindow = useCallback(() => {
     if (layoutMode === "desktop") {
@@ -425,6 +435,10 @@ export function MarkdownEditorScreen({
         return;
       }
 
+      if (section === "menu" && mobileSection !== "menu") {
+        mobileSectionBeforeMenuRef.current = mobileSection;
+      }
+
       if (section !== "draft") {
         blurActiveElement();
       }
@@ -434,7 +448,7 @@ export function MarkdownEditorScreen({
       mobileDragOffsetPxRef.current = 0;
       setMobileSection(section);
     },
-    [blurActiveElement, isPreviewVisible],
+    [blurActiveElement, isPreviewVisible, mobileSection],
   );
 
   const handlePreviewVisibilityChange = useCallback((nextIsPreviewVisible: boolean) => {
@@ -450,7 +464,6 @@ export function MarkdownEditorScreen({
   const handleLayoutModeChange = useCallback((nextLayoutMode: LayoutMode) => {
     closeDesktopMenuImmediately();
     blurActiveElement();
-    setHasManualLayoutModeOverride(true);
     setIsDraftFocused(false);
     setIsMobileDragging(false);
     setMobileDragOffsetPx(0);
@@ -474,6 +487,26 @@ export function MarkdownEditorScreen({
   const handleDraftFocusChange = useCallback((nextIsFocused: boolean) => {
     setIsDraftFocused(nextIsFocused);
   }, []);
+
+  const handleDraftCursorLineChange = useCallback((nextCursorLine: number) => {
+    setActiveDraftCursorLine(nextCursorLine);
+  }, []);
+
+  const handleRenderedA4PagesChange = useCallback((nextRenderedA4Pages: readonly RenderedA4PreviewPage[]) => {
+    setRenderedA4PreviewPages(nextRenderedA4Pages);
+  }, []);
+
+  const handlePreviewSourceLineDoubleClick = useCallback((lineNumber: number) => {
+    const nextRequestId = draftSelectionRequestIdRef.current + 1;
+    draftSelectionRequestIdRef.current = nextRequestId;
+
+    setActiveDraftCursorLine(lineNumber);
+    setDraftSelectionRequest({ lineNumber, requestId: nextRequestId });
+
+    if (layoutMode === "mobile") {
+      handleMobileSectionRequest("draft");
+    }
+  }, [handleMobileSectionRequest, layoutMode]);
 
   const handleMobileTrackPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (!event.isPrimary || layoutMode !== "mobile") {
@@ -698,7 +731,7 @@ export function MarkdownEditorScreen({
 
   const printDocumentEvent = useEffectEvent(() => {
     closeDesktopMenu();
-    void handlePrintDocument();
+    void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
   });
 
   const openDocumentEvent = useEffectEvent(() => {
@@ -742,7 +775,18 @@ export function MarkdownEditorScreen({
   const dismissMenuEvent = useEffectEvent(() => {
     if (layoutMode === "desktop") {
       closeDesktopMenu();
+      return;
     }
+
+    if (mobileSection !== "menu") {
+      return;
+    }
+
+    const previousMobileSection = !isPreviewVisible && mobileSectionBeforeMenuRef.current === "preview"
+      ? "draft"
+      : mobileSectionBeforeMenuRef.current;
+
+    handleMobileSectionRequest(previousMobileSection);
   });
 
   useEffect(() => {
@@ -835,6 +879,8 @@ export function MarkdownEditorScreen({
                 layoutMode={layoutMode}
                 multiCursorModifier={multiCursorModifier}
                 onContentChange={handleContentChange}
+                onCursorLineChange={handleDraftCursorLineChange}
+                requestedLineSelection={draftSelectionRequest}
               />
             </div>
 
@@ -858,11 +904,29 @@ export function MarkdownEditorScreen({
                 />
 
                 <div className="workspace-grid__panel workspace-grid__panel--preview">
-                  <MarkdownPreview html={previewHtml} />
+                  <MarkdownPreview
+                    activeSourceLine={activeDraftCursorLine}
+                    displayMode={previewDisplayMode}
+                    html={previewHtml}
+                    onRenderedA4PagesChange={handleRenderedA4PagesChange}
+                    onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
+                    pageHtmls={previewPageHtmls}
+                  />
                 </div>
               </>
             ) : null}
           </section>
+
+          {previewDisplayMode === "a4" && !isPreviewVisible ? (
+            <div className="editor-shell__hidden-preview-probe" aria-hidden="true">
+              <MarkdownPreview
+                displayMode={previewDisplayMode}
+                html={previewHtml}
+                onRenderedA4PagesChange={handleRenderedA4PagesChange}
+                pageHtmls={previewPageHtmls}
+              />
+            </div>
+          ) : null}
 
           {isDesktopMenuMounted ? (
             <div
@@ -873,6 +937,7 @@ export function MarkdownEditorScreen({
               <div className="editor-shell__sidebar" role="dialog" aria-modal="true" aria-label="メニュー">
                 <MenuSection
                   appThemeId={appThemeId}
+                  previewDisplayMode={previewDisplayMode}
                   isPreviewVisible={isPreviewVisible}
                   layoutMode={layoutMode}
                   multiCursorModifier={multiCursorModifier}
@@ -884,6 +949,7 @@ export function MarkdownEditorScreen({
                   onOpenDocument={handleRequestOpen}
                   onOverwriteSaveDocument={handleRequestOverwriteSave}
                   onPrintDocument={handleRequestPrint}
+                  onPreviewDisplayModeChange={onPreviewDisplayModeChange}
                   onPreviewVisibilityChange={handlePreviewVisibilityChange}
                   onSaveDocumentAs={handleRequestSaveAs}
                 />
@@ -909,6 +975,7 @@ export function MarkdownEditorScreen({
                   {section === "menu" ? (
                     <MenuSection
                       appThemeId={appThemeId}
+                      previewDisplayMode={previewDisplayMode}
                       isPreviewVisible={isPreviewVisible}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
@@ -920,6 +987,7 @@ export function MarkdownEditorScreen({
                       onOpenDocument={handleRequestOpen}
                       onOverwriteSaveDocument={handleRequestOverwriteSave}
                       onPrintDocument={handleRequestPrint}
+                      onPreviewDisplayModeChange={onPreviewDisplayModeChange}
                       onPreviewVisibilityChange={handlePreviewVisibilityChange}
                       onSaveDocumentAs={handleRequestSaveAs}
                     />
@@ -930,10 +998,19 @@ export function MarkdownEditorScreen({
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
                       onContentChange={handleContentChange}
+                      onCursorLineChange={handleDraftCursorLineChange}
                       onFocusChange={handleDraftFocusChange}
+                      requestedLineSelection={draftSelectionRequest}
                     />
                   ) : (
-                    <MarkdownPreview html={previewHtml} />
+                    <MarkdownPreview
+                      activeSourceLine={activeDraftCursorLine}
+                      displayMode={previewDisplayMode}
+                      html={previewHtml}
+                      onRenderedA4PagesChange={handleRenderedA4PagesChange}
+                      onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
+                      pageHtmls={previewPageHtmls}
+                    />
                   )}
                 </div>
               ))}

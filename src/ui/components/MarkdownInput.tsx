@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, type ChangeEvent, type KeyboardEvent } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, type ChangeEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
 import { type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
@@ -17,8 +17,43 @@ type MarkdownInputProps = {
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly onContentChange: (content: string) => void;
+  readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
+  readonly requestedLineSelection?: {
+    readonly lineNumber: number;
+    readonly requestId: number;
+  } | null;
 };
+
+function getCursorLineNumber(content: string, cursorOffset: number): number {
+  const normalizedCursorOffset = Math.max(0, Math.min(cursorOffset, content.length));
+
+  return content.slice(0, normalizedCursorOffset).split(/\r?\n/u).length;
+}
+
+function getCursorOffsetForLine(content: string, lineNumber: number): number {
+  const normalizedLineNumber = Math.max(1, lineNumber);
+
+  if (normalizedLineNumber === 1) {
+    return 0;
+  }
+
+  let currentLineNumber = 1;
+
+  for (let offset = 0; offset < content.length; offset += 1) {
+    if (content[offset] !== "\n") {
+      continue;
+    }
+
+    currentLineNumber += 1;
+
+    if (currentLineNumber === normalizedLineNumber) {
+      return offset + 1;
+    }
+  }
+
+  return content.length;
+}
 
 function MarkdownInputComponent({
   appThemeId,
@@ -26,11 +61,44 @@ function MarkdownInputComponent({
   layoutMode,
   multiCursorModifier,
   onContentChange,
+  onCursorLineChange,
   onFocusChange,
+  requestedLineSelection,
 }: MarkdownInputProps) {
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const emitTextAreaCursorLine = useCallback((textArea: HTMLTextAreaElement) => {
+    onCursorLineChange?.(getCursorLineNumber(textArea.value, textArea.selectionStart));
+  }, [onCursorLineChange]);
+
+  useEffect(() => {
+    if (layoutMode === "desktop" || requestedLineSelection === null || requestedLineSelection === undefined) {
+      return;
+    }
+
+    const textArea = textAreaRef.current;
+
+    if (textArea === null) {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const nextCursorOffset = getCursorOffsetForLine(content, requestedLineSelection.lineNumber);
+
+      textArea.focus();
+      textArea.setSelectionRange(nextCursorOffset, nextCursorOffset);
+      emitTextAreaCursorLine(textArea);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [content, emitTextAreaCursorLine, layoutMode, requestedLineSelection]);
+
   const handleChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     onContentChange(event.currentTarget.value);
-  }, [onContentChange]);
+    emitTextAreaCursorLine(event.currentTarget);
+  }, [emitTextAreaCursorLine, onContentChange]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Tab") {
@@ -48,8 +116,18 @@ function MarkdownInputComponent({
     window.requestAnimationFrame(() => {
       textArea.selectionStart = nextCursor;
       textArea.selectionEnd = nextCursor;
+      onCursorLineChange?.(getCursorLineNumber(nextContent, nextCursor));
     });
-  }, [onContentChange]);
+  }, [onContentChange, onCursorLineChange]);
+
+  const handleTextAreaCursorEvent = useCallback((event: SyntheticEvent<HTMLTextAreaElement>) => {
+    emitTextAreaCursorLine(event.currentTarget);
+  }, [emitTextAreaCursorLine]);
+
+  const handleFocus = useCallback((event: SyntheticEvent<HTMLTextAreaElement>) => {
+    onFocusChange?.(true);
+    emitTextAreaCursorLine(event.currentTarget);
+  }, [emitTextAreaCursorLine, onFocusChange]);
 
   if (layoutMode === "desktop") {
     return (
@@ -61,7 +139,9 @@ function MarkdownInputComponent({
               content={content}
               multiCursorModifier={multiCursorModifier}
               onContentChange={onContentChange}
+              onCursorLineChange={onCursorLineChange}
               onFocusChange={onFocusChange}
+              requestedLineSelection={requestedLineSelection}
             />
           </Suspense>
         </div>
@@ -72,12 +152,16 @@ function MarkdownInputComponent({
   return (
     <section className="section section--draft" aria-label="Draft">
       <textarea
+        ref={textAreaRef}
         className="draft-section__textarea"
         value={content}
         onChange={handleChange}
-        onFocus={() => onFocusChange?.(true)}
+        onClick={handleTextAreaCursorEvent}
+        onFocus={handleFocus}
         onBlur={() => onFocusChange?.(false)}
         onKeyDown={handleKeyDown}
+        onKeyUp={handleTextAreaCursorEvent}
+        onSelect={handleTextAreaCursorEvent}
         spellCheck={false}
         placeholder="ここに Markdown を書きます"
         aria-label="Markdown エディター"
