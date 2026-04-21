@@ -1,8 +1,16 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useReducer } from "react";
-import { createInitialEditorState, deriveEditorStats } from "../../domain/editor";
-import { downloadMarkdownDocument, readMarkdownFile } from "../../infra/fileTransfer";
+import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
+import { createInitialEditorState } from "../../domain/editor";
+import {
+  overwriteMarkdownDocument,
+  pickMarkdownDocument,
+  readMarkdownFile,
+  saveMarkdownDocumentAs,
+  supportsNativeOpenPicker,
+  type MarkdownFileHandle,
+} from "../../infra/fileTransfer";
 import { loadLocalDraft, persistLocalDraft } from "../../infra/localDraft";
 import { renderMarkdown } from "../../infra/markdown";
+import { printMarkdownDocument } from "../../infra/printDocument";
 import { editorReducer } from "../../intent/editorIntent";
 
 function toErrorMessage(error: unknown): string {
@@ -16,6 +24,7 @@ function toErrorMessage(error: unknown): string {
 export function useMarkdownEditor() {
   const [state, dispatch] = useReducer(editorReducer, undefined, createInitialEditorState);
   const deferredContent = useDeferredValue(state.content);
+  const currentFileHandleRef = useRef<MarkdownFileHandle | null>(null);
 
   useEffect(() => {
     const draft = loadLocalDraft();
@@ -40,31 +49,30 @@ export function useMarkdownEditor() {
     });
   }, [state.content, state.fileName, state.lastSavedAt]);
 
-  const stats = useMemo(() => deriveEditorStats(state.content), [state.content]);
   const previewHtml = useMemo(() => renderMarkdown(deferredContent), [deferredContent]);
-  const statusLabel = useMemo(() => {
-    if (state.isDirty) {
-      return "未保存の変更があります";
-    }
-
-    if (state.lastSavedAt !== null) {
-      const formatted = new Intl.DateTimeFormat("ja-JP", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(state.lastSavedAt);
-
-      return `${formatted} に書き出し済み`;
-    }
-
-    return "ローカル下書きを自動で保持しています";
-  }, [state.isDirty, state.lastSavedAt]);
 
   const handleContentChange = useCallback((content: string) => {
     dispatch({ type: "editor/contentChanged", content });
   }, []);
 
-  const handleFileNameChange = useCallback((fileName: string) => {
-    dispatch({ type: "editor/fileNameChanged", fileName });
+  const handleOpenDocumentFromPicker = useCallback(async () => {
+    try {
+      const result = await pickMarkdownDocument();
+
+      if (result === null) {
+        return;
+      }
+
+      currentFileHandleRef.current = result.fileHandle;
+      dispatch({
+        type: "editor/documentLoaded",
+        fileName: result.fileName,
+        content: result.content,
+        loadedAt: null,
+      });
+    } catch (error) {
+      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
+    }
   }, []);
 
   const handlePickedFile = useCallback(async (file: File | null) => {
@@ -74,29 +82,87 @@ export function useMarkdownEditor() {
 
     try {
       const result = await readMarkdownFile(file);
+      currentFileHandleRef.current = null;
 
       dispatch({
         type: "editor/documentLoaded",
         fileName: result.fileName,
         content: result.content,
-        loadedAt: Date.now(),
+        loadedAt: null,
       });
     } catch (error) {
       dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
     }
   }, []);
 
-  const handleSaveDocument = useCallback(async () => {
+  const handleOverwriteSaveDocument = useCallback(async () => {
     try {
-      downloadMarkdownDocument(state.fileName, state.content);
-      dispatch({ type: "editor/saveSucceeded", savedAt: Date.now() });
+      const currentFileHandle = currentFileHandleRef.current;
+
+      if (currentFileHandle !== null) {
+        await overwriteMarkdownDocument(currentFileHandle, state.content);
+        dispatch({
+          type: "editor/saveSucceeded",
+          fileName: currentFileHandle.name,
+          savedAt: Date.now(),
+        });
+        return;
+      }
+
+      const result = await saveMarkdownDocumentAs(state.fileName, state.content);
+
+      if (result === null) {
+        return;
+      }
+
+      currentFileHandleRef.current = result.fileHandle;
+      dispatch({
+        type: "editor/saveSucceeded",
+        fileName: result.fileName,
+        savedAt: Date.now(),
+      });
+    } catch (error) {
+      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
+    }
+  }, [state.content, state.fileName]);
+
+  const handleSaveDocumentAs = useCallback(async () => {
+    try {
+      const result = await saveMarkdownDocumentAs(state.fileName, state.content);
+
+      if (result === null) {
+        return;
+      }
+
+      currentFileHandleRef.current = result.fileHandle;
+      dispatch({
+        type: "editor/saveSucceeded",
+        fileName: result.fileName,
+        savedAt: Date.now(),
+      });
+    } catch (error) {
+      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
+    }
+  }, [state.content, state.fileName]);
+
+  const handlePrintDocument = useCallback(async () => {
+    try {
+      await printMarkdownDocument({
+        title: state.fileName,
+        html: renderMarkdown(state.content),
+      });
     } catch (error) {
       dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
     }
   }, [state.content, state.fileName]);
 
   const handleResetDocument = useCallback(() => {
+    currentFileHandleRef.current = null;
     dispatch({ type: "editor/documentReset" });
+  }, []);
+
+  const handleErrorRaise = useCallback((message: string) => {
+    dispatch({ type: "editor/errorRaised", message });
   }, []);
 
   const handleErrorClear = useCallback(() => {
@@ -112,19 +178,21 @@ export function useMarkdownEditor() {
   }, [state.isDirty]);
 
   return {
+    canOpenDocumentWithNativePicker: supportsNativeOpenPicker(),
     content: state.content,
     errorMessage: state.errorMessage,
     fileName: state.fileName,
     isDirty: state.isDirty,
     previewHtml,
-    stats,
-    statusLabel,
     confirmDiscard,
     handleContentChange,
     handleErrorClear,
-    handleFileNameChange,
+    handleErrorRaise,
+    handleOpenDocumentFromPicker,
     handlePickedFile,
     handleResetDocument,
-    handleSaveDocument,
+    handleOverwriteSaveDocument,
+    handlePrintDocument,
+    handleSaveDocumentAs,
   };
 }

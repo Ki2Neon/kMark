@@ -6,7 +6,6 @@ import {
 
 export type EditorAction =
   | { readonly type: "editor/contentChanged"; readonly content: string }
-  | { readonly type: "editor/fileNameChanged"; readonly fileName: string }
   | {
       readonly type: "editor/documentLoaded";
       readonly fileName: string;
@@ -14,7 +13,7 @@ export type EditorAction =
       readonly loadedAt: number | null;
     }
   | { readonly type: "editor/documentReset" }
-  | { readonly type: "editor/saveSucceeded"; readonly savedAt: number }
+  | { readonly type: "editor/saveSucceeded"; readonly fileName: string; readonly savedAt: number }
   | { readonly type: "editor/errorRaised"; readonly message: string }
   | { readonly type: "editor/errorCleared" };
 
@@ -30,18 +29,6 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         content: action.content,
         isDirty: true,
         errorMessage: null,
-      };
-    }
-
-    case "editor/fileNameChanged": {
-      if (state.fileName === action.fileName) {
-        return state;
-      }
-
-      return {
-        ...state,
-        fileName: action.fileName,
-        isDirty: true,
       };
     }
 
@@ -63,7 +50,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "editor/saveSucceeded": {
       return {
         ...state,
-        fileName: ensureMarkdownExtension(state.fileName),
+        fileName: ensureMarkdownExtension(action.fileName),
         isDirty: false,
         lastSavedAt: action.savedAt,
         errorMessage: null,

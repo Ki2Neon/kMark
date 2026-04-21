@@ -1,16 +1,38 @@
-import { memo, type ChangeEvent, type KeyboardEvent } from "react";
+import { lazy, memo, Suspense, useCallback, type ChangeEvent, type KeyboardEvent } from "react";
+import { type LayoutMode } from "../../domain/editor";
+import { type MultiCursorModifier } from "../../domain/editorPreferences";
+import { type AppThemeId } from "../../domain/theme";
+
+const DesktopMarkdownInput = lazy(async () => {
+  const module = await import("./DesktopMarkdownInput");
+
+  return {
+    default: module.DesktopMarkdownInput,
+  };
+});
 
 type MarkdownInputProps = {
+  readonly appThemeId: AppThemeId;
   readonly content: string;
+  readonly layoutMode: LayoutMode;
+  readonly multiCursorModifier: MultiCursorModifier;
   readonly onContentChange: (content: string) => void;
+  readonly onFocusChange?: (isFocused: boolean) => void;
 };
 
-function MarkdownInputComponent({ content, onContentChange }: MarkdownInputProps) {
-  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+function MarkdownInputComponent({
+  appThemeId,
+  content,
+  layoutMode,
+  multiCursorModifier,
+  onContentChange,
+  onFocusChange,
+}: MarkdownInputProps) {
+  const handleChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     onContentChange(event.currentTarget.value);
-  };
+  }, [onContentChange]);
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Tab") {
       return;
     }
@@ -27,25 +49,34 @@ function MarkdownInputComponent({ content, onContentChange }: MarkdownInputProps
       textArea.selectionStart = nextCursor;
       textArea.selectionEnd = nextCursor;
     });
-  };
+  }, [onContentChange]);
+
+  if (layoutMode === "desktop") {
+    return (
+      <section className="section section--draft" aria-label="Draft">
+        <div className="draft-section__editor">
+          <Suspense fallback={null}>
+            <DesktopMarkdownInput
+              appThemeId={appThemeId}
+              content={content}
+              multiCursorModifier={multiCursorModifier}
+              onContentChange={onContentChange}
+              onFocusChange={onFocusChange}
+            />
+          </Suspense>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="section section--draft" aria-labelledby="draft-title">
-      <div className="section__head section__head--compact">
-        <div>
-          <span className="section__eyebrow">draft</span>
-          <h2 id="draft-title" className="section__title">
-            Draft
-          </h2>
-        </div>
-
-        <p className="section__note section__note--compact">Tab キーで 2 スペースを挿入します。</p>
-      </div>
-
+    <section className="section section--draft" aria-label="Draft">
       <textarea
         className="draft-section__textarea"
         value={content}
         onChange={handleChange}
+        onFocus={() => onFocusChange?.(true)}
+        onBlur={() => onFocusChange?.(false)}
         onKeyDown={handleKeyDown}
         spellCheck={false}
         placeholder="ここに Markdown を書きます"

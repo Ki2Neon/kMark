@@ -1,7 +1,12 @@
+import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 
+const SANITIZE_OPTIONS = {
+  ADD_ATTR: ["target", "rel"],
+};
+
 const markdown = new MarkdownIt({
-  html: false,
+  html: true,
   linkify: true,
   breaks: true,
   typographer: true,
@@ -22,5 +27,5 @@ markdown.renderer.rules.link_open = (tokens, index, options, environment, self) 
 };
 
 export function renderMarkdown(content: string): string {
-  return markdown.render(content);
+  return DOMPurify.sanitize(markdown.render(content), SANITIZE_OPTIONS);
 }
