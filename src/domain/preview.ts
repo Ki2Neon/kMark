@@ -13,6 +13,7 @@ export type PreviewDisplayModeOption = {
 
 export type PreviewPreferences = {
   readonly previewDisplayMode: PreviewDisplayMode;
+  readonly isPreviewVisible: boolean;
 };
 
 export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] = [
@@ -22,6 +23,7 @@ export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] =
 
 export const DEFAULT_PREVIEW_PREFERENCES: PreviewPreferences = {
   previewDisplayMode: "standard",
+  isPreviewVisible: true,
 };
 
 export const CSS_MM_TO_PX = 96 / 25.4;

@@ -23,6 +23,7 @@ export function usePreviewPreferences() {
 
       setPreviewPreferences((currentPreviewPreferences) => (
         currentPreviewPreferences.previewDisplayMode === nextPreviewPreferences.previewDisplayMode
+        && currentPreviewPreferences.isPreviewVisible === nextPreviewPreferences.isPreviewVisible
           ? currentPreviewPreferences
           : nextPreviewPreferences
       ));
@@ -48,8 +49,23 @@ export function usePreviewPreferences() {
     });
   }, []);
 
+  const handlePreviewVisibilityChange = useCallback((isPreviewVisible: boolean) => {
+    setPreviewPreferences((currentPreviewPreferences) => {
+      if (currentPreviewPreferences.isPreviewVisible === isPreviewVisible) {
+        return currentPreviewPreferences;
+      }
+
+      return {
+        ...currentPreviewPreferences,
+        isPreviewVisible,
+      };
+    });
+  }, []);
+
   return {
+    isPreviewVisible: previewPreferences.isPreviewVisible,
     previewDisplayMode: previewPreferences.previewDisplayMode,
     onPreviewDisplayModeChange: handlePreviewDisplayModeChange,
+    onPreviewVisibilityChange: handlePreviewVisibilityChange,
   };
 }

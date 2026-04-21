@@ -113,7 +113,12 @@ export function MarkdownEditorScreen({
   onPreviewUsesAppThemeColorsChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
-  const { previewDisplayMode, onPreviewDisplayModeChange } = usePreviewPreferences();
+  const {
+    isPreviewVisible,
+    previewDisplayMode,
+    onPreviewDisplayModeChange,
+    onPreviewVisibilityChange: onStoredPreviewVisibilityChange,
+  } = usePreviewPreferences();
   const {
     canOpenDocumentWithNativePicker,
     content,
@@ -157,7 +162,6 @@ export function MarkdownEditorScreen({
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
   const [isDesktopMenuMounted, setIsDesktopMenuMounted] = useState(false);
   const [isDesktopMenuVisible, setIsDesktopMenuVisible] = useState(false);
-  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [isDesktopResizing, setIsDesktopResizing] = useState(false);
   const [isDraftFocused, setIsDraftFocused] = useState(false);
   const [isMobileDragging, setIsMobileDragging] = useState(false);
@@ -516,14 +520,14 @@ export function MarkdownEditorScreen({
   }, [loadPendingExternalDocumentEvent, subscribeToExternalDocumentRequests]);
 
   const handlePreviewVisibilityChange = useCallback((nextIsPreviewVisible: boolean) => {
-    setIsPreviewVisible(nextIsPreviewVisible);
+    onStoredPreviewVisibilityChange(nextIsPreviewVisible);
 
     if (!nextIsPreviewVisible) {
       setIsMobileDragging(false);
       setMobileDragOffsetPx(0);
       mobileDragOffsetPxRef.current = 0;
     }
-  }, []);
+  }, [onStoredPreviewVisibilityChange]);
 
   const handleLayoutModeChange = useCallback((nextLayoutMode: LayoutMode) => {
     closeDesktopMenuImmediately();

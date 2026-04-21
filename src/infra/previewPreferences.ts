@@ -21,6 +21,10 @@ export function loadPreviewPreferences(): PreviewPreferences {
         typeof parsedValue.previewDisplayMode === "string" && isPreviewDisplayMode(parsedValue.previewDisplayMode)
           ? parsedValue.previewDisplayMode
           : DEFAULT_PREVIEW_PREFERENCES.previewDisplayMode,
+      isPreviewVisible:
+        typeof parsedValue.isPreviewVisible === "boolean"
+          ? parsedValue.isPreviewVisible
+          : DEFAULT_PREVIEW_PREFERENCES.isPreviewVisible,
     };
   } catch {
     return DEFAULT_PREVIEW_PREFERENCES;
@@ -31,6 +35,6 @@ export function persistPreviewPreferences(previewPreferences: PreviewPreferences
   try {
     window.localStorage.setItem(PREVIEW_PREFERENCES_STORAGE_KEY, JSON.stringify(previewPreferences));
   } catch {
-    // Ignore storage failures to keep preview mode switching responsive.
+    // Ignore storage failures to keep preview preference switching responsive.
   }
 }
