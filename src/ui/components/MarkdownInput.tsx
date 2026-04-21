@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, type ChangeEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
+import { getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
@@ -101,22 +102,73 @@ function MarkdownInputComponent({
   }, [emitTextAreaCursorLine, onContentChange]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      const textArea = event.currentTarget;
+
+      if (textArea.selectionStart === textArea.selectionEnd) {
+        const enterAction = getMarkdownEnterAction(textArea.value, textArea.selectionStart);
+
+        if (enterAction !== null) {
+          event.preventDefault();
+          const nextContent = `${textArea.value.slice(0, enterAction.rangeStart)}${enterAction.text}${textArea.value.slice(enterAction.rangeEnd)}`;
+          const nextCursorOffset = enterAction.rangeStart + enterAction.text.length;
+
+          onContentChange(nextContent);
+
+          window.requestAnimationFrame(() => {
+            textArea.selectionStart = nextCursorOffset;
+            textArea.selectionEnd = nextCursorOffset;
+            onCursorLineChange?.(getCursorLineNumber(nextContent, nextCursorOffset));
+          });
+
+          return;
+        }
+      }
+
+      return;
+    }
+
     if (event.key !== "Tab") {
       return;
     }
 
     event.preventDefault();
     const textArea = event.currentTarget;
-    const indent = "  ";
-    const nextContent = `${textArea.value.slice(0, textArea.selectionStart)}${indent}${textArea.value.slice(textArea.selectionEnd)}`;
-    const nextCursor = textArea.selectionStart + indent.length;
+    const tabAction = getMarkdownTabAction(
+      textArea.value,
+      textArea.selectionStart,
+      textArea.selectionEnd,
+      event.shiftKey,
+    );
+
+    if (tabAction === null) {
+      if (event.shiftKey) {
+        return;
+      }
+
+      const indent = "  ";
+      const nextContent = `${textArea.value.slice(0, textArea.selectionStart)}${indent}${textArea.value.slice(textArea.selectionEnd)}`;
+      const nextCursor = textArea.selectionStart + indent.length;
+
+      onContentChange(nextContent);
+
+      window.requestAnimationFrame(() => {
+        textArea.selectionStart = nextCursor;
+        textArea.selectionEnd = nextCursor;
+        onCursorLineChange?.(getCursorLineNumber(nextContent, nextCursor));
+      });
+
+      return;
+    }
+
+    const nextContent = `${textArea.value.slice(0, tabAction.rangeStart)}${tabAction.text}${textArea.value.slice(tabAction.rangeEnd)}`;
 
     onContentChange(nextContent);
 
     window.requestAnimationFrame(() => {
-      textArea.selectionStart = nextCursor;
-      textArea.selectionEnd = nextCursor;
-      onCursorLineChange?.(getCursorLineNumber(nextContent, nextCursor));
+      textArea.selectionStart = tabAction.nextSelectionStart;
+      textArea.selectionEnd = tabAction.nextSelectionEnd;
+      onCursorLineChange?.(getCursorLineNumber(nextContent, tabAction.nextSelectionEnd));
     });
   }, [onContentChange, onCursorLineChange]);
 
