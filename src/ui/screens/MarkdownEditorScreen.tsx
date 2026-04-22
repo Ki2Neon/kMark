@@ -1020,6 +1020,7 @@ export function MarkdownEditorScreen({
                 showLineNumbers={showLineNumbers}
                 onContentChange={handleContentChange}
                 onCursorLineChange={handleEditCursorLineChange}
+                onFocusChange={handleEditFocusChange}
                 requestedLineSelection={editSelectionRequest}
               />
             </div>

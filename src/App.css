@@ -20,6 +20,9 @@
   --edit-font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
   --edit-font-size: 15px;
   --preview-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --scrollbar-size: 7px;
+  --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 28%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-soft) 42%, transparent);
   --mobile-nav-height: 32px;
   font-family: var(--app-font-family);
   line-height: 1.5;
@@ -155,6 +158,36 @@
 
 * {
   box-sizing: border-box;
+}
+
+:where(.menu-section, .edit-section__textarea, .edit-section__editor .cm-scroller, .preview-section__body) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+:where(.menu-section, .edit-section__textarea, .edit-section__editor .cm-scroller, .preview-section__body)::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+:where(.menu-section, .edit-section__textarea, .edit-section__editor .cm-scroller, .preview-section__body)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(.menu-section, .edit-section__textarea, .edit-section__editor .cm-scroller, .preview-section__body)::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+:where(.menu-section, .edit-section__textarea, .edit-section__editor .cm-scroller, .preview-section__body)::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+:where(.menu-section, .edit-section__textarea, .edit-section__editor .cm-scroller, .preview-section__body)::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
@@ -299,7 +332,7 @@ input:focus-visible,
 .workspace-grid__divider {
   position: relative;
   min-height: 0;
-  background: transparent;
+  background: var(--border);
   cursor: col-resize;
   touch-action: none;
 }
@@ -596,9 +629,15 @@ input:focus-visible,
 }
 
 .edit-section__editor {
+  display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.edit-section__editor > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .edit-section__editor .cm-editor,
@@ -673,6 +712,7 @@ input:focus-visible,
 .preview-section__body--a4 {
   padding: 20px;
   background: var(--surface-muted);
+  scrollbar-gutter: stable both-edges;
 }
 
 .preview-section__standard-content {
