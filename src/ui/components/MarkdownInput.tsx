@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense } from "react";
 import { type LayoutMode } from "../../domain/editor";
-import { type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
+import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 const DesktopMarkdownInput = lazy(async () => {
@@ -14,7 +14,7 @@ const DesktopMarkdownInput = lazy(async () => {
 type MarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly content: string;
-  readonly draftFontId: DraftFontId;
+  readonly editFontId: EditFontId;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
@@ -30,7 +30,7 @@ type MarkdownInputProps = {
 function MarkdownInputComponent({
   appThemeId,
   content,
-  draftFontId,
+  editFontId,
   layoutMode,
   multiCursorModifier,
   showLineNumbers,
@@ -40,14 +40,14 @@ function MarkdownInputComponent({
   requestedLineSelection,
 }: MarkdownInputProps) {
   return (
-    <section className="section section--draft" aria-label="Draft">
-      <div className="draft-section__editor">
+    <section className="section section--edit" aria-label="Edit">
+      <div className="edit-section__editor">
         <Suspense fallback={null}>
           <DesktopMarkdownInput
             appThemeId={appThemeId}
             blurOnEscapeWhenSelectionEmpty={layoutMode === "mobile"}
             content={content}
-            draftFontId={draftFontId}
+            editFontId={editFontId}
             multiCursorModifier={multiCursorModifier}
             showLineNumbers={showLineNumbers}
             onContentChange={onContentChange}

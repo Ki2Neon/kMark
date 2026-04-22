@@ -1,6 +1,6 @@
 import { useLayoutEffect } from "react";
 import "./App.css";
-import { resolveAppFontFamily, resolveDraftFontFamily } from "./domain/editorPreferences";
+import { resolveAppFontFamily, resolveEditFontFamily } from "./domain/editorPreferences";
 import { isPreviewWindowMode } from "./infra/previewWindow";
 import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
@@ -17,26 +17,26 @@ function App() {
   } = useAppTheme();
   const {
     appFontId,
-    draftFontId,
-    draftFontSizePx,
+    editFontId,
+    editFontSizePx,
     multiCursorModifier,
     showLineNumbers,
-    startupDraftMode,
+    startupEditMode,
     onAppFontChange,
-    onDraftFontChange,
-    onDraftFontSizeChange,
+    onEditFontChange,
+    onEditFontSizeChange,
     onMultiCursorModifierChange,
     onShowLineNumbersChange,
-    onStartupDraftModeChange,
+    onStartupEditModeChange,
   } = useEditorPreferences();
 
   useLayoutEffect(() => {
     document.documentElement.dataset.appTheme = appThemeId;
     document.documentElement.dataset.previewColors = previewUsesAppThemeColors ? "app" : "fixed";
     document.documentElement.style.setProperty("--app-font-family", resolveAppFontFamily(appFontId));
-    document.documentElement.style.setProperty("--draft-font-family", resolveDraftFontFamily(draftFontId));
-    document.documentElement.style.setProperty("--draft-font-size", `${draftFontSizePx}px`);
-  }, [appFontId, appThemeId, draftFontId, draftFontSizePx, previewUsesAppThemeColors]);
+    document.documentElement.style.setProperty("--edit-font-family", resolveEditFontFamily(editFontId));
+    document.documentElement.style.setProperty("--edit-font-size", `${editFontSizePx}px`);
+  }, [appFontId, appThemeId, editFontId, editFontSizePx, previewUsesAppThemeColors]);
 
   if (previewWindowMode) {
     return <PreviewWindowScreen />;
@@ -46,19 +46,19 @@ function App() {
     <MarkdownEditorScreen
       appFontId={appFontId}
       appThemeId={appThemeId}
-      draftFontId={draftFontId}
-      draftFontSizePx={draftFontSizePx}
+      editFontId={editFontId}
+      editFontSizePx={editFontSizePx}
       multiCursorModifier={multiCursorModifier}
       showLineNumbers={showLineNumbers}
-      startupDraftMode={startupDraftMode}
+      startupEditMode={startupEditMode}
       onAppFontChange={onAppFontChange}
       onAppThemeChange={onAppThemeChange}
-      onDraftFontChange={onDraftFontChange}
-      onDraftFontSizeChange={onDraftFontSizeChange}
+      onEditFontChange={onEditFontChange}
+      onEditFontSizeChange={onEditFontSizeChange}
       onMultiCursorModifierChange={onMultiCursorModifierChange}
       onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
       onShowLineNumbersChange={onShowLineNumbersChange}
-      onStartupDraftModeChange={onStartupDraftModeChange}
+      onStartupEditModeChange={onStartupEditModeChange}
       previewUsesAppThemeColors={previewUsesAppThemeColors}
     />
   );

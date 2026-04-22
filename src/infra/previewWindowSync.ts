@@ -1,12 +1,12 @@
 const PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY = "kmark:preview-window:cursor-sync:v1";
-const PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY = "kmark:preview-window:draft-jump-request:v1";
+const PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY = "kmark:preview-window:edit-jump-request:v1";
 
 type StoredPreviewWindowCursorState = {
   readonly activeSourceLine: number | null;
   readonly updatedAt: number;
 };
 
-export type PreviewWindowDraftJumpRequest = {
+export type PreviewWindowEditJumpRequest = {
   readonly lineNumber: number;
   readonly requestId: number;
 };
@@ -46,15 +46,15 @@ export function persistPreviewWindowActiveSourceLine(activeSourceLine: number | 
   }
 }
 
-export function loadPreviewWindowDraftJumpRequest(): PreviewWindowDraftJumpRequest | null {
+export function loadPreviewWindowEditJumpRequest(): PreviewWindowEditJumpRequest | null {
   try {
-    const storedValue = window.localStorage.getItem(PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY);
+    const storedValue = window.localStorage.getItem(PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY);
 
     if (storedValue === null) {
       return null;
     }
 
-    const parsedValue = JSON.parse(storedValue) as Partial<PreviewWindowDraftJumpRequest>;
+    const parsedValue = JSON.parse(storedValue) as Partial<PreviewWindowEditJumpRequest>;
     const lineNumber = normalizeLineNumber(parsedValue.lineNumber);
 
     if (lineNumber === null || typeof parsedValue.requestId !== "number" || !Number.isFinite(parsedValue.requestId)) {
@@ -70,7 +70,7 @@ export function loadPreviewWindowDraftJumpRequest(): PreviewWindowDraftJumpReque
   }
 }
 
-export function requestPreviewWindowDraftJump(lineNumber: number): void {
+export function requestPreviewWindowEditJump(lineNumber: number): void {
   const normalizedLineNumber = normalizeLineNumber(lineNumber);
 
   if (normalizedLineNumber === null) {
@@ -78,10 +78,10 @@ export function requestPreviewWindowDraftJump(lineNumber: number): void {
   }
 
   try {
-    window.localStorage.setItem(PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY, JSON.stringify({
+    window.localStorage.setItem(PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY, JSON.stringify({
       lineNumber: normalizedLineNumber,
       requestId: Date.now(),
-    } satisfies PreviewWindowDraftJumpRequest));
+    } satisfies PreviewWindowEditJumpRequest));
   } catch {
     // Ignore sync persistence failures so preview interaction stays responsive.
   }
@@ -89,5 +89,5 @@ export function requestPreviewWindowDraftJump(lineNumber: number): void {
 
 export {
   PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY,
-  PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY,
+  PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY,
 };

@@ -14,7 +14,7 @@ import {
 import { selectMostRecentExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
-import { type AppFontId, type DraftFontId, type DraftFontSizePx, type MultiCursorModifier, type StartupDraftMode } from "../../domain/editorPreferences";
+import { type AppFontId, type EditFontId, type EditFontSizePx, type MultiCursorModifier, type StartupEditMode } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 import {
   DEFAULT_DESKTOP_SPLIT_RATIO,
@@ -25,8 +25,8 @@ import {
 } from "../../infra/editorLayout";
 import { syncWindowTitle } from "../../infra/windowTitle";
 import {
-  PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY,
-  loadPreviewWindowDraftJumpRequest,
+  PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY,
+  loadPreviewWindowEditJumpRequest,
   persistPreviewWindowActiveSourceLine,
 } from "../../infra/previewWindowSync";
 import { openPreviewWindow } from "../../infra/previewWindow";
@@ -39,8 +39,8 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
-const MOBILE_SECTION_ORDER_WITH_PREVIEW = ["menu", "draft", "preview"] as const;
-const MOBILE_SECTION_ORDER_WITHOUT_PREVIEW = ["menu", "draft"] as const;
+const MOBILE_SECTION_ORDER_WITH_PREVIEW = ["menu", "edit", "preview"] as const;
+const MOBILE_SECTION_ORDER_WITHOUT_PREVIEW = ["menu", "edit"] as const;
 const DESKTOP_DIVIDER_WIDTH = 8;
 const DESKTOP_MIN_PANEL_WIDTH = 180;
 const DESKTOP_SPLIT_KEYBOARD_STEP = 5;
@@ -50,29 +50,33 @@ const MOBILE_SWIPE_THRESHOLD_PX = 40;
 const MOBILE_SLIDE_TRANSITION_MS = 180;
 const MOBILE_SLIDE_TRANSITION_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 
-type MobileSectionId = "menu" | "draft" | "preview";
+type MobileSectionId = "menu" | "edit" | "preview";
 
 type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
-  readonly draftFontId: DraftFontId;
-  readonly draftFontSizePx: DraftFontSizePx;
+  readonly editFontId: EditFontId;
+  readonly editFontSizePx: EditFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
-  readonly startupDraftMode: StartupDraftMode;
+  readonly startupEditMode: StartupEditMode;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
-  readonly onDraftFontChange: (draftFontId: DraftFontId) => void;
-  readonly onDraftFontSizeChange: (draftFontSizePx: DraftFontSizePx) => void;
+  readonly onEditFontChange: (editFontId: EditFontId) => void;
+  readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
-  readonly onStartupDraftModeChange: (startupDraftMode: StartupDraftMode) => void;
+  readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
   readonly previewUsesAppThemeColors: boolean;
 };
 
 function getMobileSectionIndex(section: MobileSectionId, sectionOrder: readonly MobileSectionId[]): number {
   return sectionOrder.indexOf(section);
+}
+
+function getMobileSectionLabel(section: MobileSectionId): string {
+  return section;
 }
 
 function toPreviewWindowErrorMessage(error: unknown): string {
@@ -118,19 +122,19 @@ function detectLayoutMode(): LayoutMode {
 export function MarkdownEditorScreen({
   appFontId,
   appThemeId,
-  draftFontId,
-  draftFontSizePx,
+  editFontId,
+  editFontSizePx,
   multiCursorModifier,
   showLineNumbers,
-  startupDraftMode,
+  startupEditMode,
   onAppFontChange,
   onAppThemeChange,
-  onDraftFontChange,
-  onDraftFontSizeChange,
+  onEditFontChange,
+  onEditFontSizeChange,
   onMultiCursorModifierChange,
   onPreviewUsesAppThemeColorsChange,
   onShowLineNumbersChange,
-  onStartupDraftModeChange,
+  onStartupEditModeChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
   const {
@@ -161,7 +165,7 @@ export function MarkdownEditorScreen({
     subscribeToExternalDocumentRequests,
     handleErrorClear,
     handleErrorRaise,
-  } = useMarkdownEditor(startupDraftMode);
+  } = useMarkdownEditor(startupEditMode);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const desktopWorkspaceRef = useRef<HTMLElement | null>(null);
@@ -172,9 +176,9 @@ export function MarkdownEditorScreen({
   const mobileSwipeStartIndexRef = useRef(0);
   const mobileSwipeAxisRef = useRef<"horizontal" | "vertical" | null>(null);
   const mobileDragOffsetPxRef = useRef(0);
-  const mobileSectionBeforeMenuRef = useRef<Exclude<MobileSectionId, "menu">>("draft");
+  const mobileSectionBeforeMenuRef = useRef<Exclude<MobileSectionId, "menu">>("edit");
   const pendingMobileSectionRef = useRef<MobileSectionId | null>(null);
-  const draftSelectionRequestIdRef = useRef(0);
+  const editSelectionRequestIdRef = useRef(0);
   const lastHandledPreviewWindowJumpRequestIdRef = useRef<number | null>(null);
   const activeDividerPointerIdRef = useRef<number | null>(null);
   const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
@@ -184,13 +188,13 @@ export function MarkdownEditorScreen({
   const [isDesktopMenuMounted, setIsDesktopMenuMounted] = useState(false);
   const [isDesktopMenuVisible, setIsDesktopMenuVisible] = useState(false);
   const [isDesktopResizing, setIsDesktopResizing] = useState(false);
-  const [isDraftFocused, setIsDraftFocused] = useState(false);
+  const [isEditFocused, setIsEditFocused] = useState(false);
   const [isMobileDragging, setIsMobileDragging] = useState(false);
-  const [activeDraftCursorLine, setActiveDraftCursorLine] = useState<number | null>(1);
-  const [draftSelectionRequest, setDraftSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
+  const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
+  const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
   const [renderedA4PreviewPages, setRenderedA4PreviewPages] = useState<readonly RenderedA4PreviewPage[]>([]);
   const [mobileDragOffsetPx, setMobileDragOffsetPx] = useState(0);
-  const [mobileSection, setMobileSection] = useState<MobileSectionId>("draft");
+  const [mobileSection, setMobileSection] = useState<MobileSectionId>("edit");
   const [mobileViewportWidth, setMobileViewportWidth] = useState<number>(() => {
     if (typeof window === "undefined") {
       return 0;
@@ -204,7 +208,7 @@ export function MarkdownEditorScreen({
 
   const desktopSplitRatioRef = useRef(desktopSplitRatio);
   const mobileSectionOrder = isPreviewVisible ? MOBILE_SECTION_ORDER_WITH_PREVIEW : MOBILE_SECTION_ORDER_WITHOUT_PREVIEW;
-  const previewHighlightSourceLine = isDraftFocused ? activeDraftCursorLine : null;
+  const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
   const isPreviewInteractionAvailable = isPreviewVisible && (layoutMode === "desktop" || mobileSection === "preview");
   const {
     contextMenuRef: previewContextMenuRef,
@@ -222,7 +226,7 @@ export function MarkdownEditorScreen({
   const mobileSectionIndex = useMemo(() => {
     const nextIndex = getMobileSectionIndex(mobileSection, mobileSectionOrder);
 
-    return nextIndex === -1 ? getMobileSectionIndex("draft", mobileSectionOrder) : nextIndex;
+    return nextIndex === -1 ? getMobileSectionIndex("edit", mobileSectionOrder) : nextIndex;
   }, [mobileSection, mobileSectionOrder]);
 
   useEffect(() => {
@@ -356,7 +360,7 @@ export function MarkdownEditorScreen({
     mobileDragOffsetPxRef.current = 0;
 
     const animationFrameId = window.requestAnimationFrame(() => {
-      const nextMobileSection = pendingMobileSectionRef.current ?? "draft";
+      const nextMobileSection = pendingMobileSectionRef.current ?? "edit";
       pendingMobileSectionRef.current = null;
       setMobileSection(nextMobileSection);
     });
@@ -372,7 +376,7 @@ export function MarkdownEditorScreen({
 
   useEffect(() => {
     if (layoutMode !== "mobile") {
-      setIsDraftFocused(false);
+      setIsEditFocused(false);
     }
   }, [layoutMode]);
 
@@ -387,11 +391,11 @@ export function MarkdownEditorScreen({
       return;
     }
 
-    pendingMobileSectionRef.current = "draft";
+    pendingMobileSectionRef.current = "edit";
     setIsMobileDragging(false);
     setMobileDragOffsetPx(0);
     mobileDragOffsetPxRef.current = 0;
-    setMobileSection("draft");
+    setMobileSection("edit");
   }, [isPreviewVisible, mobileSection]);
 
   useEffect(() => {
@@ -496,7 +500,7 @@ export function MarkdownEditorScreen({
         mobileSectionBeforeMenuRef.current = mobileSection;
       }
 
-      if (section !== "draft") {
+      if (section !== "edit") {
         blurActiveElement();
       }
 
@@ -524,7 +528,7 @@ export function MarkdownEditorScreen({
     if (layoutMode === "desktop") {
       closeDesktopMenu();
     } else {
-      handleMobileSectionRequest("draft");
+        handleMobileSectionRequest("edit");
     }
 
     handleLoadExternalDocument(nextDocument);
@@ -568,7 +572,7 @@ export function MarkdownEditorScreen({
   const handleLayoutModeChange = useCallback((nextLayoutMode: LayoutMode) => {
     closeDesktopMenuImmediately();
     blurActiveElement();
-    setIsDraftFocused(false);
+    setIsEditFocused(false);
     setIsMobileDragging(false);
     setMobileDragOffsetPx(0);
     mobileDragOffsetPxRef.current = 0;
@@ -588,12 +592,12 @@ export function MarkdownEditorScreen({
     mobileSwipeAxisRef.current = null;
   }, []);
 
-  const handleDraftFocusChange = useCallback((nextIsFocused: boolean) => {
-    setIsDraftFocused(nextIsFocused);
+  const handleEditFocusChange = useCallback((nextIsFocused: boolean) => {
+    setIsEditFocused(nextIsFocused);
   }, []);
 
-  const handleDraftCursorLineChange = useCallback((nextCursorLine: number) => {
-    setActiveDraftCursorLine(nextCursorLine);
+  const handleEditCursorLineChange = useCallback((nextCursorLine: number) => {
+    setActiveEditCursorLine(nextCursorLine);
   }, []);
 
   const handleRenderedA4PagesChange = useCallback((nextRenderedA4Pages: readonly RenderedA4PreviewPage[]) => {
@@ -601,14 +605,14 @@ export function MarkdownEditorScreen({
   }, []);
 
   const handlePreviewSourceLineDoubleClick = useCallback((lineNumber: number) => {
-    const nextRequestId = draftSelectionRequestIdRef.current + 1;
-    draftSelectionRequestIdRef.current = nextRequestId;
+    const nextRequestId = editSelectionRequestIdRef.current + 1;
+    editSelectionRequestIdRef.current = nextRequestId;
 
-    setActiveDraftCursorLine(lineNumber);
-    setDraftSelectionRequest({ lineNumber, requestId: nextRequestId });
+    setActiveEditCursorLine(lineNumber);
+    setEditSelectionRequest({ lineNumber, requestId: nextRequestId });
 
     if (layoutMode === "mobile") {
-      handleMobileSectionRequest("draft");
+      handleMobileSectionRequest("edit");
     }
   }, [handleMobileSectionRequest, layoutMode]);
 
@@ -618,11 +622,11 @@ export function MarkdownEditorScreen({
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY) {
+      if (event.storageArea !== window.localStorage || event.key !== PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY) {
         return;
       }
 
-      const nextJumpRequest = loadPreviewWindowDraftJumpRequest();
+      const nextJumpRequest = loadPreviewWindowEditJumpRequest();
 
       if (
         nextJumpRequest === null
@@ -657,7 +661,7 @@ export function MarkdownEditorScreen({
       return;
     }
 
-    if (mobileSection === "draft" && isDraftFocused) {
+    if (mobileSection === "edit" && isEditFocused) {
       return;
     }
 
@@ -669,7 +673,7 @@ export function MarkdownEditorScreen({
     mobileDragOffsetPxRef.current = 0;
     setIsMobileDragging(false);
     setMobileDragOffsetPx(0);
-  }, [isDraftFocused, layoutMode, mobileSectionIndex]);
+  }, [isEditFocused, layoutMode, mobileSectionIndex]);
 
   const handleMobileTrackPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (mobileSwipePointerIdRef.current !== event.pointerId) {
@@ -751,9 +755,9 @@ export function MarkdownEditorScreen({
           : Math.max(baseIndex - 1, 0);
       }
 
-      const nextSection = mobileSectionOrder[targetIndex] ?? "draft";
+      const nextSection = mobileSectionOrder[targetIndex] ?? "edit";
 
-      if (nextSection !== "draft") {
+      if (nextSection !== "edit") {
         blurActiveElement();
       }
 
@@ -917,7 +921,7 @@ export function MarkdownEditorScreen({
     }
 
     const previousMobileSection = !isPreviewVisible && mobileSectionBeforeMenuRef.current === "preview"
-      ? "draft"
+      ? "edit"
       : mobileSectionBeforeMenuRef.current;
 
     handleMobileSectionRequest(previousMobileSection);
@@ -1006,17 +1010,17 @@ export function MarkdownEditorScreen({
             className={isPreviewVisible ? "workspace-grid" : "workspace-grid workspace-grid--preview-hidden"}
             aria-label="メインワークスペース"
           >
-            <div className="workspace-grid__panel workspace-grid__panel--draft">
+            <div className="workspace-grid__panel workspace-grid__panel--edit">
               <MarkdownInput
                 appThemeId={appThemeId}
                 content={content}
-                draftFontId={draftFontId}
+                editFontId={editFontId}
                 layoutMode={layoutMode}
                 multiCursorModifier={multiCursorModifier}
                 showLineNumbers={showLineNumbers}
                 onContentChange={handleContentChange}
-                onCursorLineChange={handleDraftCursorLineChange}
-                requestedLineSelection={draftSelectionRequest}
+                onCursorLineChange={handleEditCursorLineChange}
+                requestedLineSelection={editSelectionRequest}
               />
             </div>
 
@@ -1025,7 +1029,7 @@ export function MarkdownEditorScreen({
                 <div
                   className="workspace-grid__divider"
                   role="separator"
-                  aria-label="Draft と Preview の幅を調整"
+                  aria-label="Edit と Preview の幅を調整"
                   aria-orientation="vertical"
                   aria-valuemin={MIN_DESKTOP_SPLIT_RATIO}
                   aria-valuemax={MAX_DESKTOP_SPLIT_RATIO}
@@ -1080,19 +1084,19 @@ export function MarkdownEditorScreen({
                 <MenuSection
                   appFontId={appFontId}
                   appThemeId={appThemeId}
-                  draftFontId={draftFontId}
-                  draftFontSizePx={draftFontSizePx}
+                  editFontId={editFontId}
+                  editFontSizePx={editFontSizePx}
                   previewDisplayMode={previewDisplayMode}
                   previewUsesAppThemeColors={previewUsesAppThemeColors}
                   isPreviewVisible={isPreviewVisible}
                   layoutMode={layoutMode}
                   multiCursorModifier={multiCursorModifier}
                   showLineNumbers={showLineNumbers}
-                  startupDraftMode={startupDraftMode}
+                  startupEditMode={startupEditMode}
                   onAppFontChange={onAppFontChange}
                   onAppThemeChange={onAppThemeChange}
-                  onDraftFontChange={onDraftFontChange}
-                  onDraftFontSizeChange={onDraftFontSizeChange}
+                  onEditFontChange={onEditFontChange}
+                  onEditFontSizeChange={onEditFontSizeChange}
                   onLayoutModeChange={handleLayoutModeChange}
                   onMultiCursorModifierChange={onMultiCursorModifierChange}
                   onNewDocument={handleRequestNew}
@@ -1105,7 +1109,7 @@ export function MarkdownEditorScreen({
                   onPreviewVisibilityChange={handlePreviewVisibilityChange}
                   onSaveDocumentAs={handleRequestSaveAs}
                   onShowLineNumbersChange={onShowLineNumbersChange}
-                  onStartupDraftModeChange={onStartupDraftModeChange}
+                  onStartupEditModeChange={onStartupEditModeChange}
                 />
               </div>
             </div>
@@ -1130,19 +1134,19 @@ export function MarkdownEditorScreen({
                     <MenuSection
                       appFontId={appFontId}
                       appThemeId={appThemeId}
-                      draftFontId={draftFontId}
-                      draftFontSizePx={draftFontSizePx}
+                      editFontId={editFontId}
+                      editFontSizePx={editFontSizePx}
                       previewDisplayMode={previewDisplayMode}
                       previewUsesAppThemeColors={previewUsesAppThemeColors}
                       isPreviewVisible={isPreviewVisible}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
                       showLineNumbers={showLineNumbers}
-                      startupDraftMode={startupDraftMode}
+                      startupEditMode={startupEditMode}
                       onAppFontChange={onAppFontChange}
                       onAppThemeChange={onAppThemeChange}
-                      onDraftFontChange={onDraftFontChange}
-                      onDraftFontSizeChange={onDraftFontSizeChange}
+                      onEditFontChange={onEditFontChange}
+                      onEditFontSizeChange={onEditFontSizeChange}
                       onLayoutModeChange={handleLayoutModeChange}
                       onMultiCursorModifierChange={onMultiCursorModifierChange}
                       onNewDocument={handleRequestNew}
@@ -1155,20 +1159,20 @@ export function MarkdownEditorScreen({
                       onPreviewVisibilityChange={handlePreviewVisibilityChange}
                       onSaveDocumentAs={handleRequestSaveAs}
                       onShowLineNumbersChange={onShowLineNumbersChange}
-                      onStartupDraftModeChange={onStartupDraftModeChange}
+                      onStartupEditModeChange={onStartupEditModeChange}
                     />
-                  ) : section === "draft" ? (
+                  ) : section === "edit" ? (
                     <MarkdownInput
                       appThemeId={appThemeId}
                       content={content}
-                      draftFontId={draftFontId}
+                      editFontId={editFontId}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
                       showLineNumbers={showLineNumbers}
                       onContentChange={handleContentChange}
-                      onCursorLineChange={handleDraftCursorLineChange}
-                      onFocusChange={handleDraftFocusChange}
-                      requestedLineSelection={draftSelectionRequest}
+                      onCursorLineChange={handleEditCursorLineChange}
+                      onFocusChange={handleEditFocusChange}
+                      requestedLineSelection={editSelectionRequest}
                     />
                   ) : (
                     <MarkdownPreview
@@ -1199,7 +1203,7 @@ export function MarkdownEditorScreen({
                 className={mobileSection === section ? "is-active" : undefined}
                 onClick={() => handleMobileSectionRequest(section)}
               >
-                {section}
+                {getMobileSectionLabel(section)}
               </button>
             ))}
           </nav>

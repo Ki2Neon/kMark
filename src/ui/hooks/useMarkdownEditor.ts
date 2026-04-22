@@ -1,7 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
 import { createStartupEditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
-import { type StartupDraftMode } from "../../domain/editorPreferences";
+import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
 import {
   clearPendingTauriMarkdownOpenRequests,
@@ -15,7 +15,7 @@ import {
   takePendingTauriMarkdownOpenRequests,
   type MarkdownFileHandle,
 } from "../../infra/fileTransfer";
-import { loadLocalDraft, persistLocalDraft } from "../../infra/localDraft";
+import { loadLocalEdit, persistLocalEdit } from "../../infra/localEdit";
 import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
 import { printMarkdownDocument } from "../../infra/printDocument";
 import { editorReducer } from "../../intent/editorIntent";
@@ -28,16 +28,16 @@ function toErrorMessage(error: unknown): string {
   return "処理に失敗しました。もう一度試してください。";
 }
 
-export function useMarkdownEditor(startupDraftMode: StartupDraftMode) {
-  const shouldSkipInitialDraftPersistRef = useRef(false);
-  const [state, dispatch] = useReducer(editorReducer, startupDraftMode, (initialStartupDraftMode) => {
-    const storedDraft = loadLocalDraft();
+export function useMarkdownEditor(startupEditMode: StartupEditMode) {
+  const shouldSkipInitialEditPersistRef = useRef(false);
+  const [state, dispatch] = useReducer(editorReducer, startupEditMode, (initialStartupEditMode) => {
+    const storedEdit = loadLocalEdit();
 
-    shouldSkipInitialDraftPersistRef.current = initialStartupDraftMode !== "last-opened-file" && storedDraft !== null;
+    shouldSkipInitialEditPersistRef.current = initialStartupEditMode !== "last-opened-file" && storedEdit !== null;
 
     return createStartupEditorState({
-      startupDraftMode: initialStartupDraftMode,
-      storedDraft,
+      startupEditMode: initialStartupEditMode,
+      storedEdit,
     });
   });
   const deferredContent = useDeferredValue(state.content);
@@ -45,12 +45,12 @@ export function useMarkdownEditor(startupDraftMode: StartupDraftMode) {
   const currentExternalFilePathRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (shouldSkipInitialDraftPersistRef.current) {
-      shouldSkipInitialDraftPersistRef.current = false;
+    if (shouldSkipInitialEditPersistRef.current) {
+      shouldSkipInitialEditPersistRef.current = false;
       return;
     }
 
-    persistLocalDraft({
+    persistLocalEdit({
       fileName: state.fileName,
       content: state.content,
       savedAt: state.lastSavedAt,

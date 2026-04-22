@@ -5,7 +5,7 @@ import { EditorView, highlightActiveLineGutter, keymap, lineNumbers } from "@cod
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
-import { resolveDraftFontFamily, type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
+import { resolveEditFontFamily, type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 const DESKTOP_EDITOR_BASIC_SETUP = {
@@ -139,7 +139,7 @@ type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly blurOnEscapeWhenSelectionEmpty?: boolean;
   readonly content: string;
-  readonly draftFontId: DraftFontId;
+  readonly editFontId: EditFontId;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly onContentChange: (content: string) => void;
@@ -155,7 +155,7 @@ function DesktopMarkdownInputComponent({
   appThemeId,
   blurOnEscapeWhenSelectionEmpty = false,
   content,
-  draftFontId,
+  editFontId,
   multiCursorModifier,
   showLineNumbers,
   onContentChange,
@@ -237,8 +237,8 @@ function DesktopMarkdownInputComponent({
     "&": {
       backgroundColor: "transparent",
       color: "var(--text)",
-      fontFamily: resolveDraftFontFamily(draftFontId),
-      fontSize: "var(--draft-font-size)",
+      fontFamily: resolveEditFontFamily(editFontId),
+      fontSize: "var(--edit-font-size)",
       height: "100%",
     },
     ".cm-content": {
@@ -290,7 +290,7 @@ function DesktopMarkdownInputComponent({
     },
   }, {
     dark: isDarkEditorTheme(appThemeId),
-  }), [appThemeId, draftFontId]);
+  }), [appThemeId, editFontId]);
 
   const extensions = useMemo<Extension[]>(() => {
     const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();

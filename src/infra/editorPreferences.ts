@@ -1,11 +1,11 @@
 import {
   DEFAULT_EDITOR_PREFERENCES,
   deserializeAppFontId,
-  deserializeDraftFontId,
-  deserializeDraftFontSizePx,
+  deserializeEditFontId,
+  deserializeEditFontSizePx,
   deserializeShowLineNumbers,
   isMultiCursorModifier,
-  isStartupDraftMode,
+  isStartupEditMode,
   type EditorPreferences,
 } from "../domain/editorPreferences";
 
@@ -23,17 +23,17 @@ export function loadEditorPreferences(): EditorPreferences {
 
     return {
       appFontId: deserializeAppFontId(parsedValue.appFontId),
-      draftFontId: deserializeDraftFontId(parsedValue.draftFontId),
-      draftFontSizePx: deserializeDraftFontSizePx(parsedValue.draftFontSizePx),
+      editFontId: deserializeEditFontId(parsedValue.editFontId),
+      editFontSizePx: deserializeEditFontSizePx(parsedValue.editFontSizePx),
       multiCursorModifier:
         typeof parsedValue.multiCursorModifier === "string" && isMultiCursorModifier(parsedValue.multiCursorModifier)
           ? parsedValue.multiCursorModifier
           : DEFAULT_EDITOR_PREFERENCES.multiCursorModifier,
       showLineNumbers: deserializeShowLineNumbers(parsedValue.showLineNumbers),
-      startupDraftMode:
-        typeof parsedValue.startupDraftMode === "string" && isStartupDraftMode(parsedValue.startupDraftMode)
-          ? parsedValue.startupDraftMode
-          : DEFAULT_EDITOR_PREFERENCES.startupDraftMode,
+      startupEditMode:
+        typeof parsedValue.startupEditMode === "string" && isStartupEditMode(parsedValue.startupEditMode)
+          ? parsedValue.startupEditMode
+          : DEFAULT_EDITOR_PREFERENCES.startupEditMode,
     };
   } catch {
     return DEFAULT_EDITOR_PREFERENCES;

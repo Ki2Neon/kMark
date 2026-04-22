@@ -1,4 +1,4 @@
-import { type StartupDraftMode } from "./editorPreferences";
+import { type StartupEditMode } from "./editorPreferences";
 
 export type LayoutMode = "desktop" | "mobile";
 
@@ -17,7 +17,7 @@ export type EditorStats = {
   readonly readingMinutes: number;
 };
 
-export type StoredDraft = {
+export type StoredEdit = {
   readonly content: string;
   readonly fileName: string;
   readonly savedAt: number | null;
@@ -55,20 +55,20 @@ export function createBlankEditorState(): EditorState {
 }
 
 export function createStartupEditorState(options: {
-  readonly startupDraftMode: StartupDraftMode;
-  readonly storedDraft: StoredDraft | null;
+  readonly startupEditMode: StartupEditMode;
+  readonly storedEdit: StoredEdit | null;
 }): EditorState {
-  if (options.startupDraftMode === "last-opened-file" && options.storedDraft !== null) {
+  if (options.startupEditMode === "last-opened-file" && options.storedEdit !== null) {
     return {
-      content: options.storedDraft.content,
-      fileName: ensureMarkdownExtension(options.storedDraft.fileName),
+      content: options.storedEdit.content,
+      fileName: ensureMarkdownExtension(options.storedEdit.fileName),
       isDirty: false,
-      lastSavedAt: options.storedDraft.savedAt,
+      lastSavedAt: options.storedEdit.savedAt,
       errorMessage: null,
     };
   }
 
-  if (options.startupDraftMode === "blank") {
+  if (options.startupEditMode === "blank") {
     return createBlankEditorState();
   }
 

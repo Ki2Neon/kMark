@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_FILE_NAME, DEFAULT_MARKDOWN } from "../../domain/editor";
-import { LOCAL_DRAFT_STORAGE_KEY, loadLocalDraft } from "../../infra/localDraft";
+import { LOCAL_EDIT_STORAGE_KEY, loadLocalEdit } from "../../infra/localEdit";
 import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
 import {
   PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY,
   loadPreviewWindowActiveSourceLine,
-  requestPreviewWindowDraftJump,
+  requestPreviewWindowEditJump,
 } from "../../infra/previewWindowSync";
 import { syncWindowTitle } from "../../infra/windowTitle";
 import { MarkdownPreview } from "../components/MarkdownPreview";
@@ -19,9 +19,9 @@ type PreviewSnapshot = {
 };
 
 function loadPreviewSnapshot(): PreviewSnapshot {
-  const draft = loadLocalDraft();
+  const edit = loadLocalEdit();
 
-  if (draft === null) {
+  if (edit === null) {
     return {
       content: DEFAULT_MARKDOWN,
       fileName: DEFAULT_FILE_NAME,
@@ -29,8 +29,8 @@ function loadPreviewSnapshot(): PreviewSnapshot {
   }
 
   return {
-    content: draft.content,
-    fileName: draft.fileName,
+    content: edit.content,
+    fileName: edit.fileName,
   };
 }
 
@@ -57,7 +57,7 @@ export function PreviewWindowScreen() {
         return;
       }
 
-      if (event.key === LOCAL_DRAFT_STORAGE_KEY) {
+      if (event.key === LOCAL_EDIT_STORAGE_KEY) {
         setPreviewSnapshot(loadPreviewSnapshot());
         return;
       }
@@ -75,7 +75,7 @@ export function PreviewWindowScreen() {
   }, []);
 
   const handleSourceLineDoubleClick = useCallback((lineNumber: number) => {
-    requestPreviewWindowDraftJump(lineNumber);
+    requestPreviewWindowEditJump(lineNumber);
   }, []);
 
   useEffect(() => {

@@ -2,18 +2,18 @@ import { memo, type ChangeEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
 import {
   APP_FONT_OPTIONS,
-  DRAFT_FONT_OPTIONS,
-  MAX_DRAFT_FONT_SIZE_PX,
-  MIN_DRAFT_FONT_SIZE_PX,
+  EDIT_FONT_OPTIONS,
+  MAX_EDIT_FONT_SIZE_PX,
+  MIN_EDIT_FONT_SIZE_PX,
   MULTI_CURSOR_MODIFIER_OPTIONS,
-  STARTUP_DRAFT_MODE_OPTIONS,
+  STARTUP_EDIT_MODE_OPTIONS,
   isMultiCursorModifier,
-  isStartupDraftMode,
+  isStartupEditMode,
   type AppFontId,
-  type DraftFontId,
-  type DraftFontSizePx,
+  type EditFontId,
+  type EditFontSizePx,
   type MultiCursorModifier,
-  type StartupDraftMode,
+  type StartupEditMode,
 } from "../../domain/editorPreferences";
 import {
   PREVIEW_DISPLAY_MODE_OPTIONS,
@@ -25,19 +25,19 @@ import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/t
 type MenuSectionProps = {
   readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
-  readonly draftFontId: DraftFontId;
-  readonly draftFontSizePx: DraftFontSizePx;
+  readonly editFontId: EditFontId;
+  readonly editFontSizePx: EditFontSizePx;
   readonly previewDisplayMode: PreviewDisplayMode;
   readonly previewUsesAppThemeColors: boolean;
   readonly isPreviewVisible: boolean;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
-  readonly startupDraftMode: StartupDraftMode;
+  readonly startupEditMode: StartupEditMode;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
-  readonly onDraftFontChange: (draftFontId: DraftFontId) => void;
-  readonly onDraftFontSizeChange: (draftFontSizePx: DraftFontSizePx) => void;
+  readonly onEditFontChange: (editFontId: EditFontId) => void;
+  readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onNewDocument: () => void;
@@ -50,28 +50,28 @@ type MenuSectionProps = {
   readonly onPreviewVisibilityChange: (isPreviewVisible: boolean) => void;
   readonly onSaveDocumentAs: () => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
-  readonly onStartupDraftModeChange: (startupDraftMode: StartupDraftMode) => void;
+  readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
 };
 
 const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
-const DRAFT_FONT_DATALIST_ID = "menu-section-draft-fonts";
+const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 
 function MenuSectionComponent({
   appFontId,
   appThemeId,
-  draftFontId,
-  draftFontSizePx,
+  editFontId,
+  editFontSizePx,
   previewDisplayMode,
   previewUsesAppThemeColors,
   isPreviewVisible,
   layoutMode,
   multiCursorModifier,
   showLineNumbers,
-  startupDraftMode,
+  startupEditMode,
   onAppFontChange,
   onAppThemeChange,
-  onDraftFontChange,
-  onDraftFontSizeChange,
+  onEditFontChange,
+  onEditFontSizeChange,
   onLayoutModeChange,
   onMultiCursorModifierChange,
   onNewDocument,
@@ -84,7 +84,7 @@ function MenuSectionComponent({
   onPreviewVisibilityChange,
   onSaveDocumentAs,
   onShowLineNumbersChange,
-  onStartupDraftModeChange,
+  onStartupEditModeChange,
 }: MenuSectionProps) {
   const handleAppThemeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextThemeId = event.currentTarget.value;
@@ -132,32 +132,32 @@ function MenuSectionComponent({
     onAppFontChange(event.currentTarget.value);
   };
 
-  const handleDraftFontInput = (event: ChangeEvent<HTMLInputElement>) => {
-    onDraftFontChange(event.currentTarget.value);
+  const handleEditFontInput = (event: ChangeEvent<HTMLInputElement>) => {
+    onEditFontChange(event.currentTarget.value);
   };
 
-  const handleDraftFontSizeInput = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextDraftFontSizePx = Number.parseInt(event.currentTarget.value, 10);
+  const handleEditFontSizeInput = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextEditFontSizePx = Number.parseInt(event.currentTarget.value, 10);
 
-    if (Number.isNaN(nextDraftFontSizePx)) {
+    if (Number.isNaN(nextEditFontSizePx)) {
       return;
     }
 
-    onDraftFontSizeChange(nextDraftFontSizePx);
+    onEditFontSizeChange(nextEditFontSizePx);
   };
 
   const handleShowLineNumbersSwitch = (event: ChangeEvent<HTMLInputElement>) => {
     onShowLineNumbersChange(event.currentTarget.checked);
   };
 
-  const handleStartupDraftModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextStartupDraftMode = event.currentTarget.value;
+  const handleStartupEditModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextStartupEditMode = event.currentTarget.value;
 
-    if (!isStartupDraftMode(nextStartupDraftMode)) {
+    if (!isStartupEditMode(nextStartupEditMode)) {
       return;
     }
 
-    onStartupDraftModeChange(nextStartupDraftMode);
+    onStartupEditModeChange(nextStartupEditMode);
   };
 
   return (
@@ -262,7 +262,7 @@ function MenuSectionComponent({
 
       <div className="menu-section__group">
         <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">ドラフト</h2>
+          <h2 className="menu-section__group-title">Edit</h2>
           <p className="menu-section__group-description">起動時の内容と編集表示</p>
         </div>
         <label className="menu-section__mode-switch">
@@ -292,12 +292,12 @@ function MenuSectionComponent({
           <span className="menu-section__field-label">フォントサイズ</span>
           <input
             type="number"
-            value={draftFontSizePx}
-            min={MIN_DRAFT_FONT_SIZE_PX}
-            max={MAX_DRAFT_FONT_SIZE_PX}
+            value={editFontSizePx}
+            min={MIN_EDIT_FONT_SIZE_PX}
+            max={MAX_EDIT_FONT_SIZE_PX}
             step={1}
-            onChange={handleDraftFontSizeInput}
-            aria-label="ドラフトのフォントサイズ"
+            onChange={handleEditFontSizeInput}
+            aria-label="Edit のフォントサイズ"
             className="menu-section__select"
           />
         </label>
@@ -305,14 +305,14 @@ function MenuSectionComponent({
         <label className="menu-section__label">
           <span className="menu-section__field-label">起動時の表示</span>
           <select
-            value={startupDraftMode}
-            onChange={handleStartupDraftModeSelect}
-            aria-label="起動時にドラフトへ表示する内容"
+            value={startupEditMode}
+            onChange={handleStartupEditModeSelect}
+            aria-label="起動時に Edit へ表示する内容"
             className="menu-section__select"
           >
-            {STARTUP_DRAFT_MODE_OPTIONS.map((startupDraftModeOption) => (
-              <option key={startupDraftModeOption.id} value={startupDraftModeOption.id}>
-                {startupDraftModeOption.label}
+            {STARTUP_EDIT_MODE_OPTIONS.map((startupEditModeOption) => (
+              <option key={startupEditModeOption.id} value={startupEditModeOption.id}>
+                {startupEditModeOption.label}
               </option>
             ))}
           </select>
@@ -322,22 +322,22 @@ function MenuSectionComponent({
       <div className="menu-section__group">
         <div className="menu-section__group-header">
           <h2 className="menu-section__group-title">フォント</h2>
-          <p className="menu-section__group-description">アプリ全体とドラフト本文</p>
+          <p className="menu-section__group-description">アプリ全体と Edit 本文</p>
         </div>
         <label className="menu-section__label">
-          <span className="menu-section__field-label">ドラフト</span>
+          <span className="menu-section__field-label">Edit</span>
           <input
             type="text"
-            value={draftFontId}
-            onChange={handleDraftFontInput}
-            aria-label="ドラフトフォント"
+            value={editFontId}
+            onChange={handleEditFontInput}
+            aria-label="Edit フォント"
             className="menu-section__select"
-            list={DRAFT_FONT_DATALIST_ID}
+            list={EDIT_FONT_DATALIST_ID}
             placeholder='例: Iosevka Term, "Fira Code", monospace'
             spellCheck={false}
           />
-          <datalist id={DRAFT_FONT_DATALIST_ID}>
-            {DRAFT_FONT_OPTIONS.map((fontOption) => (
+          <datalist id={EDIT_FONT_DATALIST_ID}>
+            {EDIT_FONT_OPTIONS.map((fontOption) => (
               <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
             ))}
           </datalist>

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   type AppFontId,
-  clampDraftFontSizePx,
-  type DraftFontId,
-  type DraftFontSizePx,
+  clampEditFontSizePx,
+  type EditFontId,
+  type EditFontSizePx,
   type EditorPreferences,
   type MultiCursorModifier,
-  type StartupDraftMode,
+  type StartupEditMode,
 } from "../../domain/editorPreferences";
 import { loadEditorPreferences, persistEditorPreferences } from "../../infra/editorPreferences";
 
@@ -43,30 +43,30 @@ export function useEditorPreferences() {
     });
   }, []);
 
-  const handleDraftFontChange = useCallback((draftFontId: DraftFontId) => {
+  const handleEditFontChange = useCallback((editFontId: EditFontId) => {
     setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.draftFontId === draftFontId) {
+      if (currentPreferences.editFontId === editFontId) {
         return currentPreferences;
       }
 
       return {
         ...currentPreferences,
-        draftFontId,
+        editFontId,
       };
     });
   }, []);
 
-  const handleDraftFontSizeChange = useCallback((draftFontSizePx: DraftFontSizePx) => {
-    const nextDraftFontSizePx = clampDraftFontSizePx(draftFontSizePx);
+  const handleEditFontSizeChange = useCallback((editFontSizePx: EditFontSizePx) => {
+    const nextEditFontSizePx = clampEditFontSizePx(editFontSizePx);
 
     setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.draftFontSizePx === nextDraftFontSizePx) {
+      if (currentPreferences.editFontSizePx === nextEditFontSizePx) {
         return currentPreferences;
       }
 
       return {
         ...currentPreferences,
-        draftFontSizePx: nextDraftFontSizePx,
+        editFontSizePx: nextEditFontSizePx,
       };
     });
   }, []);
@@ -84,31 +84,31 @@ export function useEditorPreferences() {
     });
   }, []);
 
-  const handleStartupDraftModeChange = useCallback((startupDraftMode: StartupDraftMode) => {
+  const handleStartupEditModeChange = useCallback((startupEditMode: StartupEditMode) => {
     setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.startupDraftMode === startupDraftMode) {
+      if (currentPreferences.startupEditMode === startupEditMode) {
         return currentPreferences;
       }
 
       return {
         ...currentPreferences,
-        startupDraftMode,
+        startupEditMode,
       };
     });
   }, []);
 
   return {
     appFontId: editorPreferences.appFontId,
-    draftFontId: editorPreferences.draftFontId,
-    draftFontSizePx: editorPreferences.draftFontSizePx,
+    editFontId: editorPreferences.editFontId,
+    editFontSizePx: editorPreferences.editFontSizePx,
     multiCursorModifier: editorPreferences.multiCursorModifier,
     showLineNumbers: editorPreferences.showLineNumbers,
-    startupDraftMode: editorPreferences.startupDraftMode,
+    startupEditMode: editorPreferences.startupEditMode,
     onAppFontChange: handleAppFontChange,
-    onDraftFontChange: handleDraftFontChange,
-    onDraftFontSizeChange: handleDraftFontSizeChange,
+    onEditFontChange: handleEditFontChange,
+    onEditFontSizeChange: handleEditFontSizeChange,
     onMultiCursorModifierChange: handleMultiCursorModifierChange,
     onShowLineNumbersChange: handleShowLineNumbersChange,
-    onStartupDraftModeChange: handleStartupDraftModeChange,
+    onStartupEditModeChange: handleStartupEditModeChange,
   };
 }

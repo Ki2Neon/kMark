@@ -1,20 +1,20 @@
 export type MultiCursorModifier = "alt" | "ctrlCmd";
 
-export type StartupDraftMode = "start-page" | "blank" | "last-opened-file";
+export type StartupEditMode = "start-page" | "blank" | "last-opened-file";
 
 export type AppFontId = string;
 
-export type DraftFontId = string;
+export type EditFontId = string;
 
-export type DraftFontSizePx = number;
+export type EditFontSizePx = number;
 
 export type MultiCursorModifierOption = {
   readonly id: MultiCursorModifier;
   readonly label: string;
 };
 
-export type StartupDraftModeOption = {
-  readonly id: StartupDraftMode;
+export type StartupEditModeOption = {
+  readonly id: StartupEditMode;
   readonly label: string;
 };
 
@@ -23,29 +23,29 @@ export type AppFontOption = {
   readonly label: string;
 };
 
-export type DraftFontOption = {
+export type EditFontOption = {
   readonly value: string;
   readonly label: string;
 };
 
 export type EditorPreferences = {
   readonly appFontId: AppFontId;
-  readonly draftFontId: DraftFontId;
-  readonly draftFontSizePx: DraftFontSizePx;
+  readonly editFontId: EditFontId;
+  readonly editFontSizePx: EditFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
-  readonly startupDraftMode: StartupDraftMode;
+  readonly startupEditMode: StartupEditMode;
 };
 
 const DEFAULT_APP_FONT_FAMILY = '"Aptos", "Segoe UI Variable", "Segoe UI", sans-serif';
 
-const DEFAULT_DRAFT_FONT_FAMILY = '"Iosevka Term", "Cascadia Code", Consolas, monospace';
+const DEFAULT_EDIT_FONT_FAMILY = '"Iosevka Term", "Cascadia Code", Consolas, monospace';
 
-export const DEFAULT_DRAFT_FONT_SIZE_PX = 15;
+export const DEFAULT_EDIT_FONT_SIZE_PX = 15;
 
-export const MIN_DRAFT_FONT_SIZE_PX = 10;
+export const MIN_EDIT_FONT_SIZE_PX = 10;
 
-export const MAX_DRAFT_FONT_SIZE_PX = 36;
+export const MAX_EDIT_FONT_SIZE_PX = 36;
 
 const APP_FONT_SUGGESTED_FAMILY_BY_NAME: Readonly<Record<string, string>> = {
   aptos: DEFAULT_APP_FONT_FAMILY,
@@ -62,8 +62,8 @@ const APP_FONT_SUGGESTED_FAMILY_BY_NAME: Readonly<Record<string, string>> = {
   monospace: 'monospace',
 };
 
-const DRAFT_FONT_SUGGESTED_FAMILY_BY_NAME: Readonly<Record<string, string>> = {
-  "iosevka term": DEFAULT_DRAFT_FONT_FAMILY,
+const EDIT_FONT_SUGGESTED_FAMILY_BY_NAME: Readonly<Record<string, string>> = {
+  "iosevka term": DEFAULT_EDIT_FONT_FAMILY,
   "cascadia code": '"Cascadia Code", Consolas, monospace',
   consolas: '"Consolas", "Courier New", monospace',
   aptos: DEFAULT_APP_FONT_FAMILY,
@@ -83,7 +83,7 @@ const APP_FONT_DISPLAY_VALUE_BY_LEGACY_ID: Readonly<Record<string, string>> = {
   "biz-udp": "BIZ UDPGothic",
 };
 
-const DRAFT_FONT_DISPLAY_VALUE_BY_LEGACY_ID: Readonly<Record<string, string>> = {
+const EDIT_FONT_DISPLAY_VALUE_BY_LEGACY_ID: Readonly<Record<string, string>> = {
   iosevka: "Iosevka Term",
   cascadia: "Cascadia Code",
   consolas: "Consolas",
@@ -97,7 +97,7 @@ export const MULTI_CURSOR_MODIFIER_OPTIONS: readonly MultiCursorModifierOption[]
   { id: "ctrlCmd", label: "Ctrl + Click" },
 ] as const;
 
-export const STARTUP_DRAFT_MODE_OPTIONS: readonly StartupDraftModeOption[] = [
+export const STARTUP_EDIT_MODE_OPTIONS: readonly StartupEditModeOption[] = [
   { id: "start-page", label: "スタートページ" },
   { id: "blank", label: "無地" },
   { id: "last-opened-file", label: "前回開いたファイル" },
@@ -113,7 +113,7 @@ export const APP_FONT_OPTIONS: readonly AppFontOption[] = [
   { value: 'Inter, "Segoe UI Variable", "Segoe UI", sans-serif', label: "Inter + Segoe UI" },
 ] as const;
 
-export const DRAFT_FONT_OPTIONS: readonly DraftFontOption[] = [
+export const EDIT_FONT_OPTIONS: readonly EditFontOption[] = [
   { value: "Iosevka Term", label: "Iosevka Term" },
   { value: "Cascadia Code", label: "Cascadia Code" },
   { value: "Consolas", label: "Consolas" },
@@ -126,35 +126,35 @@ export const DRAFT_FONT_OPTIONS: readonly DraftFontOption[] = [
 
 export const DEFAULT_EDITOR_PREFERENCES: EditorPreferences = {
   appFontId: "Aptos",
-  draftFontId: "Iosevka Term",
-  draftFontSizePx: DEFAULT_DRAFT_FONT_SIZE_PX,
+  editFontId: "Iosevka Term",
+  editFontSizePx: DEFAULT_EDIT_FONT_SIZE_PX,
   multiCursorModifier: "alt",
   showLineNumbers: false,
-  startupDraftMode: "last-opened-file",
+  startupEditMode: "last-opened-file",
 };
 
 const MULTI_CURSOR_MODIFIER_SET = new Set<MultiCursorModifier>(
   MULTI_CURSOR_MODIFIER_OPTIONS.map((modifierOption) => modifierOption.id),
 );
 
-const STARTUP_DRAFT_MODE_SET = new Set<StartupDraftMode>(
-  STARTUP_DRAFT_MODE_OPTIONS.map((startupDraftModeOption) => startupDraftModeOption.id),
+const STARTUP_EDIT_MODE_SET = new Set<StartupEditMode>(
+  STARTUP_EDIT_MODE_OPTIONS.map((startupEditModeOption) => startupEditModeOption.id),
 );
 
 export function isMultiCursorModifier(value: string): value is MultiCursorModifier {
   return MULTI_CURSOR_MODIFIER_SET.has(value as MultiCursorModifier);
 }
 
-export function isStartupDraftMode(value: string): value is StartupDraftMode {
-  return STARTUP_DRAFT_MODE_SET.has(value as StartupDraftMode);
+export function isStartupEditMode(value: string): value is StartupEditMode {
+  return STARTUP_EDIT_MODE_SET.has(value as StartupEditMode);
 }
 
-export function clampDraftFontSizePx(value: number): DraftFontSizePx {
+export function clampEditFontSizePx(value: number): EditFontSizePx {
   if (!Number.isFinite(value)) {
-    return DEFAULT_DRAFT_FONT_SIZE_PX;
+    return DEFAULT_EDIT_FONT_SIZE_PX;
   }
 
-  return Math.min(MAX_DRAFT_FONT_SIZE_PX, Math.max(MIN_DRAFT_FONT_SIZE_PX, Math.round(value)));
+  return Math.min(MAX_EDIT_FONT_SIZE_PX, Math.max(MIN_EDIT_FONT_SIZE_PX, Math.round(value)));
 }
 
 function sanitizeFontPreference(value: string): string {
@@ -193,26 +193,26 @@ export function deserializeAppFontId(value: unknown): AppFontId {
   return APP_FONT_DISPLAY_VALUE_BY_LEGACY_ID[sanitizedValue.toLowerCase()] ?? sanitizedValue;
 }
 
-export function deserializeDraftFontId(value: unknown): DraftFontId {
+export function deserializeEditFontId(value: unknown): EditFontId {
   if (typeof value !== "string") {
-    return DEFAULT_EDITOR_PREFERENCES.draftFontId;
+    return DEFAULT_EDITOR_PREFERENCES.editFontId;
   }
 
   const sanitizedValue = sanitizeFontPreference(value);
 
   if (sanitizedValue.length === 0) {
-    return DEFAULT_EDITOR_PREFERENCES.draftFontId;
+    return DEFAULT_EDITOR_PREFERENCES.editFontId;
   }
 
-  return DRAFT_FONT_DISPLAY_VALUE_BY_LEGACY_ID[sanitizedValue.toLowerCase()] ?? sanitizedValue;
+  return EDIT_FONT_DISPLAY_VALUE_BY_LEGACY_ID[sanitizedValue.toLowerCase()] ?? sanitizedValue;
 }
 
-export function deserializeDraftFontSizePx(value: unknown): DraftFontSizePx {
+export function deserializeEditFontSizePx(value: unknown): EditFontSizePx {
   if (typeof value !== "number") {
-    return DEFAULT_EDITOR_PREFERENCES.draftFontSizePx;
+    return DEFAULT_EDITOR_PREFERENCES.editFontSizePx;
   }
 
-  return clampDraftFontSizePx(value);
+  return clampEditFontSizePx(value);
 }
 
 export function deserializeShowLineNumbers(value: unknown): boolean {
@@ -223,6 +223,6 @@ export function resolveAppFontFamily(appFontId: AppFontId): string {
   return resolveKnownFontFamily(appFontId, APP_FONT_SUGGESTED_FAMILY_BY_NAME, DEFAULT_APP_FONT_FAMILY);
 }
 
-export function resolveDraftFontFamily(draftFontId: DraftFontId): string {
-  return resolveKnownFontFamily(draftFontId, DRAFT_FONT_SUGGESTED_FAMILY_BY_NAME, DEFAULT_DRAFT_FONT_FAMILY);
+export function resolveEditFontFamily(editFontId: EditFontId): string {
+  return resolveKnownFontFamily(editFontId, EDIT_FONT_SUGGESTED_FAMILY_BY_NAME, DEFAULT_EDIT_FONT_FAMILY);
 }
