@@ -23,7 +23,7 @@ export type StoredDraft = {
   readonly savedAt: number | null;
 };
 
-export const DEFAULT_FILE_NAME = "love-note.md";
+export const DEFAULT_FILE_NAME = "untitled.md";
 
 export const DEFAULT_MARKDOWN = `## 操作説明
 

@@ -23,6 +23,7 @@ import {
   loadDesktopSplitRatio,
   persistDesktopSplitRatio,
 } from "../../infra/editorLayout";
+import { syncWindowTitle } from "../../infra/windowTitle";
 import {
   PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY,
   loadPreviewWindowDraftJumpRequest,
@@ -415,7 +416,7 @@ export function MarkdownEditorScreen({
 
   useEffect(() => {
     const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
-    document.title = `${isDirty ? "• " : ""}${normalizedFileName} - kMark`;
+    syncWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
   }, [fileName, isDirty]);
 
   const blurActiveElement = useCallback(() => {

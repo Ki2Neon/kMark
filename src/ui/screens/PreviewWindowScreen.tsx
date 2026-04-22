@@ -7,6 +7,7 @@ import {
   loadPreviewWindowActiveSourceLine,
   requestPreviewWindowDraftJump,
 } from "../../infra/previewWindowSync";
+import { syncWindowTitle } from "../../infra/windowTitle";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
@@ -80,7 +81,7 @@ export function PreviewWindowScreen() {
   useEffect(() => {
     const normalizedFileName = previewSnapshot.fileName.trim().length > 0 ? previewSnapshot.fileName.trim() : DEFAULT_FILE_NAME;
 
-    document.title = `${normalizedFileName} - Preview - kMark`;
+    syncWindowTitle(`${normalizedFileName} - Preview - kMark`);
   }, [previewSnapshot.fileName]);
 
   return (

@@ -87,8 +87,7 @@ pub fn run() {
 
             match event {
                 tauri::WindowEvent::Resized(_)
-                | tauri::WindowEvent::CloseRequested { .. }
-                | tauri::WindowEvent::Destroyed => {
+                | tauri::WindowEvent::CloseRequested { .. } => {
                     if let Err(error) = persist_window_state(window.app_handle(), window) {
                         eprintln!("failed to persist main window state: {error}");
                     }
