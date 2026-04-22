@@ -651,12 +651,6 @@ function MarkdownPreviewComponent({
       return;
     }
 
-    if (eventTarget.closest("[data-source-line-start][data-source-line-end]") !== null) {
-      return;
-    }
-
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
     panPointerStateRef.current = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
@@ -681,9 +675,14 @@ function MarkdownPreviewComponent({
       return;
     }
 
-    event.preventDefault();
-
     if (!isViewportPanning) {
+      event.preventDefault();
+
+      if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+
+      window.getSelection()?.removeAllRanges();
       setIsViewportPanning(true);
     }
 
