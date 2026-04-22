@@ -19,3 +19,10 @@ npm run dev
 ```bash
 npm run tauri dev
 ```
+
+## ライセンス
+
+このプロジェクト本体は MIT License です。
+
+- 本体ライセンス: [LICENSE](LICENSE)
+- 第三者ライセンス情報: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
