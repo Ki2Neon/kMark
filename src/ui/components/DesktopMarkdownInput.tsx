@@ -1,7 +1,7 @@
 import { autocompletion, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, type Completion } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorSelection, Prec, type Extension } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
@@ -137,9 +137,11 @@ function runMarkdownTab(view: EditorView, isOutdent: boolean): boolean {
 
 type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
+  readonly blurOnEscapeWhenSelectionEmpty?: boolean;
   readonly content: string;
   readonly draftFontId: DraftFontId;
   readonly multiCursorModifier: MultiCursorModifier;
+  readonly showLineNumbers: boolean;
   readonly onContentChange: (content: string) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
@@ -151,9 +153,11 @@ type DesktopMarkdownInputProps = {
 
 function DesktopMarkdownInputComponent({
   appThemeId,
+  blurOnEscapeWhenSelectionEmpty = false,
   content,
   draftFontId,
   multiCursorModifier,
+  showLineNumbers,
   onContentChange,
   onCursorLineChange,
   onFocusChange,
@@ -234,7 +238,7 @@ function DesktopMarkdownInputComponent({
       backgroundColor: "transparent",
       color: "var(--text)",
       fontFamily: resolveDraftFontFamily(draftFontId),
-      fontSize: "15px",
+      fontSize: "var(--draft-font-size)",
       height: "100%",
     },
     ".cm-content": {
@@ -290,32 +294,55 @@ function DesktopMarkdownInputComponent({
 
   const extensions = useMemo<Extension[]>(() => {
     const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();
+    const editorKeyBindings = [
+      {
+        key: "Enter",
+        run: runMarkdownEnter,
+      },
+      {
+        key: "Shift-Tab",
+        run: (view: EditorView) => runMarkdownTab(view, true),
+      },
+      {
+        key: "Tab",
+        run: (view: EditorView) => runMarkdownTab(view, false),
+      },
+    ];
+
+    if (blurOnEscapeWhenSelectionEmpty) {
+      editorKeyBindings.unshift({
+        key: "Escape",
+        run: (view: EditorView) => {
+          if (!view.hasFocus || view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty || isCompletionOrSnippetActive(view)) {
+            return false;
+          }
+
+          const activeElement = view.dom.ownerDocument.activeElement;
+
+          if (activeElement instanceof HTMLElement && view.dom.contains(activeElement)) {
+            activeElement.blur();
+            return true;
+          }
+
+          view.contentDOM.blur();
+          return true;
+        },
+      });
+    }
 
     return [
       markdown(),
       markdownLanguage.data.of({
         autocomplete: MARKDOWN_SNIPPET_COMPLETION_SOURCE,
       }),
+      ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
       autocompletion({
         activateOnTyping: false,
       }),
       keymap.of(completionKeymap),
-      Prec.highest(keymap.of([
-        {
-          key: "Enter",
-          run: runMarkdownEnter,
-        },
-        {
-          key: "Shift-Tab",
-          run: (view) => runMarkdownTab(view, true),
-        },
-        {
-          key: "Tab",
-          run: (view) => runMarkdownTab(view, false),
-        },
-      ])),
+      Prec.highest(keymap.of(editorKeyBindings)),
       EditorView.clickAddsSelectionRange.of((event) => (
         multiCursorModifier === "alt"
           ? event.altKey
@@ -325,7 +352,7 @@ function DesktopMarkdownInputComponent({
       )),
       editorTheme,
     ];
-  }, [editorTheme, multiCursorModifier]);
+  }, [blurOnEscapeWhenSelectionEmpty, editorTheme, multiCursorModifier, showLineNumbers]);
 
   return (
     <CodeMirror

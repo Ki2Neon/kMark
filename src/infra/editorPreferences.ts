@@ -2,7 +2,10 @@ import {
   DEFAULT_EDITOR_PREFERENCES,
   deserializeAppFontId,
   deserializeDraftFontId,
+  deserializeDraftFontSizePx,
+  deserializeShowLineNumbers,
   isMultiCursorModifier,
+  isStartupDraftMode,
   type EditorPreferences,
 } from "../domain/editorPreferences";
 
@@ -21,10 +24,16 @@ export function loadEditorPreferences(): EditorPreferences {
     return {
       appFontId: deserializeAppFontId(parsedValue.appFontId),
       draftFontId: deserializeDraftFontId(parsedValue.draftFontId),
+      draftFontSizePx: deserializeDraftFontSizePx(parsedValue.draftFontSizePx),
       multiCursorModifier:
         typeof parsedValue.multiCursorModifier === "string" && isMultiCursorModifier(parsedValue.multiCursorModifier)
           ? parsedValue.multiCursorModifier
           : DEFAULT_EDITOR_PREFERENCES.multiCursorModifier,
+      showLineNumbers: deserializeShowLineNumbers(parsedValue.showLineNumbers),
+      startupDraftMode:
+        typeof parsedValue.startupDraftMode === "string" && isStartupDraftMode(parsedValue.startupDraftMode)
+          ? parsedValue.startupDraftMode
+          : DEFAULT_EDITOR_PREFERENCES.startupDraftMode,
     };
   } catch {
     return DEFAULT_EDITOR_PREFERENCES;

@@ -14,7 +14,7 @@ import {
 import { selectMostRecentExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
-import { type AppFontId, type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
+import { type AppFontId, type DraftFontId, type DraftFontSizePx, type MultiCursorModifier, type StartupDraftMode } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 import {
   DEFAULT_DESKTOP_SPLIT_RATIO,
@@ -39,7 +39,8 @@ const DESKTOP_SPLIT_KEYBOARD_STEP = 5;
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
 const MOBILE_SWIPE_THRESHOLD_PX = 40;
-const MOBILE_SLIDE_TRANSITION_MS = 60;
+const MOBILE_SLIDE_TRANSITION_MS = 180;
+const MOBILE_SLIDE_TRANSITION_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 type MobileSectionId = "menu" | "draft" | "preview";
 
@@ -47,12 +48,18 @@ type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
   readonly draftFontId: DraftFontId;
+  readonly draftFontSizePx: DraftFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
+  readonly showLineNumbers: boolean;
+  readonly startupDraftMode: StartupDraftMode;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onDraftFontChange: (draftFontId: DraftFontId) => void;
+  readonly onDraftFontSizeChange: (draftFontSizePx: DraftFontSizePx) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
+  readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
+  readonly onStartupDraftModeChange: (startupDraftMode: StartupDraftMode) => void;
   readonly previewUsesAppThemeColors: boolean;
 };
 
@@ -105,12 +112,18 @@ export function MarkdownEditorScreen({
   appFontId,
   appThemeId,
   draftFontId,
+  draftFontSizePx,
   multiCursorModifier,
+  showLineNumbers,
+  startupDraftMode,
   onAppFontChange,
   onAppThemeChange,
   onDraftFontChange,
+  onDraftFontSizeChange,
   onMultiCursorModifierChange,
   onPreviewUsesAppThemeColorsChange,
+  onShowLineNumbersChange,
+  onStartupDraftModeChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
   const {
@@ -141,7 +154,7 @@ export function MarkdownEditorScreen({
     subscribeToExternalDocumentRequests,
     handleErrorClear,
     handleErrorRaise,
-  } = useMarkdownEditor();
+  } = useMarkdownEditor(startupDraftMode);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const desktopWorkspaceRef = useRef<HTMLElement | null>(null);
@@ -203,6 +216,7 @@ export function MarkdownEditorScreen({
     () => ({
       transform: `translate3d(${(-mobileSectionIndex * mobileViewportWidth) + mobileDragOffsetPx}px, 0, 0)`,
       transitionDuration: isMobileDragging ? "0ms" : `${MOBILE_SLIDE_TRANSITION_MS}ms`,
+      transitionTimingFunction: isMobileDragging ? "linear" : MOBILE_SLIDE_TRANSITION_EASING,
     } as CSSProperties),
     [isMobileDragging, mobileDragOffsetPx, mobileSectionIndex, mobileViewportWidth],
   );
@@ -947,6 +961,7 @@ export function MarkdownEditorScreen({
                 draftFontId={draftFontId}
                 layoutMode={layoutMode}
                 multiCursorModifier={multiCursorModifier}
+                showLineNumbers={showLineNumbers}
                 onContentChange={handleContentChange}
                 onCursorLineChange={handleDraftCursorLineChange}
                 requestedLineSelection={draftSelectionRequest}
@@ -1008,14 +1023,18 @@ export function MarkdownEditorScreen({
                   appFontId={appFontId}
                   appThemeId={appThemeId}
                   draftFontId={draftFontId}
+                  draftFontSizePx={draftFontSizePx}
                   previewDisplayMode={previewDisplayMode}
                   previewUsesAppThemeColors={previewUsesAppThemeColors}
                   isPreviewVisible={isPreviewVisible}
                   layoutMode={layoutMode}
                   multiCursorModifier={multiCursorModifier}
+                  showLineNumbers={showLineNumbers}
+                  startupDraftMode={startupDraftMode}
                   onAppFontChange={onAppFontChange}
                   onAppThemeChange={onAppThemeChange}
                   onDraftFontChange={onDraftFontChange}
+                  onDraftFontSizeChange={onDraftFontSizeChange}
                   onLayoutModeChange={handleLayoutModeChange}
                   onMultiCursorModifierChange={onMultiCursorModifierChange}
                   onNewDocument={handleRequestNew}
@@ -1027,6 +1046,8 @@ export function MarkdownEditorScreen({
                   onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
                   onPreviewVisibilityChange={handlePreviewVisibilityChange}
                   onSaveDocumentAs={handleRequestSaveAs}
+                  onShowLineNumbersChange={onShowLineNumbersChange}
+                  onStartupDraftModeChange={onStartupDraftModeChange}
                 />
               </div>
             </div>
@@ -1052,14 +1073,18 @@ export function MarkdownEditorScreen({
                       appFontId={appFontId}
                       appThemeId={appThemeId}
                       draftFontId={draftFontId}
+                      draftFontSizePx={draftFontSizePx}
                       previewDisplayMode={previewDisplayMode}
                       previewUsesAppThemeColors={previewUsesAppThemeColors}
                       isPreviewVisible={isPreviewVisible}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
+                      showLineNumbers={showLineNumbers}
+                      startupDraftMode={startupDraftMode}
                       onAppFontChange={onAppFontChange}
                       onAppThemeChange={onAppThemeChange}
                       onDraftFontChange={onDraftFontChange}
+                      onDraftFontSizeChange={onDraftFontSizeChange}
                       onLayoutModeChange={handleLayoutModeChange}
                       onMultiCursorModifierChange={onMultiCursorModifierChange}
                       onNewDocument={handleRequestNew}
@@ -1071,6 +1096,8 @@ export function MarkdownEditorScreen({
                       onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
                       onPreviewVisibilityChange={handlePreviewVisibilityChange}
                       onSaveDocumentAs={handleRequestSaveAs}
+                      onShowLineNumbersChange={onShowLineNumbersChange}
+                      onStartupDraftModeChange={onStartupDraftModeChange}
                     />
                   ) : section === "draft" ? (
                     <MarkdownInput
@@ -1079,6 +1106,7 @@ export function MarkdownEditorScreen({
                       draftFontId={draftFontId}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}
+                      showLineNumbers={showLineNumbers}
                       onContentChange={handleContentChange}
                       onCursorLineChange={handleDraftCursorLineChange}
                       onFocusChange={handleDraftFocusChange}

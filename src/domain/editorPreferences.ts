@@ -1,11 +1,20 @@
 export type MultiCursorModifier = "alt" | "ctrlCmd";
 
+export type StartupDraftMode = "start-page" | "blank" | "last-opened-file";
+
 export type AppFontId = string;
 
 export type DraftFontId = string;
 
+export type DraftFontSizePx = number;
+
 export type MultiCursorModifierOption = {
   readonly id: MultiCursorModifier;
+  readonly label: string;
+};
+
+export type StartupDraftModeOption = {
+  readonly id: StartupDraftMode;
   readonly label: string;
 };
 
@@ -22,12 +31,21 @@ export type DraftFontOption = {
 export type EditorPreferences = {
   readonly appFontId: AppFontId;
   readonly draftFontId: DraftFontId;
+  readonly draftFontSizePx: DraftFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
+  readonly showLineNumbers: boolean;
+  readonly startupDraftMode: StartupDraftMode;
 };
 
 const DEFAULT_APP_FONT_FAMILY = '"Aptos", "Segoe UI Variable", "Segoe UI", sans-serif';
 
 const DEFAULT_DRAFT_FONT_FAMILY = '"Iosevka Term", "Cascadia Code", Consolas, monospace';
+
+export const DEFAULT_DRAFT_FONT_SIZE_PX = 15;
+
+export const MIN_DRAFT_FONT_SIZE_PX = 10;
+
+export const MAX_DRAFT_FONT_SIZE_PX = 36;
 
 const APP_FONT_SUGGESTED_FAMILY_BY_NAME: Readonly<Record<string, string>> = {
   aptos: DEFAULT_APP_FONT_FAMILY,
@@ -79,6 +97,12 @@ export const MULTI_CURSOR_MODIFIER_OPTIONS: readonly MultiCursorModifierOption[]
   { id: "ctrlCmd", label: "Ctrl + Click" },
 ] as const;
 
+export const STARTUP_DRAFT_MODE_OPTIONS: readonly StartupDraftModeOption[] = [
+  { id: "start-page", label: "スタートページ" },
+  { id: "blank", label: "無地" },
+  { id: "last-opened-file", label: "前回開いたファイル" },
+] as const;
+
 export const APP_FONT_OPTIONS: readonly AppFontOption[] = [
   { value: "Aptos", label: "Aptos" },
   { value: "Segoe UI", label: "Segoe UI" },
@@ -103,15 +127,34 @@ export const DRAFT_FONT_OPTIONS: readonly DraftFontOption[] = [
 export const DEFAULT_EDITOR_PREFERENCES: EditorPreferences = {
   appFontId: "Aptos",
   draftFontId: "Iosevka Term",
+  draftFontSizePx: DEFAULT_DRAFT_FONT_SIZE_PX,
   multiCursorModifier: "alt",
+  showLineNumbers: false,
+  startupDraftMode: "last-opened-file",
 };
 
 const MULTI_CURSOR_MODIFIER_SET = new Set<MultiCursorModifier>(
   MULTI_CURSOR_MODIFIER_OPTIONS.map((modifierOption) => modifierOption.id),
 );
 
+const STARTUP_DRAFT_MODE_SET = new Set<StartupDraftMode>(
+  STARTUP_DRAFT_MODE_OPTIONS.map((startupDraftModeOption) => startupDraftModeOption.id),
+);
+
 export function isMultiCursorModifier(value: string): value is MultiCursorModifier {
   return MULTI_CURSOR_MODIFIER_SET.has(value as MultiCursorModifier);
+}
+
+export function isStartupDraftMode(value: string): value is StartupDraftMode {
+  return STARTUP_DRAFT_MODE_SET.has(value as StartupDraftMode);
+}
+
+export function clampDraftFontSizePx(value: number): DraftFontSizePx {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_DRAFT_FONT_SIZE_PX;
+  }
+
+  return Math.min(MAX_DRAFT_FONT_SIZE_PX, Math.max(MIN_DRAFT_FONT_SIZE_PX, Math.round(value)));
 }
 
 function sanitizeFontPreference(value: string): string {
@@ -162,6 +205,18 @@ export function deserializeDraftFontId(value: unknown): DraftFontId {
   }
 
   return DRAFT_FONT_DISPLAY_VALUE_BY_LEGACY_ID[sanitizedValue.toLowerCase()] ?? sanitizedValue;
+}
+
+export function deserializeDraftFontSizePx(value: unknown): DraftFontSizePx {
+  if (typeof value !== "number") {
+    return DEFAULT_EDITOR_PREFERENCES.draftFontSizePx;
+  }
+
+  return clampDraftFontSizePx(value);
+}
+
+export function deserializeShowLineNumbers(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_EDITOR_PREFERENCES.showLineNumbers;
 }
 
 export function resolveAppFontFamily(appFontId: AppFontId): string {

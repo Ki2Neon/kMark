@@ -95,8 +95,8 @@ export async function openPreviewWindow(): Promise<void> {
       url: previewWindowUrl,
       width: 820,
       height: 900,
-      minWidth: 360,
-      minHeight: 480,
+      minWidth: 50,
+      minHeight: 50,
       center: true,
       resizable: true,
     });

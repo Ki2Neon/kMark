@@ -18,10 +18,16 @@ function App() {
   const {
     appFontId,
     draftFontId,
+    draftFontSizePx,
     multiCursorModifier,
+    showLineNumbers,
+    startupDraftMode,
     onAppFontChange,
     onDraftFontChange,
+    onDraftFontSizeChange,
     onMultiCursorModifierChange,
+    onShowLineNumbersChange,
+    onStartupDraftModeChange,
   } = useEditorPreferences();
 
   useLayoutEffect(() => {
@@ -29,7 +35,8 @@ function App() {
     document.documentElement.dataset.previewColors = previewUsesAppThemeColors ? "app" : "fixed";
     document.documentElement.style.setProperty("--app-font-family", resolveAppFontFamily(appFontId));
     document.documentElement.style.setProperty("--draft-font-family", resolveDraftFontFamily(draftFontId));
-  }, [appFontId, appThemeId, draftFontId, previewUsesAppThemeColors]);
+    document.documentElement.style.setProperty("--draft-font-size", `${draftFontSizePx}px`);
+  }, [appFontId, appThemeId, draftFontId, draftFontSizePx, previewUsesAppThemeColors]);
 
   if (previewWindowMode) {
     return <PreviewWindowScreen />;
@@ -40,12 +47,18 @@ function App() {
       appFontId={appFontId}
       appThemeId={appThemeId}
       draftFontId={draftFontId}
+      draftFontSizePx={draftFontSizePx}
       multiCursorModifier={multiCursorModifier}
+      showLineNumbers={showLineNumbers}
+      startupDraftMode={startupDraftMode}
       onAppFontChange={onAppFontChange}
       onAppThemeChange={onAppThemeChange}
       onDraftFontChange={onDraftFontChange}
+      onDraftFontSizeChange={onDraftFontSizeChange}
       onMultiCursorModifierChange={onMultiCursorModifierChange}
       onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
+      onShowLineNumbersChange={onShowLineNumbersChange}
+      onStartupDraftModeChange={onStartupDraftModeChange}
       previewUsesAppThemeColors={previewUsesAppThemeColors}
     />
   );

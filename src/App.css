@@ -18,6 +18,7 @@
   --preview-code-bg: #f5f5f5;
   --app-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
   --draft-font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
+  --draft-font-size: 15px;
   --preview-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
   --mobile-nav-height: 32px;
   font-family: var(--app-font-family);
@@ -364,7 +365,7 @@ input:focus-visible,
   grid-auto-columns: 100%;
   height: 100%;
   will-change: transform;
-  transition: transform 60ms linear;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .editor-shell__mobile-track[data-dragging="true"] .editor-shell__mobile-track-inner {
@@ -420,7 +421,7 @@ input:focus-visible,
 }
 
 .menu-section {
-  gap: 20px;
+  gap: 14px;
   padding: 16px;
   overflow: auto;
 }
@@ -428,20 +429,42 @@ input:focus-visible,
 .menu-section__group {
   display: grid;
   gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-muted) 82%, var(--surface)) 0%, var(--surface) 100%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border-strong) 28%, transparent);
+}
+
+.menu-section__group-header {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
 }
 
 .menu-section__group-title {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--text);
+}
+
+.menu-section__group-description {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
   color: var(--text-soft);
 }
 
 .menu-section__label {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 46%, transparent);
 }
 
 .menu-section__field-label {
@@ -452,11 +475,33 @@ input:focus-visible,
 }
 
 .menu-section__mode-switch {
-  display: inline-flex;
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 46%, transparent);
+  cursor: pointer;
+}
+
+.menu-section__mode-switch-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.menu-section__mode-switch-legend {
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--text-soft);
+}
+
+.menu-section__mode-switch-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  width: fit-content;
-  cursor: pointer;
 }
 
 .menu-section__mode-label {
@@ -468,6 +513,11 @@ input:focus-visible,
 
 .menu-section__mode-label.is-active {
   color: var(--text);
+}
+
+.menu-section__mode-switch-values .menu-section__mode-label:last-child {
+  justify-self: end;
+  text-align: right;
 }
 
 .menu-section__switch-input {
@@ -516,6 +566,7 @@ input:focus-visible,
 .menu-section__select {
   width: 100%;
   padding: 0.75rem 0.85rem;
+  background: var(--surface);
 }
 
 .menu-section__actions {
@@ -526,6 +577,7 @@ input:focus-visible,
 .menu-section__actions button {
   width: 100%;
   text-align: left;
+  background: var(--surface-muted);
 }
 
 .draft-section__textarea {
@@ -539,7 +591,7 @@ input:focus-visible,
   overflow: auto;
   resize: none;
   font-family: var(--draft-font-family);
-  font-size: 0.95rem;
+  font-size: var(--draft-font-size);
   line-height: 1.7;
 }
 

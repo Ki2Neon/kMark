@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
-import { createInitialEditorState } from "../../domain/editor";
+import { createStartupEditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
+import { type StartupDraftMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
 import {
   clearPendingTauriMarkdownOpenRequests,
@@ -27,28 +28,28 @@ function toErrorMessage(error: unknown): string {
   return "処理に失敗しました。もう一度試してください。";
 }
 
-export function useMarkdownEditor() {
-  const [state, dispatch] = useReducer(editorReducer, undefined, createInitialEditorState);
+export function useMarkdownEditor(startupDraftMode: StartupDraftMode) {
+  const shouldSkipInitialDraftPersistRef = useRef(false);
+  const [state, dispatch] = useReducer(editorReducer, startupDraftMode, (initialStartupDraftMode) => {
+    const storedDraft = loadLocalDraft();
+
+    shouldSkipInitialDraftPersistRef.current = initialStartupDraftMode !== "last-opened-file" && storedDraft !== null;
+
+    return createStartupEditorState({
+      startupDraftMode: initialStartupDraftMode,
+      storedDraft,
+    });
+  });
   const deferredContent = useDeferredValue(state.content);
   const currentFileHandleRef = useRef<MarkdownFileHandle | null>(null);
   const currentExternalFilePathRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const draft = loadLocalDraft();
-
-    if (draft === null) {
+    if (shouldSkipInitialDraftPersistRef.current) {
+      shouldSkipInitialDraftPersistRef.current = false;
       return;
     }
 
-    dispatch({
-      type: "editor/documentLoaded",
-      fileName: draft.fileName,
-      content: draft.content,
-      loadedAt: draft.savedAt,
-    });
-  }, []);
-
-  useEffect(() => {
     persistLocalDraft({
       fileName: state.fileName,
       content: state.content,

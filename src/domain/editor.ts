@@ -1,3 +1,5 @@
+import { type StartupDraftMode } from "./editorPreferences";
+
 export type LayoutMode = "desktop" | "mobile";
 
 export type EditorState = {
@@ -23,17 +25,14 @@ export type StoredDraft = {
 
 export const DEFAULT_FILE_NAME = "love-note.md";
 
-export const DEFAULT_MARKDOWN = `# kMark
-
-軽く書いて、すぐ整う Markdown エディターです。
-
-## Start
+export const DEFAULT_MARKDOWN = `## 操作説明
 
 - 左で書く
 - 右で読む
-- Ctrl / Cmd + S で書き出す
-
-> 小さく、速く、気持ちよく。`;
+- Ctrl / Cmd + S で保存
+- Ctrl / Cmd + O で開く
+- Ctrl / Cmd + Shift + B でメニューを開閉
+- Ctrl / Cmd + P で印刷`;
 
 export function createInitialEditorState(): EditorState {
   return {
@@ -43,6 +42,37 @@ export function createInitialEditorState(): EditorState {
     lastSavedAt: null,
     errorMessage: null,
   };
+}
+
+export function createBlankEditorState(): EditorState {
+  return {
+    content: "",
+    fileName: DEFAULT_FILE_NAME,
+    isDirty: false,
+    lastSavedAt: null,
+    errorMessage: null,
+  };
+}
+
+export function createStartupEditorState(options: {
+  readonly startupDraftMode: StartupDraftMode;
+  readonly storedDraft: StoredDraft | null;
+}): EditorState {
+  if (options.startupDraftMode === "last-opened-file" && options.storedDraft !== null) {
+    return {
+      content: options.storedDraft.content,
+      fileName: ensureMarkdownExtension(options.storedDraft.fileName),
+      isDirty: false,
+      lastSavedAt: options.storedDraft.savedAt,
+      errorMessage: null,
+    };
+  }
+
+  if (options.startupDraftMode === "blank") {
+    return createBlankEditorState();
+  }
+
+  return createInitialEditorState();
 }
 
 export function selectStartupLayoutMode(options: {
