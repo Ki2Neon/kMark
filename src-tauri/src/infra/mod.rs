@@ -1,5 +1,7 @@
 mod file_system_markdown_document_repository;
 mod in_memory_open_request_queue;
+mod window_state;
 
 pub use file_system_markdown_document_repository::FileSystemMarkdownDocumentRepository;
 pub use in_memory_open_request_queue::InMemoryOpenRequestQueue;
+pub use window_state::{persist_window_state, restore_window_state};

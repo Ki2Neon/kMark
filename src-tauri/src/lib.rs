@@ -7,7 +7,10 @@ use std::{env, path::{Path, PathBuf}};
 
 use tauri::{Emitter, Manager};
 
-use infra::{FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue};
+use infra::{
+    FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue,
+    persist_window_state, restore_window_state,
+};
 use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -77,9 +80,31 @@ pub fn run() {
     }));
 
     let builder = builder
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW_LABEL {
+                return;
+            }
+
+            match event {
+                tauri::WindowEvent::Resized(_)
+                | tauri::WindowEvent::CloseRequested { .. }
+                | tauri::WindowEvent::Destroyed => {
+                    if let Err(error) = persist_window_state(window.app_handle(), window) {
+                        eprintln!("failed to persist main window state: {error}");
+                    }
+                }
+                _ => {}
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
+
+            if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                if let Err(error) = restore_window_state(&app_handle, &main_window) {
+                    eprintln!("failed to restore main window state: {error}");
+                }
+            }
 
             handle_startup_markdown_open_requests(&app_handle);
 

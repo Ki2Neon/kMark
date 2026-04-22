@@ -76,14 +76,9 @@ export function createStartupEditorState(options: {
 }
 
 export function selectStartupLayoutMode(options: {
-  readonly viewportWidth: number;
-  readonly isMobileUserAgent: boolean;
+  readonly isMobileDevice: boolean;
 }): LayoutMode {
-  if (options.isMobileUserAgent) {
-    return "mobile";
-  }
-
-  if (options.viewportWidth <= 640) {
+  if (options.isMobileDevice) {
     return "mobile";
   }
 

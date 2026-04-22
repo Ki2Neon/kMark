@@ -108,8 +108,7 @@ function detectLayoutMode(): LayoutMode {
   };
 
   return selectStartupLayoutMode({
-    viewportWidth: window.innerWidth,
-    isMobileUserAgent:
+    isMobileDevice:
       navigatorWithUAData.userAgentData?.mobile === true ||
       /android|iphone|ipad|ipod/iu.test(navigator.userAgent),
   });
