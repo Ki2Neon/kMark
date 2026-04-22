@@ -1,139 +1,136 @@
-import Editor, { loader, type OnMount } from "@monaco-editor/react";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
-import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js";
+import { autocompletion, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, type Completion } from "@codemirror/autocomplete";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { EditorSelection, Prec, type Extension } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { resolveDraftFontFamily, type DraftFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
-const monacoEnvironmentTarget = self as typeof self & {
-  MonacoEnvironment?: {
-    getWorker: (moduleId: string, label: string) => Worker;
-  };
-  __kmarkMarkdownCompletionProvider?: monaco.IDisposable;
-};
+const DESKTOP_EDITOR_BASIC_SETUP = {
+  autocompletion: false,
+  bracketMatching: false,
+  completionKeymap: false,
+  crosshairCursor: false,
+  dropCursor: false,
+  foldGutter: false,
+  highlightActiveLine: false,
+  highlightActiveLineGutter: false,
+  highlightSelectionMatches: false,
+  indentOnInput: false,
+  lineNumbers: false,
+  rectangularSelection: false,
+  searchKeymap: false,
+  tabSize: 2,
+} as const;
 
-loader.config({ monaco });
-monacoEnvironmentTarget.MonacoEnvironment = {
-  getWorker() {
-    return new editorWorker();
-  },
-};
+const EDITOR_CONTENT_ATTRIBUTES = EditorView.contentAttributes.of({
+  "aria-label": "Markdown エディター",
+  spellcheck: "false",
+});
 
-function resolveEditorTheme(appThemeId: AppThemeId): "vs" | "vs-dark" {
-  return appThemeId === "vscode-light" || appThemeId === "github-light" || appThemeId === "paper"
-    ? "vs"
-    : "vs-dark";
+const MARKDOWN_SNIPPET_COMPLETIONS: readonly Completion[] = MARKDOWN_SNIPPET_DEFINITIONS.map((snippetDefinition, index) => (
+  snippetCompletion(snippetDefinition.insertText, {
+    detail: snippetDefinition.detail,
+    info: snippetDefinition.documentation,
+    label: snippetDefinition.label,
+    sortText: `${String(index).padStart(2, "0")}-${snippetDefinition.label}`,
+    type: "keyword",
+  })
+));
+
+const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COMPLETIONS);
+
+function isDarkEditorTheme(appThemeId: AppThemeId): boolean {
+  return !(appThemeId === "vscode-light" || appThemeId === "github-light" || appThemeId === "paper");
 }
 
-function ensureMarkdownCompletionProvider() {
-  if (monacoEnvironmentTarget.__kmarkMarkdownCompletionProvider !== undefined) {
-    return;
-  }
-
-  monacoEnvironmentTarget.__kmarkMarkdownCompletionProvider = monaco.languages.registerCompletionItemProvider("markdown", {
-    provideCompletionItems(model, position) {
-      const wordUntilPosition = model.getWordUntilPosition(position);
-      const range = new monaco.Range(
-        position.lineNumber,
-        wordUntilPosition.startColumn,
-        position.lineNumber,
-        wordUntilPosition.endColumn,
-      );
-
-      return {
-        suggestions: MARKDOWN_SNIPPET_DEFINITIONS.map((snippetDefinition, index) => ({
-          label: snippetDefinition.label,
-          kind: monaco.languages.CompletionItemKind.Snippet,
-          detail: snippetDefinition.detail,
-          documentation: snippetDefinition.documentation,
-          filterText: snippetDefinition.filterText,
-          insertText: snippetDefinition.insertText,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          range,
-          sortText: `${String(index).padStart(2, "0")}-${snippetDefinition.label}`,
-        })),
-      };
-    },
-  });
+function usesMetaKeyForCtrlCmd(): boolean {
+  return /Mac|iPhone|iPad/u.test(window.navigator.platform);
 }
 
-ensureMarkdownCompletionProvider();
+function getCursorLineNumber(view: EditorView): number {
+  return view.state.doc.lineAt(view.state.selection.main.head).number;
+}
 
-function handleMarkdownEnter(editor: monaco.editor.IStandaloneCodeEditor): boolean {
-  const editorModel = editor.getModel();
-  const selection = editor.getSelection();
+function isCompletionOrSnippetActive(view: EditorView): boolean {
+  return completionStatus(view.state) === "active"
+    || hasNextSnippetField(view.state)
+    || hasPrevSnippetField(view.state);
+}
 
-  if (editorModel === null || selection === null || !selection.isEmpty()) {
+function runMarkdownEnter(view: EditorView): boolean {
+  if (view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty || isCompletionOrSnippetActive(view)) {
     return false;
   }
 
-  const cursorOffset = editorModel.getOffsetAt(selection.getPosition());
-  const enterAction = getMarkdownEnterAction(editorModel.getValue(), cursorOffset);
+  const cursorOffset = view.state.selection.main.head;
+  const enterAction = getMarkdownEnterAction(view.state.doc.toString(), cursorOffset);
 
   if (enterAction === null) {
     return false;
   }
 
-  const rangeStart = editorModel.getPositionAt(enterAction.rangeStart);
-  const rangeEnd = editorModel.getPositionAt(enterAction.rangeEnd);
+  const nextSelection = EditorSelection.cursor(enterAction.rangeStart + enterAction.text.length);
 
-  editor.executeEdits("kmark-markdown-enter", [{
-    range: new monaco.Range(rangeStart.lineNumber, rangeStart.column, rangeEnd.lineNumber, rangeEnd.column),
-    text: enterAction.text,
-    forceMoveMarkers: true,
-  }]);
-
-  const nextPosition = editorModel.getPositionAt(enterAction.rangeStart + enterAction.text.length);
-
-  editor.setPosition(nextPosition);
-  editor.revealPositionInCenterIfOutsideViewport(nextPosition);
+  view.dispatch({
+    changes: {
+      from: enterAction.rangeStart,
+      insert: enterAction.text,
+      to: enterAction.rangeEnd,
+    },
+    effects: EditorView.scrollIntoView(nextSelection, { y: "center" }),
+    selection: nextSelection,
+  });
 
   return true;
 }
 
-function handleMarkdownTab(editor: monaco.editor.IStandaloneCodeEditor, isOutdent: boolean): boolean {
-  const editorModel = editor.getModel();
-  const selection = editor.getSelection();
-
-  if (editorModel === null || selection === null) {
+function runMarkdownTab(view: EditorView, isOutdent: boolean): boolean {
+  if (view.state.selection.ranges.length !== 1 || isCompletionOrSnippetActive(view)) {
     return false;
   }
 
+  const selection = view.state.selection.main;
   const tabAction = getMarkdownTabAction(
-    editorModel.getValue(),
-    editorModel.getOffsetAt(selection.getStartPosition()),
-    editorModel.getOffsetAt(selection.getEndPosition()),
+    view.state.doc.toString(),
+    selection.from,
+    selection.to,
     isOutdent,
   );
 
   if (tabAction === null) {
-    return false;
+    if (isOutdent) {
+      return false;
+    }
+
+    const nextSelection = EditorSelection.cursor(selection.from + 2);
+
+    view.dispatch({
+      changes: {
+        from: selection.from,
+        insert: "  ",
+        to: selection.to,
+      },
+      effects: EditorView.scrollIntoView(nextSelection, { y: "center" }),
+      selection: nextSelection,
+    });
+
+    return true;
   }
 
-  const rangeStart = editorModel.getPositionAt(tabAction.rangeStart);
-  const rangeEnd = editorModel.getPositionAt(tabAction.rangeEnd);
+  const nextSelection = EditorSelection.range(tabAction.nextSelectionStart, tabAction.nextSelectionEnd);
 
-  editor.executeEdits("kmark-markdown-tab", [{
-    range: new monaco.Range(rangeStart.lineNumber, rangeStart.column, rangeEnd.lineNumber, rangeEnd.column),
-    text: tabAction.text,
-    forceMoveMarkers: true,
-  }]);
-
-  const nextSelectionStart = editorModel.getPositionAt(tabAction.nextSelectionStart);
-  const nextSelectionEnd = editorModel.getPositionAt(tabAction.nextSelectionEnd);
-
-  editor.setSelection(new monaco.Selection(
-    nextSelectionStart.lineNumber,
-    nextSelectionStart.column,
-    nextSelectionEnd.lineNumber,
-    nextSelectionEnd.column,
-  ));
-
-  if (tabAction.nextSelectionStart === tabAction.nextSelectionEnd) {
-    editor.revealPositionInCenterIfOutsideViewport(nextSelectionEnd);
-  }
+  view.dispatch({
+    changes: {
+      from: tabAction.rangeStart,
+      insert: tabAction.text,
+      to: tabAction.rangeEnd,
+    },
+    effects: EditorView.scrollIntoView(nextSelection, { y: "center" }),
+    selection: nextSelection,
+  });
 
   return true;
 }
@@ -162,14 +159,33 @@ function DesktopMarkdownInputComponent({
   onFocusChange,
   requestedLineSelection,
 }: DesktopMarkdownInputProps) {
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<EditorView | null>(null);
+  const lastHandledLineSelectionRequestIdRef = useRef<number | null>(null);
 
-  const handleEditorChange = useCallback((value: string | undefined) => {
-    onContentChange(value ?? "");
-  }, [onContentChange]);
+  const emitCursorLine = useCallback((view: EditorView) => {
+    onCursorLineChange?.(getCursorLineNumber(view));
+  }, [onCursorLineChange]);
+
+  const applyRequestedLineSelection = useCallback((view: EditorView, request: NonNullable<DesktopMarkdownInputProps["requestedLineSelection"]>) => {
+    const maximumLineNumber = view.state.doc.lines;
+    const nextLineNumber = Math.min(maximumLineNumber, Math.max(1, request.lineNumber));
+    const nextCursorOffset = view.state.doc.line(nextLineNumber).from;
+
+    lastHandledLineSelectionRequestIdRef.current = request.requestId;
+    view.focus();
+    view.dispatch({
+      effects: EditorView.scrollIntoView(nextCursorOffset, { y: "center" }),
+      selection: EditorSelection.cursor(nextCursorOffset),
+    });
+    onCursorLineChange?.(nextLineNumber);
+  }, [onCursorLineChange]);
 
   useEffect(() => {
     if (requestedLineSelection === null || requestedLineSelection === undefined) {
+      return;
+    }
+
+    if (lastHandledLineSelectionRequestIdRef.current === requestedLineSelection.requestId) {
       return;
     }
 
@@ -179,117 +195,150 @@ function DesktopMarkdownInputComponent({
       return;
     }
 
-    const editorModel = editor.getModel();
-    const maximumLineNumber = editorModel?.getLineCount() ?? 1;
-    const nextLineNumber = Math.min(maximumLineNumber, Math.max(1, requestedLineSelection.lineNumber));
+    applyRequestedLineSelection(editor, requestedLineSelection);
+  }, [applyRequestedLineSelection, requestedLineSelection]);
 
-    editor.focus();
-    editor.setPosition({ lineNumber: nextLineNumber, column: 1 });
-    editor.revealLineInCenter(nextLineNumber);
-    onCursorLineChange?.(nextLineNumber);
-  }, [onCursorLineChange, requestedLineSelection]);
+  useEffect(() => (
+    () => {
+      editorRef.current = null;
+    }
+  ), []);
 
-  const handleEditorMount = useCallback<OnMount>((editor) => {
-    editorRef.current = editor;
+  const handleEditorChange = useCallback((value: string) => {
+    onContentChange(value);
+  }, [onContentChange]);
 
-    editor.addCommand(monaco.KeyCode.Enter, () => {
-      if (handleMarkdownEnter(editor)) {
-        return;
-      }
-
-      editor.trigger("keyboard", "type", { text: "\n" });
-    }, "editorTextFocus && !editorHasSelection && !suggestWidgetVisible && !inSnippetMode");
-
-    editor.addCommand(monaco.KeyCode.Tab, () => {
-      if (handleMarkdownTab(editor, false)) {
-        return;
-      }
-
-      editor.trigger("keyboard", "type", { text: "  " });
-    }, "editorTextFocus && !suggestWidgetVisible && !inSnippetMode");
-
-    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Tab, () => {
-      handleMarkdownTab(editor, true);
-    }, "editorTextFocus && !suggestWidgetVisible && !inSnippetMode");
+  const handleEditorCreate = useCallback((view: EditorView) => {
+    editorRef.current = view;
 
     if (requestedLineSelection !== null && requestedLineSelection !== undefined) {
-      const editorModel = editor.getModel();
-      const maximumLineNumber = editorModel?.getLineCount() ?? 1;
-      const nextLineNumber = Math.min(maximumLineNumber, Math.max(1, requestedLineSelection.lineNumber));
-
-      editor.setPosition({ lineNumber: nextLineNumber, column: 1 });
-      editor.revealLineInCenter(nextLineNumber);
+      applyRequestedLineSelection(view, requestedLineSelection);
+      return;
     }
 
-    const emitCursorLine = () => {
-      onCursorLineChange?.(editor.getPosition()?.lineNumber ?? 1);
-    };
+    emitCursorLine(view);
+  }, [applyRequestedLineSelection, emitCursorLine, requestedLineSelection]);
 
-    emitCursorLine();
+  const handleEditorUpdate = useCallback((viewUpdate: ViewUpdate) => {
+    if (viewUpdate.focusChanged) {
+      onFocusChange?.(viewUpdate.view.hasFocus);
+    }
 
-    editor.onDidChangeCursorPosition((event) => {
-      onCursorLineChange?.(event.position.lineNumber);
-    });
+    if (viewUpdate.docChanged || viewUpdate.selectionSet || viewUpdate.focusChanged) {
+      emitCursorLine(viewUpdate.view);
+    }
+  }, [emitCursorLine, onFocusChange]);
 
-    editor.onDidChangeModelContent(() => {
-      emitCursorLine();
-    });
-
-    editor.onDidFocusEditorText(() => {
-      onFocusChange?.(true);
-      emitCursorLine();
-    });
-
-    editor.onDidBlurEditorText(() => {
-      onFocusChange?.(false);
-    });
-  }, [onCursorLineChange, onFocusChange, requestedLineSelection]);
-
-  const editorOptions = useMemo(() => ({
-    acceptSuggestionOnEnter: "smart",
-    automaticLayout: true,
-    autoClosingBrackets: "languageDefined",
-    autoClosingQuotes: "languageDefined",
-    folding: false,
-    fontFamily: resolveDraftFontFamily(draftFontId),
-    fontSize: 15,
-    glyphMargin: false,
-    hideCursorInOverviewRuler: true,
-    insertSpaces: true,
-    lineDecorationsWidth: 8,
-    lineNumbers: "off",
-    matchBrackets: "never",
-    minimap: { enabled: false },
-    multiCursorModifier,
-    overviewRulerBorder: false,
-    overviewRulerLanes: 0,
-    padding: { top: 16, bottom: 16 },
-    quickSuggestions: false,
-    renderLineHighlight: "none",
-    roundedSelection: false,
-    scrollBeyondLastLine: false,
-    snippetSuggestions: "top",
-    suggest: {
-      showKeywords: false,
-      showWords: false,
-      snippetsPreventQuickSuggestions: false,
+  const editorTheme = useMemo(() => EditorView.theme({
+    "&": {
+      backgroundColor: "transparent",
+      color: "var(--text)",
+      fontFamily: resolveDraftFontFamily(draftFontId),
+      fontSize: "15px",
+      height: "100%",
     },
-    suggestOnTriggerCharacters: false,
-    tabSize: 2,
-    wordBasedSuggestions: "off",
-    wordWrap: "on",
-    wrappingIndent: "same",
-  } as const), [draftFontId, multiCursorModifier]);
+    ".cm-content": {
+      caretColor: "var(--text)",
+      padding: "0 16px",
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "var(--text)",
+    },
+    ".cm-editor": {
+      height: "100%",
+    },
+    ".cm-focused": {
+      outline: "none",
+    },
+    ".cm-gutters": {
+      backgroundColor: "transparent",
+      border: "none",
+      color: "var(--text-soft)",
+    },
+    ".cm-line": {
+      padding: "0",
+    },
+    ".cm-panels": {
+      backgroundColor: "var(--surface-muted)",
+      borderBottom: "1px solid var(--border)",
+      color: "var(--text)",
+    },
+    ".cm-scroller": {
+      fontFamily: "inherit",
+      lineHeight: "1.7",
+      overflow: "auto",
+      padding: "16px 0",
+    },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection": {
+      backgroundColor: "color-mix(in srgb, var(--focus) 35%, transparent)",
+    },
+    ".cm-tooltip": {
+      backgroundColor: "var(--surface-muted)",
+      border: "1px solid var(--border)",
+      color: "var(--text)",
+    },
+    ".cm-tooltip-autocomplete": {
+      fontFamily: "inherit",
+    },
+    ".cm-tooltip-autocomplete ul li[aria-selected]": {
+      backgroundColor: "color-mix(in srgb, var(--focus) 18%, var(--surface-muted))",
+      color: "var(--text)",
+    },
+  }, {
+    dark: isDarkEditorTheme(appThemeId),
+  }), [appThemeId, draftFontId]);
+
+  const extensions = useMemo<Extension[]>(() => {
+    const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();
+
+    return [
+      markdown(),
+      markdownLanguage.data.of({
+        autocomplete: MARKDOWN_SNIPPET_COMPLETION_SOURCE,
+      }),
+      EditorView.lineWrapping,
+      EDITOR_CONTENT_ATTRIBUTES,
+      autocompletion({
+        activateOnTyping: false,
+      }),
+      keymap.of(completionKeymap),
+      Prec.highest(keymap.of([
+        {
+          key: "Enter",
+          run: runMarkdownEnter,
+        },
+        {
+          key: "Shift-Tab",
+          run: (view) => runMarkdownTab(view, true),
+        },
+        {
+          key: "Tab",
+          run: (view) => runMarkdownTab(view, false),
+        },
+      ])),
+      EditorView.clickAddsSelectionRange.of((event) => (
+        multiCursorModifier === "alt"
+          ? event.altKey
+          : ctrlCmdUsesMetaKey
+            ? event.metaKey
+            : event.ctrlKey
+      )),
+      editorTheme,
+    ];
+  }, [editorTheme, multiCursorModifier]);
 
   return (
-    <Editor
+    <CodeMirror
+      basicSetup={DESKTOP_EDITOR_BASIC_SETUP}
       height="100%"
-      language="markdown"
-      options={editorOptions}
+      indentWithTab={false}
       onChange={handleEditorChange}
-      onMount={handleEditorMount}
-      theme={resolveEditorTheme(appThemeId)}
+      onCreateEditor={handleEditorCreate}
+      onUpdate={handleEditorUpdate}
+      placeholder="ここに Markdown を書きます"
+      theme={isDarkEditorTheme(appThemeId) ? "dark" : "light"}
       value={content}
+      extensions={extensions}
     />
   );
 }

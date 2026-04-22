@@ -546,12 +546,21 @@ input:focus-visible,
 .draft-section__editor {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
-.draft-section__editor .monaco-editor,
-.draft-section__editor .monaco-editor-background,
-.draft-section__editor .monaco-editor .margin {
+.draft-section__editor .cm-editor,
+.draft-section__editor .cm-scroller,
+.draft-section__editor .cm-gutters {
   background: transparent;
+}
+
+.draft-section__editor .cm-editor {
+  height: 100%;
+}
+
+.draft-section__editor .cm-focused {
+  outline: none;
 }
 
 .draft-section__textarea:focus,
