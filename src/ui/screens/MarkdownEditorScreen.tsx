@@ -23,11 +23,18 @@ import {
   loadDesktopSplitRatio,
   persistDesktopSplitRatio,
 } from "../../infra/editorLayout";
+import {
+  PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY,
+  loadPreviewWindowDraftJumpRequest,
+  persistPreviewWindowActiveSourceLine,
+} from "../../infra/previewWindowSync";
 import { openPreviewWindow } from "../../infra/previewWindow";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
+import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
@@ -168,6 +175,7 @@ export function MarkdownEditorScreen({
   const mobileSectionBeforeMenuRef = useRef<Exclude<MobileSectionId, "menu">>("draft");
   const pendingMobileSectionRef = useRef<MobileSectionId | null>(null);
   const draftSelectionRequestIdRef = useRef(0);
+  const lastHandledPreviewWindowJumpRequestIdRef = useRef<number | null>(null);
   const activeDividerPointerIdRef = useRef<number | null>(null);
   const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
   const desktopMenuOpenFrameRef = useRef<number | null>(null);
@@ -196,6 +204,20 @@ export function MarkdownEditorScreen({
 
   const desktopSplitRatioRef = useRef(desktopSplitRatio);
   const mobileSectionOrder = isPreviewVisible ? MOBILE_SECTION_ORDER_WITH_PREVIEW : MOBILE_SECTION_ORDER_WITHOUT_PREVIEW;
+  const previewHighlightSourceLine = isDraftFocused ? activeDraftCursorLine : null;
+  const isPreviewInteractionAvailable = isPreviewVisible && (layoutMode === "desktop" || mobileSection === "preview");
+  const {
+    contextMenuRef: previewContextMenuRef,
+    contextMenuState: previewContextMenuState,
+    contextMenuStyle: previewContextMenuStyle,
+    handlePreviewContextMenu,
+    handleZoomFit: handlePreviewZoomFit,
+    handleZoomScaleChange: handlePreviewZoomScaleChange,
+    zoomScale: previewZoomScale,
+  } = usePreviewInteraction({
+    displayMode: previewDisplayMode,
+    isAvailable: isPreviewInteractionAvailable,
+  });
 
   const mobileSectionIndex = useMemo(() => {
     const nextIndex = getMobileSectionIndex(mobileSection, mobileSectionOrder);
@@ -589,6 +611,36 @@ export function MarkdownEditorScreen({
       handleMobileSectionRequest("draft");
     }
   }, [handleMobileSectionRequest, layoutMode]);
+
+  useEffect(() => {
+    persistPreviewWindowActiveSourceLine(previewHighlightSourceLine);
+  }, [previewHighlightSourceLine]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== PREVIEW_WINDOW_DRAFT_JUMP_REQUEST_STORAGE_KEY) {
+        return;
+      }
+
+      const nextJumpRequest = loadPreviewWindowDraftJumpRequest();
+
+      if (
+        nextJumpRequest === null
+        || lastHandledPreviewWindowJumpRequestIdRef.current === nextJumpRequest.requestId
+      ) {
+        return;
+      }
+
+      lastHandledPreviewWindowJumpRequestIdRef.current = nextJumpRequest.requestId;
+      handlePreviewSourceLineDoubleClick(nextJumpRequest.lineNumber);
+    };
+
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [handlePreviewSourceLineDoubleClick]);
 
   const handleMobileTrackPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (!event.isPrimary || layoutMode !== "mobile") {
@@ -989,12 +1041,18 @@ export function MarkdownEditorScreen({
 
                 <div className="workspace-grid__panel workspace-grid__panel--preview">
                   <MarkdownPreview
-                    activeSourceLine={activeDraftCursorLine}
+                    activeSourceLine={previewHighlightSourceLine}
                     displayMode={previewDisplayMode}
+                    enableInteractiveViewportNavigation
                     html={previewHtml}
+                    maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
+                    minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
+                    onPreviewContextMenu={handlePreviewContextMenu}
                     onRenderedA4PagesChange={handleRenderedA4PagesChange}
                     onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
+                    onZoomScaleChange={handlePreviewZoomScaleChange}
                     pageHtmls={previewPageHtmls}
+                    zoomScale={previewZoomScale}
                   />
                 </div>
               </>
@@ -1114,12 +1172,18 @@ export function MarkdownEditorScreen({
                     />
                   ) : (
                     <MarkdownPreview
-                      activeSourceLine={activeDraftCursorLine}
+                      activeSourceLine={previewHighlightSourceLine}
                       displayMode={previewDisplayMode}
+                      enableInteractiveViewportNavigation
                       html={previewHtml}
+                      maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
+                      minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
+                      onPreviewContextMenu={handlePreviewContextMenu}
                       onRenderedA4PagesChange={handleRenderedA4PagesChange}
                       onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
+                      onZoomScaleChange={handlePreviewZoomScaleChange}
                       pageHtmls={previewPageHtmls}
+                      zoomScale={previewZoomScale}
                     />
                   )}
                 </div>
@@ -1141,6 +1205,15 @@ export function MarkdownEditorScreen({
           </nav>
         </>
       )}
+
+      {previewContextMenuState !== null ? (
+        <PreviewContextMenu
+          ariaLabel="本体プレビューのコンテキストメニュー"
+          menuRef={previewContextMenuRef}
+          onFit={handlePreviewZoomFit}
+          style={previewContextMenuStyle}
+        />
+      ) : null}
     </main>
   );
 }

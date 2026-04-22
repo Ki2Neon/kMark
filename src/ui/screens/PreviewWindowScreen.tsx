@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_FILE_NAME, DEFAULT_MARKDOWN } from "../../domain/editor";
 import { LOCAL_DRAFT_STORAGE_KEY, loadLocalDraft } from "../../infra/localDraft";
 import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
+import {
+  PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY,
+  loadPreviewWindowActiveSourceLine,
+  requestPreviewWindowDraftJump,
+} from "../../infra/previewWindowSync";
 import { MarkdownPreview } from "../components/MarkdownPreview";
+import { PreviewContextMenu } from "../components/PreviewContextMenu";
+import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 
 type PreviewSnapshot = {
@@ -29,17 +36,34 @@ function loadPreviewSnapshot(): PreviewSnapshot {
 export function PreviewWindowScreen() {
   const { previewDisplayMode } = usePreviewPreferences();
   const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot>(() => loadPreviewSnapshot());
+  const [activeSourceLine, setActiveSourceLine] = useState<number | null>(() => loadPreviewWindowActiveSourceLine());
+  const {
+    contextMenuRef,
+    contextMenuState,
+    contextMenuStyle,
+    handlePreviewContextMenu,
+    handleZoomFit,
+    handleZoomScaleChange,
+    zoomScale,
+  } = usePreviewInteraction({ displayMode: previewDisplayMode });
 
   const previewHtml = useMemo(() => renderMarkdown(previewSnapshot.content), [previewSnapshot.content]);
   const previewPageHtmls = useMemo(() => renderMarkdownPages(previewSnapshot.content), [previewSnapshot.content]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== LOCAL_DRAFT_STORAGE_KEY) {
+      if (event.storageArea !== window.localStorage) {
         return;
       }
 
-      setPreviewSnapshot(loadPreviewSnapshot());
+      if (event.key === LOCAL_DRAFT_STORAGE_KEY) {
+        setPreviewSnapshot(loadPreviewSnapshot());
+        return;
+      }
+
+      if (event.key === PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY) {
+        setActiveSourceLine(loadPreviewWindowActiveSourceLine());
+      }
     };
 
     window.addEventListener("storage", handleStorage);
@@ -47,6 +71,10 @@ export function PreviewWindowScreen() {
     return () => {
       window.removeEventListener("storage", handleStorage);
     };
+  }, []);
+
+  const handleSourceLineDoubleClick = useCallback((lineNumber: number) => {
+    requestPreviewWindowDraftJump(lineNumber);
   }, []);
 
   useEffect(() => {
@@ -57,7 +85,28 @@ export function PreviewWindowScreen() {
 
   return (
     <main className="editor-shell preview-window">
-      <MarkdownPreview displayMode={previewDisplayMode} html={previewHtml} pageHtmls={previewPageHtmls} />
+      <MarkdownPreview
+        activeSourceLine={activeSourceLine}
+        displayMode={previewDisplayMode}
+        enableInteractiveViewportNavigation
+        html={previewHtml}
+        maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
+        minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
+        onPreviewContextMenu={handlePreviewContextMenu}
+        onSourceLineDoubleClick={handleSourceLineDoubleClick}
+        onZoomScaleChange={handleZoomScaleChange}
+        pageHtmls={previewPageHtmls}
+        zoomScale={zoomScale}
+      />
+
+      {contextMenuState !== null ? (
+        <PreviewContextMenu
+          ariaLabel="別ウィンドウプレビューのコンテキストメニュー"
+          menuRef={contextMenuRef}
+          onFit={handleZoomFit}
+          style={contextMenuStyle}
+        />
+      ) : null}
     </main>
   );
 }
