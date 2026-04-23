@@ -4,6 +4,7 @@ import {
   deserializeEditFontId,
   deserializeEditFontSizePx,
   deserializeShowLineNumbers,
+  deserializeWindowsStartupTrayResidentEnabled,
   isMultiCursorModifier,
   isStartupEditMode,
   type EditorPreferences,
@@ -34,6 +35,9 @@ export function loadEditorPreferences(): EditorPreferences {
         typeof parsedValue.startupEditMode === "string" && isStartupEditMode(parsedValue.startupEditMode)
           ? parsedValue.startupEditMode
           : DEFAULT_EDITOR_PREFERENCES.startupEditMode,
+      windowsStartupTrayResidentEnabled: deserializeWindowsStartupTrayResidentEnabled(
+        parsedValue.windowsStartupTrayResidentEnabled,
+      ),
     };
   } catch {
     return DEFAULT_EDITOR_PREFERENCES;

@@ -17,18 +17,21 @@ function App() {
   } = useAppTheme();
   const {
     appFontId,
+    canControlWindowsStartupTrayResident,
     editFontId,
     editFontSizePx,
     multiCursorModifier,
     showLineNumbers,
     startupEditMode,
+    windowsStartupTrayResidentEnabled,
     onAppFontChange,
     onEditFontChange,
     onEditFontSizeChange,
     onMultiCursorModifierChange,
     onShowLineNumbersChange,
     onStartupEditModeChange,
-  } = useEditorPreferences();
+    onWindowsStartupTrayResidentChange,
+  } = useEditorPreferences({ syncWindowsStartupTrayResident: !previewWindowMode });
 
   useLayoutEffect(() => {
     document.documentElement.dataset.appTheme = appThemeId;
@@ -46,11 +49,13 @@ function App() {
     <MarkdownEditorScreen
       appFontId={appFontId}
       appThemeId={appThemeId}
+      canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
       editFontId={editFontId}
       editFontSizePx={editFontSizePx}
       multiCursorModifier={multiCursorModifier}
       showLineNumbers={showLineNumbers}
       startupEditMode={startupEditMode}
+      windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
       onAppFontChange={onAppFontChange}
       onAppThemeChange={onAppThemeChange}
       onEditFontChange={onEditFontChange}
@@ -59,6 +64,7 @@ function App() {
       onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
       onShowLineNumbersChange={onShowLineNumbersChange}
       onStartupEditModeChange={onStartupEditModeChange}
+      onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
       previewUsesAppThemeColors={previewUsesAppThemeColors}
     />
   );

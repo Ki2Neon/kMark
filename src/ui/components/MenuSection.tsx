@@ -25,6 +25,7 @@ import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/t
 type MenuSectionProps = {
   readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
+  readonly canControlWindowsStartupTrayResident: boolean;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
   readonly previewDisplayMode: PreviewDisplayMode;
@@ -34,6 +35,7 @@ type MenuSectionProps = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
+  readonly windowsStartupTrayResidentEnabled: boolean;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
@@ -51,6 +53,7 @@ type MenuSectionProps = {
   readonly onSaveDocumentAs: () => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
   readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
+  readonly onWindowsStartupTrayResidentChange: (windowsStartupTrayResidentEnabled: boolean) => void;
 };
 
 const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
@@ -59,6 +62,7 @@ const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 function MenuSectionComponent({
   appFontId,
   appThemeId,
+  canControlWindowsStartupTrayResident,
   editFontId,
   editFontSizePx,
   previewDisplayMode,
@@ -68,6 +72,7 @@ function MenuSectionComponent({
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
+  windowsStartupTrayResidentEnabled,
   onAppFontChange,
   onAppThemeChange,
   onEditFontChange,
@@ -85,6 +90,7 @@ function MenuSectionComponent({
   onSaveDocumentAs,
   onShowLineNumbersChange,
   onStartupEditModeChange,
+  onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
   const handleAppThemeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextThemeId = event.currentTarget.value;
@@ -158,6 +164,10 @@ function MenuSectionComponent({
     }
 
     onStartupEditModeChange(nextStartupEditMode);
+  };
+
+  const handleWindowsStartupTrayResidentSwitch = (event: ChangeEvent<HTMLInputElement>) => {
+    onWindowsStartupTrayResidentChange(event.currentTarget.checked);
   };
 
   return (
@@ -317,6 +327,43 @@ function MenuSectionComponent({
             ))}
           </select>
         </label>
+
+        {canControlWindowsStartupTrayResident ? (
+          <label className="menu-section__mode-switch">
+            <span className="menu-section__mode-switch-meta">
+              <span className="menu-section__field-label">Windows 起動時の常駐</span>
+              <span className="menu-section__mode-switch-legend">無効 / タスクトレイ常駐</span>
+            </span>
+            <span className="menu-section__mode-switch-values">
+              <span
+                className={
+                  !windowsStartupTrayResidentEnabled
+                    ? "menu-section__mode-label is-active"
+                    : "menu-section__mode-label"
+                }
+              >
+                無効
+              </span>
+              <input
+                type="checkbox"
+                className="menu-section__switch-input"
+                checked={windowsStartupTrayResidentEnabled}
+                onChange={handleWindowsStartupTrayResidentSwitch}
+                aria-label="Windows 起動時のタスクトレイ常駐を切り替え"
+              />
+              <span className="menu-section__switch" aria-hidden="true" />
+              <span
+                className={
+                  windowsStartupTrayResidentEnabled
+                    ? "menu-section__mode-label is-active"
+                    : "menu-section__mode-label"
+                }
+              >
+                常駐
+              </span>
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div className="menu-section__group">

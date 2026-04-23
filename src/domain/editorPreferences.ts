@@ -35,6 +35,7 @@ export type EditorPreferences = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
+  readonly windowsStartupTrayResidentEnabled: boolean;
 };
 
 const DEFAULT_APP_FONT_FAMILY = '"Aptos", "Segoe UI Variable", "Segoe UI", sans-serif';
@@ -131,6 +132,7 @@ export const DEFAULT_EDITOR_PREFERENCES: EditorPreferences = {
   multiCursorModifier: "alt",
   showLineNumbers: false,
   startupEditMode: "last-opened-file",
+  windowsStartupTrayResidentEnabled: true,
 };
 
 const MULTI_CURSOR_MODIFIER_SET = new Set<MultiCursorModifier>(
@@ -217,6 +219,10 @@ export function deserializeEditFontSizePx(value: unknown): EditFontSizePx {
 
 export function deserializeShowLineNumbers(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_EDITOR_PREFERENCES.showLineNumbers;
+}
+
+export function deserializeWindowsStartupTrayResidentEnabled(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_EDITOR_PREFERENCES.windowsStartupTrayResidentEnabled;
 }
 
 export function resolveAppFontFamily(appFontId: AppFontId): string {

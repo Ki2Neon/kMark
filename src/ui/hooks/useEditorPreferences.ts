@@ -9,13 +9,32 @@ import {
   type StartupEditMode,
 } from "../../domain/editorPreferences";
 import { loadEditorPreferences, persistEditorPreferences } from "../../infra/editorPreferences";
+import {
+  supportsWindowsStartupTrayResidentToggle,
+  syncWindowsStartupTrayResidentPreference,
+} from "../../infra/windowsStartupTrayResident";
 
-export function useEditorPreferences() {
+type UseEditorPreferencesOptions = {
+  readonly syncWindowsStartupTrayResident?: boolean;
+};
+
+export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) {
+  const { syncWindowsStartupTrayResident = true } = options;
   const [editorPreferences, setEditorPreferences] = useState<EditorPreferences>(() => loadEditorPreferences());
+  const canControlWindowsStartupTrayResident =
+    syncWindowsStartupTrayResident && supportsWindowsStartupTrayResidentToggle();
 
   useEffect(() => {
     persistEditorPreferences(editorPreferences);
   }, [editorPreferences]);
+
+  useEffect(() => {
+    if (!canControlWindowsStartupTrayResident) {
+      return;
+    }
+
+    void syncWindowsStartupTrayResidentPreference(editorPreferences.windowsStartupTrayResidentEnabled);
+  }, [canControlWindowsStartupTrayResident, editorPreferences.windowsStartupTrayResidentEnabled]);
 
   const handleMultiCursorModifierChange = useCallback((multiCursorModifier: MultiCursorModifier) => {
     setEditorPreferences((currentPreferences) => {
@@ -97,18 +116,34 @@ export function useEditorPreferences() {
     });
   }, []);
 
+  const handleWindowsStartupTrayResidentChange = useCallback((windowsStartupTrayResidentEnabled: boolean) => {
+    setEditorPreferences((currentPreferences) => {
+      if (currentPreferences.windowsStartupTrayResidentEnabled === windowsStartupTrayResidentEnabled) {
+        return currentPreferences;
+      }
+
+      return {
+        ...currentPreferences,
+        windowsStartupTrayResidentEnabled,
+      };
+    });
+  }, []);
+
   return {
     appFontId: editorPreferences.appFontId,
+    canControlWindowsStartupTrayResident,
     editFontId: editorPreferences.editFontId,
     editFontSizePx: editorPreferences.editFontSizePx,
     multiCursorModifier: editorPreferences.multiCursorModifier,
     showLineNumbers: editorPreferences.showLineNumbers,
     startupEditMode: editorPreferences.startupEditMode,
+    windowsStartupTrayResidentEnabled: editorPreferences.windowsStartupTrayResidentEnabled,
     onAppFontChange: handleAppFontChange,
     onEditFontChange: handleEditFontChange,
     onEditFontSizeChange: handleEditFontSizeChange,
     onMultiCursorModifierChange: handleMultiCursorModifierChange,
     onShowLineNumbersChange: handleShowLineNumbersChange,
     onStartupEditModeChange: handleStartupEditModeChange,
+    onWindowsStartupTrayResidentChange: handleWindowsStartupTrayResidentChange,
   };
 }

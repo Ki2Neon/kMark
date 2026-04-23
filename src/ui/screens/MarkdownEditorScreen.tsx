@@ -55,11 +55,13 @@ type MobileSectionId = "menu" | "edit" | "preview";
 type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
+  readonly canControlWindowsStartupTrayResident: boolean;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
+  readonly windowsStartupTrayResidentEnabled: boolean;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
@@ -68,6 +70,7 @@ type MarkdownEditorScreenProps = {
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
   readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
+  readonly onWindowsStartupTrayResidentChange: (windowsStartupTrayResidentEnabled: boolean) => void;
   readonly previewUsesAppThemeColors: boolean;
 };
 
@@ -122,11 +125,13 @@ function detectLayoutMode(): LayoutMode {
 export function MarkdownEditorScreen({
   appFontId,
   appThemeId,
+  canControlWindowsStartupTrayResident,
   editFontId,
   editFontSizePx,
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
+  windowsStartupTrayResidentEnabled,
   onAppFontChange,
   onAppThemeChange,
   onEditFontChange,
@@ -135,6 +140,7 @@ export function MarkdownEditorScreen({
   onPreviewUsesAppThemeColorsChange,
   onShowLineNumbersChange,
   onStartupEditModeChange,
+  onWindowsStartupTrayResidentChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
   const {
@@ -1085,6 +1091,7 @@ export function MarkdownEditorScreen({
                 <MenuSection
                   appFontId={appFontId}
                   appThemeId={appThemeId}
+                  canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
                   editFontId={editFontId}
                   editFontSizePx={editFontSizePx}
                   previewDisplayMode={previewDisplayMode}
@@ -1094,6 +1101,7 @@ export function MarkdownEditorScreen({
                   multiCursorModifier={multiCursorModifier}
                   showLineNumbers={showLineNumbers}
                   startupEditMode={startupEditMode}
+                  windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
                   onAppFontChange={onAppFontChange}
                   onAppThemeChange={onAppThemeChange}
                   onEditFontChange={onEditFontChange}
@@ -1111,6 +1119,7 @@ export function MarkdownEditorScreen({
                   onSaveDocumentAs={handleRequestSaveAs}
                   onShowLineNumbersChange={onShowLineNumbersChange}
                   onStartupEditModeChange={onStartupEditModeChange}
+                  onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
                 />
               </div>
             </div>
@@ -1135,6 +1144,7 @@ export function MarkdownEditorScreen({
                     <MenuSection
                       appFontId={appFontId}
                       appThemeId={appThemeId}
+                      canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
                       editFontId={editFontId}
                       editFontSizePx={editFontSizePx}
                       previewDisplayMode={previewDisplayMode}
@@ -1144,6 +1154,7 @@ export function MarkdownEditorScreen({
                       multiCursorModifier={multiCursorModifier}
                       showLineNumbers={showLineNumbers}
                       startupEditMode={startupEditMode}
+                      windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
                       onAppFontChange={onAppFontChange}
                       onAppThemeChange={onAppThemeChange}
                       onEditFontChange={onEditFontChange}
@@ -1161,6 +1172,7 @@ export function MarkdownEditorScreen({
                       onSaveDocumentAs={handleRequestSaveAs}
                       onShowLineNumbersChange={onShowLineNumbersChange}
                       onStartupEditModeChange={onStartupEditModeChange}
+                      onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
                     />
                   ) : section === "edit" ? (
                     <MarkdownInput
