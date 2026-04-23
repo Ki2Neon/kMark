@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_FILE_NAME, DEFAULT_MARKDOWN } from "../../domain/editor";
-import { LOCAL_EDIT_STORAGE_KEY, loadLocalEdit } from "../../infra/localEdit";
 import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
 import {
-  PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY,
+  getPreviewWindowCursorSyncStorageKey,
+  getPreviewWindowSnapshotStorageKey,
+  loadPreviewWindowSnapshot,
   loadPreviewWindowActiveSourceLine,
   requestPreviewWindowEditJump,
 } from "../../infra/previewWindowSync";
+import { resolvePreviewWindowInstanceId } from "../../infra/previewWindow";
 import { syncWindowTitle } from "../../infra/windowTitle";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
@@ -18,26 +20,39 @@ type PreviewSnapshot = {
   readonly fileName: string;
 };
 
-function loadPreviewSnapshot(): PreviewSnapshot {
-  const edit = loadLocalEdit();
+function loadPreviewSnapshot(instanceId: string | null): PreviewSnapshot {
+  if (instanceId !== null) {
+    const snapshot = loadPreviewWindowSnapshot(instanceId);
 
-  if (edit === null) {
-    return {
-      content: DEFAULT_MARKDOWN,
-      fileName: DEFAULT_FILE_NAME,
-    };
+    if (snapshot !== null) {
+      return {
+        content: snapshot.content,
+        fileName: snapshot.fileName,
+      };
+    }
   }
 
   return {
-    content: edit.content,
-    fileName: edit.fileName,
+    content: DEFAULT_MARKDOWN,
+    fileName: DEFAULT_FILE_NAME,
   };
 }
 
 export function PreviewWindowScreen() {
+  const previewWindowInstanceId = useMemo(() => resolvePreviewWindowInstanceId(), []);
+  const previewWindowSnapshotStorageKey = useMemo(
+    () => (previewWindowInstanceId === null ? null : getPreviewWindowSnapshotStorageKey(previewWindowInstanceId)),
+    [previewWindowInstanceId],
+  );
+  const previewWindowCursorSyncStorageKey = useMemo(
+    () => (previewWindowInstanceId === null ? null : getPreviewWindowCursorSyncStorageKey(previewWindowInstanceId)),
+    [previewWindowInstanceId],
+  );
   const { previewDisplayMode } = usePreviewPreferences();
-  const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot>(() => loadPreviewSnapshot());
-  const [activeSourceLine, setActiveSourceLine] = useState<number | null>(() => loadPreviewWindowActiveSourceLine());
+  const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot>(() => loadPreviewSnapshot(previewWindowInstanceId));
+  const [activeSourceLine, setActiveSourceLine] = useState<number | null>(() => (
+    previewWindowInstanceId === null ? null : loadPreviewWindowActiveSourceLine(previewWindowInstanceId)
+  ));
   const {
     contextMenuRef,
     contextMenuState,
@@ -57,13 +72,15 @@ export function PreviewWindowScreen() {
         return;
       }
 
-      if (event.key === LOCAL_EDIT_STORAGE_KEY) {
-        setPreviewSnapshot(loadPreviewSnapshot());
+      if (previewWindowSnapshotStorageKey !== null && event.key === previewWindowSnapshotStorageKey) {
+        setPreviewSnapshot(loadPreviewSnapshot(previewWindowInstanceId));
         return;
       }
 
-      if (event.key === PREVIEW_WINDOW_CURSOR_SYNC_STORAGE_KEY) {
-        setActiveSourceLine(loadPreviewWindowActiveSourceLine());
+      if (previewWindowCursorSyncStorageKey !== null && event.key === previewWindowCursorSyncStorageKey) {
+        setActiveSourceLine(
+          previewWindowInstanceId === null ? null : loadPreviewWindowActiveSourceLine(previewWindowInstanceId),
+        );
       }
     };
 
@@ -72,11 +89,15 @@ export function PreviewWindowScreen() {
     return () => {
       window.removeEventListener("storage", handleStorage);
     };
-  }, []);
+  }, [previewWindowCursorSyncStorageKey, previewWindowInstanceId, previewWindowSnapshotStorageKey]);
 
   const handleSourceLineDoubleClick = useCallback((lineNumber: number) => {
-    requestPreviewWindowEditJump(lineNumber);
-  }, []);
+    if (previewWindowInstanceId === null) {
+      return;
+    }
+
+    requestPreviewWindowEditJump(previewWindowInstanceId, lineNumber);
+  }, [previewWindowInstanceId]);
 
   useEffect(() => {
     const normalizedFileName = previewSnapshot.fileName.trim().length > 0 ? previewSnapshot.fileName.trim() : DEFAULT_FILE_NAME;

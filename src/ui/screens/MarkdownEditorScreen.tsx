@@ -25,11 +25,12 @@ import {
 } from "../../infra/editorLayout";
 import { syncWindowTitle } from "../../infra/windowTitle";
 import {
-  PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY,
+  getPreviewWindowEditJumpRequestStorageKey,
   loadPreviewWindowEditJumpRequest,
   persistPreviewWindowActiveSourceLine,
+  persistPreviewWindowSnapshot,
 } from "../../infra/previewWindowSync";
-import { openPreviewWindow } from "../../infra/previewWindow";
+import { openPreviewWindow, resolveAppInstanceId } from "../../infra/previewWindow";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
@@ -143,12 +144,17 @@ export function MarkdownEditorScreen({
   onWindowsStartupTrayResidentChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
+  const [previewWindowInstanceId, setPreviewWindowInstanceId] = useState<string | null>(null);
+  const previewWindowEditJumpRequestStorageKey = useMemo(
+    () => (previewWindowInstanceId === null ? null : getPreviewWindowEditJumpRequestStorageKey(previewWindowInstanceId)),
+    [previewWindowInstanceId],
+  );
   const {
     isPreviewVisible,
     previewDisplayMode,
     onPreviewDisplayModeChange,
     onPreviewVisibilityChange: onStoredPreviewVisibilityChange,
-  } = usePreviewPreferences();
+  } = usePreviewPreferences({ manageVisibilityByAppInstance: true });
   const {
     canOpenDocumentWithNativePicker,
     content,
@@ -234,6 +240,22 @@ export function MarkdownEditorScreen({
 
     return nextIndex === -1 ? getMobileSectionIndex("edit", mobileSectionOrder) : nextIndex;
   }, [mobileSection, mobileSectionOrder]);
+
+  useEffect(() => {
+    let isDisposed = false;
+
+    void resolveAppInstanceId().then((nextInstanceId) => {
+      if (isDisposed) {
+        return;
+      }
+
+      setPreviewWindowInstanceId(nextInstanceId);
+    });
+
+    return () => {
+      isDisposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     desktopSplitRatioRef.current = desktopSplitRatio;
@@ -472,10 +494,15 @@ export function MarkdownEditorScreen({
       closeDesktopMenu();
     }
 
-    void openPreviewWindow().catch((error) => {
+    void (async () => {
+      const instanceId = previewWindowInstanceId ?? await resolveAppInstanceId();
+      setPreviewWindowInstanceId((currentInstanceId) => currentInstanceId ?? instanceId);
+      persistPreviewWindowSnapshot(instanceId, { content, fileName });
+      await openPreviewWindow(instanceId);
+    })().catch((error) => {
       handleErrorRaise(toPreviewWindowErrorMessage(error));
     });
-  }, [closeDesktopMenu, handleErrorRaise, layoutMode]);
+  }, [closeDesktopMenu, content, fileName, handleErrorRaise, layoutMode, previewWindowInstanceId]);
 
   const handleRequestNew = useCallback(() => {
     if (!confirmDiscard()) {
@@ -623,16 +650,33 @@ export function MarkdownEditorScreen({
   }, [handleMobileSectionRequest, layoutMode]);
 
   useEffect(() => {
-    persistPreviewWindowActiveSourceLine(previewHighlightSourceLine);
-  }, [previewHighlightSourceLine]);
+    if (previewWindowInstanceId === null) {
+      return;
+    }
+
+    persistPreviewWindowActiveSourceLine(previewWindowInstanceId, previewHighlightSourceLine);
+  }, [previewHighlightSourceLine, previewWindowInstanceId]);
+
+  useEffect(() => {
+    if (previewWindowInstanceId === null) {
+      return;
+    }
+
+    persistPreviewWindowSnapshot(previewWindowInstanceId, { content, fileName });
+  }, [content, fileName, previewWindowInstanceId]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== PREVIEW_WINDOW_EDIT_JUMP_REQUEST_STORAGE_KEY) {
+      if (
+        event.storageArea !== window.localStorage
+        || previewWindowInstanceId === null
+        || previewWindowEditJumpRequestStorageKey === null
+        || event.key !== previewWindowEditJumpRequestStorageKey
+      ) {
         return;
       }
 
-      const nextJumpRequest = loadPreviewWindowEditJumpRequest();
+      const nextJumpRequest = loadPreviewWindowEditJumpRequest(previewWindowInstanceId);
 
       if (
         nextJumpRequest === null
@@ -650,7 +694,7 @@ export function MarkdownEditorScreen({
     return () => {
       window.removeEventListener("storage", handleStorage);
     };
-  }, [handlePreviewSourceLineDoubleClick]);
+  }, [handlePreviewSourceLineDoubleClick, previewWindowEditJumpRequestStorageKey, previewWindowInstanceId]);
 
   const handleMobileTrackPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (!event.isPrimary || layoutMode !== "mobile") {

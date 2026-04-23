@@ -33,13 +33,13 @@ This file records the dependency licenses confirmed in this repository on 2026-0
 
 | Package | License |
 | --- | --- |
+| fs2 | MIT OR Apache-2.0 |
 | serde | MIT OR Apache-2.0 |
 | serde_json | MIT OR Apache-2.0 |
 | tauri | Apache-2.0 OR MIT |
 | tauri-build | Apache-2.0 OR MIT |
 | tauri-plugin-autostart | Apache-2.0 OR MIT |
 | tauri-plugin-opener | Apache-2.0 OR MIT |
-| tauri-plugin-single-instance | Apache-2.0 OR MIT |
 | thiserror | MIT OR Apache-2.0 |
 
 ## Selected transitive licenses worth noting

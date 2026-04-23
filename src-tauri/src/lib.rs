@@ -6,28 +6,39 @@ mod usecase;
 use std::{
     env,
     ffi::OsStr,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    path::PathBuf,
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use tauri::{
-    Emitter, Manager,
+    Manager,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
 use infra::{
     FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue,
-    persist_window_state, restore_window_state,
+    TRAY_COORDINATOR_POLL_INTERVAL, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,
+    broadcast_command, persist_window_state, restore_window_state,
 };
 use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
 const MAIN_WINDOW_LABEL: &str = "main";
-const MARKDOWN_OPEN_REQUESTED_EVENT: &str = "markdown-open-requested";
 const TRAY_ICON_ID: &str = "main-tray";
 const TRAY_SHOW_MENU_ITEM_ID: &str = "tray-show";
 const TRAY_QUIT_MENU_ITEM_ID: &str = "tray-quit";
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
+
+#[derive(Debug, thiserror::Error)]
+enum TrayRuntimeError {
+    #[error(transparent)]
+    Coordinator(#[from] TrayCoordinatorError),
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
+}
 
 #[derive(Default)]
 pub(crate) struct AppState {
@@ -36,10 +47,17 @@ pub(crate) struct AppState {
     pub(crate) should_exit: AtomicBool,
 }
 
-fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = main_window.show();
         let _ = main_window.unminimize();
+    }
+}
+
+fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    show_main_window(app);
+
+    if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = main_window.set_focus();
     }
 }
@@ -58,7 +76,8 @@ fn should_start_hidden() -> bool {
 
 #[cfg(desktop)]
 fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(app, TRAY_SHOW_MENU_ITEM_ID, "Show kMark", true, None::<&str>)?;
+    let show_item =
+        MenuItem::with_id(app, TRAY_SHOW_MENU_ITEM_ID, "Show All kMark", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, TRAY_QUIT_MENU_ITEM_ID, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
@@ -74,9 +93,15 @@ fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             TRAY_SHOW_MENU_ITEM_ID => {
+                if let Err(error) = broadcast_command(app, TrayCommandKind::ShowAll) {
+                    eprintln!("failed to broadcast tray show-all command: {error}");
+                }
                 focus_main_window(app);
             }
             TRAY_QUIT_MENU_ITEM_ID => {
+                if let Err(error) = broadcast_command(app, TrayCommandKind::QuitAll) {
+                    eprintln!("failed to broadcast tray quit-all command: {error}");
+                }
                 app.state::<AppState>()
                     .should_exit
                     .store(true, Ordering::SeqCst);
@@ -91,6 +116,9 @@ fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()
                 ..
             } = event
             {
+                if let Err(error) = broadcast_command(tray.app_handle(), TrayCommandKind::ShowAll) {
+                    eprintln!("failed to broadcast tray show-all command: {error}");
+                }
                 focus_main_window(tray.app_handle());
             }
         })
@@ -102,7 +130,6 @@ fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()
 fn queue_markdown_open_requests<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     file_paths: Vec<PathBuf>,
-    notify_frontend: bool,
 ) {
     if file_paths.is_empty() {
         return;
@@ -115,38 +142,108 @@ fn queue_markdown_open_requests<R: tauri::Runtime>(
     }
 
     focus_main_window(app);
-
-    if notify_frontend {
-        let _ = app.emit_to(MAIN_WINDOW_LABEL, MARKDOWN_OPEN_REQUESTED_EVENT, ());
-    }
 }
 
 fn handle_startup_markdown_open_requests<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let file_paths = collect_markdown_file_paths(env::args_os(), &current_dir);
 
-    queue_markdown_open_requests(app, file_paths, false);
+    queue_markdown_open_requests(app, file_paths);
 }
 
-fn handle_secondary_instance_markdown_open_requests<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    args: Vec<String>,
-    cwd: String,
-) {
-    let current_dir = Path::new(&cwd);
-    let file_paths = collect_markdown_file_paths(args, current_dir);
+#[cfg(desktop)]
+fn handle_tray_command<R: tauri::Runtime>(app: &tauri::AppHandle<R>, command: TrayCommandKind) {
+    match command {
+        TrayCommandKind::ShowAll => {
+            show_main_window(app);
+        }
+        TrayCommandKind::QuitAll => {
+            app.state::<AppState>()
+                .should_exit
+                .store(true, Ordering::SeqCst);
+            app.exit(0);
+        }
+    }
+}
 
-    queue_markdown_open_requests(app, file_paths, true);
+#[cfg(desktop)]
+fn lock_tray_coordinator<'a>(
+    coordinator: &'a Arc<Mutex<TrayCoordinator>>,
+) -> MutexGuard<'a, TrayCoordinator> {
+    match coordinator.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+#[cfg(desktop)]
+fn maybe_register_tray<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    coordinator: &Arc<Mutex<TrayCoordinator>>,
+) -> Result<(), TrayRuntimeError> {
+    let needs_tray_registration = {
+        let mut coordinator = lock_tray_coordinator(coordinator);
+        let _ = coordinator.try_claim_ownership(app)?;
+        coordinator.needs_tray_registration()
+    };
+
+    if !needs_tray_registration {
+        return Ok(());
+    }
+
+    create_tray(app)?;
+    lock_tray_coordinator(coordinator).mark_tray_registered();
+
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn start_tray_coordinator<R: tauri::Runtime + 'static>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), TrayRuntimeError> {
+    let coordinator = Arc::new(Mutex::new(TrayCoordinator::initialize(app)?));
+
+    maybe_register_tray(app, &coordinator)?;
+
+    let worker_app = app.clone();
+    let worker_coordinator = Arc::clone(&coordinator);
+    std::thread::spawn(move || loop {
+        if worker_app
+            .state::<AppState>()
+            .should_exit
+            .load(Ordering::SeqCst)
+        {
+            break;
+        }
+
+        if let Err(error) = maybe_register_tray(&worker_app, &worker_coordinator) {
+            eprintln!("failed to register tray owner: {error}");
+        }
+
+        let pending_command = {
+            let mut coordinator = lock_tray_coordinator(&worker_coordinator);
+            match coordinator.take_pending_command(&worker_app) {
+                Ok(command) => command,
+                Err(error) => {
+                    eprintln!("failed to poll tray command: {error}");
+                    None
+                }
+            }
+        };
+
+        if let Some(command) = pending_command {
+            handle_tray_command(&worker_app, command);
+        }
+
+        std::thread::sleep(TRAY_COORDINATOR_POLL_INTERVAL);
+    });
+
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default().manage(AppState::default());
-
-    #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-        handle_secondary_instance_markdown_open_requests(app, args, cwd);
-    }));
 
     #[cfg(desktop)]
     let builder = builder.plugin(
@@ -197,7 +294,7 @@ pub fn run() {
             }
 
             #[cfg(desktop)]
-            create_tray(&app_handle)?;
+            start_tray_coordinator(&app_handle)?;
 
             handle_startup_markdown_open_requests(&app_handle);
 
@@ -208,6 +305,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_instance::current_app_instance_id,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,
