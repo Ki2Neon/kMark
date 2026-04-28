@@ -17,8 +17,7 @@ export type PreviewWindowViewerState = {
 };
 
 export type PreviewWindowViewerRenderer = {
-  render(content: string): string;
-  renderPages(content: string): readonly string[];
+  render(content: string): Promise<PreviewWindowViewerRenderedPreview>;
 };
 
 export type PreviewWindowViewerGateway = {

@@ -1,13 +1,10 @@
 import { type MarkdownRenderer } from "../../application/editorSession/editorSessionPorts";
-import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
+import { renderMarkdownPreview } from "./browserMarkdownPreviewRenderer";
 
 export function createBrowserMarkdownRenderer(): MarkdownRenderer {
   return {
-    render(content) {
-      return renderMarkdown(content);
-    },
-    renderPages(content) {
-      return renderMarkdownPages(content);
+    async render(content) {
+      return renderMarkdownPreview(content);
     },
   };
 }

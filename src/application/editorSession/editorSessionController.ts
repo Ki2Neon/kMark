@@ -84,11 +84,8 @@ export class EditorSessionController {
     });
   }
 
-  renderPreview(content: string): RenderedPreview {
-    return {
-      html: this.#renderer.render(content),
-      pageHtmls: this.#renderer.renderPages(content),
-    };
+  async renderPreview(content: string): Promise<RenderedPreview> {
+    return this.#renderer.render(content);
   }
 
   changeContent(store: EditorSessionStore, content: string): void {
@@ -180,7 +177,7 @@ export class EditorSessionController {
     renderedA4PreviewPages?: readonly RenderedA4PreviewPage[],
   ): Promise<void> {
     const state = store.getState();
-    const renderedPreview = this.renderPreview(state.content);
+    const renderedPreview = await this.renderPreview(state.content);
 
     await this.#printer.print({
       displayMode: previewDisplayMode,

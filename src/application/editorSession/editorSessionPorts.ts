@@ -29,8 +29,10 @@ export type DraftStore = {
 };
 
 export type MarkdownRenderer = {
-  render(content: string): string;
-  renderPages(content: string): readonly string[];
+  render(content: string): Promise<{
+    readonly html: string;
+    readonly pageHtmls: readonly string[];
+  }>;
 };
 
 export type MarkdownDocumentGateway = {

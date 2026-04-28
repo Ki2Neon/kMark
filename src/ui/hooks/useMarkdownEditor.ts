@@ -1,10 +1,11 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createBrowserDraftStore } from "../../adapters/browser/browserDraftStore";
 import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/browserMarkdownDocumentGateway";
 import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
 import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
 import {
   EditorSessionController,
+  type RenderedPreview,
   toEditorSessionErrorMessage,
   type EditorSessionStore,
 } from "../../application/editorSession/editorSessionController";
@@ -14,6 +15,7 @@ import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
 
 export function useMarkdownEditor(startupEditMode: StartupEditMode) {
+  const renderRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
   const controllerRef = useRef<EditorSessionController | null>(null);
 
@@ -42,6 +44,10 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     getState: () => stateRef.current,
   }), [dispatch]);
   const deferredContent = useDeferredValue(state.content);
+  const [renderedPreview, setRenderedPreview] = useState<RenderedPreview>({
+    html: "",
+    pageHtmls: [],
+  });
 
   useEffect(() => {
     stateRef.current = state;
@@ -56,10 +62,33 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     controller.persistDraft(state);
   }, [controller, state]);
 
-  const renderedPreview = useMemo(
-    () => controller.renderPreview(deferredContent),
-    [controller, deferredContent],
-  );
+  useEffect(() => {
+    const requestId = renderRequestIdRef.current + 1;
+    renderRequestIdRef.current = requestId;
+    let disposed = false;
+
+    void controller.renderPreview(deferredContent)
+      .then((nextRenderedPreview) => {
+        if (disposed || renderRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        startTransition(() => {
+          setRenderedPreview(nextRenderedPreview);
+        });
+      })
+      .catch((error) => {
+        if (disposed || renderRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [controller, deferredContent, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {

@@ -69,10 +69,7 @@ export class PreviewWindowViewerController {
     this.#gateway.requestEditJump(instanceId, lineNumber);
   }
 
-  renderSnapshot(snapshot: PreviewWindowViewerSnapshot): PreviewWindowViewerRenderedPreview {
-    return {
-      html: this.#renderer.render(snapshot.content),
-      pageHtmls: this.#renderer.renderPages(snapshot.content),
-    };
+  async renderSnapshot(snapshot: PreviewWindowViewerSnapshot): Promise<PreviewWindowViewerRenderedPreview> {
+    return this.#renderer.render(snapshot.content);
   }
 }
