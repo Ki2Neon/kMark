@@ -1,18 +1,23 @@
 import {
   type PreviewWindowViewerGateway,
+  type PreviewWindowViewerRenderedPreview,
+  type PreviewWindowViewerRenderer,
   type PreviewWindowViewerSnapshot,
   type PreviewWindowViewerState,
 } from "./previewWindowViewerPorts";
 
 type PreviewWindowViewerControllerDependencies = {
   readonly gateway: PreviewWindowViewerGateway;
+  readonly renderer: PreviewWindowViewerRenderer;
 };
 
 export class PreviewWindowViewerController {
   readonly #gateway: PreviewWindowViewerGateway;
+  readonly #renderer: PreviewWindowViewerRenderer;
 
   constructor(dependencies: PreviewWindowViewerControllerDependencies) {
     this.#gateway = dependencies.gateway;
+    this.#renderer = dependencies.renderer;
   }
 
   createState(
@@ -62,5 +67,12 @@ export class PreviewWindowViewerController {
     }
 
     this.#gateway.requestEditJump(instanceId, lineNumber);
+  }
+
+  renderSnapshot(snapshot: PreviewWindowViewerSnapshot): PreviewWindowViewerRenderedPreview {
+    return {
+      html: this.#renderer.render(snapshot.content),
+      pageHtmls: this.#renderer.renderPages(snapshot.content),
+    };
   }
 }

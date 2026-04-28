@@ -185,5 +185,7 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
     handleDividerPointerEnd,
     handleDividerPointerMove,
     isDesktopResizing,
+    maximumDesktopSplitRatio: MAX_DESKTOP_SPLIT_RATIO,
+    minimumDesktopSplitRatio: MIN_DESKTOP_SPLIT_RATIO,
   };
 }

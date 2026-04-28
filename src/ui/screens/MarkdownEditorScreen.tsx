@@ -4,17 +4,16 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type MouseEvent,
 } from "react";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
 import { type AppFontId, type EditFontId, type EditFontSizePx, type MultiCursorModifier, type StartupEditMode } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
-import { MAX_DESKTOP_SPLIT_RATIO, MIN_DESKTOP_SPLIT_RATIO } from "../../infra/editorLayout";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
+import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
 import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
 import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
@@ -126,12 +125,8 @@ export function MarkdownEditorScreen({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editSelectionRequestIdRef = useRef(0);
-  const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
-  const desktopMenuOpenFrameRef = useRef<number | null>(null);
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
-  const [isDesktopMenuMounted, setIsDesktopMenuMounted] = useState(false);
-  const [isDesktopMenuVisible, setIsDesktopMenuVisible] = useState(false);
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
@@ -145,6 +140,14 @@ export function MarkdownEditorScreen({
     }
   }, []);
   const {
+    closeDesktopMenu,
+    closeDesktopMenuImmediately,
+    handleOverlayClick,
+    isDesktopMenuMounted,
+    isDesktopMenuVisible,
+    toggleDesktopMenu,
+  } = useDesktopMenuVisibility({ transitionMs: DESKTOP_MENU_TRANSITION_MS });
+  const {
     desktopLayoutStyle,
     desktopSplitRatio,
     desktopWorkspaceRef,
@@ -154,6 +157,8 @@ export function MarkdownEditorScreen({
     handleDividerPointerEnd,
     handleDividerPointerMove,
     isDesktopResizing,
+    maximumDesktopSplitRatio,
+    minimumDesktopSplitRatio,
   } = useDesktopWorkspaceSplit({ layoutMode });
   const {
     dismissMobileMenu,
@@ -189,62 +194,11 @@ export function MarkdownEditorScreen({
     isAvailable: isPreviewInteractionAvailable,
   });
 
-  const clearDesktopMenuTimers = useCallback(() => {
-    if (desktopMenuCloseTimeoutRef.current !== null) {
-      window.clearTimeout(desktopMenuCloseTimeoutRef.current);
-      desktopMenuCloseTimeoutRef.current = null;
-    }
-
-    if (desktopMenuOpenFrameRef.current !== null) {
-      window.cancelAnimationFrame(desktopMenuOpenFrameRef.current);
-      desktopMenuOpenFrameRef.current = null;
-    }
-  }, []);
-
-  const closeDesktopMenuImmediately = useCallback(() => {
-    clearDesktopMenuTimers();
-    setIsDesktopMenuVisible(false);
-    setIsDesktopMenuMounted(false);
-  }, [clearDesktopMenuTimers]);
-
-  const closeDesktopMenu = useCallback(() => {
-    clearDesktopMenuTimers();
-    setIsDesktopMenuVisible(false);
-    desktopMenuCloseTimeoutRef.current = window.setTimeout(() => {
-      setIsDesktopMenuMounted(false);
-      desktopMenuCloseTimeoutRef.current = null;
-    }, DESKTOP_MENU_TRANSITION_MS);
-  }, [clearDesktopMenuTimers]);
-
-  const openDesktopMenu = useCallback(() => {
-    clearDesktopMenuTimers();
-    setIsDesktopMenuMounted(true);
-    desktopMenuOpenFrameRef.current = window.requestAnimationFrame(() => {
-      setIsDesktopMenuVisible(true);
-      desktopMenuOpenFrameRef.current = null;
-    });
-  }, [clearDesktopMenuTimers]);
-
-  const toggleDesktopMenu = useCallback(() => {
-    if (isDesktopMenuMounted && isDesktopMenuVisible) {
-      closeDesktopMenu();
-      return;
-    }
-
-    openDesktopMenu();
-  }, [closeDesktopMenu, isDesktopMenuMounted, isDesktopMenuVisible, openDesktopMenu]);
-
   useEffect(() => {
     if (layoutMode !== "mobile") {
       setIsEditFocused(false);
     }
   }, [layoutMode]);
-
-  useEffect(() => {
-    return () => {
-      clearDesktopMenuTimers();
-    };
-  }, [clearDesktopMenuTimers]);
 
   useEffect(() => {
     if (errorMessage === null) {
@@ -386,15 +340,6 @@ export function MarkdownEditorScreen({
     takePendingExternalDocuments: handleTakePendingExternalDocuments,
   });
 
-  const handleOverlayClick = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
-      if (event.target === event.currentTarget) {
-        closeDesktopMenu();
-      }
-    },
-    [closeDesktopMenu],
-  );
-
   const handleShortcutOpenDocument = useCallback(() => {
     if (!confirmDiscard()) {
       return;
@@ -456,6 +401,40 @@ export function MarkdownEditorScreen({
     },
   });
 
+  const menuSectionProps = {
+    appFontId,
+    appThemeId,
+    canControlWindowsStartupTrayResident,
+    editFontId,
+    editFontSizePx,
+    isPreviewVisible,
+    layoutMode,
+    multiCursorModifier,
+    onAppFontChange,
+    onAppThemeChange,
+    onEditFontChange,
+    onEditFontSizeChange,
+    onLayoutModeChange: handleLayoutModeChange,
+    onMultiCursorModifierChange,
+    onNewDocument: handleRequestNew,
+    onOpenDocument: handleRequestOpen,
+    onOpenPreviewWindow: handleRequestOpenPreviewWindow,
+    onOverwriteSaveDocument: handleRequestOverwriteSave,
+    onPreviewDisplayModeChange,
+    onPreviewUsesAppThemeColorsChange,
+    onPreviewVisibilityChange: handlePreviewVisibilityChange,
+    onPrintDocument: handleRequestPrint,
+    onSaveDocumentAs: handleRequestSaveAs,
+    onShowLineNumbersChange,
+    onStartupEditModeChange,
+    onWindowsStartupTrayResidentChange,
+    previewDisplayMode,
+    previewUsesAppThemeColors,
+    showLineNumbers,
+    startupEditMode,
+    windowsStartupTrayResidentEnabled,
+  };
+
   return (
     <main
       className={`editor-shell editor-shell--${layoutMode}`}
@@ -511,8 +490,8 @@ export function MarkdownEditorScreen({
                   role="separator"
                   aria-label="Edit と Preview の幅を調整"
                   aria-orientation="vertical"
-                  aria-valuemin={MIN_DESKTOP_SPLIT_RATIO}
-                  aria-valuemax={MAX_DESKTOP_SPLIT_RATIO}
+                  aria-valuemin={minimumDesktopSplitRatio}
+                  aria-valuemax={maximumDesktopSplitRatio}
                   aria-valuenow={Math.round(desktopSplitRatio)}
                   tabIndex={0}
                   onKeyDown={handleDividerKeyDown}
@@ -561,39 +540,7 @@ export function MarkdownEditorScreen({
               onClick={handleOverlayClick}
             >
               <div className="editor-shell__sidebar" role="dialog" aria-modal="true" aria-label="メニュー">
-                <MenuSection
-                  appFontId={appFontId}
-                  appThemeId={appThemeId}
-                  canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
-                  editFontId={editFontId}
-                  editFontSizePx={editFontSizePx}
-                  previewDisplayMode={previewDisplayMode}
-                  previewUsesAppThemeColors={previewUsesAppThemeColors}
-                  isPreviewVisible={isPreviewVisible}
-                  layoutMode={layoutMode}
-                  multiCursorModifier={multiCursorModifier}
-                  showLineNumbers={showLineNumbers}
-                  startupEditMode={startupEditMode}
-                  windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
-                  onAppFontChange={onAppFontChange}
-                  onAppThemeChange={onAppThemeChange}
-                  onEditFontChange={onEditFontChange}
-                  onEditFontSizeChange={onEditFontSizeChange}
-                  onLayoutModeChange={handleLayoutModeChange}
-                  onMultiCursorModifierChange={onMultiCursorModifierChange}
-                  onNewDocument={handleRequestNew}
-                  onOpenPreviewWindow={handleRequestOpenPreviewWindow}
-                  onOpenDocument={handleRequestOpen}
-                  onOverwriteSaveDocument={handleRequestOverwriteSave}
-                  onPrintDocument={handleRequestPrint}
-                  onPreviewDisplayModeChange={onPreviewDisplayModeChange}
-                  onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
-                  onPreviewVisibilityChange={handlePreviewVisibilityChange}
-                  onSaveDocumentAs={handleRequestSaveAs}
-                  onShowLineNumbersChange={onShowLineNumbersChange}
-                  onStartupEditModeChange={onStartupEditModeChange}
-                  onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
-                />
+                <MenuSection {...menuSectionProps} />
               </div>
             </div>
           ) : null}
@@ -614,39 +561,7 @@ export function MarkdownEditorScreen({
               {mobileSectionOrder.map((section) => (
                 <div key={section} className="editor-shell__mobile-slide">
                   {section === "menu" ? (
-                    <MenuSection
-                      appFontId={appFontId}
-                      appThemeId={appThemeId}
-                      canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
-                      editFontId={editFontId}
-                      editFontSizePx={editFontSizePx}
-                      previewDisplayMode={previewDisplayMode}
-                      previewUsesAppThemeColors={previewUsesAppThemeColors}
-                      isPreviewVisible={isPreviewVisible}
-                      layoutMode={layoutMode}
-                      multiCursorModifier={multiCursorModifier}
-                      showLineNumbers={showLineNumbers}
-                      startupEditMode={startupEditMode}
-                      windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
-                      onAppFontChange={onAppFontChange}
-                      onAppThemeChange={onAppThemeChange}
-                      onEditFontChange={onEditFontChange}
-                      onEditFontSizeChange={onEditFontSizeChange}
-                      onLayoutModeChange={handleLayoutModeChange}
-                      onMultiCursorModifierChange={onMultiCursorModifierChange}
-                      onNewDocument={handleRequestNew}
-                      onOpenPreviewWindow={handleRequestOpenPreviewWindow}
-                      onOpenDocument={handleRequestOpen}
-                      onOverwriteSaveDocument={handleRequestOverwriteSave}
-                      onPrintDocument={handleRequestPrint}
-                      onPreviewDisplayModeChange={onPreviewDisplayModeChange}
-                      onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
-                      onPreviewVisibilityChange={handlePreviewVisibilityChange}
-                      onSaveDocumentAs={handleRequestSaveAs}
-                      onShowLineNumbersChange={onShowLineNumbersChange}
-                      onStartupEditModeChange={onStartupEditModeChange}
-                      onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
-                    />
+                    <MenuSection {...menuSectionProps} />
                   ) : section === "edit" ? (
                     <MarkdownInput
                       appThemeId={appThemeId}

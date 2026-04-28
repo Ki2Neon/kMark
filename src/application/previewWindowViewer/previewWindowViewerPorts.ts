@@ -3,12 +3,22 @@ export type PreviewWindowViewerSnapshot = {
   readonly fileName: string;
 };
 
+export type PreviewWindowViewerRenderedPreview = {
+  readonly html: string;
+  readonly pageHtmls: readonly string[];
+};
+
 export type PreviewWindowViewerState = {
   readonly activeSourceLine: number | null;
   readonly cursorSyncStorageKey: string | null;
   readonly instanceId: string | null;
   readonly snapshot: PreviewWindowViewerSnapshot;
   readonly snapshotStorageKey: string | null;
+};
+
+export type PreviewWindowViewerRenderer = {
+  render(content: string): string;
+  renderPages(content: string): readonly string[];
 };
 
 export type PreviewWindowViewerGateway = {

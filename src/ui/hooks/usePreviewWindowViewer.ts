@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createBrowserPreviewWindowViewerRenderer } from "../../adapters/browser/browserPreviewWindowViewerRenderer";
 import { createBrowserPreviewWindowViewerGateway } from "../../adapters/browser/browserPreviewWindowViewerGateway";
 import { PreviewWindowViewerController } from "../../application/previewWindowViewer/previewWindowViewerController";
 import { type PreviewWindowViewerSnapshot } from "../../application/previewWindowViewer/previewWindowViewerPorts";
@@ -13,6 +14,7 @@ export function usePreviewWindowViewer({ fallbackSnapshot }: UsePreviewWindowVie
   if (controllerRef.current === null) {
     controllerRef.current = new PreviewWindowViewerController({
       gateway: createBrowserPreviewWindowViewerGateway(),
+      renderer: createBrowserPreviewWindowViewerRenderer(),
     });
   }
 
@@ -47,10 +49,13 @@ export function usePreviewWindowViewer({ fallbackSnapshot }: UsePreviewWindowVie
   const handleSourceLineDoubleClick = useCallback((lineNumber: number) => {
     controller.requestEditJump(viewerState.instanceId, lineNumber);
   }, [controller, viewerState.instanceId]);
+  const renderedPreview = useMemo(() => controller.renderSnapshot(snapshot), [controller, snapshot]);
 
   return {
     activeSourceLine,
     onSourceLineDoubleClick: handleSourceLineDoubleClick,
+    previewHtml: renderedPreview.html,
+    previewPageHtmls: renderedPreview.pageHtmls,
     snapshot,
   };
 }

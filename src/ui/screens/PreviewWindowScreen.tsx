@@ -1,6 +1,4 @@
-import { useMemo } from "react";
 import { DEFAULT_FILE_NAME, DEFAULT_MARKDOWN } from "../../domain/editor";
-import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
@@ -8,20 +6,20 @@ import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { usePreviewWindowViewer } from "../hooks/usePreviewWindowViewer";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 
+const FALLBACK_PREVIEW_SNAPSHOT = {
+  content: DEFAULT_MARKDOWN,
+  fileName: DEFAULT_FILE_NAME,
+};
+
 export function PreviewWindowScreen() {
   const { previewDisplayMode } = usePreviewPreferences();
-  const fallbackSnapshot = useMemo(
-    () => ({
-      content: DEFAULT_MARKDOWN,
-      fileName: DEFAULT_FILE_NAME,
-    }),
-    [],
-  );
   const {
     activeSourceLine,
     onSourceLineDoubleClick,
+    previewHtml,
+    previewPageHtmls,
     snapshot: previewSnapshot,
-  } = usePreviewWindowViewer({ fallbackSnapshot });
+  } = usePreviewWindowViewer({ fallbackSnapshot: FALLBACK_PREVIEW_SNAPSHOT });
   const {
     contextMenuRef,
     contextMenuState,
@@ -31,9 +29,6 @@ export function PreviewWindowScreen() {
     handleZoomScaleChange,
     zoomScale,
   } = usePreviewInteraction({ displayMode: previewDisplayMode });
-
-  const previewHtml = useMemo(() => renderMarkdown(previewSnapshot.content), [previewSnapshot.content]);
-  const previewPageHtmls = useMemo(() => renderMarkdownPages(previewSnapshot.content), [previewSnapshot.content]);
 
   const normalizedFileName = previewSnapshot.fileName.trim().length > 0 ? previewSnapshot.fileName.trim() : DEFAULT_FILE_NAME;
   useWindowTitle(`${normalizedFileName} - Preview - kMark`);
