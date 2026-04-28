@@ -1,3 +1,4 @@
+import { type DesktopWorkspaceSplitGateway } from "../../application/desktopWorkspaceSplit/desktopWorkspaceSplitPorts";
 import {
   DEFAULT_DESKTOP_SPLIT_RATIO,
   MAX_DESKTOP_SPLIT_RATIO,
@@ -6,12 +7,16 @@ import {
   persistDesktopSplitRatio,
 } from "../../infra/editorLayout";
 
-export function createBrowserEditorLayoutGateway() {
+export function createBrowserEditorLayoutGateway(): DesktopWorkspaceSplitGateway {
   return {
-    defaultDesktopSplitRatio: DEFAULT_DESKTOP_SPLIT_RATIO,
-    loadDesktopSplitRatio,
-    maximumDesktopSplitRatio: MAX_DESKTOP_SPLIT_RATIO,
-    minimumDesktopSplitRatio: MIN_DESKTOP_SPLIT_RATIO,
-    persistDesktopSplitRatio,
+    defaultRatio: DEFAULT_DESKTOP_SPLIT_RATIO,
+    loadRatio() {
+      return loadDesktopSplitRatio();
+    },
+    maximumRatio: MAX_DESKTOP_SPLIT_RATIO,
+    minimumRatio: MIN_DESKTOP_SPLIT_RATIO,
+    persistRatio(splitRatio) {
+      persistDesktopSplitRatio(splitRatio);
+    },
   };
 }
