@@ -2,22 +2,10 @@ import {
   createInitialEditorState,
   ensureMarkdownExtension,
   type EditorState,
-} from "../domain/editor";
+} from "../../domain/editor";
+import { type EditorSessionAction } from "./editorSessionAction";
 
-export type EditorAction =
-  | { readonly type: "editor/contentChanged"; readonly content: string }
-  | {
-      readonly type: "editor/documentLoaded";
-      readonly fileName: string;
-      readonly content: string;
-      readonly loadedAt: number | null;
-    }
-  | { readonly type: "editor/documentReset" }
-  | { readonly type: "editor/saveSucceeded"; readonly fileName: string; readonly savedAt: number }
-  | { readonly type: "editor/errorRaised"; readonly message: string }
-  | { readonly type: "editor/errorCleared" };
-
-export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+export function editorSessionReducer(state: EditorState, action: EditorSessionAction): EditorState {
   switch (action.type) {
     case "editor/contentChanged": {
       if (state.content === action.content) {

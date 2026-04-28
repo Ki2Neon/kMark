@@ -1,57 +1,32 @@
 import {
   useCallback,
   useEffect,
-  useEffectEvent,
-  useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ChangeEvent,
-  type MouseEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
-import { selectMostRecentExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
 import { type AppFontId, type EditFontId, type EditFontSizePx, type MultiCursorModifier, type StartupEditMode } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
-import {
-  DEFAULT_DESKTOP_SPLIT_RATIO,
-  MAX_DESKTOP_SPLIT_RATIO,
-  MIN_DESKTOP_SPLIT_RATIO,
-  loadDesktopSplitRatio,
-  persistDesktopSplitRatio,
-} from "../../infra/editorLayout";
-import { syncWindowTitle } from "../../infra/windowTitle";
-import {
-  getPreviewWindowEditJumpRequestStorageKey,
-  loadPreviewWindowEditJumpRequest,
-  persistPreviewWindowActiveSourceLine,
-  persistPreviewWindowSnapshot,
-} from "../../infra/previewWindowSync";
-import { openPreviewWindow, resolveAppInstanceId } from "../../infra/previewWindow";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
+import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
+import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
+import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { useMarkdownEditorShortcuts } from "../hooks/useMarkdownEditorShortcuts";
+import { type MobileSectionId, useMobileSectionNavigation } from "../hooks/useMobileSectionNavigation";
+import { usePreviewWindowSession } from "../hooks/usePreviewWindowSession";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
+import { useWindowTitle } from "../hooks/useWindowTitle";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
-const MOBILE_SECTION_ORDER_WITH_PREVIEW = ["menu", "edit", "preview"] as const;
-const MOBILE_SECTION_ORDER_WITHOUT_PREVIEW = ["menu", "edit"] as const;
-const DESKTOP_DIVIDER_WIDTH = 8;
-const DESKTOP_MIN_PANEL_WIDTH = 180;
-const DESKTOP_SPLIT_KEYBOARD_STEP = 5;
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
-const MOBILE_SWIPE_THRESHOLD_PX = 40;
-const MOBILE_SLIDE_TRANSITION_MS = 180;
-const MOBILE_SLIDE_TRANSITION_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
-
-type MobileSectionId = "menu" | "edit" | "preview";
 
 type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
@@ -75,34 +50,8 @@ type MarkdownEditorScreenProps = {
   readonly previewUsesAppThemeColors: boolean;
 };
 
-function getMobileSectionIndex(section: MobileSectionId, sectionOrder: readonly MobileSectionId[]): number {
-  return sectionOrder.indexOf(section);
-}
-
 function getMobileSectionLabel(section: MobileSectionId): string {
   return section;
-}
-
-function toPreviewWindowErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return "プレビューウィンドウを開けませんでした。";
-}
-
-function clampDesktopSplitRatio(splitRatio: number, containerWidth: number): number {
-  if (containerWidth <= DESKTOP_MIN_PANEL_WIDTH * 2) {
-    return DEFAULT_DESKTOP_SPLIT_RATIO;
-  }
-
-  const minRatio = Math.max(
-    MIN_DESKTOP_SPLIT_RATIO,
-    (DESKTOP_MIN_PANEL_WIDTH / containerWidth) * 100,
-  );
-  const maxRatio = Math.min(MAX_DESKTOP_SPLIT_RATIO, 100 - minRatio);
-
-  return Math.min(maxRatio, Math.max(minRatio, splitRatio));
 }
 
 function detectLayoutMode(): LayoutMode {
@@ -144,11 +93,6 @@ export function MarkdownEditorScreen({
   onWindowsStartupTrayResidentChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
-  const [previewWindowInstanceId, setPreviewWindowInstanceId] = useState<string | null>(null);
-  const previewWindowEditJumpRequestStorageKey = useMemo(
-    () => (previewWindowInstanceId === null ? null : getPreviewWindowEditJumpRequestStorageKey(previewWindowInstanceId)),
-    [previewWindowInstanceId],
-  );
   const {
     isPreviewVisible,
     previewDisplayMode,
@@ -180,47 +124,62 @@ export function MarkdownEditorScreen({
   } = useMarkdownEditor(startupEditMode);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const desktopWorkspaceRef = useRef<HTMLElement | null>(null);
-  const mobileTrackRef = useRef<HTMLElement | null>(null);
-  const mobileSwipePointerIdRef = useRef<number | null>(null);
-  const mobileSwipeStartXRef = useRef<number | null>(null);
-  const mobileSwipeStartYRef = useRef<number | null>(null);
-  const mobileSwipeStartIndexRef = useRef(0);
-  const mobileSwipeAxisRef = useRef<"horizontal" | "vertical" | null>(null);
-  const mobileDragOffsetPxRef = useRef(0);
-  const mobileSectionBeforeMenuRef = useRef<Exclude<MobileSectionId, "menu">>("edit");
-  const pendingMobileSectionRef = useRef<MobileSectionId | null>(null);
   const editSelectionRequestIdRef = useRef(0);
-  const lastHandledPreviewWindowJumpRequestIdRef = useRef<number | null>(null);
-  const activeDividerPointerIdRef = useRef<number | null>(null);
-  const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
-  const desktopMenuOpenFrameRef = useRef<number | null>(null);
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
-  const [isDesktopMenuMounted, setIsDesktopMenuMounted] = useState(false);
-  const [isDesktopMenuVisible, setIsDesktopMenuVisible] = useState(false);
-  const [isDesktopResizing, setIsDesktopResizing] = useState(false);
   const [isEditFocused, setIsEditFocused] = useState(false);
-  const [isMobileDragging, setIsMobileDragging] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
   const [renderedA4PreviewPages, setRenderedA4PreviewPages] = useState<readonly RenderedA4PreviewPage[]>([]);
-  const [mobileDragOffsetPx, setMobileDragOffsetPx] = useState(0);
-  const [mobileSection, setMobileSection] = useState<MobileSectionId>("edit");
-  const [mobileViewportWidth, setMobileViewportWidth] = useState<number>(() => {
-    if (typeof window === "undefined") {
-      return 0;
-    }
-
-    return window.innerWidth;
-  });
-  const [desktopSplitRatio, setDesktopSplitRatio] = useState<number>(
-    () => loadDesktopSplitRatio() ?? DEFAULT_DESKTOP_SPLIT_RATIO,
-  );
-
-  const desktopSplitRatioRef = useRef(desktopSplitRatio);
-  const mobileSectionOrder = isPreviewVisible ? MOBILE_SECTION_ORDER_WITH_PREVIEW : MOBILE_SECTION_ORDER_WITHOUT_PREVIEW;
   const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
+  const blurActiveElement = useCallback(() => {
+    const activeElement = document.activeElement;
+
+    if (activeElement instanceof HTMLElement) {
+      activeElement.blur();
+    }
+  }, []);
+  const {
+    closeDesktopMenu,
+    closeDesktopMenuImmediately,
+    handleOverlayClick,
+    isDesktopMenuMounted,
+    isDesktopMenuVisible,
+    toggleDesktopMenu,
+  } = useDesktopMenuVisibility({ transitionMs: DESKTOP_MENU_TRANSITION_MS });
+  const {
+    desktopLayoutStyle,
+    desktopSplitRatio,
+    desktopWorkspaceRef,
+    handleDividerDoubleClick,
+    handleDividerKeyDown,
+    handleDividerPointerDown,
+    handleDividerPointerEnd,
+    handleDividerPointerMove,
+    isDesktopResizing,
+    maximumDesktopSplitRatio,
+    minimumDesktopSplitRatio,
+  } = useDesktopWorkspaceSplit({ layoutMode });
+  const {
+    dismissMobileMenu,
+    handleMobileTrackPointerDown,
+    handleMobileTrackPointerEnd,
+    handleMobileTrackPointerMove,
+    isMobileDragging,
+    mobileNavStyle,
+    mobileSection,
+    mobileSectionOrder,
+    mobileTrackInnerStyle,
+    mobileTrackRef,
+    prepareForLayoutModeChange,
+    requestMobileSection,
+    resetMobileDrag,
+  } = useMobileSectionNavigation({
+    blurActiveElement,
+    isEditFocused,
+    isPreviewVisible,
+    layoutMode,
+  });
   const isPreviewInteractionAvailable = isPreviewVisible && (layoutMode === "desktop" || mobileSection === "preview");
   const {
     contextMenuRef: previewContextMenuRef,
@@ -235,202 +194,11 @@ export function MarkdownEditorScreen({
     isAvailable: isPreviewInteractionAvailable,
   });
 
-  const mobileSectionIndex = useMemo(() => {
-    const nextIndex = getMobileSectionIndex(mobileSection, mobileSectionOrder);
-
-    return nextIndex === -1 ? getMobileSectionIndex("edit", mobileSectionOrder) : nextIndex;
-  }, [mobileSection, mobileSectionOrder]);
-
-  useEffect(() => {
-    let isDisposed = false;
-
-    void resolveAppInstanceId().then((nextInstanceId) => {
-      if (isDisposed) {
-        return;
-      }
-
-      setPreviewWindowInstanceId(nextInstanceId);
-    });
-
-    return () => {
-      isDisposed = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    desktopSplitRatioRef.current = desktopSplitRatio;
-  }, [desktopSplitRatio]);
-
-  const desktopLayoutStyle = useMemo(
-    () => ({ "--desktop-split-ratio": `${desktopSplitRatio}` } as CSSProperties),
-    [desktopSplitRatio],
-  );
-
-  const mobileTrackInnerStyle = useMemo(
-    () => ({
-      transform: `translate3d(${(-mobileSectionIndex * mobileViewportWidth) + mobileDragOffsetPx}px, 0, 0)`,
-      transitionDuration: isMobileDragging ? "0ms" : `${MOBILE_SLIDE_TRANSITION_MS}ms`,
-      transitionTimingFunction: isMobileDragging ? "linear" : MOBILE_SLIDE_TRANSITION_EASING,
-    } as CSSProperties),
-    [isMobileDragging, mobileDragOffsetPx, mobileSectionIndex, mobileViewportWidth],
-  );
-
-  const mobileNavStyle = useMemo(
-    () => ({ gridTemplateColumns: `repeat(${mobileSectionOrder.length}, minmax(0, 1fr))` } as CSSProperties),
-    [mobileSectionOrder.length],
-  );
-
-  const setDesktopSplitRatioValue = useCallback((nextRatio: number) => {
-    desktopSplitRatioRef.current = nextRatio;
-    setDesktopSplitRatio(nextRatio);
-  }, []);
-
-  const updateDesktopSplitRatioFromClientX = useCallback((clientX: number) => {
-    const workspace = desktopWorkspaceRef.current;
-
-    if (workspace === null) {
-      return;
-    }
-
-    const workspaceBounds = workspace.getBoundingClientRect();
-    const availableWidth = workspaceBounds.width - DESKTOP_DIVIDER_WIDTH;
-
-    if (availableWidth <= 0) {
-      return;
-    }
-
-    const nextRatio = clampDesktopSplitRatio(
-      ((clientX - workspaceBounds.left - DESKTOP_DIVIDER_WIDTH / 2) / availableWidth) * 100,
-      availableWidth,
-    );
-
-    setDesktopSplitRatioValue(nextRatio);
-  }, [setDesktopSplitRatioValue]);
-
-  const commitDesktopSplitRatio = useCallback((splitRatio: number) => {
-    persistDesktopSplitRatio(splitRatio);
-  }, []);
-
-  const syncMobileViewportWidth = useCallback(() => {
-    const track = mobileTrackRef.current;
-    const nextWidth = track?.clientWidth ?? (typeof window === "undefined" ? 0 : window.innerWidth);
-
-    setMobileViewportWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
-  }, []);
-
-  const clearDesktopMenuTimers = useCallback(() => {
-    if (desktopMenuCloseTimeoutRef.current !== null) {
-      window.clearTimeout(desktopMenuCloseTimeoutRef.current);
-      desktopMenuCloseTimeoutRef.current = null;
-    }
-
-    if (desktopMenuOpenFrameRef.current !== null) {
-      window.cancelAnimationFrame(desktopMenuOpenFrameRef.current);
-      desktopMenuOpenFrameRef.current = null;
-    }
-  }, []);
-
-  const closeDesktopMenuImmediately = useCallback(() => {
-    clearDesktopMenuTimers();
-    setIsDesktopMenuVisible(false);
-    setIsDesktopMenuMounted(false);
-  }, [clearDesktopMenuTimers]);
-
-  const closeDesktopMenu = useCallback(() => {
-    clearDesktopMenuTimers();
-    setIsDesktopMenuVisible(false);
-    desktopMenuCloseTimeoutRef.current = window.setTimeout(() => {
-      setIsDesktopMenuMounted(false);
-      desktopMenuCloseTimeoutRef.current = null;
-    }, DESKTOP_MENU_TRANSITION_MS);
-  }, [clearDesktopMenuTimers]);
-
-  const openDesktopMenu = useCallback(() => {
-    clearDesktopMenuTimers();
-    setIsDesktopMenuMounted(true);
-    desktopMenuOpenFrameRef.current = window.requestAnimationFrame(() => {
-      setIsDesktopMenuVisible(true);
-      desktopMenuOpenFrameRef.current = null;
-    });
-  }, [clearDesktopMenuTimers]);
-
-  const toggleDesktopMenu = useCallback(() => {
-    if (isDesktopMenuMounted && isDesktopMenuVisible) {
-      closeDesktopMenu();
-      return;
-    }
-
-    openDesktopMenu();
-  }, [closeDesktopMenu, isDesktopMenuMounted, isDesktopMenuVisible, openDesktopMenu]);
-
-  const handleViewportResize = useCallback(() => {
-    syncMobileViewportWidth();
-  }, [syncMobileViewportWidth]);
-
-  useEffect(() => {
-    window.addEventListener("resize", handleViewportResize);
-
-    return () => {
-      window.removeEventListener("resize", handleViewportResize);
-    };
-  }, [handleViewportResize]);
-
-  useEffect(() => {
-    if (layoutMode === "desktop") {
-      pendingMobileSectionRef.current = null;
-      return;
-    }
-
-    closeDesktopMenuImmediately();
-    syncMobileViewportWidth();
-    setIsMobileDragging(false);
-    setMobileDragOffsetPx(0);
-    mobileDragOffsetPxRef.current = 0;
-
-    const animationFrameId = window.requestAnimationFrame(() => {
-      const nextMobileSection = pendingMobileSectionRef.current ?? "edit";
-      pendingMobileSectionRef.current = null;
-      setMobileSection(nextMobileSection);
-    });
-
-    return () => {
-      window.cancelAnimationFrame(animationFrameId);
-    };
-  }, [closeDesktopMenuImmediately, layoutMode, syncMobileViewportWidth]);
-
-  useEffect(() => {
-    syncMobileViewportWidth();
-  }, [layoutMode, syncMobileViewportWidth]);
-
   useEffect(() => {
     if (layoutMode !== "mobile") {
       setIsEditFocused(false);
     }
   }, [layoutMode]);
-
-  useEffect(() => {
-    if (mobileSection !== "menu") {
-      mobileSectionBeforeMenuRef.current = mobileSection;
-    }
-  }, [mobileSection]);
-
-  useEffect(() => {
-    if (isPreviewVisible || mobileSection !== "preview") {
-      return;
-    }
-
-    pendingMobileSectionRef.current = "edit";
-    setIsMobileDragging(false);
-    setMobileDragOffsetPx(0);
-    mobileDragOffsetPxRef.current = 0;
-    setMobileSection("edit");
-  }, [isPreviewVisible, mobileSection]);
-
-  useEffect(() => {
-    return () => {
-      clearDesktopMenuTimers();
-    };
-  }, [clearDesktopMenuTimers]);
 
   useEffect(() => {
     if (errorMessage === null) {
@@ -446,18 +214,8 @@ export function MarkdownEditorScreen({
     };
   }, [errorMessage, handleErrorClear]);
 
-  useEffect(() => {
-    const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
-    syncWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
-  }, [fileName, isDirty]);
-
-  const blurActiveElement = useCallback(() => {
-    const activeElement = document.activeElement;
-
-    if (activeElement instanceof HTMLElement) {
-      activeElement.blur();
-    }
-  }, []);
+  const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
+  useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
 
   const handleRequestOpen = useCallback(async () => {
     if (!confirmDiscard()) {
@@ -489,21 +247,6 @@ export function MarkdownEditorScreen({
     void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
   }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode, renderedA4PreviewPages]);
 
-  const handleRequestOpenPreviewWindow = useCallback(() => {
-    if (layoutMode === "desktop") {
-      closeDesktopMenu();
-    }
-
-    void (async () => {
-      const instanceId = previewWindowInstanceId ?? await resolveAppInstanceId();
-      setPreviewWindowInstanceId((currentInstanceId) => currentInstanceId ?? instanceId);
-      persistPreviewWindowSnapshot(instanceId, { content, fileName });
-      await openPreviewWindow(instanceId);
-    })().catch((error) => {
-      handleErrorRaise(toPreviewWindowErrorMessage(error));
-    });
-  }, [closeDesktopMenu, content, fileName, handleErrorRaise, layoutMode, previewWindowInstanceId]);
-
   const handleRequestNew = useCallback(() => {
     if (!confirmDiscard()) {
       return;
@@ -523,107 +266,21 @@ export function MarkdownEditorScreen({
     [handlePickedFile],
   );
 
-  const handleMobileSectionRequest = useCallback(
-    (section: MobileSectionId) => {
-      if (!isPreviewVisible && section === "preview") {
-        return;
-      }
-
-      if (section === "menu" && mobileSection !== "menu") {
-        mobileSectionBeforeMenuRef.current = mobileSection;
-      }
-
-      if (section !== "edit") {
-        blurActiveElement();
-      }
-
-      setIsMobileDragging(false);
-      setMobileDragOffsetPx(0);
-      mobileDragOffsetPxRef.current = 0;
-      setMobileSection(section);
-    },
-    [blurActiveElement, isPreviewVisible, mobileSection],
-  );
-
-  const loadPendingExternalDocumentEvent = useEffectEvent(async (requiresDiscardConfirmation: boolean) => {
-    if (requiresDiscardConfirmation && !confirmDiscard()) {
-      await handleClearPendingExternalDocuments();
-      return;
-    }
-
-    const pendingDocuments = await handleTakePendingExternalDocuments();
-    const nextDocument = selectMostRecentExternalMarkdownDocument(pendingDocuments);
-
-    if (nextDocument === null) {
-      return;
-    }
-
-    if (layoutMode === "desktop") {
-      closeDesktopMenu();
-    } else {
-        handleMobileSectionRequest("edit");
-    }
-
-    handleLoadExternalDocument(nextDocument);
-  });
-
-  useEffect(() => {
-    void loadPendingExternalDocumentEvent(false);
-  }, [loadPendingExternalDocumentEvent]);
-
-  useEffect(() => {
-    let isDisposed = false;
-    let unlisten: (() => void) | null = null;
-
-    void subscribeToExternalDocumentRequests(() => {
-      void loadPendingExternalDocumentEvent(true);
-    }).then((nextUnlisten) => {
-      if (isDisposed) {
-        nextUnlisten();
-        return;
-      }
-
-      unlisten = nextUnlisten;
-    });
-
-    return () => {
-      isDisposed = true;
-      unlisten?.();
-    };
-  }, [loadPendingExternalDocumentEvent, subscribeToExternalDocumentRequests]);
-
   const handlePreviewVisibilityChange = useCallback((nextIsPreviewVisible: boolean) => {
     onStoredPreviewVisibilityChange(nextIsPreviewVisible);
 
     if (!nextIsPreviewVisible) {
-      setIsMobileDragging(false);
-      setMobileDragOffsetPx(0);
-      mobileDragOffsetPxRef.current = 0;
+      resetMobileDrag();
     }
-  }, [onStoredPreviewVisibilityChange]);
+  }, [onStoredPreviewVisibilityChange, resetMobileDrag]);
 
   const handleLayoutModeChange = useCallback((nextLayoutMode: LayoutMode) => {
     closeDesktopMenuImmediately();
     blurActiveElement();
     setIsEditFocused(false);
-    setIsMobileDragging(false);
-    setMobileDragOffsetPx(0);
-    mobileDragOffsetPxRef.current = 0;
-
-    if (nextLayoutMode === "mobile") {
-      pendingMobileSectionRef.current = "menu";
-      syncMobileViewportWidth();
-    }
-
+    prepareForLayoutModeChange(nextLayoutMode);
     setLayoutMode(nextLayoutMode);
-  }, [blurActiveElement, closeDesktopMenuImmediately, syncMobileViewportWidth]);
-
-  const clearMobileSwipeState = useCallback(() => {
-    mobileSwipePointerIdRef.current = null;
-    mobileSwipeStartXRef.current = null;
-    mobileSwipeStartYRef.current = null;
-    mobileSwipeAxisRef.current = null;
-  }, []);
+  }, [blurActiveElement, closeDesktopMenuImmediately, prepareForLayoutModeChange]);
 
   const handleEditFocusChange = useCallback((nextIsFocused: boolean) => {
     setIsEditFocused(nextIsFocused);
@@ -645,284 +302,45 @@ export function MarkdownEditorScreen({
     setEditSelectionRequest({ lineNumber, requestId: nextRequestId });
 
     if (layoutMode === "mobile") {
-      handleMobileSectionRequest("edit");
+      requestMobileSection("edit");
     }
-  }, [handleMobileSectionRequest, layoutMode]);
+  }, [layoutMode, requestMobileSection]);
 
-  useEffect(() => {
-    if (previewWindowInstanceId === null) {
-      return;
-    }
-
-    persistPreviewWindowActiveSourceLine(previewWindowInstanceId, previewHighlightSourceLine);
-  }, [previewHighlightSourceLine, previewWindowInstanceId]);
-
-  useEffect(() => {
-    if (previewWindowInstanceId === null) {
-      return;
-    }
-
-    persistPreviewWindowSnapshot(previewWindowInstanceId, { content, fileName });
-  }, [content, fileName, previewWindowInstanceId]);
-
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (
-        event.storageArea !== window.localStorage
-        || previewWindowInstanceId === null
-        || previewWindowEditJumpRequestStorageKey === null
-        || event.key !== previewWindowEditJumpRequestStorageKey
-      ) {
-        return;
-      }
-
-      const nextJumpRequest = loadPreviewWindowEditJumpRequest(previewWindowInstanceId);
-
-      if (
-        nextJumpRequest === null
-        || lastHandledPreviewWindowJumpRequestIdRef.current === nextJumpRequest.requestId
-      ) {
-        return;
-      }
-
-      lastHandledPreviewWindowJumpRequestIdRef.current = nextJumpRequest.requestId;
-      handlePreviewSourceLineDoubleClick(nextJumpRequest.lineNumber);
-    };
-
-    window.addEventListener("storage", handleStorage);
-
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-    };
-  }, [handlePreviewSourceLineDoubleClick, previewWindowEditJumpRequestStorageKey, previewWindowInstanceId]);
-
-  const handleMobileTrackPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (!event.isPrimary || layoutMode !== "mobile") {
-      return;
-    }
-
-    const eventTarget = event.target;
-
-    if (!(eventTarget instanceof HTMLElement)) {
-      return;
-    }
-
-    if (eventTarget.closest("button, input, select, label, a") !== null) {
-      return;
-    }
-
-    if (mobileSection === "edit" && isEditFocused) {
-      return;
-    }
-
-    mobileSwipePointerIdRef.current = event.pointerId;
-    mobileSwipeStartXRef.current = event.clientX;
-    mobileSwipeStartYRef.current = event.clientY;
-    mobileSwipeStartIndexRef.current = mobileSectionIndex;
-    mobileSwipeAxisRef.current = null;
-    mobileDragOffsetPxRef.current = 0;
-    setIsMobileDragging(false);
-    setMobileDragOffsetPx(0);
-  }, [isEditFocused, layoutMode, mobileSectionIndex]);
-
-  const handleMobileTrackPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (mobileSwipePointerIdRef.current !== event.pointerId) {
-      return;
-    }
-
-    const startX = mobileSwipeStartXRef.current;
-    const startY = mobileSwipeStartYRef.current;
-
-    if (startX === null || startY === null) {
-      return;
-    }
-
-    const deltaX = event.clientX - startX;
-    const deltaY = event.clientY - startY;
-
-    if (mobileSwipeAxisRef.current === null) {
-      if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
-        return;
-      }
-
-      if (Math.abs(deltaX) <= Math.abs(deltaY)) {
-        clearMobileSwipeState();
-        return;
-      }
-
-      mobileSwipeAxisRef.current = "horizontal";
-      if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }
-      setIsMobileDragging(true);
-    }
-
-    if (mobileSwipeAxisRef.current !== "horizontal") {
-      return;
-    }
-
-    const baseIndex = mobileSwipeStartIndexRef.current;
-    let nextOffset = deltaX;
-
-    if ((baseIndex === 0 && nextOffset > 0) || (baseIndex === mobileSectionOrder.length - 1 && nextOffset < 0)) {
-      nextOffset = 0;
-    }
-
-    mobileDragOffsetPxRef.current = nextOffset;
-    setMobileDragOffsetPx(nextOffset);
-  }, [clearMobileSwipeState, mobileSectionOrder.length]);
-
-  const handleMobileTrackPointerEnd = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      if (mobileSwipePointerIdRef.current !== event.pointerId) {
-        return;
-      }
-
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-
-      const axis = mobileSwipeAxisRef.current;
-      const baseIndex = mobileSwipeStartIndexRef.current;
-      const width = mobileViewportWidth > 0 ? mobileViewportWidth : event.currentTarget.clientWidth;
-      const currentOffset = mobileDragOffsetPxRef.current;
-
-      clearMobileSwipeState();
-      setIsMobileDragging(false);
-      setMobileDragOffsetPx(0);
-      mobileDragOffsetPxRef.current = 0;
-
-      if (axis !== "horizontal" || width <= 0) {
-        return;
-      }
-
-      const threshold = Math.max(MOBILE_SWIPE_THRESHOLD_PX, Math.min(80, width * 0.12));
-      let targetIndex = baseIndex;
-
-      if (Math.abs(currentOffset) >= threshold) {
-        targetIndex = currentOffset < 0
-          ? Math.min(baseIndex + 1, mobileSectionOrder.length - 1)
-          : Math.max(baseIndex - 1, 0);
-      }
-
-      const nextSection = mobileSectionOrder[targetIndex] ?? "edit";
-
-      if (nextSection !== "edit") {
-        blurActiveElement();
-      }
-
-      setMobileSection(nextSection);
-    },
-    [blurActiveElement, clearMobileSwipeState, mobileSectionOrder, mobileViewportWidth],
-  );
-
-  const handleOverlayClick = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
-      if (event.target === event.currentTarget) {
-        closeDesktopMenu();
-      }
-    },
-    [closeDesktopMenu],
-  );
-
-  const handleDividerPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (layoutMode !== "desktop") {
-        return;
-      }
-
-      activeDividerPointerIdRef.current = event.pointerId;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      setIsDesktopResizing(true);
-      updateDesktopSplitRatioFromClientX(event.clientX);
-    },
-    [layoutMode, updateDesktopSplitRatioFromClientX],
-  );
-
-  const handleDividerPointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (activeDividerPointerIdRef.current !== event.pointerId) {
-        return;
-      }
-
-      updateDesktopSplitRatioFromClientX(event.clientX);
-    },
-    [updateDesktopSplitRatioFromClientX],
-  );
-
-  const handleDividerPointerEnd = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (activeDividerPointerIdRef.current !== event.pointerId) {
-        return;
-      }
-
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-
-      activeDividerPointerIdRef.current = null;
-      setIsDesktopResizing(false);
-      commitDesktopSplitRatio(desktopSplitRatioRef.current);
-    },
-    [commitDesktopSplitRatio],
-  );
-
-  const handleDividerKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      const workspace = desktopWorkspaceRef.current;
-
-      if (workspace === null) {
-        return;
-      }
-
-      const availableWidth = workspace.getBoundingClientRect().width - DESKTOP_DIVIDER_WIDTH;
-
-      if (event.key === "Home") {
-        event.preventDefault();
-        const nextRatio = clampDesktopSplitRatio(MIN_DESKTOP_SPLIT_RATIO, availableWidth);
-        setDesktopSplitRatioValue(nextRatio);
-        commitDesktopSplitRatio(nextRatio);
-        return;
-      }
-
-      if (event.key === "End") {
-        event.preventDefault();
-        const nextRatio = clampDesktopSplitRatio(MAX_DESKTOP_SPLIT_RATIO, availableWidth);
-        setDesktopSplitRatioValue(nextRatio);
-        commitDesktopSplitRatio(nextRatio);
-        return;
-      }
-
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-        return;
-      }
-
-      event.preventDefault();
-
-      const delta = event.key === "ArrowLeft" ? -DESKTOP_SPLIT_KEYBOARD_STEP : DESKTOP_SPLIT_KEYBOARD_STEP;
-      const nextRatio = clampDesktopSplitRatio(desktopSplitRatioRef.current + delta, availableWidth);
-
-      setDesktopSplitRatioValue(nextRatio);
-      commitDesktopSplitRatio(nextRatio);
-    },
-    [commitDesktopSplitRatio, setDesktopSplitRatioValue],
-  );
-
-  const handleDividerDoubleClick = useCallback(() => {
-    setDesktopSplitRatioValue(DEFAULT_DESKTOP_SPLIT_RATIO);
-    commitDesktopSplitRatio(DEFAULT_DESKTOP_SPLIT_RATIO);
-  }, [commitDesktopSplitRatio, setDesktopSplitRatioValue]);
-
-  const saveDocumentEvent = useEffectEvent(() => {
-    void handleOverwriteSaveDocument();
+  const { openPreviewWindow } = usePreviewWindowSession({
+    activeSourceLine: previewHighlightSourceLine,
+    content,
+    fileName,
+    onError: handleErrorRaise,
+    onJumpToSourceLine: handlePreviewSourceLineDoubleClick,
   });
 
-  const printDocumentEvent = useEffectEvent(() => {
-    closeDesktopMenu();
-    void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
+  const handleRequestOpenPreviewWindow = useCallback(() => {
+    if (layoutMode === "desktop") {
+      closeDesktopMenu();
+    }
+
+    openPreviewWindow();
+  }, [closeDesktopMenu, layoutMode, openPreviewWindow]);
+
+  const focusExternalDocument = useCallback(() => {
+    if (layoutMode === "desktop") {
+      closeDesktopMenu();
+      return;
+    }
+
+    requestMobileSection("edit");
+  }, [closeDesktopMenu, layoutMode, requestMobileSection]);
+
+  useExternalMarkdownRequests({
+    clearPendingExternalDocuments: handleClearPendingExternalDocuments,
+    confirmDiscard,
+    onBeforeLoadExternalDocument: focusExternalDocument,
+    onLoadExternalDocument: handleLoadExternalDocument,
+    subscribeToExternalDocumentRequests,
+    takePendingExternalDocuments: handleTakePendingExternalDocuments,
   });
 
-  const openDocumentEvent = useEffectEvent(() => {
+  const handleShortcutOpenDocument = useCallback(() => {
     if (!confirmDiscard()) {
       return;
     }
@@ -937,9 +355,9 @@ export function MarkdownEditorScreen({
     }
 
     fileInputRef.current?.click();
-  });
+  }, [canOpenDocumentWithNativePicker, closeDesktopMenu, confirmDiscard, handleOpenDocumentFromPicker, layoutMode]);
 
-  const newDocumentEvent = useEffectEvent(() => {
+  const handleShortcutNewDocument = useCallback(() => {
     if (!confirmDiscard()) {
       return;
     }
@@ -949,83 +367,73 @@ export function MarkdownEditorScreen({
     }
 
     handleResetDocument();
-  });
+  }, [closeDesktopMenu, confirmDiscard, handleResetDocument, layoutMode]);
 
-  const menuToggleEvent = useEffectEvent(() => {
+  const handleShortcutMenuToggle = useCallback(() => {
     if (layoutMode === "desktop") {
       toggleDesktopMenu();
       return;
     }
 
-    handleMobileSectionRequest("menu");
-  });
+    requestMobileSection("menu");
+  }, [layoutMode, requestMobileSection, toggleDesktopMenu]);
 
-  const dismissMenuEvent = useEffectEvent(() => {
+  const handleShortcutDismissMenu = useCallback(() => {
     if (layoutMode === "desktop") {
       closeDesktopMenu();
       return;
     }
 
-    if (mobileSection !== "menu") {
-      return;
-    }
+    dismissMobileMenu();
+  }, [closeDesktopMenu, dismissMobileMenu, layoutMode]);
 
-    const previousMobileSection = !isPreviewVisible && mobileSectionBeforeMenuRef.current === "preview"
-      ? "edit"
-      : mobileSectionBeforeMenuRef.current;
-
-    handleMobileSectionRequest(previousMobileSection);
+  useMarkdownEditorShortcuts({
+    onDismissMenu: handleShortcutDismissMenu,
+    onMenuToggle: handleShortcutMenuToggle,
+    onNewDocument: handleShortcutNewDocument,
+    onOpenDocument: handleShortcutOpenDocument,
+    onPrintDocument: () => {
+      closeDesktopMenu();
+      void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
+    },
+    onSaveDocument: () => {
+      void handleOverwriteSaveDocument();
+    },
   });
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        dismissMenuEvent();
-        return;
-      }
-
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) {
-        return;
-      }
-
-      const key = event.key.toLowerCase();
-
-      if (key === "s") {
-        event.preventDefault();
-        saveDocumentEvent();
-        return;
-      }
-
-      if (key === "p") {
-        event.preventDefault();
-        printDocumentEvent();
-        return;
-      }
-
-      if (key === "b" && event.shiftKey) {
-        event.preventDefault();
-        menuToggleEvent();
-        return;
-      }
-
-      if (key === "o") {
-        event.preventDefault();
-        openDocumentEvent();
-        return;
-      }
-
-      if (key === "n") {
-        event.preventDefault();
-        newDocumentEvent();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [dismissMenuEvent, menuToggleEvent, newDocumentEvent, openDocumentEvent, printDocumentEvent, saveDocumentEvent]);
+  const menuSectionProps = {
+    appFontId,
+    appThemeId,
+    canControlWindowsStartupTrayResident,
+    editFontId,
+    editFontSizePx,
+    isPreviewVisible,
+    layoutMode,
+    multiCursorModifier,
+    onAppFontChange,
+    onAppThemeChange,
+    onEditFontChange,
+    onEditFontSizeChange,
+    onLayoutModeChange: handleLayoutModeChange,
+    onMultiCursorModifierChange,
+    onNewDocument: handleRequestNew,
+    onOpenDocument: handleRequestOpen,
+    onOpenPreviewWindow: handleRequestOpenPreviewWindow,
+    onOverwriteSaveDocument: handleRequestOverwriteSave,
+    onPreviewDisplayModeChange,
+    onPreviewUsesAppThemeColorsChange,
+    onPreviewVisibilityChange: handlePreviewVisibilityChange,
+    onPrintDocument: handleRequestPrint,
+    onSaveDocumentAs: handleRequestSaveAs,
+    onShowLineNumbersChange,
+    onStartupEditModeChange,
+    onWindowsStartupTrayResidentChange,
+    previewDisplayMode,
+    previewUsesAppThemeColors,
+    showLineNumbers,
+    startupEditMode,
+    windowsStartupTrayResidentEnabled,
+  };
 
   return (
     <main
@@ -1082,8 +490,8 @@ export function MarkdownEditorScreen({
                   role="separator"
                   aria-label="Edit と Preview の幅を調整"
                   aria-orientation="vertical"
-                  aria-valuemin={MIN_DESKTOP_SPLIT_RATIO}
-                  aria-valuemax={MAX_DESKTOP_SPLIT_RATIO}
+                  aria-valuemin={minimumDesktopSplitRatio}
+                  aria-valuemax={maximumDesktopSplitRatio}
                   aria-valuenow={Math.round(desktopSplitRatio)}
                   tabIndex={0}
                   onKeyDown={handleDividerKeyDown}
@@ -1132,39 +540,7 @@ export function MarkdownEditorScreen({
               onClick={handleOverlayClick}
             >
               <div className="editor-shell__sidebar" role="dialog" aria-modal="true" aria-label="メニュー">
-                <MenuSection
-                  appFontId={appFontId}
-                  appThemeId={appThemeId}
-                  canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
-                  editFontId={editFontId}
-                  editFontSizePx={editFontSizePx}
-                  previewDisplayMode={previewDisplayMode}
-                  previewUsesAppThemeColors={previewUsesAppThemeColors}
-                  isPreviewVisible={isPreviewVisible}
-                  layoutMode={layoutMode}
-                  multiCursorModifier={multiCursorModifier}
-                  showLineNumbers={showLineNumbers}
-                  startupEditMode={startupEditMode}
-                  windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
-                  onAppFontChange={onAppFontChange}
-                  onAppThemeChange={onAppThemeChange}
-                  onEditFontChange={onEditFontChange}
-                  onEditFontSizeChange={onEditFontSizeChange}
-                  onLayoutModeChange={handleLayoutModeChange}
-                  onMultiCursorModifierChange={onMultiCursorModifierChange}
-                  onNewDocument={handleRequestNew}
-                  onOpenPreviewWindow={handleRequestOpenPreviewWindow}
-                  onOpenDocument={handleRequestOpen}
-                  onOverwriteSaveDocument={handleRequestOverwriteSave}
-                  onPrintDocument={handleRequestPrint}
-                  onPreviewDisplayModeChange={onPreviewDisplayModeChange}
-                  onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
-                  onPreviewVisibilityChange={handlePreviewVisibilityChange}
-                  onSaveDocumentAs={handleRequestSaveAs}
-                  onShowLineNumbersChange={onShowLineNumbersChange}
-                  onStartupEditModeChange={onStartupEditModeChange}
-                  onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
-                />
+                <MenuSection {...menuSectionProps} />
               </div>
             </div>
           ) : null}
@@ -1185,39 +561,7 @@ export function MarkdownEditorScreen({
               {mobileSectionOrder.map((section) => (
                 <div key={section} className="editor-shell__mobile-slide">
                   {section === "menu" ? (
-                    <MenuSection
-                      appFontId={appFontId}
-                      appThemeId={appThemeId}
-                      canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
-                      editFontId={editFontId}
-                      editFontSizePx={editFontSizePx}
-                      previewDisplayMode={previewDisplayMode}
-                      previewUsesAppThemeColors={previewUsesAppThemeColors}
-                      isPreviewVisible={isPreviewVisible}
-                      layoutMode={layoutMode}
-                      multiCursorModifier={multiCursorModifier}
-                      showLineNumbers={showLineNumbers}
-                      startupEditMode={startupEditMode}
-                      windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
-                      onAppFontChange={onAppFontChange}
-                      onAppThemeChange={onAppThemeChange}
-                      onEditFontChange={onEditFontChange}
-                      onEditFontSizeChange={onEditFontSizeChange}
-                      onLayoutModeChange={handleLayoutModeChange}
-                      onMultiCursorModifierChange={onMultiCursorModifierChange}
-                      onNewDocument={handleRequestNew}
-                      onOpenPreviewWindow={handleRequestOpenPreviewWindow}
-                      onOpenDocument={handleRequestOpen}
-                      onOverwriteSaveDocument={handleRequestOverwriteSave}
-                      onPrintDocument={handleRequestPrint}
-                      onPreviewDisplayModeChange={onPreviewDisplayModeChange}
-                      onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
-                      onPreviewVisibilityChange={handlePreviewVisibilityChange}
-                      onSaveDocumentAs={handleRequestSaveAs}
-                      onShowLineNumbersChange={onShowLineNumbersChange}
-                      onStartupEditModeChange={onStartupEditModeChange}
-                      onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
-                    />
+                    <MenuSection {...menuSectionProps} />
                   ) : section === "edit" ? (
                     <MarkdownInput
                       appThemeId={appThemeId}
@@ -1258,7 +602,7 @@ export function MarkdownEditorScreen({
                 key={section}
                 type="button"
                 className={mobileSection === section ? "is-active" : undefined}
-                onClick={() => handleMobileSectionRequest(section)}
+                onClick={() => requestMobileSection(section)}
               >
                 {getMobileSectionLabel(section)}
               </button>

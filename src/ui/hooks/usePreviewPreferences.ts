@@ -1,21 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createBrowserAppInstanceGateway } from "../../adapters/browser/browserAppInstanceGateway";
+import { createBrowserPreviewPreferencesGateway } from "../../adapters/browser/browserPreviewPreferencesGateway";
+import { PreviewPreferencesController } from "../../application/previewPreferences/previewPreferencesController";
 import { type PreviewDisplayMode, type PreviewPreferences } from "../../domain/preview";
-import {
-  APP_INSTANCE_PRESENCE_HEARTBEAT_MS,
-  PREVIEW_PREFERENCES_STORAGE_KEY,
-  countActiveAppInstances,
-  getInstancePreviewVisibilityStorageKey,
-  isAppInstancePresenceStorageKey,
-  loadInstancePreviewVisibility,
-  loadPreviewPreferences,
-  persistInstancePreviewVisibility,
-  persistPreviewDisplayMode,
-  persistPreviewPreferences,
-  persistSingletonPreviewVisibility,
-  removeAppInstancePresence,
-  touchAppInstancePresence,
-} from "../../infra/previewPreferences";
-import { resolveAppInstanceId } from "../../infra/previewWindow";
 
 type UsePreviewPreferencesOptions = {
   readonly manageVisibilityByAppInstance?: boolean;
@@ -23,7 +10,17 @@ type UsePreviewPreferencesOptions = {
 
 export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}) {
   const { manageVisibilityByAppInstance = false } = options;
-  const [previewPreferences, setPreviewPreferences] = useState<PreviewPreferences>(() => loadPreviewPreferences());
+  const controllerRef = useRef<PreviewPreferencesController | null>(null);
+
+  if (controllerRef.current === null) {
+    controllerRef.current = new PreviewPreferencesController({
+      appInstanceGateway: createBrowserAppInstanceGateway(),
+      preferencesGateway: createBrowserPreviewPreferencesGateway(),
+    });
+  }
+
+  const controller = controllerRef.current;
+  const [previewPreferences, setPreviewPreferences] = useState<PreviewPreferences>(() => controller.createState());
   const [appInstanceId, setAppInstanceId] = useState<string | null>(null);
   const previewVisibilityRef = useRef(previewPreferences.isPreviewVisible);
 
@@ -38,7 +35,7 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
 
     let isDisposed = false;
 
-    void resolveAppInstanceId().then((nextAppInstanceId) => {
+    void controller.resolveAppInstanceId(manageVisibilityByAppInstance).then((nextAppInstanceId) => {
       if (isDisposed) {
         return;
       }
@@ -49,40 +46,21 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
     return () => {
       isDisposed = true;
     };
-  }, [manageVisibilityByAppInstance]);
+  }, [controller, manageVisibilityByAppInstance]);
 
   useEffect(() => {
-    if (manageVisibilityByAppInstance) {
-      persistPreviewDisplayMode(previewPreferences.previewDisplayMode);
-      return;
-    }
-
-    persistPreviewPreferences(previewPreferences);
-  }, [manageVisibilityByAppInstance, previewPreferences]);
+    controller.persist(previewPreferences, manageVisibilityByAppInstance);
+  }, [controller, manageVisibilityByAppInstance, previewPreferences]);
 
   useEffect(() => {
     if (!manageVisibilityByAppInstance || appInstanceId === null) {
       return;
     }
 
-    setPreviewPreferences((currentPreviewPreferences) => {
-      const storedInstancePreviewVisibility = loadInstancePreviewVisibility(appInstanceId);
-
-      if (storedInstancePreviewVisibility === null) {
-        persistInstancePreviewVisibility(appInstanceId, currentPreviewPreferences.isPreviewVisible);
-        return currentPreviewPreferences;
-      }
-
-      if (currentPreviewPreferences.isPreviewVisible === storedInstancePreviewVisibility) {
-        return currentPreviewPreferences;
-      }
-
-      return {
-        ...currentPreviewPreferences,
-        isPreviewVisible: storedInstancePreviewVisibility,
-      };
-    });
-  }, [appInstanceId, manageVisibilityByAppInstance]);
+    setPreviewPreferences((currentPreviewPreferences) => (
+      controller.syncManagedPreviewVisibility(currentPreviewPreferences, appInstanceId)
+    ));
+  }, [appInstanceId, controller, manageVisibilityByAppInstance]);
 
   useEffect(() => {
     if (!manageVisibilityByAppInstance || appInstanceId === null) {
@@ -90,34 +68,26 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
     }
 
     const syncPresence = () => {
-      const activeAppInstanceCount = touchAppInstancePresence(appInstanceId);
-
-      if (activeAppInstanceCount <= 1) {
-        persistSingletonPreviewVisibility(previewVisibilityRef.current);
-      }
+      controller.syncPresence(appInstanceId, previewVisibilityRef.current);
     };
 
     syncPresence();
 
-    const intervalId = window.setInterval(syncPresence, APP_INSTANCE_PRESENCE_HEARTBEAT_MS);
+    const intervalId = window.setInterval(syncPresence, controller.getAppInstancePresenceHeartbeatMs());
 
     return () => {
       window.clearInterval(intervalId);
-      removeAppInstancePresence(appInstanceId);
+      controller.cleanupPresence(appInstanceId);
     };
-  }, [appInstanceId, manageVisibilityByAppInstance]);
+  }, [appInstanceId, controller, manageVisibilityByAppInstance]);
 
   useEffect(() => {
     if (!manageVisibilityByAppInstance || appInstanceId === null) {
       return;
     }
 
-    persistInstancePreviewVisibility(appInstanceId, previewPreferences.isPreviewVisible);
-
-    if (countActiveAppInstances() <= 1) {
-      persistSingletonPreviewVisibility(previewPreferences.isPreviewVisible);
-    }
-  }, [appInstanceId, manageVisibilityByAppInstance, previewPreferences.isPreviewVisible]);
+    controller.persistManagedVisibility(appInstanceId, previewPreferences.isPreviewVisible);
+  }, [appInstanceId, controller, manageVisibilityByAppInstance, previewPreferences.isPreviewVisible]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -125,52 +95,14 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
         return;
       }
 
-      if (event.key === PREVIEW_PREFERENCES_STORAGE_KEY) {
-        const nextPreviewPreferences = loadPreviewPreferences();
-
-        setPreviewPreferences((currentPreviewPreferences) => {
-          const nextIsPreviewVisible = manageVisibilityByAppInstance
-            ? currentPreviewPreferences.isPreviewVisible
-            : nextPreviewPreferences.isPreviewVisible;
-
-          return currentPreviewPreferences.previewDisplayMode === nextPreviewPreferences.previewDisplayMode
-            && currentPreviewPreferences.isPreviewVisible === nextIsPreviewVisible
-            ? currentPreviewPreferences
-            : {
-              previewDisplayMode: nextPreviewPreferences.previewDisplayMode,
-              isPreviewVisible: nextIsPreviewVisible,
-            };
-        });
-
-        return;
-      }
-
-      if (manageVisibilityByAppInstance && appInstanceId !== null) {
-        const instancePreviewVisibilityStorageKey = getInstancePreviewVisibilityStorageKey(appInstanceId);
-
-        if (event.key === instancePreviewVisibilityStorageKey) {
-          const nextInstancePreviewVisibility = loadInstancePreviewVisibility(appInstanceId);
-
-          if (nextInstancePreviewVisibility !== null) {
-            setPreviewPreferences((currentPreviewPreferences) => (
-              currentPreviewPreferences.isPreviewVisible === nextInstancePreviewVisibility
-                ? currentPreviewPreferences
-                : {
-                  ...currentPreviewPreferences,
-                  isPreviewVisible: nextInstancePreviewVisibility,
-                }
-            ));
-          }
-
-          return;
-        }
-
-        if (event.key === null || isAppInstancePresenceStorageKey(event.key)) {
-          if (countActiveAppInstances() <= 1) {
-            persistSingletonPreviewVisibility(previewVisibilityRef.current);
-          }
-        }
-      }
+      setPreviewPreferences((currentPreviewPreferences) => (
+        controller.handleStorageChange({
+          appInstanceId,
+          currentPreviewPreferences,
+          key: event.key,
+          manageVisibilityByAppInstance,
+        }) ?? currentPreviewPreferences
+      ));
     };
 
     window.addEventListener("storage", handleStorage);
@@ -178,33 +110,19 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
     return () => {
       window.removeEventListener("storage", handleStorage);
     };
-  }, [appInstanceId, manageVisibilityByAppInstance]);
+  }, [appInstanceId, controller, manageVisibilityByAppInstance]);
 
   const handlePreviewDisplayModeChange = useCallback((previewDisplayMode: PreviewDisplayMode) => {
-    setPreviewPreferences((currentPreviewPreferences) => {
-      if (currentPreviewPreferences.previewDisplayMode === previewDisplayMode) {
-        return currentPreviewPreferences;
-      }
-
-      return {
-        ...currentPreviewPreferences,
-        previewDisplayMode,
-      };
-    });
-  }, []);
+    setPreviewPreferences((currentPreviewPreferences) => (
+      controller.changePreviewDisplayMode(currentPreviewPreferences, previewDisplayMode)
+    ));
+  }, [controller]);
 
   const handlePreviewVisibilityChange = useCallback((isPreviewVisible: boolean) => {
-    setPreviewPreferences((currentPreviewPreferences) => {
-      if (currentPreviewPreferences.isPreviewVisible === isPreviewVisible) {
-        return currentPreviewPreferences;
-      }
-
-      return {
-        ...currentPreviewPreferences,
-        isPreviewVisible,
-      };
-    });
-  }, []);
+    setPreviewPreferences((currentPreviewPreferences) => (
+      controller.changePreviewVisibility(currentPreviewPreferences, isPreviewVisible)
+    ));
+  }, [controller]);
 
   return {
     isPreviewVisible: previewPreferences.isPreviewVisible,

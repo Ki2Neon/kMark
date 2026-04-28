@@ -1,0 +1,12 @@
+export type EditorSessionAction =
+  | { readonly type: "editor/contentChanged"; readonly content: string }
+  | {
+      readonly type: "editor/documentLoaded";
+      readonly fileName: string;
+      readonly content: string;
+      readonly loadedAt: number | null;
+    }
+  | { readonly type: "editor/documentReset" }
+  | { readonly type: "editor/saveSucceeded"; readonly fileName: string; readonly savedAt: number }
+  | { readonly type: "editor/errorRaised"; readonly message: string }
+  | { readonly type: "editor/errorCleared" };

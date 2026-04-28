@@ -307,6 +307,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_instance::current_app_instance_id,
             commands::file_open::clear_pending_markdown_open_requests,
+            commands::markdown_render::render_markdown_preview,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,
         ]);

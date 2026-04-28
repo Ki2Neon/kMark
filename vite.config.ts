@@ -7,6 +7,23 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("@uiw/react-codemirror")) {
+            return "codemirror-react";
+          }
+
+          if (id.includes("markdown-it") || id.includes("dompurify")) {
+            return "markdown";
+          }
+
+          return undefined;
+        },
+      },
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

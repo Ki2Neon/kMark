@@ -1,18 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createBrowserEditorPreferencesGateway } from "../../adapters/browser/browserEditorPreferencesGateway";
+import { createBrowserWindowsStartupTrayResidentGateway } from "../../adapters/browser/browserWindowsStartupTrayResidentGateway";
+import { EditorPreferencesController } from "../../application/editorPreferences/editorPreferencesController";
 import {
   type AppFontId,
-  clampEditFontSizePx,
   type EditFontId,
   type EditFontSizePx,
   type EditorPreferences,
   type MultiCursorModifier,
   type StartupEditMode,
 } from "../../domain/editorPreferences";
-import { loadEditorPreferences, persistEditorPreferences } from "../../infra/editorPreferences";
-import {
-  supportsWindowsStartupTrayResidentToggle,
-  syncWindowsStartupTrayResidentPreference,
-} from "../../infra/windowsStartupTrayResident";
 
 type UseEditorPreferencesOptions = {
   readonly syncWindowsStartupTrayResident?: boolean;
@@ -20,114 +17,68 @@ type UseEditorPreferencesOptions = {
 
 export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) {
   const { syncWindowsStartupTrayResident = true } = options;
-  const [editorPreferences, setEditorPreferences] = useState<EditorPreferences>(() => loadEditorPreferences());
+  const controllerRef = useRef<EditorPreferencesController | null>(null);
+
+  if (controllerRef.current === null) {
+    controllerRef.current = new EditorPreferencesController({
+      preferencesGateway: createBrowserEditorPreferencesGateway(),
+      windowsStartupTrayResidentGateway: createBrowserWindowsStartupTrayResidentGateway(),
+    });
+  }
+
+  const controller = controllerRef.current;
+  const [editorPreferences, setEditorPreferences] = useState<EditorPreferences>(() => controller.createState());
   const canControlWindowsStartupTrayResident =
-    syncWindowsStartupTrayResident && supportsWindowsStartupTrayResidentToggle();
+    controller.canControlWindowsStartupTrayResident(syncWindowsStartupTrayResident);
 
   useEffect(() => {
-    persistEditorPreferences(editorPreferences);
-  }, [editorPreferences]);
+    controller.persist(editorPreferences);
+  }, [controller, editorPreferences]);
 
   useEffect(() => {
-    if (!canControlWindowsStartupTrayResident) {
-      return;
-    }
-
-    void syncWindowsStartupTrayResidentPreference(editorPreferences.windowsStartupTrayResidentEnabled);
-  }, [canControlWindowsStartupTrayResident, editorPreferences.windowsStartupTrayResidentEnabled]);
+    void controller.syncWindowsStartupTrayResidentPreference(
+      editorPreferences.windowsStartupTrayResidentEnabled,
+      canControlWindowsStartupTrayResident,
+    );
+  }, [canControlWindowsStartupTrayResident, controller, editorPreferences.windowsStartupTrayResidentEnabled]);
 
   const handleMultiCursorModifierChange = useCallback((multiCursorModifier: MultiCursorModifier) => {
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.multiCursorModifier === multiCursorModifier) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        multiCursorModifier,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => (
+      controller.changeMultiCursorModifier(currentPreferences, multiCursorModifier)
+    ));
+  }, [controller]);
 
   const handleAppFontChange = useCallback((appFontId: AppFontId) => {
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.appFontId === appFontId) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        appFontId,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => controller.changeAppFont(currentPreferences, appFontId));
+  }, [controller]);
 
   const handleEditFontChange = useCallback((editFontId: EditFontId) => {
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.editFontId === editFontId) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        editFontId,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => controller.changeEditFont(currentPreferences, editFontId));
+  }, [controller]);
 
   const handleEditFontSizeChange = useCallback((editFontSizePx: EditFontSizePx) => {
-    const nextEditFontSizePx = clampEditFontSizePx(editFontSizePx);
-
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.editFontSizePx === nextEditFontSizePx) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        editFontSizePx: nextEditFontSizePx,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => (
+      controller.changeEditFontSize(currentPreferences, editFontSizePx)
+    ));
+  }, [controller]);
 
   const handleShowLineNumbersChange = useCallback((showLineNumbers: boolean) => {
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.showLineNumbers === showLineNumbers) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        showLineNumbers,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => (
+      controller.changeShowLineNumbers(currentPreferences, showLineNumbers)
+    ));
+  }, [controller]);
 
   const handleStartupEditModeChange = useCallback((startupEditMode: StartupEditMode) => {
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.startupEditMode === startupEditMode) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        startupEditMode,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => (
+      controller.changeStartupEditMode(currentPreferences, startupEditMode)
+    ));
+  }, [controller]);
 
   const handleWindowsStartupTrayResidentChange = useCallback((windowsStartupTrayResidentEnabled: boolean) => {
-    setEditorPreferences((currentPreferences) => {
-      if (currentPreferences.windowsStartupTrayResidentEnabled === windowsStartupTrayResidentEnabled) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        windowsStartupTrayResidentEnabled,
-      };
-    });
-  }, []);
+    setEditorPreferences((currentPreferences) => (
+      controller.changeWindowsStartupTrayResident(currentPreferences, windowsStartupTrayResidentEnabled)
+    ));
+  }, [controller]);
 
   return {
     appFontId: editorPreferences.appFontId,

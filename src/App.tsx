@@ -1,14 +1,12 @@
-import { useLayoutEffect } from "react";
 import "./App.css";
-import { resolveAppFontFamily, resolveEditFontFamily } from "./domain/editorPreferences";
-import { isPreviewWindowMode } from "./infra/previewWindow";
 import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
+import { useAppMode, useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
 import { PreviewWindowScreen } from "./ui/screens/PreviewWindowScreen";
 
 function App() {
-  const previewWindowMode = isPreviewWindowMode();
+  const { previewWindowMode } = useAppMode();
   const {
     appThemeId,
     previewUsesAppThemeColors,
@@ -32,14 +30,13 @@ function App() {
     onStartupEditModeChange,
     onWindowsStartupTrayResidentChange,
   } = useEditorPreferences({ syncWindowsStartupTrayResident: !previewWindowMode });
-
-  useLayoutEffect(() => {
-    document.documentElement.dataset.appTheme = appThemeId;
-    document.documentElement.dataset.previewColors = previewUsesAppThemeColors ? "app" : "fixed";
-    document.documentElement.style.setProperty("--app-font-family", resolveAppFontFamily(appFontId));
-    document.documentElement.style.setProperty("--edit-font-family", resolveEditFontFamily(editFontId));
-    document.documentElement.style.setProperty("--edit-font-size", `${editFontSizePx}px`);
-  }, [appFontId, appThemeId, editFontId, editFontSizePx, previewUsesAppThemeColors]);
+  useAppShell({
+    appFontId,
+    appThemeId,
+    editFontId,
+    editFontSizePx,
+    previewUsesAppThemeColors,
+  });
 
   if (previewWindowMode) {
     return <PreviewWindowScreen />;
