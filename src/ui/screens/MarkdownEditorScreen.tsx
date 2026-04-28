@@ -11,7 +11,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { selectMostRecentExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
 import { type AppFontId, type EditFontId, type EditFontSizePx, type MultiCursorModifier, type StartupEditMode } from "../../domain/editorPreferences";
@@ -23,21 +22,16 @@ import {
   loadDesktopSplitRatio,
   persistDesktopSplitRatio,
 } from "../../infra/editorLayout";
-import { syncWindowTitle } from "../../infra/windowTitle";
-import {
-  getPreviewWindowEditJumpRequestStorageKey,
-  loadPreviewWindowEditJumpRequest,
-  persistPreviewWindowActiveSourceLine,
-  persistPreviewWindowSnapshot,
-} from "../../infra/previewWindowSync";
-import { openPreviewWindow, resolveAppInstanceId } from "../../infra/previewWindow";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
+import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { usePreviewWindowSession } from "../hooks/usePreviewWindowSession";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
+import { useWindowTitle } from "../hooks/useWindowTitle";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const MOBILE_SECTION_ORDER_WITH_PREVIEW = ["menu", "edit", "preview"] as const;
@@ -81,14 +75,6 @@ function getMobileSectionIndex(section: MobileSectionId, sectionOrder: readonly 
 
 function getMobileSectionLabel(section: MobileSectionId): string {
   return section;
-}
-
-function toPreviewWindowErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return "プレビューウィンドウを開けませんでした。";
 }
 
 function clampDesktopSplitRatio(splitRatio: number, containerWidth: number): number {
@@ -144,11 +130,6 @@ export function MarkdownEditorScreen({
   onWindowsStartupTrayResidentChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
-  const [previewWindowInstanceId, setPreviewWindowInstanceId] = useState<string | null>(null);
-  const previewWindowEditJumpRequestStorageKey = useMemo(
-    () => (previewWindowInstanceId === null ? null : getPreviewWindowEditJumpRequestStorageKey(previewWindowInstanceId)),
-    [previewWindowInstanceId],
-  );
   const {
     isPreviewVisible,
     previewDisplayMode,
@@ -191,7 +172,6 @@ export function MarkdownEditorScreen({
   const mobileSectionBeforeMenuRef = useRef<Exclude<MobileSectionId, "menu">>("edit");
   const pendingMobileSectionRef = useRef<MobileSectionId | null>(null);
   const editSelectionRequestIdRef = useRef(0);
-  const lastHandledPreviewWindowJumpRequestIdRef = useRef<number | null>(null);
   const activeDividerPointerIdRef = useRef<number | null>(null);
   const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
   const desktopMenuOpenFrameRef = useRef<number | null>(null);
@@ -240,22 +220,6 @@ export function MarkdownEditorScreen({
 
     return nextIndex === -1 ? getMobileSectionIndex("edit", mobileSectionOrder) : nextIndex;
   }, [mobileSection, mobileSectionOrder]);
-
-  useEffect(() => {
-    let isDisposed = false;
-
-    void resolveAppInstanceId().then((nextInstanceId) => {
-      if (isDisposed) {
-        return;
-      }
-
-      setPreviewWindowInstanceId(nextInstanceId);
-    });
-
-    return () => {
-      isDisposed = true;
-    };
-  }, []);
 
   useEffect(() => {
     desktopSplitRatioRef.current = desktopSplitRatio;
@@ -446,10 +410,8 @@ export function MarkdownEditorScreen({
     };
   }, [errorMessage, handleErrorClear]);
 
-  useEffect(() => {
-    const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
-    syncWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
-  }, [fileName, isDirty]);
+  const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
+  useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
 
   const blurActiveElement = useCallback(() => {
     const activeElement = document.activeElement;
@@ -488,21 +450,6 @@ export function MarkdownEditorScreen({
     closeDesktopMenu();
     void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
   }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode, renderedA4PreviewPages]);
-
-  const handleRequestOpenPreviewWindow = useCallback(() => {
-    if (layoutMode === "desktop") {
-      closeDesktopMenu();
-    }
-
-    void (async () => {
-      const instanceId = previewWindowInstanceId ?? await resolveAppInstanceId();
-      setPreviewWindowInstanceId((currentInstanceId) => currentInstanceId ?? instanceId);
-      persistPreviewWindowSnapshot(instanceId, { content, fileName });
-      await openPreviewWindow(instanceId);
-    })().catch((error) => {
-      handleErrorRaise(toPreviewWindowErrorMessage(error));
-    });
-  }, [closeDesktopMenu, content, fileName, handleErrorRaise, layoutMode, previewWindowInstanceId]);
 
   const handleRequestNew = useCallback(() => {
     if (!confirmDiscard()) {
@@ -544,53 +491,6 @@ export function MarkdownEditorScreen({
     },
     [blurActiveElement, isPreviewVisible, mobileSection],
   );
-
-  const loadPendingExternalDocumentEvent = useEffectEvent(async (requiresDiscardConfirmation: boolean) => {
-    if (requiresDiscardConfirmation && !confirmDiscard()) {
-      await handleClearPendingExternalDocuments();
-      return;
-    }
-
-    const pendingDocuments = await handleTakePendingExternalDocuments();
-    const nextDocument = selectMostRecentExternalMarkdownDocument(pendingDocuments);
-
-    if (nextDocument === null) {
-      return;
-    }
-
-    if (layoutMode === "desktop") {
-      closeDesktopMenu();
-    } else {
-        handleMobileSectionRequest("edit");
-    }
-
-    handleLoadExternalDocument(nextDocument);
-  });
-
-  useEffect(() => {
-    void loadPendingExternalDocumentEvent(false);
-  }, [loadPendingExternalDocumentEvent]);
-
-  useEffect(() => {
-    let isDisposed = false;
-    let unlisten: (() => void) | null = null;
-
-    void subscribeToExternalDocumentRequests(() => {
-      void loadPendingExternalDocumentEvent(true);
-    }).then((nextUnlisten) => {
-      if (isDisposed) {
-        nextUnlisten();
-        return;
-      }
-
-      unlisten = nextUnlisten;
-    });
-
-    return () => {
-      isDisposed = true;
-      unlisten?.();
-    };
-  }, [loadPendingExternalDocumentEvent, subscribeToExternalDocumentRequests]);
 
   const handlePreviewVisibilityChange = useCallback((nextIsPreviewVisible: boolean) => {
     onStoredPreviewVisibilityChange(nextIsPreviewVisible);
@@ -649,52 +549,39 @@ export function MarkdownEditorScreen({
     }
   }, [handleMobileSectionRequest, layoutMode]);
 
-  useEffect(() => {
-    if (previewWindowInstanceId === null) {
+  const { openPreviewWindow } = usePreviewWindowSession({
+    activeSourceLine: previewHighlightSourceLine,
+    content,
+    fileName,
+    onError: handleErrorRaise,
+    onJumpToSourceLine: handlePreviewSourceLineDoubleClick,
+  });
+
+  const handleRequestOpenPreviewWindow = useCallback(() => {
+    if (layoutMode === "desktop") {
+      closeDesktopMenu();
+    }
+
+    openPreviewWindow();
+  }, [closeDesktopMenu, layoutMode, openPreviewWindow]);
+
+  const focusExternalDocument = useCallback(() => {
+    if (layoutMode === "desktop") {
+      closeDesktopMenu();
       return;
     }
 
-    persistPreviewWindowActiveSourceLine(previewWindowInstanceId, previewHighlightSourceLine);
-  }, [previewHighlightSourceLine, previewWindowInstanceId]);
+    handleMobileSectionRequest("edit");
+  }, [closeDesktopMenu, handleMobileSectionRequest, layoutMode]);
 
-  useEffect(() => {
-    if (previewWindowInstanceId === null) {
-      return;
-    }
-
-    persistPreviewWindowSnapshot(previewWindowInstanceId, { content, fileName });
-  }, [content, fileName, previewWindowInstanceId]);
-
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (
-        event.storageArea !== window.localStorage
-        || previewWindowInstanceId === null
-        || previewWindowEditJumpRequestStorageKey === null
-        || event.key !== previewWindowEditJumpRequestStorageKey
-      ) {
-        return;
-      }
-
-      const nextJumpRequest = loadPreviewWindowEditJumpRequest(previewWindowInstanceId);
-
-      if (
-        nextJumpRequest === null
-        || lastHandledPreviewWindowJumpRequestIdRef.current === nextJumpRequest.requestId
-      ) {
-        return;
-      }
-
-      lastHandledPreviewWindowJumpRequestIdRef.current = nextJumpRequest.requestId;
-      handlePreviewSourceLineDoubleClick(nextJumpRequest.lineNumber);
-    };
-
-    window.addEventListener("storage", handleStorage);
-
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-    };
-  }, [handlePreviewSourceLineDoubleClick, previewWindowEditJumpRequestStorageKey, previewWindowInstanceId]);
+  useExternalMarkdownRequests({
+    clearPendingExternalDocuments: handleClearPendingExternalDocuments,
+    confirmDiscard,
+    onBeforeLoadExternalDocument: focusExternalDocument,
+    onLoadExternalDocument: handleLoadExternalDocument,
+    subscribeToExternalDocumentRequests,
+    takePendingExternalDocuments: handleTakePendingExternalDocuments,
+  });
 
   const handleMobileTrackPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (!event.isPrimary || layoutMode !== "mobile") {

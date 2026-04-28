@@ -9,11 +9,11 @@ import {
   requestPreviewWindowEditJump,
 } from "../../infra/previewWindowSync";
 import { resolvePreviewWindowInstanceId } from "../../infra/previewWindow";
-import { syncWindowTitle } from "../../infra/windowTitle";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
+import { useWindowTitle } from "../hooks/useWindowTitle";
 
 type PreviewSnapshot = {
   readonly content: string;
@@ -99,11 +99,8 @@ export function PreviewWindowScreen() {
     requestPreviewWindowEditJump(previewWindowInstanceId, lineNumber);
   }, [previewWindowInstanceId]);
 
-  useEffect(() => {
-    const normalizedFileName = previewSnapshot.fileName.trim().length > 0 ? previewSnapshot.fileName.trim() : DEFAULT_FILE_NAME;
-
-    syncWindowTitle(`${normalizedFileName} - Preview - kMark`);
-  }, [previewSnapshot.fileName]);
+  const normalizedFileName = previewSnapshot.fileName.trim().length > 0 ? previewSnapshot.fileName.trim() : DEFAULT_FILE_NAME;
+  useWindowTitle(`${normalizedFileName} - Preview - kMark`);
 
   return (
     <main className="editor-shell preview-window">
