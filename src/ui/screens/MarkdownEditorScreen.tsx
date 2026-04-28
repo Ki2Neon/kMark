@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -28,6 +27,7 @@ import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { useMarkdownEditorShortcuts } from "../hooks/useMarkdownEditorShortcuts";
 import { usePreviewWindowSession } from "../hooks/usePreviewWindowSession";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
@@ -800,16 +800,7 @@ export function MarkdownEditorScreen({
     commitDesktopSplitRatio(DEFAULT_DESKTOP_SPLIT_RATIO);
   }, [commitDesktopSplitRatio, setDesktopSplitRatioValue]);
 
-  const saveDocumentEvent = useEffectEvent(() => {
-    void handleOverwriteSaveDocument();
-  });
-
-  const printDocumentEvent = useEffectEvent(() => {
-    closeDesktopMenu();
-    void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
-  });
-
-  const openDocumentEvent = useEffectEvent(() => {
+  const handleShortcutOpenDocument = useCallback(() => {
     if (!confirmDiscard()) {
       return;
     }
@@ -824,9 +815,9 @@ export function MarkdownEditorScreen({
     }
 
     fileInputRef.current?.click();
-  });
+  }, [canOpenDocumentWithNativePicker, closeDesktopMenu, confirmDiscard, handleOpenDocumentFromPicker, layoutMode]);
 
-  const newDocumentEvent = useEffectEvent(() => {
+  const handleShortcutNewDocument = useCallback(() => {
     if (!confirmDiscard()) {
       return;
     }
@@ -836,18 +827,18 @@ export function MarkdownEditorScreen({
     }
 
     handleResetDocument();
-  });
+  }, [closeDesktopMenu, confirmDiscard, handleResetDocument, layoutMode]);
 
-  const menuToggleEvent = useEffectEvent(() => {
+  const handleShortcutMenuToggle = useCallback(() => {
     if (layoutMode === "desktop") {
       toggleDesktopMenu();
       return;
     }
 
     handleMobileSectionRequest("menu");
-  });
+  }, [handleMobileSectionRequest, layoutMode, toggleDesktopMenu]);
 
-  const dismissMenuEvent = useEffectEvent(() => {
+  const handleShortcutDismissMenu = useCallback(() => {
     if (layoutMode === "desktop") {
       closeDesktopMenu();
       return;
@@ -862,57 +853,21 @@ export function MarkdownEditorScreen({
       : mobileSectionBeforeMenuRef.current;
 
     handleMobileSectionRequest(previousMobileSection);
+  }, [closeDesktopMenu, handleMobileSectionRequest, isPreviewVisible, layoutMode, mobileSection]);
+
+  useMarkdownEditorShortcuts({
+    onDismissMenu: handleShortcutDismissMenu,
+    onMenuToggle: handleShortcutMenuToggle,
+    onNewDocument: handleShortcutNewDocument,
+    onOpenDocument: handleShortcutOpenDocument,
+    onPrintDocument: () => {
+      closeDesktopMenu();
+      void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
+    },
+    onSaveDocument: () => {
+      void handleOverwriteSaveDocument();
+    },
   });
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        dismissMenuEvent();
-        return;
-      }
-
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) {
-        return;
-      }
-
-      const key = event.key.toLowerCase();
-
-      if (key === "s") {
-        event.preventDefault();
-        saveDocumentEvent();
-        return;
-      }
-
-      if (key === "p") {
-        event.preventDefault();
-        printDocumentEvent();
-        return;
-      }
-
-      if (key === "b" && event.shiftKey) {
-        event.preventDefault();
-        menuToggleEvent();
-        return;
-      }
-
-      if (key === "o") {
-        event.preventDefault();
-        openDocumentEvent();
-        return;
-      }
-
-      if (key === "n") {
-        event.preventDefault();
-        newDocumentEvent();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [dismissMenuEvent, menuToggleEvent, newDocumentEvent, openDocumentEvent, printDocumentEvent, saveDocumentEvent]);
 
   return (
     <main
