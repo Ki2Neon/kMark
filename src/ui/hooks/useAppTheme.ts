@@ -1,33 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
+import { createBrowserThemePreferencesGateway } from "../../adapters/browser/browserThemePreferencesGateway";
+import { AppThemeController } from "../../application/appTheme/appThemeController";
 import { type AppThemeId, type ThemePreferences } from "../../domain/theme";
-import {
-  THEME_PREFERENCES_STORAGE_KEY,
-  loadThemePreferences,
-  persistThemePreferences,
-} from "../../infra/themePreferences";
+
+const appThemeController = new AppThemeController({
+  gateway: createBrowserThemePreferencesGateway(),
+});
 
 export function useAppTheme() {
-  const [themePreferences, setThemePreferences] = useState<ThemePreferences>(() => loadThemePreferences());
+  const [themePreferences, setThemePreferences] = useState<ThemePreferences>(() => appThemeController.createState());
 
   useEffect(() => {
-    persistThemePreferences(themePreferences);
+    appThemeController.persist(themePreferences);
   }, [themePreferences]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== THEME_PREFERENCES_STORAGE_KEY) {
+      if (event.storageArea !== window.localStorage || !appThemeController.matchesStorageKey(event.key)) {
         return;
       }
 
-      const nextThemePreferences = loadThemePreferences();
-
-      setThemePreferences((currentThemePreferences) => (
-        currentThemePreferences.appThemeId === nextThemePreferences.appThemeId
-          && currentThemePreferences.previewThemeId === nextThemePreferences.previewThemeId
-          && currentThemePreferences.previewUsesAppThemeColors === nextThemePreferences.previewUsesAppThemeColors
-          ? currentThemePreferences
-          : nextThemePreferences
-      ));
+      setThemePreferences((currentThemePreferences) => appThemeController.loadFromStorage(currentThemePreferences));
     };
 
     window.addEventListener("storage", handleStorage);
@@ -38,29 +31,18 @@ export function useAppTheme() {
   }, []);
 
   const handleAppThemeChange = useCallback((appThemeId: AppThemeId) => {
-    setThemePreferences((currentPreferences) => {
-      if (currentPreferences.appThemeId === appThemeId) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
-        appThemeId,
-      };
-    });
+    setThemePreferences((currentThemePreferences) => (
+      appThemeController.changeAppTheme(currentThemePreferences, appThemeId)
+    ));
   }, []);
 
   const handlePreviewUsesAppThemeColorsChange = useCallback((previewUsesAppThemeColors: boolean) => {
-    setThemePreferences((currentPreferences) => {
-      if (currentPreferences.previewUsesAppThemeColors === previewUsesAppThemeColors) {
-        return currentPreferences;
-      }
-
-      return {
-        ...currentPreferences,
+    setThemePreferences((currentThemePreferences) => (
+      appThemeController.changePreviewUsesAppThemeColors(
+        currentThemePreferences,
         previewUsesAppThemeColors,
-      };
-    });
+      )
+    ));
   }, []);
 
   return {

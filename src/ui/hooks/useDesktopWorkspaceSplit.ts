@@ -8,28 +8,23 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import {
-  DEFAULT_DESKTOP_SPLIT_RATIO,
-  MAX_DESKTOP_SPLIT_RATIO,
-  MIN_DESKTOP_SPLIT_RATIO,
-  loadDesktopSplitRatio,
-  persistDesktopSplitRatio,
-} from "../../infra/editorLayout";
+import { createBrowserEditorLayoutGateway } from "../../adapters/browser/browserEditorLayoutGateway";
 
 const DESKTOP_DIVIDER_WIDTH = 8;
 const DESKTOP_MIN_PANEL_WIDTH = 180;
 const DESKTOP_SPLIT_KEYBOARD_STEP = 5;
+const editorLayoutGateway = createBrowserEditorLayoutGateway();
 
 function clampDesktopSplitRatio(splitRatio: number, containerWidth: number): number {
   if (containerWidth <= DESKTOP_MIN_PANEL_WIDTH * 2) {
-    return DEFAULT_DESKTOP_SPLIT_RATIO;
+    return editorLayoutGateway.defaultDesktopSplitRatio;
   }
 
   const minRatio = Math.max(
-    MIN_DESKTOP_SPLIT_RATIO,
+    editorLayoutGateway.minimumDesktopSplitRatio,
     (DESKTOP_MIN_PANEL_WIDTH / containerWidth) * 100,
   );
-  const maxRatio = Math.min(MAX_DESKTOP_SPLIT_RATIO, 100 - minRatio);
+  const maxRatio = Math.min(editorLayoutGateway.maximumDesktopSplitRatio, 100 - minRatio);
 
   return Math.min(maxRatio, Math.max(minRatio, splitRatio));
 }
@@ -42,7 +37,7 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
   const desktopWorkspaceRef = useRef<HTMLElement | null>(null);
   const activeDividerPointerIdRef = useRef<number | null>(null);
   const [desktopSplitRatio, setDesktopSplitRatio] = useState<number>(
-    () => loadDesktopSplitRatio() ?? DEFAULT_DESKTOP_SPLIT_RATIO,
+    () => editorLayoutGateway.loadDesktopSplitRatio() ?? editorLayoutGateway.defaultDesktopSplitRatio,
   );
   const [isDesktopResizing, setIsDesktopResizing] = useState(false);
   const desktopSplitRatioRef = useRef(desktopSplitRatio);
@@ -84,7 +79,7 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
   }, [setDesktopSplitRatioValue]);
 
   const commitDesktopSplitRatio = useCallback((splitRatio: number) => {
-    persistDesktopSplitRatio(splitRatio);
+    editorLayoutGateway.persistDesktopSplitRatio(splitRatio);
   }, []);
 
   const handleDividerPointerDown = useCallback(
@@ -141,7 +136,7 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
 
       if (event.key === "Home") {
         event.preventDefault();
-        const nextRatio = clampDesktopSplitRatio(MIN_DESKTOP_SPLIT_RATIO, availableWidth);
+        const nextRatio = clampDesktopSplitRatio(editorLayoutGateway.minimumDesktopSplitRatio, availableWidth);
         setDesktopSplitRatioValue(nextRatio);
         commitDesktopSplitRatio(nextRatio);
         return;
@@ -149,7 +144,7 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
 
       if (event.key === "End") {
         event.preventDefault();
-        const nextRatio = clampDesktopSplitRatio(MAX_DESKTOP_SPLIT_RATIO, availableWidth);
+        const nextRatio = clampDesktopSplitRatio(editorLayoutGateway.maximumDesktopSplitRatio, availableWidth);
         setDesktopSplitRatioValue(nextRatio);
         commitDesktopSplitRatio(nextRatio);
         return;
@@ -171,8 +166,8 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
   );
 
   const handleDividerDoubleClick = useCallback(() => {
-    setDesktopSplitRatioValue(DEFAULT_DESKTOP_SPLIT_RATIO);
-    commitDesktopSplitRatio(DEFAULT_DESKTOP_SPLIT_RATIO);
+    setDesktopSplitRatioValue(editorLayoutGateway.defaultDesktopSplitRatio);
+    commitDesktopSplitRatio(editorLayoutGateway.defaultDesktopSplitRatio);
   }, [commitDesktopSplitRatio, setDesktopSplitRatioValue]);
 
   return {
@@ -185,7 +180,7 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
     handleDividerPointerEnd,
     handleDividerPointerMove,
     isDesktopResizing,
-    maximumDesktopSplitRatio: MAX_DESKTOP_SPLIT_RATIO,
-    minimumDesktopSplitRatio: MIN_DESKTOP_SPLIT_RATIO,
+    maximumDesktopSplitRatio: editorLayoutGateway.maximumDesktopSplitRatio,
+    minimumDesktopSplitRatio: editorLayoutGateway.minimumDesktopSplitRatio,
   };
 }

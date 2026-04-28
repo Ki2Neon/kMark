@@ -37,7 +37,13 @@ for (const [sourceFilePath, targetFilePaths] of graph.entries()) {
     continue;
   }
 
-  if (sourceRelativePath === "src/ui/hooks/useMarkdownEditor.ts") {
+  if (
+    sourceRelativePath === "src/ui/hooks/useMarkdownEditor.ts"
+    || sourceRelativePath === "src/ui/hooks/useAppTheme.ts"
+    || sourceRelativePath === "src/ui/hooks/useEditorPreferences.ts"
+    || sourceRelativePath === "src/ui/hooks/usePreviewPreferences.ts"
+    || sourceRelativePath === "src/ui/hooks/useDesktopWorkspaceSplit.ts"
+  ) {
     for (const targetFilePath of targetFilePaths) {
       verifyLayerBoundary(sourceFilePath, targetFilePath, new Set(["ui", "application", "adapters", "domain"]));
     }
