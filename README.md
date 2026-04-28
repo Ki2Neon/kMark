@@ -10,14 +10,14 @@
 ## 開発
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 ## Tauri アプリとして起動
 
 ```bash
-npm run tauri dev
+pnpm run tauri dev
 ```
 
 ## ライセンス

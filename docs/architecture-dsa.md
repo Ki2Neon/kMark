@@ -72,11 +72,11 @@
 - `ui/hooks/useDesktopWorkspaceSplit.ts` -> `application | adapters | domain` のみ
 - `src/App.tsx` -> `application | adapters | domain | ui` のみ
 - `infra` 直参照 `ui` へ再導入 禁止
-- import cycle 発生時 `npm run check:cycles` fail
+- import cycle 発生時 `pnpm run check:cycles` fail
 
 # Verification
 
-- `npm run check:cycles`
-- `npm run check:boundaries`
+- `pnpm run check:cycles`
+- `pnpm run check:boundaries`
 - `cargo test --manifest-path src-tauri/Cargo.toml`
 - `cargo test --manifest-path src-tauri/Cargo.toml benchmark_collect_markdown_file_paths -- --ignored --nocapture`
