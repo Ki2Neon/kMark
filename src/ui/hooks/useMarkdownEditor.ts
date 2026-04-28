@@ -1,48 +1,51 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from "react";
-import { createStartupEditorState } from "../../domain/editor";
+import { createBrowserDraftStore } from "../../adapters/browser/browserDraftStore";
+import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/browserMarkdownDocumentGateway";
+import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
+import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
+import {
+  EditorSessionController,
+  toEditorSessionErrorMessage,
+  type EditorSessionStore,
+} from "../../application/editorSession/editorSessionController";
+import { editorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
-import {
-  clearPendingTauriMarkdownOpenRequests,
-  listenForTauriMarkdownOpenRequests,
-  overwriteMarkdownDocument,
-  overwriteMarkdownDocumentAtPath,
-  pickMarkdownDocument,
-  readMarkdownFile,
-  saveMarkdownDocumentAs,
-  supportsNativeOpenPicker,
-  takePendingTauriMarkdownOpenRequests,
-  type MarkdownFileHandle,
-} from "../../infra/fileTransfer";
-import { loadLocalEdit, persistLocalEdit } from "../../infra/localEdit";
-import { renderMarkdown, renderMarkdownPages } from "../../infra/markdown";
-import { printMarkdownDocument } from "../../infra/printDocument";
-import { editorReducer } from "../../intent/editorIntent";
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.length > 0) {
-    return error.message;
-  }
-
-  return "処理に失敗しました。もう一度試してください。";
-}
 
 export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   const shouldSkipInitialEditPersistRef = useRef(false);
-  const [state, dispatch] = useReducer(editorReducer, startupEditMode, (initialStartupEditMode) => {
-    const storedEdit = loadLocalEdit();
+  const controllerRef = useRef<EditorSessionController | null>(null);
 
-    shouldSkipInitialEditPersistRef.current = initialStartupEditMode !== "last-opened-file" && storedEdit !== null;
-
-    return createStartupEditorState({
-      startupEditMode: initialStartupEditMode,
-      storedEdit,
+  if (controllerRef.current === null) {
+    controllerRef.current = new EditorSessionController({
+      clock: {
+        now: () => Date.now(),
+      },
+      draftStore: createBrowserDraftStore(),
+      documentGateway: createBrowserMarkdownDocumentGateway(),
+      printer: createBrowserMarkdownDocumentPrinter(),
+      renderer: createBrowserMarkdownRenderer(),
     });
+  }
+
+  const controller = controllerRef.current;
+  const [state, dispatch] = useReducer(editorSessionReducer, startupEditMode, (initialStartupEditMode) => {
+    const bootstrap = controller.bootstrap(initialStartupEditMode);
+    shouldSkipInitialEditPersistRef.current = bootstrap.shouldSkipInitialPersist;
+
+    return bootstrap.initialState;
   });
+  const stateRef = useRef(state);
+  const store = useMemo<EditorSessionStore>(() => ({
+    dispatch,
+    getState: () => stateRef.current,
+  }), [dispatch]);
   const deferredContent = useDeferredValue(state.content);
-  const currentFileHandleRef = useRef<MarkdownFileHandle | null>(null);
-  const currentExternalFilePathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     if (shouldSkipInitialEditPersistRef.current) {
@@ -50,189 +53,100 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
       return;
     }
 
-    persistLocalEdit({
-      fileName: state.fileName,
-      content: state.content,
-      savedAt: state.lastSavedAt,
-    });
-  }, [state.content, state.fileName, state.lastSavedAt]);
+    controller.persistDraft(state);
+  }, [controller, state]);
 
-  const previewHtml = useMemo(() => renderMarkdown(deferredContent), [deferredContent]);
-  const previewPageHtmls = useMemo(() => renderMarkdownPages(deferredContent), [deferredContent]);
+  const renderedPreview = useMemo(
+    () => controller.renderPreview(deferredContent),
+    [controller, deferredContent],
+  );
+
+  const executeWithErrorHandling = useCallback(
+    async (operation: () => Promise<void>) => {
+      try {
+        await operation();
+      } catch (error) {
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      }
+    },
+    [controller, store],
+  );
 
   const handleContentChange = useCallback((content: string) => {
-    dispatch({ type: "editor/contentChanged", content });
-  }, []);
+    controller.changeContent(store, content);
+  }, [controller, store]);
 
   const handleOpenDocumentFromPicker = useCallback(async () => {
-    try {
-      const result = await pickMarkdownDocument();
-
-      if (result === null) {
-        return;
-      }
-
-      currentFileHandleRef.current = result.fileHandle;
-      currentExternalFilePathRef.current = null;
-      dispatch({
-        type: "editor/documentLoaded",
-        fileName: result.fileName,
-        content: result.content,
-        loadedAt: null,
-      });
-    } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
-    }
-  }, []);
+    await executeWithErrorHandling(async () => {
+      await controller.openDocumentFromPicker(store);
+    });
+  }, [controller, executeWithErrorHandling, store]);
 
   const handlePickedFile = useCallback(async (file: File | null) => {
     if (file === null) {
       return;
     }
 
-    try {
-      const result = await readMarkdownFile(file);
-      currentFileHandleRef.current = null;
-      currentExternalFilePathRef.current = null;
-
-      dispatch({
-        type: "editor/documentLoaded",
-        fileName: result.fileName,
-        content: result.content,
-        loadedAt: null,
-      });
-    } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
-    }
-  }, []);
+    await executeWithErrorHandling(async () => {
+      await controller.openDocumentFromFile(store, file);
+    });
+  }, [controller, executeWithErrorHandling, store]);
 
   const handleOverwriteSaveDocument = useCallback(async () => {
-    try {
-      const currentFileHandle = currentFileHandleRef.current;
-
-      if (currentFileHandle !== null) {
-        await overwriteMarkdownDocument(currentFileHandle, state.content);
-        dispatch({
-          type: "editor/saveSucceeded",
-          fileName: currentFileHandle.name,
-          savedAt: Date.now(),
-        });
-        return;
-      }
-
-      const currentExternalFilePath = currentExternalFilePathRef.current;
-
-      if (currentExternalFilePath !== null) {
-        await overwriteMarkdownDocumentAtPath(currentExternalFilePath, state.content);
-        dispatch({
-          type: "editor/saveSucceeded",
-          fileName: state.fileName,
-          savedAt: Date.now(),
-        });
-        return;
-      }
-
-      const result = await saveMarkdownDocumentAs(state.fileName, state.content);
-
-      if (result === null) {
-        return;
-      }
-
-      currentFileHandleRef.current = result.fileHandle;
-      currentExternalFilePathRef.current = null;
-      dispatch({
-        type: "editor/saveSucceeded",
-        fileName: result.fileName,
-        savedAt: Date.now(),
-      });
-    } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
-    }
-  }, [state.content, state.fileName]);
+    await executeWithErrorHandling(async () => {
+      await controller.overwriteSaveDocument(store);
+    });
+  }, [controller, executeWithErrorHandling, store]);
 
   const handleSaveDocumentAs = useCallback(async () => {
-    try {
-      const result = await saveMarkdownDocumentAs(state.fileName, state.content);
-
-      if (result === null) {
-        return;
-      }
-
-      currentFileHandleRef.current = result.fileHandle;
-      currentExternalFilePathRef.current = null;
-      dispatch({
-        type: "editor/saveSucceeded",
-        fileName: result.fileName,
-        savedAt: Date.now(),
-      });
-    } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
-    }
-  }, [state.content, state.fileName]);
+    await executeWithErrorHandling(async () => {
+      await controller.saveDocumentAs(store);
+    });
+  }, [controller, executeWithErrorHandling, store]);
 
   const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {
-    currentFileHandleRef.current = null;
-    currentExternalFilePathRef.current = document.filePath;
-
-    dispatch({
-      type: "editor/documentLoaded",
-      fileName: document.fileName,
-      content: document.content,
-      loadedAt: null,
-    });
-  }, []);
+    controller.loadExternalDocument(store, document);
+  }, [controller, store]);
 
   const handleTakePendingExternalDocuments = useCallback(async () => {
     try {
-      return await takePendingTauriMarkdownOpenRequests();
+      return await controller.takePendingExternalDocuments();
     } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
       return [];
     }
-  }, []);
+  }, [controller, store]);
 
   const handleClearPendingExternalDocuments = useCallback(async () => {
-    try {
-      await clearPendingTauriMarkdownOpenRequests();
-    } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
-    }
-  }, []);
+    await executeWithErrorHandling(async () => {
+      await controller.clearPendingExternalDocuments();
+    });
+  }, [controller, executeWithErrorHandling]);
 
   const subscribeToExternalDocumentRequests = useCallback((callback: () => void) => {
-    return listenForTauriMarkdownOpenRequests(callback);
-  }, []);
+    return controller.subscribeToExternalDocumentRequests(callback);
+  }, [controller]);
 
   const handlePrintDocument = useCallback(async (
     previewDisplayMode: PreviewDisplayMode,
     renderedA4PreviewPages?: readonly RenderedA4PreviewPage[],
   ) => {
-    try {
-      await printMarkdownDocument({
-        displayMode: previewDisplayMode,
-        title: state.fileName,
-        html: renderMarkdown(state.content),
-        pageHtmls: renderMarkdownPages(state.content),
-        renderedA4PreviewPages,
-      });
-    } catch (error) {
-      dispatch({ type: "editor/errorRaised", message: toErrorMessage(error) });
-    }
-  }, [state.content, state.fileName]);
+    await executeWithErrorHandling(async () => {
+      await controller.printDocument(store, previewDisplayMode, renderedA4PreviewPages);
+    });
+  }, [controller, executeWithErrorHandling, store]);
 
   const handleResetDocument = useCallback(() => {
-    currentFileHandleRef.current = null;
-    currentExternalFilePathRef.current = null;
-    dispatch({ type: "editor/documentReset" });
-  }, []);
+    controller.resetDocument(store);
+  }, [controller, store]);
 
   const handleErrorRaise = useCallback((message: string) => {
-    dispatch({ type: "editor/errorRaised", message });
-  }, []);
+    controller.raiseError(store, message);
+  }, [controller, store]);
 
   const handleErrorClear = useCallback(() => {
-    dispatch({ type: "editor/errorCleared" });
-  }, []);
+    controller.clearError(store);
+  }, [controller, store]);
 
   const confirmDiscard = useCallback(() => {
     if (!state.isDirty) {
@@ -243,13 +157,13 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   }, [state.isDirty]);
 
   return {
-    canOpenDocumentWithNativePicker: supportsNativeOpenPicker(),
+    canOpenDocumentWithNativePicker: controller.supportsNativeOpenPicker(),
     content: state.content,
     errorMessage: state.errorMessage,
     fileName: state.fileName,
     isDirty: state.isDirty,
-    previewHtml,
-    previewPageHtmls,
+    previewHtml: renderedPreview.html,
+    previewPageHtmls: renderedPreview.pageHtmls,
     confirmDiscard,
     handleClearPendingExternalDocuments,
     handleContentChange,
