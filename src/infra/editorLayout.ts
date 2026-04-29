@@ -23,7 +23,7 @@ const desktopLayoutPreferencesStore = createWebJsonStateStore<DesktopLayoutPrefe
 });
 
 function toDesktopLayoutPreferences(splitRatio: number): DesktopLayoutPreferences {
-  return { desktopSplitRatio: splitRatio };
+  return { desktopSplitRatio: Math.round(splitRatio) };
 }
 
 export async function loadDesktopSplitRatio(): Promise<number> {

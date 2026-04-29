@@ -51,7 +51,7 @@ export class DesktopWorkspaceSplitController {
     }
 
     return this.#clampRatio(
-      ((clientX - workspaceLeft - DESKTOP_DIVIDER_WIDTH / 2) / availableWidth) * 100,
+      Math.round(((clientX - workspaceLeft - DESKTOP_DIVIDER_WIDTH / 2) / availableWidth) * 100),
       availableWidth,
     );
   }
@@ -85,12 +85,15 @@ export class DesktopWorkspaceSplitController {
       return this.#gateway.defaultRatio;
     }
 
+    const normalizedRatio = Number.isFinite(splitRatio)
+      ? Math.round(splitRatio)
+      : this.#gateway.defaultRatio;
     const minRatio = Math.max(
       this.#gateway.minimumRatio,
       (DESKTOP_MIN_PANEL_WIDTH / containerWidth) * 100,
     );
     const maxRatio = Math.min(this.#gateway.maximumRatio, 100 - minRatio);
 
-    return Math.min(maxRatio, Math.max(minRatio, splitRatio));
+    return Math.round(Math.min(maxRatio, Math.max(minRatio, normalizedRatio)));
   }
 }
