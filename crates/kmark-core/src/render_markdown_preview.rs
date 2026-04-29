@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use pulldown_cmark::{
     Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options,
@@ -31,6 +31,14 @@ struct ImageContext {
     safe: bool,
 }
 
+#[derive(Debug, Clone)]
+struct FootnoteDefinitionContext {
+    label: String,
+    paragraph_count: usize,
+}
+
+type OwnedEvent = (Event<'static>, Range<usize>);
+
 struct HtmlEmitter<'a> {
     content: &'a str,
     line_offset: usize,
@@ -41,6 +49,11 @@ struct HtmlEmitter<'a> {
     table_section: TableSection,
     table_alignments: Vec<Alignment>,
     table_cell_index: usize,
+    table_body_open: bool,
+    footnote_numbers: HashMap<String, usize>,
+    footnote_reference_ids: HashMap<String, Vec<String>>,
+    footnote_reference_render_counts: HashMap<String, usize>,
+    footnote_definition_stack: Vec<FootnoteDefinitionContext>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -61,9 +74,26 @@ pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
 }
 
 fn render_markdown_page(content: &str, line_offset: usize) -> String {
-    let emitter = HtmlEmitter::new(content, line_offset);
-    let parser = Parser::new_ext(content, Options::empty()).into_offset_iter();
-    emitter.render(parser)
+    let events = collect_markdown_events(content);
+    let mut emitter = HtmlEmitter::new(content, line_offset);
+    emitter.prepare_footnotes(&events);
+    emitter.render(events)
+}
+
+fn collect_markdown_events(content: &str) -> Vec<OwnedEvent> {
+    Parser::new_ext(content, markdown_options())
+        .into_offset_iter()
+        .map(|(event, range)| (event.into_static(), range))
+        .collect()
+}
+
+fn markdown_options() -> Options {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_FOOTNOTES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+    options
 }
 
 fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
@@ -116,13 +146,32 @@ impl<'a> HtmlEmitter<'a> {
             table_section: TableSection::Head,
             table_alignments: Vec::new(),
             table_cell_index: 0,
+            table_body_open: false,
+            footnote_numbers: HashMap::new(),
+            footnote_reference_ids: HashMap::new(),
+            footnote_reference_render_counts: HashMap::new(),
+            footnote_definition_stack: Vec::new(),
         }
     }
 
-    fn render<'input>(
-        mut self,
-        events: impl Iterator<Item = (Event<'input>, Range<usize>)>,
-    ) -> String {
+    fn prepare_footnotes(&mut self, events: &[OwnedEvent]) {
+        for (event, _) in events {
+            match event {
+                Event::FootnoteReference(label) => {
+                    let label = label.to_string();
+                    let number = self.resolve_footnote_number(&label);
+                    let entry = self.footnote_reference_ids.entry(label).or_default();
+                    entry.push(footnote_reference_id(number, entry.len() + 1));
+                }
+                Event::Start(Tag::FootnoteDefinition(label)) => {
+                    self.resolve_footnote_number(label.as_ref());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn render(mut self, events: Vec<OwnedEvent>) -> String {
         for (event, range) in events {
             self.push_event(event, range);
         }
@@ -130,7 +179,7 @@ impl<'a> HtmlEmitter<'a> {
         self.html
     }
 
-    fn push_event<'input>(&mut self, event: Event<'input>, range: Range<usize>) {
+    fn push_event(&mut self, event: Event<'static>, range: Range<usize>) {
         match event {
             Event::Start(tag) => self.start_tag(tag, &range),
             Event::End(tag_end) => self.end_tag(tag_end),
@@ -143,14 +192,48 @@ impl<'a> HtmlEmitter<'a> {
                 "<hr{} />",
                 self.source_line_attributes(&range),
             )),
-            Event::FootnoteReference(name) => self.push_text(&format!("[^{name}]")),
+            Event::FootnoteReference(label) => self.push_footnote_reference(label.as_ref()),
             Event::TaskListMarker(checked) => self.push_task_list_marker(checked),
-            Event::InlineMath(text) => self.push_math_span("math-inline", &text),
-            Event::DisplayMath(text) => self.push_math_span("math-display", &text),
+            Event::InlineMath(text) => self.push_math_text("math-inline", &text),
+            Event::DisplayMath(text) => self.push_math_text("math-display", &text),
         }
     }
 
-    fn start_tag<'input>(&mut self, tag: Tag<'input>, range: &Range<usize>) {
+    fn push_footnote_reference(&mut self, label: &str) {
+        let number = self.resolve_footnote_number(label);
+
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context.alt_text.push('[');
+            image_context.alt_text.push_str(&number.to_string());
+            image_context.alt_text.push(']');
+            return;
+        }
+
+        let occurrence_index = {
+            let count = self
+                .footnote_reference_render_counts
+                .entry(label.to_owned())
+                .or_insert(0);
+            let current = *count;
+            *count += 1;
+            current
+        };
+        let reference_id = self
+            .footnote_reference_ids
+            .get(label)
+            .and_then(|ids| ids.get(occurrence_index))
+            .cloned()
+            .unwrap_or_else(|| footnote_reference_id(number, occurrence_index + 1));
+
+        self.push_raw(&format!(
+            "<sup class=\"footnote-reference\" id=\"{}\"><a href=\"#{}\">{}</a></sup>",
+            escape_html(&reference_id),
+            footnote_definition_id(number),
+            number,
+        ));
+    }
+
+    fn start_tag(&mut self, tag: Tag<'static>, range: &Range<usize>) {
         if self.is_collecting_image_alt_text() {
             if matches!(tag, Tag::Image { .. }) {
                 self.image_stack.push(ImageContext {
@@ -165,6 +248,13 @@ impl<'a> HtmlEmitter<'a> {
 
         match tag {
             Tag::Paragraph => {
+                if self.is_inside_footnote_definition() {
+                    let paragraph_count = self.begin_footnote_paragraph();
+                    if paragraph_count > 1 {
+                        self.push_raw("<p>");
+                    }
+                    return;
+                }
                 self.push_raw(&format!("<p{}>", self.source_line_attributes(range)));
             }
             Tag::Heading {
@@ -231,11 +321,19 @@ impl<'a> HtmlEmitter<'a> {
             Tag::Item => {
                 self.push_raw(&format!("<li{}>", self.source_line_attributes(range)));
             }
-            Tag::FootnoteDefinition(name) => {
+            Tag::FootnoteDefinition(label) => {
+                let label = label.to_string();
+                let number = self.resolve_footnote_number(&label);
+                self.footnote_definition_stack
+                    .push(FootnoteDefinitionContext {
+                        label,
+                        paragraph_count: 0,
+                    });
                 self.push_raw(&format!(
-                    "<section{} data-footnote-definition=\"{}\">",
+                    "<div class=\"footnote-definition\" id=\"{}\"{}><sup class=\"footnote-definition-label\">{}</sup>",
+                    footnote_definition_id(number),
                     self.source_line_attributes(range),
-                    escape_html(&name),
+                    number,
                 ));
             }
             Tag::DefinitionList => self.push_raw("<dl>"),
@@ -245,16 +343,20 @@ impl<'a> HtmlEmitter<'a> {
                 self.table_alignments = alignments;
                 self.table_section = TableSection::Head;
                 self.table_cell_index = 0;
+                self.table_body_open = false;
                 self.push_raw("<table>");
             }
             Tag::TableHead => {
                 self.table_section = TableSection::Head;
                 self.table_cell_index = 0;
-                self.push_raw("<thead><tr>");
+                self.push_raw(&format!(
+                    "<thead><tr{}>",
+                    self.source_line_attributes(range),
+                ));
             }
             Tag::TableRow => {
                 self.table_cell_index = 0;
-                self.push_raw("<tr>");
+                self.push_raw(&format!("<tr{}>", self.source_line_attributes(range)));
             }
             Tag::TableCell => {
                 let tag_name = match self.table_section {
@@ -272,7 +374,7 @@ impl<'a> HtmlEmitter<'a> {
                     if let Some(style) = style {
                         html.push_str(" style=\"text-align: ");
                         html.push_str(style);
-                        html.push_str("\"");
+                        html.push('"');
                     }
                 }
                 html.push('>');
@@ -323,7 +425,10 @@ impl<'a> HtmlEmitter<'a> {
                 });
             }
             Tag::MetadataBlock(kind) => {
-                self.push_raw(&format!("<section data-metadata-block=\"{}\">", metadata_block_name(kind)));
+                self.push_raw(&format!(
+                    "<section data-metadata-block=\"{}\">",
+                    metadata_block_name(kind),
+                ));
             }
         }
     }
@@ -337,7 +442,15 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         match tag_end {
-            TagEnd::Paragraph => self.push_raw("</p>"),
+            TagEnd::Paragraph => {
+                if self.is_inside_footnote_definition() {
+                    if self.current_footnote_paragraph_count() > 1 {
+                        self.push_raw("</p>");
+                    }
+                } else {
+                    self.push_raw("</p>");
+                }
+            }
             TagEnd::Heading(level) => self.push_raw(&format!("</{level}>")),
             TagEnd::BlockQuote(_) => self.push_raw("</blockquote>"),
             TagEnd::CodeBlock => self.push_raw("</code></pre>"),
@@ -345,18 +458,23 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::List(true) => self.push_raw("</ol>"),
             TagEnd::List(false) => self.push_raw("</ul>"),
             TagEnd::Item => self.push_raw("</li>"),
-            TagEnd::FootnoteDefinition => self.push_raw("</section>"),
+            TagEnd::FootnoteDefinition => self.finish_footnote_definition(),
             TagEnd::DefinitionList => self.push_raw("</dl>"),
             TagEnd::DefinitionListTitle => self.push_raw("</dt>"),
             TagEnd::DefinitionListDefinition => self.push_raw("</dd>"),
             TagEnd::Table => {
+                if self.table_body_open {
+                    self.push_raw("</tbody>");
+                }
+                self.push_raw("</table>");
                 self.table_alignments.clear();
                 self.table_cell_index = 0;
-                self.push_raw("</table>");
+                self.table_body_open = false;
             }
             TagEnd::TableHead => {
                 self.table_section = TableSection::Body;
                 self.table_cell_index = 0;
+                self.table_body_open = true;
                 self.push_raw("</tr></thead><tbody>");
             }
             TagEnd::TableRow => self.push_raw("</tr>"),
@@ -382,6 +500,25 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::Image => self.finish_image(),
             TagEnd::MetadataBlock(_) => self.push_raw("</section>"),
         }
+    }
+
+    fn finish_footnote_definition(&mut self) {
+        let Some(context) = self.footnote_definition_stack.pop() else {
+            self.push_raw("</div>");
+            return;
+        };
+
+        if let Some(reference_ids) = self.footnote_reference_ids.get(&context.label).cloned() {
+            for reference_id in reference_ids {
+                self.push_raw(" ");
+                self.push_raw(&format!(
+                    "<a href=\"#{}\" class=\"footnote-backreference\">↩</a>",
+                    escape_html(&reference_id),
+                ));
+            }
+        }
+
+        self.push_raw("</div>");
     }
 
     fn finish_image(&mut self) {
@@ -416,15 +553,27 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_task_list_marker(&mut self, checked: bool) {
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context
+                .alt_text
+                .push_str(if checked { "[x]" } else { "[ ]" });
+            return;
+        }
+
         let markup = if checked {
-            "<input disabled=\"\" type=\"checkbox\" checked=\"\" />"
+            "<input disabled=\"\" type=\"checkbox\" checked=\"\" />\n"
         } else {
-            "<input disabled=\"\" type=\"checkbox\" />"
+            "<input disabled=\"\" type=\"checkbox\" />\n"
         };
         self.push_raw(markup);
     }
 
-    fn push_math_span(&mut self, class_name: &str, text: &str) {
+    fn push_math_text(&mut self, class_name: &str, text: &str) {
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context.alt_text.push_str(text);
+            return;
+        }
+
         self.push_raw(&format!(
             "<span class=\"math {class_name}\">{}</span>",
             escape_html(text),
@@ -453,7 +602,7 @@ impl<'a> HtmlEmitter<'a> {
 
     fn push_soft_break(&mut self) {
         if let Some(image_context) = self.image_stack.last_mut() {
-            image_context.alt_text.push('\n');
+            image_context.alt_text.push(' ');
             return;
         }
 
@@ -462,7 +611,7 @@ impl<'a> HtmlEmitter<'a> {
 
     fn push_hard_break(&mut self) {
         if let Some(image_context) = self.image_stack.last_mut() {
-            image_context.alt_text.push('\n');
+            image_context.alt_text.push(' ');
             return;
         }
 
@@ -479,6 +628,35 @@ impl<'a> HtmlEmitter<'a> {
         !self.image_stack.is_empty()
     }
 
+    fn resolve_footnote_number(&mut self, label: &str) -> usize {
+        if let Some(number) = self.footnote_numbers.get(label) {
+            return *number;
+        }
+
+        let number = self.footnote_numbers.len() + 1;
+        self.footnote_numbers.insert(label.to_owned(), number);
+        number
+    }
+
+    fn is_inside_footnote_definition(&self) -> bool {
+        !self.footnote_definition_stack.is_empty()
+    }
+
+    fn begin_footnote_paragraph(&mut self) -> usize {
+        let Some(context) = self.footnote_definition_stack.last_mut() else {
+            return 0;
+        };
+        context.paragraph_count += 1;
+        context.paragraph_count
+    }
+
+    fn current_footnote_paragraph_count(&self) -> usize {
+        self.footnote_definition_stack
+            .last()
+            .map(|context| context.paragraph_count)
+            .unwrap_or(0)
+    }
+
     fn source_line_attributes(&self, range: &Range<usize>) -> String {
         let (start_line, end_line) = resolve_source_line_range(
             self.content,
@@ -491,6 +669,14 @@ impl<'a> HtmlEmitter<'a> {
             start_line, end_line,
         )
     }
+}
+
+fn footnote_definition_id(number: usize) -> String {
+    format!("fn-{number}")
+}
+
+fn footnote_reference_id(number: usize, occurrence: usize) -> String {
+    format!("fnref-{number}-{occurrence}")
 }
 
 fn blockquote_class_name(kind: Option<BlockQuoteKind>) -> Option<&'static str> {
@@ -650,6 +836,37 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x &lt;script&gt;alert(1)&lt;/script&gt;</p>"
+        );
+    }
+
+    #[test]
+    fn renders_tables_with_alignment_and_nested_inline() {
+        let rendered_preview =
+            render_markdown_preview("| Left | Center | Right |\n| :--- | :----: | ----: |\n| *a* | **b** | ~~c~~ |");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<table><thead><tr data-source-line-start=\"0\" data-source-line-end=\"0\"><th style=\"text-align: left\">Left</th><th style=\"text-align: center\">Center</th><th style=\"text-align: right\">Right</th></tr></thead><tbody><tr data-source-line-start=\"2\" data-source-line-end=\"2\"><td style=\"text-align: left\"><em>a</em></td><td style=\"text-align: center\"><strong>b</strong></td><td style=\"text-align: right\"><del>c</del></td></tr></tbody></table>"
+        );
+    }
+
+    #[test]
+    fn renders_task_lists_with_disabled_checkboxes() {
+        let rendered_preview = render_markdown_preview("- [x] done\n- [ ] todo");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<ul><li data-source-line-start=\"0\" data-source-line-end=\"0\"><input disabled=\"\" type=\"checkbox\" checked=\"\" />\ndone</li><li data-source-line-start=\"1\" data-source-line-end=\"1\"><input disabled=\"\" type=\"checkbox\" />\ntodo</li></ul>"
+        );
+    }
+
+    #[test]
+    fn renders_footnotes_with_backreferences() {
+        let rendered_preview = render_markdown_preview("Note[^alpha].\n\n[^alpha]: Footnote *value*");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">Note<sup class=\"footnote-reference\" id=\"fnref-1-1\"><a href=\"#fn-1\">1</a></sup>.</p><div class=\"footnote-definition\" id=\"fn-1\" data-source-line-start=\"2\" data-source-line-end=\"2\"><sup class=\"footnote-definition-label\">1</sup>Footnote <em>value</em> <a href=\"#fnref-1-1\" class=\"footnote-backreference\">↩</a></div>"
         );
     }
 }

@@ -117,13 +117,15 @@ fn main() {
 
 ---
 
+<!-- --- -->
+
 ## 10. テーブル
 
-| Name    |     Type | Description  |
-| ------- | -------: | :----------- |
-| id      | uint32_t | identifier   |
-| name    |   string | display name |
-| enabled |     bool | enable flag  |
+| Name    |     Type | Description  | Description  | Description  | Description  |
+| ------- | -------: | :----------- | :----------- | :----------- | :----------- |
+| id      | uint32_t | identifier   | identifier   | identifier   | identifier   |
+| name    |   string | display name | display name | display name | display name |
+| enabled |     bool | enable flag  | enable flag  | enable flag  | enable flag  |
 
 ---
 
@@ -164,6 +166,15 @@ fn main() {
 English text.
 
 記号: ! ? # $ % & ` * _ - + = / \ | @ ~ ^
+
+---
+
+## フットノート
+
+
+これは本文です[^note]
+
+[^note]: 任意のラベルでOK
 
 ---
 

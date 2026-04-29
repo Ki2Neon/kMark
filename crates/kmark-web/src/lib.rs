@@ -8,7 +8,7 @@ use kmark_core::{
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct RenderedMarkdownPreviewPayload {
     html: String,
@@ -488,5 +488,23 @@ impl From<&PreviewWindowState> for PreviewWindowStatePayload {
             },
             active_source_line: preview_window_state.active_source_line(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_markdown_preview_json, RenderedMarkdownPreviewPayload};
+
+    #[test]
+    fn wasm_render_output_matches_core_renderer() {
+        let markdown = "| Left | Right |\n| :--- | ----: |\n| ~~a~~ | [x] |\n\n- [x] done\n\nNote[^alpha].\n\n[^alpha]: Footnote";
+        let core_output = kmark_core::render_markdown_preview(markdown);
+        let wasm_output = serde_json::from_str::<RenderedMarkdownPreviewPayload>(
+            &render_markdown_preview_json(markdown.to_owned()),
+        )
+        .expect("wasm render payload parse failed");
+
+        assert_eq!(wasm_output.html, core_output.html);
+        assert_eq!(wasm_output.page_htmls, core_output.page_htmls);
     }
 }
