@@ -1,13 +1,14 @@
+use std::ops::Range;
+
+use pulldown_cmark::{
+    Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options,
+    Parser, Tag, TagEnd,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedMarkdownPreview {
     pub html: String,
     pub page_htmls: Vec<String>,
-}
-
-#[derive(Clone, Copy)]
-struct SourceLine<'a> {
-    number: usize,
-    text: &'a str,
 }
 
 #[derive(Clone, Copy)]
@@ -16,35 +17,53 @@ struct MarkdownPageSegment<'a> {
     line_offset: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TableSection {
+    Head,
+    Body,
+}
+
+#[derive(Debug, Clone)]
+struct ImageContext {
+    destination_url: String,
+    title: String,
+    alt_text: String,
+    safe: bool,
+}
+
+struct HtmlEmitter<'a> {
+    content: &'a str,
+    line_offset: usize,
+    line_starts: Vec<usize>,
+    html: String,
+    image_stack: Vec<ImageContext>,
+    suppressed_link_depth: usize,
+    table_section: TableSection,
+    table_alignments: Vec<Alignment>,
+    table_cell_index: usize,
+}
+
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
 const PAGE_BREAK_TOKEN_CLOSE: &str = "-->";
 const LINK_REL: &str = "noreferrer noopener";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     let page_segments = split_markdown_pages(content);
+    let page_htmls = page_segments
+        .iter()
+        .map(|page_segment| render_markdown_page(page_segment.content, page_segment.line_offset))
+        .collect::<Vec<_>>();
 
     RenderedMarkdownPreview {
-        html: render_markdown_page(content, 0),
-        page_htmls: page_segments
-            .iter()
-            .map(|page_segment| {
-                render_markdown_page(page_segment.content, page_segment.line_offset)
-            })
-            .collect(),
+        html: page_htmls.join(""),
+        page_htmls,
     }
 }
 
 fn render_markdown_page(content: &str, line_offset: usize) -> String {
-    let lines = content
-        .split('\n')
-        .enumerate()
-        .map(|(index, line)| SourceLine {
-            number: line_offset + index,
-            text: line.strip_suffix('\r').unwrap_or(line),
-        })
-        .collect::<Vec<_>>();
-
-    render_blocks(&lines)
+    let emitter = HtmlEmitter::new(content, line_offset);
+    let parser = Parser::new_ext(content, Options::empty()).into_offset_iter();
+    emitter.render(parser)
 }
 
 fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
@@ -85,493 +104,461 @@ fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
     page_segments
 }
 
-fn render_blocks(lines: &[SourceLine<'_>]) -> String {
-    let mut html = String::new();
-    let mut index = 0;
+impl<'a> HtmlEmitter<'a> {
+    fn new(content: &'a str, line_offset: usize) -> Self {
+        Self {
+            content,
+            line_offset,
+            line_starts: collect_line_starts(content),
+            html: String::new(),
+            image_stack: Vec::new(),
+            suppressed_link_depth: 0,
+            table_section: TableSection::Head,
+            table_alignments: Vec::new(),
+            table_cell_index: 0,
+        }
+    }
 
-    while index < lines.len() {
-        let line = lines[index];
-
-        if is_blank(line.text) || is_page_break_line(line.text) {
-            index += 1;
-            continue;
+    fn render<'input>(
+        mut self,
+        events: impl Iterator<Item = (Event<'input>, Range<usize>)>,
+    ) -> String {
+        for (event, range) in events {
+            self.push_event(event, range);
         }
 
-        if let Some((marker, marker_len, language)) = parse_fence_start(line.text) {
-            let start_line = line.number;
-            let mut code_lines = Vec::new();
-            let mut end_line = line.number;
-            index += 1;
+        self.html
+    }
 
-            while index < lines.len() {
-                let candidate_line = lines[index];
-                end_line = candidate_line.number;
-
-                if is_fence_end(candidate_line.text, marker, marker_len) {
-                    index += 1;
-                    break;
-                }
-
-                code_lines.push(candidate_line.text);
-                index += 1;
-            }
-
-            let code = code_lines.join("\n");
-            let language_class = if language.is_empty() {
-                String::new()
-            } else {
-                format!(" class=\"language-{}\"", escape_html(language))
-            };
-
-            push_block(
-                &mut html,
-                &format!(
-                    "<pre{}><code{}>{}</code></pre>",
-                    source_line_attributes(start_line, end_line),
-                    language_class,
-                    escape_html(&code),
-                ),
-            );
-
-            continue;
+    fn push_event<'input>(&mut self, event: Event<'input>, range: Range<usize>) {
+        match event {
+            Event::Start(tag) => self.start_tag(tag, &range),
+            Event::End(tag_end) => self.end_tag(tag_end),
+            Event::Text(text) => self.push_text(&text),
+            Event::Code(text) => self.push_code(&text),
+            Event::Html(html) | Event::InlineHtml(html) => self.push_text(&html),
+            Event::SoftBreak => self.push_soft_break(),
+            Event::HardBreak => self.push_hard_break(),
+            Event::Rule => self.push_raw(&format!(
+                "<hr{} />",
+                self.source_line_attributes(&range),
+            )),
+            Event::FootnoteReference(name) => self.push_text(&format!("[^{name}]")),
+            Event::TaskListMarker(checked) => self.push_task_list_marker(checked),
+            Event::InlineMath(text) => self.push_math_span("math-inline", &text),
+            Event::DisplayMath(text) => self.push_math_span("math-display", &text),
         }
+    }
 
-        if let Some((level, heading_content)) = parse_heading(line.text) {
-            push_block(
-                &mut html,
-                &format!(
-                    "<h{level}{}>{}</h{level}>",
-                    source_line_attributes(line.number, line.number),
-                    render_inline(heading_content.trim()),
-                ),
-            );
-            index += 1;
-            continue;
-        }
-
-        if is_horizontal_rule(line.text) {
-            push_block(
-                &mut html,
-                &format!("<hr{} />", source_line_attributes(line.number, line.number),),
-            );
-            index += 1;
-            continue;
-        }
-
-        if is_blockquote_line(line.text) {
-            let start_line = line.number;
-            let mut quote_lines = Vec::new();
-            let mut end_line = line.number;
-
-            while index < lines.len() && is_blockquote_line(lines[index].text) {
-                let current_line = lines[index];
-                end_line = current_line.number;
-                quote_lines.push(SourceLine {
-                    number: current_line.number,
-                    text: strip_blockquote_marker(current_line.text),
+    fn start_tag<'input>(&mut self, tag: Tag<'input>, range: &Range<usize>) {
+        if self.is_collecting_image_alt_text() {
+            if matches!(tag, Tag::Image { .. }) {
+                self.image_stack.push(ImageContext {
+                    destination_url: String::new(),
+                    title: String::new(),
+                    alt_text: String::new(),
+                    safe: false,
                 });
-                index += 1;
             }
-
-            push_block(
-                &mut html,
-                &format!(
-                    "<blockquote{}>{}</blockquote>",
-                    source_line_attributes(start_line, end_line),
-                    render_blocks(&quote_lines),
-                ),
-            );
-            continue;
+            return;
         }
 
-        if let Some((ordered, first_value, item_content)) = parse_list_item(line.text) {
-            let mut items = Vec::new();
-            items.push((line.number, render_inline(item_content.trim())));
-            index += 1;
-
-            while index < lines.len() {
-                let current_line = lines[index];
-
-                if let Some((next_ordered, _, next_item_content)) =
-                    parse_list_item(current_line.text)
-                {
-                    if next_ordered != ordered {
-                        break;
+        match tag {
+            Tag::Paragraph => {
+                self.push_raw(&format!("<p{}>", self.source_line_attributes(range)));
+            }
+            Tag::Heading {
+                level,
+                id,
+                classes,
+                attrs,
+            } => {
+                let mut html = format!("<{level}{}", self.source_line_attributes(range));
+                if let Some(id) = id {
+                    html.push_str(" id=\"");
+                    html.push_str(&escape_html(&id));
+                    html.push('"');
+                }
+                if !classes.is_empty() {
+                    html.push_str(" class=\"");
+                    for (index, class_name) in classes.iter().enumerate() {
+                        if index > 0 {
+                            html.push(' ');
+                        }
+                        html.push_str(&escape_html(class_name));
                     }
-
-                    items.push((current_line.number, render_inline(next_item_content.trim())));
-                    index += 1;
-                    continue;
+                    html.push('"');
+                }
+                for (attribute, value) in attrs {
+                    html.push(' ');
+                    html.push_str(&escape_html(&attribute));
+                    html.push_str("=\"");
+                    if let Some(value) = value {
+                        html.push_str(&escape_html(&value));
+                    }
+                    html.push('"');
+                }
+                html.push('>');
+                self.push_raw(&html);
+            }
+            Tag::BlockQuote(kind) => {
+                let class_name = blockquote_class_name(kind);
+                let mut html = format!("<blockquote{}", self.source_line_attributes(range));
+                if let Some(class_name) = class_name {
+                    html.push_str(" class=\"");
+                    html.push_str(class_name);
+                    html.push('"');
+                }
+                html.push('>');
+                self.push_raw(&html);
+            }
+            Tag::CodeBlock(kind) => {
+                let mut html = format!("<pre{}><code", self.source_line_attributes(range));
+                if let Some(language) = code_block_language(kind) {
+                    html.push_str(" class=\"language-");
+                    html.push_str(&escape_html(&language));
+                    html.push('"');
+                }
+                html.push('>');
+                self.push_raw(&html);
+            }
+            Tag::HtmlBlock => {}
+            Tag::List(Some(1)) => self.push_raw("<ol>"),
+            Tag::List(Some(start)) => {
+                self.push_raw(&format!("<ol start=\"{start}\">"));
+            }
+            Tag::List(None) => self.push_raw("<ul>"),
+            Tag::Item => {
+                self.push_raw(&format!("<li{}>", self.source_line_attributes(range)));
+            }
+            Tag::FootnoteDefinition(name) => {
+                self.push_raw(&format!(
+                    "<section{} data-footnote-definition=\"{}\">",
+                    self.source_line_attributes(range),
+                    escape_html(&name),
+                ));
+            }
+            Tag::DefinitionList => self.push_raw("<dl>"),
+            Tag::DefinitionListTitle => self.push_raw("<dt>"),
+            Tag::DefinitionListDefinition => self.push_raw("<dd>"),
+            Tag::Table(alignments) => {
+                self.table_alignments = alignments;
+                self.table_section = TableSection::Head;
+                self.table_cell_index = 0;
+                self.push_raw("<table>");
+            }
+            Tag::TableHead => {
+                self.table_section = TableSection::Head;
+                self.table_cell_index = 0;
+                self.push_raw("<thead><tr>");
+            }
+            Tag::TableRow => {
+                self.table_cell_index = 0;
+                self.push_raw("<tr>");
+            }
+            Tag::TableCell => {
+                let tag_name = match self.table_section {
+                    TableSection::Head => "th",
+                    TableSection::Body => "td",
+                };
+                let mut html = format!("<{tag_name}");
+                if let Some(alignment) = self.table_alignments.get(self.table_cell_index) {
+                    let style = match alignment {
+                        Alignment::None => None,
+                        Alignment::Left => Some("left"),
+                        Alignment::Center => Some("center"),
+                        Alignment::Right => Some("right"),
+                    };
+                    if let Some(style) = style {
+                        html.push_str(" style=\"text-align: ");
+                        html.push_str(style);
+                        html.push_str("\"");
+                    }
+                }
+                html.push('>');
+                self.table_cell_index += 1;
+                self.push_raw(&html);
+            }
+            Tag::Emphasis => self.push_raw("<em>"),
+            Tag::Strong => self.push_raw("<strong>"),
+            Tag::Strikethrough => self.push_raw("<del>"),
+            Tag::Superscript => self.push_raw("<sup>"),
+            Tag::Subscript => self.push_raw("<sub>"),
+            Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                ..
+            } => {
+                if !is_safe_url(&dest_url) {
+                    self.suppressed_link_depth += 1;
+                    return;
                 }
 
-                break;
-            }
-
-            let mut list_html = String::new();
-
-            for (line_number, item_html) in items {
-                push_block(
-                    &mut list_html,
-                    &format!(
-                        "<li{}>{}</li>",
-                        source_line_attributes(line_number, line_number),
-                        item_html,
-                    ),
+                let href = match link_type {
+                    LinkType::Email => format!("mailto:{dest_url}"),
+                    _ => dest_url.to_string(),
+                };
+                let mut html = format!(
+                    "<a href=\"{}\" target=\"_blank\" rel=\"{}\"",
+                    escape_html(&href),
+                    LINK_REL,
                 );
-            }
-
-            let list_wrapper = if ordered {
-                if first_value == 1 {
-                    format!("<ol>\n{list_html}\n</ol>")
-                } else {
-                    format!("<ol start=\"{first_value}\">\n{list_html}\n</ol>")
+                if !title.is_empty() {
+                    html.push_str(" title=\"");
+                    html.push_str(&escape_html(&title));
+                    html.push('"');
                 }
-            } else {
-                format!("<ul>\n{list_html}\n</ul>")
-            };
-
-            push_block(&mut html, &list_wrapper);
-            continue;
-        }
-
-        let start_line = line.number;
-        let mut end_line = line.number;
-        let mut paragraph_lines = vec![line.text];
-        index += 1;
-
-        while index < lines.len() {
-            let current_line = lines[index];
-
-            if is_blank(current_line.text)
-                || is_page_break_line(current_line.text)
-                || is_block_start(current_line.text)
-            {
-                break;
+                html.push('>');
+                self.push_raw(&html);
             }
+            Tag::Image {
+                dest_url, title, ..
+            } => {
+                self.image_stack.push(ImageContext {
+                    destination_url: dest_url.to_string(),
+                    title: title.to_string(),
+                    alt_text: String::new(),
+                    safe: is_safe_url(&dest_url),
+                });
+            }
+            Tag::MetadataBlock(kind) => {
+                self.push_raw(&format!("<section data-metadata-block=\"{}\">", metadata_block_name(kind)));
+            }
+        }
+    }
 
-            end_line = current_line.number;
-            paragraph_lines.push(current_line.text);
-            index += 1;
+    fn end_tag(&mut self, tag_end: TagEnd) {
+        if self.is_collecting_image_alt_text() {
+            if matches!(tag_end, TagEnd::Image) {
+                self.finish_image();
+            }
+            return;
         }
 
-        push_block(
-            &mut html,
-            &format!(
-                "<p{}>{}</p>",
-                source_line_attributes(start_line, end_line),
-                render_inline_lines(&paragraph_lines),
-            ),
+        match tag_end {
+            TagEnd::Paragraph => self.push_raw("</p>"),
+            TagEnd::Heading(level) => self.push_raw(&format!("</{level}>")),
+            TagEnd::BlockQuote(_) => self.push_raw("</blockquote>"),
+            TagEnd::CodeBlock => self.push_raw("</code></pre>"),
+            TagEnd::HtmlBlock => {}
+            TagEnd::List(true) => self.push_raw("</ol>"),
+            TagEnd::List(false) => self.push_raw("</ul>"),
+            TagEnd::Item => self.push_raw("</li>"),
+            TagEnd::FootnoteDefinition => self.push_raw("</section>"),
+            TagEnd::DefinitionList => self.push_raw("</dl>"),
+            TagEnd::DefinitionListTitle => self.push_raw("</dt>"),
+            TagEnd::DefinitionListDefinition => self.push_raw("</dd>"),
+            TagEnd::Table => {
+                self.table_alignments.clear();
+                self.table_cell_index = 0;
+                self.push_raw("</table>");
+            }
+            TagEnd::TableHead => {
+                self.table_section = TableSection::Body;
+                self.table_cell_index = 0;
+                self.push_raw("</tr></thead><tbody>");
+            }
+            TagEnd::TableRow => self.push_raw("</tr>"),
+            TagEnd::TableCell => {
+                let tag_name = match self.table_section {
+                    TableSection::Head => "th",
+                    TableSection::Body => "td",
+                };
+                self.push_raw(&format!("</{tag_name}>"));
+            }
+            TagEnd::Emphasis => self.push_raw("</em>"),
+            TagEnd::Strong => self.push_raw("</strong>"),
+            TagEnd::Strikethrough => self.push_raw("</del>"),
+            TagEnd::Superscript => self.push_raw("</sup>"),
+            TagEnd::Subscript => self.push_raw("</sub>"),
+            TagEnd::Link => {
+                if self.suppressed_link_depth > 0 {
+                    self.suppressed_link_depth -= 1;
+                } else {
+                    self.push_raw("</a>");
+                }
+            }
+            TagEnd::Image => self.finish_image(),
+            TagEnd::MetadataBlock(_) => self.push_raw("</section>"),
+        }
+    }
+
+    fn finish_image(&mut self) {
+        let Some(image_context) = self.image_stack.pop() else {
+            return;
+        };
+
+        if self.is_collecting_image_alt_text() {
+            if let Some(parent_image_context) = self.image_stack.last_mut() {
+                parent_image_context.alt_text.push_str(&image_context.alt_text);
+            }
+            return;
+        }
+
+        if !image_context.safe {
+            self.push_text(&image_context.alt_text);
+            return;
+        }
+
+        let mut html = format!(
+            "<img src=\"{}\" alt=\"{}\"",
+            escape_html(&image_context.destination_url),
+            escape_html(&image_context.alt_text),
         );
+        if !image_context.title.is_empty() {
+            html.push_str(" title=\"");
+            html.push_str(&escape_html(&image_context.title));
+            html.push('"');
+        }
+        html.push_str(" />");
+        self.push_raw(&html);
     }
 
-    html
-}
-
-fn push_block(output: &mut String, block_html: &str) {
-    if !output.is_empty() {
-        output.push('\n');
+    fn push_task_list_marker(&mut self, checked: bool) {
+        let markup = if checked {
+            "<input disabled=\"\" type=\"checkbox\" checked=\"\" />"
+        } else {
+            "<input disabled=\"\" type=\"checkbox\" />"
+        };
+        self.push_raw(markup);
     }
 
-    output.push_str(block_html);
-}
+    fn push_math_span(&mut self, class_name: &str, text: &str) {
+        self.push_raw(&format!(
+            "<span class=\"math {class_name}\">{}</span>",
+            escape_html(text),
+        ));
+    }
 
-fn render_inline_lines(lines: &[&str]) -> String {
-    let mut html = String::new();
-
-    for (index, line) in lines.iter().enumerate() {
-        if index > 0 {
-            html.push_str("<br />\n");
+    fn push_text(&mut self, text: &str) {
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context.alt_text.push_str(text);
+            return;
         }
 
-        html.push_str(&render_inline(line.trim_end()));
+        self.html.push_str(&escape_html(text));
     }
 
-    html
-}
-
-fn render_inline(text: &str) -> String {
-    let mut html = String::new();
-    let mut index = 0;
-
-    while index < text.len() {
-        let remaining = &text[index..];
-
-        if let Some((consumed, code)) = parse_code_span(remaining) {
-            html.push_str("<code>");
-            html.push_str(&escape_html(code));
-            html.push_str("</code>");
-            index += consumed;
-            continue;
+    fn push_code(&mut self, text: &str) {
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context.alt_text.push_str(text);
+            return;
         }
 
-        if let Some((consumed, inner)) = parse_wrapped_span(remaining, "**") {
-            html.push_str("<strong>");
-            html.push_str(&render_inline(inner));
-            html.push_str("</strong>");
-            index += consumed;
-            continue;
+        self.push_raw("<code>");
+        self.html.push_str(&escape_html(text));
+        self.push_raw("</code>");
+    }
+
+    fn push_soft_break(&mut self) {
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context.alt_text.push('\n');
+            return;
         }
 
-        if let Some((consumed, inner)) = parse_wrapped_span(remaining, "*") {
-            html.push_str("<em>");
-            html.push_str(&render_inline(inner));
-            html.push_str("</em>");
-            index += consumed;
-            continue;
+        self.push_raw("\n");
+    }
+
+    fn push_hard_break(&mut self) {
+        if let Some(image_context) = self.image_stack.last_mut() {
+            image_context.alt_text.push('\n');
+            return;
         }
 
-        if let Some((consumed, label, url)) = parse_markdown_link(remaining) {
-            if is_safe_url(url) {
-                html.push_str("<a href=\"");
-                html.push_str(&escape_html(url));
-                html.push_str("\" target=\"_blank\" rel=\"");
-                html.push_str(LINK_REL);
-                html.push_str("\">");
-                html.push_str(&render_inline(label));
-                html.push_str("</a>");
-            } else {
-                html.push_str(&escape_html(&remaining[..consumed]));
-            }
-            index += consumed;
-            continue;
+        self.push_raw("<br />\n");
+    }
+
+    fn push_raw(&mut self, html: &str) {
+        if self.image_stack.is_empty() {
+            self.html.push_str(html);
         }
+    }
 
-        if let Some(consumed) = parse_auto_link(remaining) {
-            let url = &remaining[..consumed];
-            html.push_str("<a href=\"");
-            html.push_str(&escape_html(url));
-            html.push_str("\" target=\"_blank\" rel=\"");
-            html.push_str(LINK_REL);
-            html.push_str("\">");
-            html.push_str(&escape_html(url));
-            html.push_str("</a>");
-            index += consumed;
-            continue;
+    fn is_collecting_image_alt_text(&self) -> bool {
+        !self.image_stack.is_empty()
+    }
+
+    fn source_line_attributes(&self, range: &Range<usize>) -> String {
+        let (start_line, end_line) = resolve_source_line_range(
+            self.content,
+            &self.line_starts,
+            self.line_offset,
+            range,
+        );
+        format!(
+            " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
+            start_line, end_line,
+        )
+    }
+}
+
+fn blockquote_class_name(kind: Option<BlockQuoteKind>) -> Option<&'static str> {
+    match kind {
+        None => None,
+        Some(BlockQuoteKind::Note) => Some("markdown-alert-note"),
+        Some(BlockQuoteKind::Tip) => Some("markdown-alert-tip"),
+        Some(BlockQuoteKind::Important) => Some("markdown-alert-important"),
+        Some(BlockQuoteKind::Warning) => Some("markdown-alert-warning"),
+        Some(BlockQuoteKind::Caution) => Some("markdown-alert-caution"),
+    }
+}
+
+fn metadata_block_name(kind: MetadataBlockKind) -> &'static str {
+    match kind {
+        MetadataBlockKind::YamlStyle => "yaml",
+        MetadataBlockKind::PlusesStyle => "pluses",
+    }
+}
+
+fn code_block_language(kind: CodeBlockKind<'_>) -> Option<String> {
+    match kind {
+        CodeBlockKind::Indented => None,
+        CodeBlockKind::Fenced(info) => {
+            let language = info.split(' ').next().unwrap_or_default().trim();
+            (!language.is_empty()).then_some(language.to_string())
         }
-
-        let character = remaining.chars().next().unwrap_or_default();
-        html.push_str(&escape_html_character(character));
-        index += character.len_utf8();
     }
-
-    html
 }
 
-fn parse_code_span(text: &str) -> Option<(usize, &str)> {
-    if !text.starts_with('`') {
-        return None;
-    }
+fn collect_line_starts(content: &str) -> Vec<usize> {
+    let mut line_starts = vec![0];
 
-    let end_index = text[1..].find('`')?;
-    let content_end = 1 + end_index;
-
-    Some((content_end + 1, &text[1..content_end]))
-}
-
-fn parse_wrapped_span<'a>(text: &'a str, marker: &str) -> Option<(usize, &'a str)> {
-    if !text.starts_with(marker) {
-        return None;
-    }
-
-    let end_index = text[marker.len()..].find(marker)?;
-    let content_start = marker.len();
-    let content_end = content_start + end_index;
-
-    Some((
-        content_end + marker.len(),
-        &text[content_start..content_end],
-    ))
-}
-
-fn parse_markdown_link(text: &str) -> Option<(usize, &str, &str)> {
-    if !text.starts_with('[') {
-        return None;
-    }
-
-    let label_end = text.find(']')?;
-    let after_label = &text[label_end + 1..];
-
-    if !after_label.starts_with('(') {
-        return None;
-    }
-
-    let url_end = after_label[1..].find(')')?;
-    let consumed = label_end + 1 + 1 + url_end + 1;
-
-    Some((
-        consumed,
-        &text[1..label_end],
-        after_label[1..1 + url_end].trim(),
-    ))
-}
-
-fn parse_auto_link(text: &str) -> Option<usize> {
-    if !(text.starts_with("https://") || text.starts_with("http://")) {
-        return None;
-    }
-
-    let mut end_index = 0;
-
-    for (index, character) in text.char_indices() {
-        if character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'') {
-            break;
+    for (index, character) in content.char_indices() {
+        if character == '\n' {
+            line_starts.push(index + 1);
         }
-
-        end_index = index + character.len_utf8();
     }
 
-    while end_index > 0 {
-        let character = text[..end_index].chars().last().unwrap_or_default();
+    line_starts
+}
 
-        if matches!(character, '.' | ',' | ';' | ':' | '!' | '?') {
-            end_index -= character.len_utf8();
-            continue;
-        }
+fn resolve_source_line_range(
+    content: &str,
+    line_starts: &[usize],
+    line_offset: usize,
+    range: &Range<usize>,
+) -> (usize, usize) {
+    let start_line = resolve_line_number(line_starts, range.start) + line_offset;
 
-        break;
+    if content.is_empty() {
+        return (start_line, start_line);
     }
 
-    (end_index > 0).then_some(end_index)
+    let end_offset = range
+        .end
+        .saturating_sub(1)
+        .min(content.len().saturating_sub(1));
+    let end_line = resolve_line_number(line_starts, end_offset) + line_offset;
+
+    (start_line, end_line.max(start_line))
 }
 
-fn parse_heading(text: &str) -> Option<(usize, &str)> {
-    let trimmed = text.trim_start();
-    let mut marker_count = 0;
-
-    for character in trimmed.chars() {
-        if character == '#' && marker_count < 6 {
-            marker_count += 1;
-            continue;
-        }
-
-        break;
+fn resolve_line_number(line_starts: &[usize], offset: usize) -> usize {
+    match line_starts.binary_search(&offset) {
+        Ok(index) => index,
+        Err(index) => index.saturating_sub(1),
     }
-
-    if marker_count == 0 {
-        return None;
-    }
-
-    let remaining = &trimmed[marker_count..];
-
-    remaining
-        .strip_prefix(' ')
-        .map(|content| (marker_count, content))
-}
-
-fn parse_fence_start(text: &str) -> Option<(char, usize, &str)> {
-    let trimmed = text.trim_start();
-    let marker = trimmed.chars().next()?;
-
-    if marker != '`' && marker != '~' {
-        return None;
-    }
-
-    let marker_len = trimmed
-        .chars()
-        .take_while(|character| *character == marker)
-        .count();
-
-    if marker_len < 3 {
-        return None;
-    }
-
-    let language = trimmed[marker_len..].trim();
-
-    Some((marker, marker_len, language))
-}
-
-fn is_fence_end(text: &str, marker: char, marker_len: usize) -> bool {
-    let trimmed = text.trim_start();
-
-    trimmed
-        .chars()
-        .take_while(|character| *character == marker)
-        .count()
-        >= marker_len
-}
-
-fn parse_list_item(text: &str) -> Option<(bool, usize, &str)> {
-    if let Some(content) = parse_unordered_list_item(text) {
-        return Some((false, 1, content));
-    }
-
-    parse_ordered_list_item(text).map(|(start_value, content)| (true, start_value, content))
-}
-
-fn parse_unordered_list_item(text: &str) -> Option<&str> {
-    let trimmed = text.trim_start();
-    let marker = trimmed.chars().next()?;
-
-    if !matches!(marker, '-' | '*' | '+') {
-        return None;
-    }
-
-    trimmed[marker.len_utf8()..]
-        .strip_prefix(' ')
-        .or_else(|| trimmed[marker.len_utf8()..].strip_prefix('\t'))
-}
-
-fn parse_ordered_list_item(text: &str) -> Option<(usize, &str)> {
-    let trimmed = text.trim_start();
-    let digits_end = trimmed
-        .chars()
-        .take_while(|character| character.is_ascii_digit())
-        .count();
-
-    if digits_end == 0 || !trimmed[digits_end..].starts_with('.') {
-        return None;
-    }
-
-    let content = &trimmed[digits_end + 1..];
-    let content = content
-        .strip_prefix(' ')
-        .or_else(|| content.strip_prefix('\t'))?;
-    let start_value = trimmed[..digits_end].parse::<usize>().ok()?;
-
-    Some((start_value, content))
-}
-
-fn is_horizontal_rule(text: &str) -> bool {
-    let trimmed = text.trim();
-
-    if trimmed.len() < 3 {
-        return false;
-    }
-
-    let mut characters = trimmed.chars();
-    let Some(first_character) = characters.next() else {
-        return false;
-    };
-
-    matches!(first_character, '-' | '*' | '_')
-        && characters.all(|character| character == first_character)
-}
-
-fn is_blockquote_line(text: &str) -> bool {
-    text.trim_start().starts_with('>')
-}
-
-fn strip_blockquote_marker(text: &str) -> &str {
-    let trimmed = text.trim_start();
-    let stripped = trimmed.strip_prefix('>').unwrap_or(trimmed);
-
-    stripped.strip_prefix(' ').unwrap_or(stripped)
-}
-
-fn is_block_start(text: &str) -> bool {
-    parse_heading(text).is_some()
-        || parse_fence_start(text).is_some()
-        || is_horizontal_rule(text)
-        || is_blockquote_line(text)
-        || parse_list_item(text).is_some()
-}
-
-fn is_blank(text: &str) -> bool {
-    text.trim().is_empty()
-}
-
-fn is_page_break_line(text: &str) -> bool {
-    is_page_break_token(text.trim())
 }
 
 fn is_page_break_token(text: &str) -> bool {
@@ -583,13 +570,6 @@ fn is_page_break_token(text: &str) -> bool {
 
 fn count_line_breaks(text: &str) -> usize {
     text.chars().filter(|character| *character == '\n').count()
-}
-
-fn source_line_attributes(start_line: usize, end_line: usize) -> String {
-    format!(
-        " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
-        start_line, end_line
-    )
 }
 
 fn is_safe_url(url: &str) -> bool {
@@ -631,34 +611,45 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1>\n<p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p>\n<ul>\n<li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li>\n</ul>"
+            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p><ul><li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li></ul>"
         );
         assert_eq!(
             rendered_preview.page_htmls,
             vec![
-                "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1>\n<p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p>",
-                "<ul>\n<li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li>\n</ul>",
+                "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p>",
+                "<ul><li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li></ul>",
             ]
         );
     }
 
     #[test]
-    fn escapes_html_and_renders_code_blocks() {
-        let rendered_preview = render_markdown_preview("```\n<script>alert(1)</script>\n```");
+    fn escapes_html_and_uses_commonmark_code_block_output() {
+        let rendered_preview = render_markdown_preview("```rust\n<script>alert(1)</script>\n```");
 
         assert_eq!(
             rendered_preview.html,
-            "<pre data-source-line-start=\"0\" data-source-line-end=\"2\"><code>&lt;script&gt;alert(1)&lt;/script&gt;</code></pre>"
+            "<pre data-source-line-start=\"0\" data-source-line-end=\"2\"><code class=\"language-rust\">&lt;script&gt;alert(1)&lt;/script&gt;\n</code></pre>"
         );
     }
 
     #[test]
-    fn renders_blockquotes_and_emphasis() {
+    fn renders_blockquotes_with_commonmark_soft_breaks() {
         let rendered_preview = render_markdown_preview("> quoted\n> *value*");
 
         assert_eq!(
             rendered_preview.html,
-            "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted<br />\n<em>value</em></p></blockquote>"
+            "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted\n<em>value</em></p></blockquote>"
+        );
+    }
+
+    #[test]
+    fn escapes_inline_html_and_suppresses_unsafe_links() {
+        let rendered_preview =
+            render_markdown_preview("[x](javascript:alert(1)) <script>alert(1)</script>");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x &lt;script&gt;alert(1)&lt;/script&gt;</p>"
         );
     }
 }

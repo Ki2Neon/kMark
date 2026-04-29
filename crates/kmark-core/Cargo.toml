@@ -6,3 +6,6 @@ edition = "2021"
 [lib]
 name = "kmark_core"
 path = "src/lib.rs"
+
+[dependencies]
+pulldown-cmark = "0.13"
