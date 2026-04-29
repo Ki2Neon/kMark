@@ -20,6 +20,14 @@ const INTERACTIVE_PREVIEW_PAN_THRESHOLD_PX = 3;
 const PREVIEW_CURSOR_TARGET_CLASS_NAME = "preview-section__cursor-target";
 const PREVIEW_CURSOR_SCROLL_PADDING_PX = 72;
 const PREVIEW_CURSOR_VIEWPORT_ANCHOR_RATIO = 0.35;
+const DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX = 12;
+const DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX = 10.4;
+const MIN_TABLE_CELL_HORIZONTAL_PADDING_PX = 4;
+const MIN_TABLE_CELL_VERTICAL_PADDING_PX = 4;
+const MIN_TABLE_FONT_SCALE = 0.74;
+const TABLE_FONT_SCALE_STEP = 0.02;
+const TABLE_OVERFLOW_TOLERANCE_PX = 1;
+const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
 
 type MarkdownPreviewProps = {
   readonly activeSourceLine?: number | null;
@@ -28,6 +36,7 @@ type MarkdownPreviewProps = {
   readonly html: string;
   readonly maximumZoomScale?: number;
   readonly minimumZoomScale?: number;
+  readonly onOpenExternalLink?: (url: string) => void;
   readonly onPreviewContextMenu?: (clientX: number, clientY: number) => void;
   readonly onSourceLineDoubleClick?: (lineNumber: number) => void;
   readonly onZoomScaleChange?: (zoomScale: number) => void;
@@ -214,6 +223,123 @@ function resolveDoubleClickSourceLine(
   return zeroBasedLineNumber + 1;
 }
 
+function resolveExternalLink(anchor: HTMLAnchorElement): string | null {
+  const href = anchor.getAttribute("href")?.trim() ?? "";
+
+  if (href.length === 0 || href.startsWith("#") || !EXTERNAL_LINK_SCHEME_PATTERN.test(href)) {
+    return null;
+  }
+
+  return href;
+}
+
+function getTableAvailableWidth(table: HTMLTableElement): number {
+  return table.parentElement?.clientWidth ?? table.clientWidth;
+}
+
+function isPreviewTableOverflowing(table: HTMLTableElement): boolean {
+  const availableWidth = getTableAvailableWidth(table);
+
+  if (availableWidth <= 0) {
+    return false;
+  }
+
+  return table.scrollWidth - availableWidth > TABLE_OVERFLOW_TOLERANCE_PX;
+}
+
+function getPreviewTableCellPadding(
+  table: HTMLTableElement,
+): { horizontal: number; vertical: number } {
+  const previewTableCell = table.querySelector<HTMLElement>("th, td");
+
+  if (previewTableCell === null) {
+    return {
+      horizontal: DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX,
+      vertical: DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX,
+    };
+  }
+
+  const previewTableCellStyle = window.getComputedStyle(previewTableCell);
+  const horizontalPadding = Number.parseFloat(previewTableCellStyle.paddingLeft);
+  const verticalPadding = Number.parseFloat(previewTableCellStyle.paddingTop);
+
+  return {
+    horizontal: Number.isFinite(horizontalPadding) ? horizontalPadding : DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX,
+    vertical: Number.isFinite(verticalPadding) ? verticalPadding : DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX,
+  };
+}
+
+function resetPreviewTableFit(table: HTMLTableElement): void {
+  table.style.removeProperty("--preview-table-cell-padding-x");
+  table.style.removeProperty("--preview-table-cell-padding-y");
+  table.style.removeProperty("--preview-table-font-scale");
+}
+
+function setPreviewTablePadding(
+  table: HTMLTableElement,
+  horizontalPaddingPx: number,
+  verticalPaddingPx: number,
+): void {
+  table.style.setProperty("--preview-table-cell-padding-x", `${horizontalPaddingPx.toFixed(2)}px`);
+  table.style.setProperty("--preview-table-cell-padding-y", `${verticalPaddingPx.toFixed(2)}px`);
+}
+
+function setPreviewTableFontScale(table: HTMLTableElement, fontScale: number): void {
+  table.style.setProperty("--preview-table-font-scale", fontScale.toFixed(2));
+}
+
+function fitPreviewTable(table: HTMLTableElement): void {
+  resetPreviewTableFit(table);
+
+  if (!isPreviewTableOverflowing(table)) {
+    return;
+  }
+
+  const defaultPadding = getPreviewTableCellPadding(table);
+
+  for (
+    let nextHorizontalPadding = defaultPadding.horizontal - 1;
+    nextHorizontalPadding >= MIN_TABLE_CELL_HORIZONTAL_PADDING_PX;
+    nextHorizontalPadding -= 1
+  ) {
+    const paddingReductionRatio = defaultPadding.horizontal <= MIN_TABLE_CELL_HORIZONTAL_PADDING_PX
+      ? 1
+      : (nextHorizontalPadding - MIN_TABLE_CELL_HORIZONTAL_PADDING_PX)
+        / (defaultPadding.horizontal - MIN_TABLE_CELL_HORIZONTAL_PADDING_PX);
+    const nextVerticalPadding = Math.max(
+      MIN_TABLE_CELL_VERTICAL_PADDING_PX,
+      MIN_TABLE_CELL_VERTICAL_PADDING_PX
+        + ((defaultPadding.vertical - MIN_TABLE_CELL_VERTICAL_PADDING_PX) * paddingReductionRatio),
+    );
+
+    setPreviewTablePadding(table, nextHorizontalPadding, nextVerticalPadding);
+
+    if (!isPreviewTableOverflowing(table)) {
+      return;
+    }
+  }
+
+  setPreviewTablePadding(
+    table,
+    MIN_TABLE_CELL_HORIZONTAL_PADDING_PX,
+    MIN_TABLE_CELL_VERTICAL_PADDING_PX,
+  );
+
+  if (!isPreviewTableOverflowing(table)) {
+    return;
+  }
+
+  for (let fontScale = 1 - TABLE_FONT_SCALE_STEP; fontScale >= MIN_TABLE_FONT_SCALE; fontScale -= TABLE_FONT_SCALE_STEP) {
+    setPreviewTableFontScale(table, fontScale);
+
+    if (!isPreviewTableOverflowing(table)) {
+      return;
+    }
+  }
+
+  setPreviewTableFontScale(table, MIN_TABLE_FONT_SCALE);
+}
+
 function MarkdownPreviewComponent({
   activeSourceLine = null,
   displayMode,
@@ -221,6 +347,7 @@ function MarkdownPreviewComponent({
   html,
   maximumZoomScale = DEFAULT_MAX_PREVIEW_ZOOM_SCALE,
   minimumZoomScale = MIN_A4_SCALE,
+  onOpenExternalLink,
   onPreviewContextMenu,
   onSourceLineDoubleClick,
   onZoomScaleChange,
@@ -305,6 +432,33 @@ function MarkdownPreviewComponent({
 
     onSourceLineDoubleClick(sourceLine);
   }, [onSourceLineDoubleClick]);
+
+  const handlePreviewClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    if (onOpenExternalLink === undefined) {
+      return;
+    }
+
+    const eventTarget = resolveEventTargetElement(event.target);
+
+    if (eventTarget === null) {
+      return;
+    }
+
+    const anchor = eventTarget.closest<HTMLAnchorElement>("a[href]");
+
+    if (anchor === null) {
+      return;
+    }
+
+    const externalLink = resolveExternalLink(anchor);
+
+    if (externalLink === null) {
+      return;
+    }
+
+    event.preventDefault();
+    onOpenExternalLink(externalLink);
+  }, [onOpenExternalLink]);
 
   const handlePreviewContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (onPreviewContextMenu === undefined) {
@@ -406,6 +560,49 @@ function MarkdownPreviewComponent({
       resizeObserver.disconnect();
     };
   }, [displayMode]);
+
+  useLayoutEffect(() => {
+    const previewViewport = previewViewportRef.current;
+
+    if (previewViewport === null) {
+      return;
+    }
+
+    let animationFrameId: number | null = null;
+
+    const fitPreviewTables = () => {
+      for (const previewTable of previewViewport.querySelectorAll<HTMLTableElement>("table")) {
+        fitPreviewTable(previewTable);
+      }
+    };
+
+    const schedulePreviewTableFit = () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = null;
+        fitPreviewTables();
+      });
+    };
+
+    schedulePreviewTableFit();
+
+    const resizeObserver = new ResizeObserver(() => {
+      schedulePreviewTableFit();
+    });
+
+    resizeObserver.observe(previewViewport);
+
+    return () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+
+      resizeObserver.disconnect();
+    };
+  }, [currentDisplayScale, html, normalizedPageHtmls]);
 
   useLayoutEffect(() => {
     const previewViewport = previewViewportRef.current;
@@ -614,6 +811,7 @@ function MarkdownPreviewComponent({
           className="preview-section__body preview-section__body--a4"
           data-interactive-pan={enableInteractiveViewportNavigation ? "true" : "false"}
           data-panning={isViewportPanning ? "true" : "false"}
+          onClick={handlePreviewClick}
           onContextMenu={handlePreviewContextMenu}
           onDoubleClick={handlePreviewDoubleClick}
           onPointerCancel={handlePreviewPointerEnd}
@@ -645,6 +843,7 @@ function MarkdownPreviewComponent({
         className="preview-section__body"
         data-interactive-pan={enableInteractiveViewportNavigation ? "true" : "false"}
         data-panning={isViewportPanning ? "true" : "false"}
+        onClick={handlePreviewClick}
         onContextMenu={handlePreviewContextMenu}
         onDoubleClick={handlePreviewDoubleClick}
         onPointerCancel={handlePreviewPointerEnd}

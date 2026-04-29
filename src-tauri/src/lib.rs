@@ -410,6 +410,7 @@ pub fn run() {
             commands::editor_draft::set_editor_draft,
             commands::editor_preferences::get_editor_preferences,
             commands::editor_preferences::set_editor_preferences,
+            commands::external_link::open_external_link,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::markdown_render::render_markdown_preview,
             commands::preview_preferences::get_preview_preferences,

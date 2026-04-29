@@ -782,7 +782,62 @@ input:focus-visible,
 }
 
 .markdown-body a {
-  color: inherit;
+  color: color-mix(in srgb, var(--preview-text) 78%, var(--focus));
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--focus) 54%, transparent);
+  text-underline-offset: 0.16em;
+}
+
+.markdown-body a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.markdown-body .markdown-task-checkbox {
+  display: block;
+  flex: 0 0 auto;
+  width: 1.14em;
+  height: 1.14em;
+  margin: 0.14em 0 0;
+  border: 0.16em solid var(--preview-text);
+  background: var(--preview-surface);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.markdown-body .markdown-task-checkbox svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.markdown-body .markdown-task-checkbox path {
+  fill: none;
+  stroke: var(--preview-surface);
+  stroke-width: 3.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.markdown-body .markdown-task-checkbox[data-checked="true"] {
+  background: var(--preview-text);
+}
+
+.markdown-body .markdown-task-checkbox[data-checked="false"] svg {
+  visibility: hidden;
+}
+
+.markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox) {
+  padding-left: 0;
+}
+
+.markdown-body li:has(> .markdown-task-checkbox) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.68rem;
+  list-style: none;
+  min-height: 1.5em;
 }
 
 .markdown-body blockquote {
@@ -812,15 +867,21 @@ input:focus-visible,
 }
 
 .markdown-body table {
+  --preview-table-font-scale: 1;
+  --preview-table-cell-padding-x: 0.75rem;
+  --preview-table-cell-padding-y: 0.65rem;
   width: 100%;
   border-collapse: collapse;
+  font-size: calc(1rem * var(--preview-table-font-scale));
 }
 
 .markdown-body th,
 .markdown-body td {
-  padding: 0.65rem 0.75rem;
+  padding: var(--preview-table-cell-padding-y) var(--preview-table-cell-padding-x);
   border: 1px solid var(--preview-border);
   text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body th {

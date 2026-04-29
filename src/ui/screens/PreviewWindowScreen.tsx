@@ -5,6 +5,7 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { usePreviewWindowViewer } from "../hooks/usePreviewWindowViewer";
 import { useWindowTitle } from "../hooks/useWindowTitle";
+import { openExternalLink } from "../../infra/externalLink";
 
 const FALLBACK_PREVIEW_SNAPSHOT = {
   content: DEFAULT_MARKDOWN,
@@ -33,6 +34,10 @@ export function PreviewWindowScreen() {
   const normalizedFileName = previewSnapshot.fileName.trim().length > 0 ? previewSnapshot.fileName.trim() : DEFAULT_FILE_NAME;
   useWindowTitle(`${normalizedFileName} - Preview - kMark`);
 
+  const handlePreviewExternalLinkOpen = (url: string) => {
+    void openExternalLink(url).catch(() => {});
+  };
+
   return (
     <main className="editor-shell preview-window">
       <MarkdownPreview
@@ -42,6 +47,7 @@ export function PreviewWindowScreen() {
         html={previewHtml}
         maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
         minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
+        onOpenExternalLink={handlePreviewExternalLinkOpen}
         onPreviewContextMenu={handlePreviewContextMenu}
         onSourceLineDoubleClick={onSourceLineDoubleClick}
         onZoomScaleChange={handleZoomScaleChange}

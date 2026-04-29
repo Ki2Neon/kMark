@@ -561,9 +561,9 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         let markup = if checked {
-            "<input disabled=\"\" type=\"checkbox\" checked=\"\" />\n"
+            "<span class=\"markdown-task-checkbox\" data-checked=\"true\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 7.5\" /></svg></span>"
         } else {
-            "<input disabled=\"\" type=\"checkbox\" />\n"
+            "<span class=\"markdown-task-checkbox\" data-checked=\"false\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 7.5\" /></svg></span>"
         };
         self.push_raw(markup);
     }
@@ -606,7 +606,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        self.push_raw("\n");
+        self.push_raw("<br />\n");
     }
 
     fn push_hard_break(&mut self) {
@@ -824,7 +824,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted\n<em>value</em></p></blockquote>"
+            "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted<br />\n<em>value</em></p></blockquote>"
         );
     }
 
@@ -856,7 +856,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<ul><li data-source-line-start=\"0\" data-source-line-end=\"0\"><input disabled=\"\" type=\"checkbox\" checked=\"\" />\ndone</li><li data-source-line-start=\"1\" data-source-line-end=\"1\"><input disabled=\"\" type=\"checkbox\" />\ntodo</li></ul>"
+            "<ul><li data-source-line-start=\"0\" data-source-line-end=\"0\"><span class=\"markdown-task-checkbox\" data-checked=\"true\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 7.5\" /></svg></span>done</li><li data-source-line-start=\"1\" data-source-line-end=\"1\"><span class=\"markdown-task-checkbox\" data-checked=\"false\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 7.5\" /></svg></span>todo</li></ul>"
         );
     }
 

@@ -22,6 +22,7 @@ import { usePreviewWindowSession } from "../hooks/usePreviewWindowSession";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
+import { openExternalLink } from "../../infra/externalLink";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
@@ -301,8 +302,14 @@ export function MarkdownEditorScreen({
     }
   }, [layoutMode, requestMobileSection]);
 
+  const handlePreviewExternalLinkOpen = useCallback((url: string) => {
+    void openExternalLink(url).catch((error) => {
+      handleErrorRaise(error instanceof Error ? error.message : "外部リンクを開けませんでした。");
+    });
+  }, [handleErrorRaise]);
+
   const { openPreviewWindow } = usePreviewWindowSession({
-    activeSourceLine: previewHighlightSourceLine,
+    activeSourceLine: activeEditCursorLine,
     content,
     enabled: isEditorReady,
     fileName,
@@ -512,6 +519,7 @@ export function MarkdownEditorScreen({
                     html={previewHtml}
                     maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
                     minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
+                    onOpenExternalLink={handlePreviewExternalLinkOpen}
                     onPreviewContextMenu={handlePreviewContextMenu}
                     onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
                     onZoomScaleChange={handlePreviewZoomScaleChange}
@@ -572,6 +580,7 @@ export function MarkdownEditorScreen({
                       html={previewHtml}
                       maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
                       minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
+                      onOpenExternalLink={handlePreviewExternalLinkOpen}
                       onPreviewContextMenu={handlePreviewContextMenu}
                       onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
                       onZoomScaleChange={handlePreviewZoomScaleChange}
