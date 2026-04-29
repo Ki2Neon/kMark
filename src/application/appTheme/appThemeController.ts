@@ -12,26 +12,26 @@ export class AppThemeController {
     this.#gateway = dependencies.gateway;
   }
 
-  createState(): ThemePreferences {
+  createInitialState(): ThemePreferences {
+    return this.#gateway.createDefault();
+  }
+
+  async load(): Promise<ThemePreferences> {
     return this.#gateway.load();
   }
 
-  persist(themePreferences: ThemePreferences): void {
-    this.#gateway.persist(themePreferences);
+  async persist(themePreferences: ThemePreferences): Promise<ThemePreferences> {
+    return this.#gateway.persist(themePreferences);
   }
 
-  matchesStorageKey(key: string | null): boolean {
-    return key === this.#gateway.storageKey;
+  subscribeToPreferences(
+    callback: (themePreferences: ThemePreferences) => void,
+  ): Promise<() => void> {
+    return this.#gateway.listen(callback);
   }
 
-  loadFromStorage(currentThemePreferences: ThemePreferences): ThemePreferences {
-    const nextThemePreferences = this.#gateway.load();
-
-    return currentThemePreferences.appThemeId === nextThemePreferences.appThemeId
-      && currentThemePreferences.previewThemeId === nextThemePreferences.previewThemeId
-      && currentThemePreferences.previewUsesAppThemeColors === nextThemePreferences.previewUsesAppThemeColors
-      ? currentThemePreferences
-      : nextThemePreferences;
+  createState(themePreferences: ThemePreferences): ThemePreferences {
+    return themePreferences;
   }
 
   changeAppTheme(currentThemePreferences: ThemePreferences, appThemeId: AppThemeId): ThemePreferences {
@@ -39,10 +39,10 @@ export class AppThemeController {
       return currentThemePreferences;
     }
 
-    return {
+    return this.#gateway.normalize({
       ...currentThemePreferences,
       appThemeId,
-    };
+    });
   }
 
   changePreviewUsesAppThemeColors(
@@ -53,9 +53,9 @@ export class AppThemeController {
       return currentThemePreferences;
     }
 
-    return {
+    return this.#gateway.normalize({
       ...currentThemePreferences,
       previewUsesAppThemeColors,
-    };
+    });
   }
 }

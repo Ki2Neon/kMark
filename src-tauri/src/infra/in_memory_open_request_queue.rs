@@ -1,6 +1,7 @@
 use std::{mem, path::PathBuf, sync::Mutex};
 
-use crate::domain::{MarkdownDocumentError, OpenRequestQueue};
+use crate::ports::OpenRequestQueue;
+use kmark_core::MarkdownDocumentError;
 
 #[derive(Default)]
 pub struct InMemoryOpenRequestQueue {

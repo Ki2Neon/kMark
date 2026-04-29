@@ -9,6 +9,7 @@ function App() {
   const { previewWindowMode } = useAppMode();
   const {
     appThemeId,
+    isReady: isThemeReady,
     previewUsesAppThemeColors,
     onAppThemeChange,
     onPreviewUsesAppThemeColorsChange,
@@ -22,6 +23,7 @@ function App() {
     showLineNumbers,
     startupEditMode,
     windowsStartupTrayResidentEnabled,
+    isReady: isEditorPreferencesReady,
     onAppFontChange,
     onEditFontChange,
     onEditFontSizeChange,
@@ -37,6 +39,10 @@ function App() {
     editFontSizePx,
     previewUsesAppThemeColors,
   });
+
+  if (!isThemeReady || !isEditorPreferencesReady) {
+    return null;
+  }
 
   if (previewWindowMode) {
     return <PreviewWindowScreen />;

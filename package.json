@@ -7,8 +7,11 @@
   "type": "module",
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "build:wasm": "wasm-pack build crates/kmark-web --target web --out-dir ../../src/wasm/pkg --out-name kmark_web",
+    "dev:vite": "vite",
+    "dev": "pnpm run build:wasm && pnpm run dev:vite",
+    "build:vite": "tsc && vite build",
+    "build": "pnpm run build:wasm && pnpm run build:vite",
     "check:boundaries": "node tools/architecture/check-boundaries.mjs",
     "check:cycles": "node tools/architecture/check-cycles.mjs",
     "preview": "vite preview",

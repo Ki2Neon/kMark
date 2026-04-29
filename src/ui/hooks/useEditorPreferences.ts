@@ -18,6 +18,7 @@ type UseEditorPreferencesOptions = {
 export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) {
   const { syncWindowsStartupTrayResident = true } = options;
   const controllerRef = useRef<EditorPreferencesController | null>(null);
+  const isLoadedRef = useRef(false);
 
   if (controllerRef.current === null) {
     controllerRef.current = new EditorPreferencesController({
@@ -27,57 +28,153 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
   }
 
   const controller = controllerRef.current;
-  const [editorPreferences, setEditorPreferences] = useState<EditorPreferences>(() => controller.createState());
+  const [editorPreferences, setEditorPreferences] = useState<EditorPreferences>(() => controller.createInitialState());
+  const [isReady, setIsReady] = useState(false);
   const canControlWindowsStartupTrayResident =
     controller.canControlWindowsStartupTrayResident(syncWindowsStartupTrayResident);
 
   useEffect(() => {
-    controller.persist(editorPreferences);
-  }, [controller, editorPreferences]);
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
 
-  useEffect(() => {
-    void controller.syncWindowsStartupTrayResidentPreference(
-      editorPreferences.windowsStartupTrayResidentEnabled,
-      canControlWindowsStartupTrayResident,
-    );
-  }, [canControlWindowsStartupTrayResident, controller, editorPreferences.windowsStartupTrayResidentEnabled]);
+    void controller.load().then((nextEditorPreferences) => {
+      if (isDisposed) {
+        return;
+      }
+
+      isLoadedRef.current = true;
+      setEditorPreferences(nextEditorPreferences);
+      setIsReady(true);
+    }).catch(() => {
+      if (isDisposed) {
+        return;
+      }
+
+      setEditorPreferences(controller.createInitialState());
+      setIsReady(true);
+    });
+
+    void controller.subscribeToPreferences((nextEditorPreferences) => {
+      if (isDisposed) {
+        return;
+      }
+
+      isLoadedRef.current = true;
+      setEditorPreferences(nextEditorPreferences);
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    }).catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      unlisten?.();
+    };
+  }, [controller]);
 
   const handleMultiCursorModifierChange = useCallback((multiCursorModifier: MultiCursorModifier) => {
-    setEditorPreferences((currentPreferences) => (
-      controller.changeMultiCursorModifier(currentPreferences, multiCursorModifier)
-    ));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeMultiCursorModifier(currentPreferences, multiCursorModifier);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   const handleAppFontChange = useCallback((appFontId: AppFontId) => {
-    setEditorPreferences((currentPreferences) => controller.changeAppFont(currentPreferences, appFontId));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeAppFont(currentPreferences, appFontId);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   const handleEditFontChange = useCallback((editFontId: EditFontId) => {
-    setEditorPreferences((currentPreferences) => controller.changeEditFont(currentPreferences, editFontId));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeEditFont(currentPreferences, editFontId);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   const handleEditFontSizeChange = useCallback((editFontSizePx: EditFontSizePx) => {
-    setEditorPreferences((currentPreferences) => (
-      controller.changeEditFontSize(currentPreferences, editFontSizePx)
-    ));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeEditFontSize(currentPreferences, editFontSizePx);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   const handleShowLineNumbersChange = useCallback((showLineNumbers: boolean) => {
-    setEditorPreferences((currentPreferences) => (
-      controller.changeShowLineNumbers(currentPreferences, showLineNumbers)
-    ));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeShowLineNumbers(currentPreferences, showLineNumbers);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   const handleStartupEditModeChange = useCallback((startupEditMode: StartupEditMode) => {
-    setEditorPreferences((currentPreferences) => (
-      controller.changeStartupEditMode(currentPreferences, startupEditMode)
-    ));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeStartupEditMode(currentPreferences, startupEditMode);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   const handleWindowsStartupTrayResidentChange = useCallback((windowsStartupTrayResidentEnabled: boolean) => {
-    setEditorPreferences((currentPreferences) => (
-      controller.changeWindowsStartupTrayResident(currentPreferences, windowsStartupTrayResidentEnabled)
-    ));
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeWindowsStartupTrayResident(
+        currentPreferences,
+        windowsStartupTrayResidentEnabled,
+      );
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
   }, [controller]);
 
   return {
@@ -85,6 +182,7 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
     canControlWindowsStartupTrayResident,
     editFontId: editorPreferences.editFontId,
     editFontSizePx: editorPreferences.editFontSizePx,
+    isReady,
     multiCursorModifier: editorPreferences.multiCursorModifier,
     showLineNumbers: editorPreferences.showLineNumbers,
     startupEditMode: editorPreferences.startupEditMode,

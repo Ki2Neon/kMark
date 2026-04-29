@@ -104,6 +104,7 @@ export function MarkdownEditorScreen({
     errorMessage,
     fileName,
     isDirty,
+    isReady: isEditorReady,
     previewHtml,
     handleClearPendingExternalDocuments,
     previewPageHtmls,
@@ -303,6 +304,7 @@ export function MarkdownEditorScreen({
   const { openPreviewWindow } = usePreviewWindowSession({
     activeSourceLine: previewHighlightSourceLine,
     content,
+    enabled: isEditorReady,
     fileName,
     onError: handleErrorRaise,
     onJumpToSourceLine: handlePreviewSourceLineDoubleClick,
@@ -328,6 +330,7 @@ export function MarkdownEditorScreen({
   useExternalMarkdownRequests({
     clearPendingExternalDocuments: handleClearPendingExternalDocuments,
     confirmDiscard,
+    enabled: isEditorReady,
     onBeforeLoadExternalDocument: focusExternalDocument,
     onLoadExternalDocument: handleLoadExternalDocument,
     subscribeToExternalDocumentRequests,
@@ -382,6 +385,7 @@ export function MarkdownEditorScreen({
   }, [closeDesktopMenu, dismissMobileMenu, layoutMode]);
 
   useMarkdownEditorShortcuts({
+    enabled: isEditorReady,
     onDismissMenu: handleShortcutDismissMenu,
     onMenuToggle: handleShortcutMenuToggle,
     onNewDocument: handleShortcutNewDocument,
@@ -394,6 +398,10 @@ export function MarkdownEditorScreen({
       void handleOverwriteSaveDocument();
     },
   });
+
+  if (!isEditorReady) {
+    return null;
+  }
 
   const menuSectionProps = {
     appFontId,

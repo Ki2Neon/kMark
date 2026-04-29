@@ -15,11 +15,6 @@ export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] =
   { id: "a4", label: "A4" },
 ] as const;
 
-export const DEFAULT_PREVIEW_PREFERENCES: PreviewPreferences = {
-  previewDisplayMode: "standard",
-  isPreviewVisible: true,
-};
-
 export const CSS_MM_TO_PX = 96 / 25.4;
 
 export const A4_PAGE_WIDTH_MM = 210;

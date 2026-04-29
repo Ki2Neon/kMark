@@ -1,9 +1,11 @@
-import { type PreviewWindowViewerGateway } from "../../application/previewWindowViewer/previewWindowViewerPorts";
+import {
+  type PreviewWindowViewerGateway,
+  type PreviewWindowViewerState,
+} from "../../application/previewWindowViewer/previewWindowViewerPorts";
 import {
   loadPreviewWindowState,
   listenForPreviewWindowStateUpdates,
   requestPreviewWindowEditJump,
-  type PreviewWindowState,
 } from "../../infra/previewWindow";
 
 export function createBrowserPreviewWindowViewerGateway(): PreviewWindowViewerGateway {
@@ -13,7 +15,7 @@ export function createBrowserPreviewWindowViewerGateway(): PreviewWindowViewerGa
     },
 
     async listenForStateUpdates(callback) {
-      return listenForPreviewWindowStateUpdates((previewWindowState: PreviewWindowState) => {
+      return listenForPreviewWindowStateUpdates((previewWindowState: PreviewWindowViewerState) => {
         callback({
           activeSourceLine: previewWindowState.activeSourceLine,
           snapshot: previewWindowState.snapshot,

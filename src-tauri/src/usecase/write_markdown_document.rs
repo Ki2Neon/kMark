@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use crate::domain::{MarkdownDocumentError, MarkdownDocumentRepository};
+use crate::ports::MarkdownDocumentRepository;
+use kmark_core::MarkdownDocumentError;
 
 pub fn write_markdown_document<R>(
     repository: &R,

@@ -1,6 +1,9 @@
 import { type StoredEdit } from "../../domain/editor";
+import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
+import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode } from "../../domain/preview";
+import { type EditorSessionAction } from "./editorSessionAction";
 
 export type LoadedMarkdownDocument = {
   readonly fileName: string;
@@ -22,9 +25,14 @@ export type Clock = {
   now(): number;
 };
 
+export type EditorStateRules = {
+  createStartupState(startupEditMode: StartupEditMode, storedEdit: StoredEdit | null): EditorState;
+  reduce(state: EditorState, action: EditorSessionAction): EditorState;
+};
+
 export type DraftStore = {
-  load(): StoredEdit | null;
-  persist(edit: StoredEdit): void;
+  load(): Promise<StoredEdit | null>;
+  persist(edit: StoredEdit): Promise<void>;
 };
 
 export type MarkdownRenderer = {

@@ -14,11 +14,15 @@ pnpm install
 pnpm run dev
 ```
 
+- `pnpm run dev` : `WASM pkg` 再生成後 `Vite` 起動
+
 ## Tauri アプリとして起動
 
 ```bash
 pnpm run tauri dev
 ```
+
+- `pnpm run tauri dev` : `WASM pkg` 再生成込み
 
 ## ライセンス
 

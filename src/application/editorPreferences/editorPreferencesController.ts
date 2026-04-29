@@ -1,5 +1,4 @@
 import {
-  clampEditFontSizePx,
   type AppFontId,
   type EditFontId,
   type EditFontSizePx,
@@ -26,7 +25,11 @@ export class EditorPreferencesController {
     this.#windowsStartupTrayResidentGateway = dependencies.windowsStartupTrayResidentGateway;
   }
 
-  createState(): EditorPreferences {
+  createInitialState(): EditorPreferences {
+    return this.#preferencesGateway.createDefault();
+  }
+
+  async load(): Promise<EditorPreferences> {
     return this.#preferencesGateway.load();
   }
 
@@ -34,19 +37,14 @@ export class EditorPreferencesController {
     return syncWindowsStartupTrayResident && this.#windowsStartupTrayResidentGateway.supportsToggle();
   }
 
-  persist(editorPreferences: EditorPreferences): void {
-    this.#preferencesGateway.persist(editorPreferences);
+  async persist(editorPreferences: EditorPreferences): Promise<EditorPreferences> {
+    return this.#preferencesGateway.persist(editorPreferences);
   }
 
-  async syncWindowsStartupTrayResidentPreference(
-    enabled: boolean,
-    canControlWindowsStartupTrayResident: boolean,
-  ): Promise<void> {
-    if (!canControlWindowsStartupTrayResident) {
-      return;
-    }
-
-    await this.#windowsStartupTrayResidentGateway.syncPreference(enabled);
+  subscribeToPreferences(
+    callback: (editorPreferences: EditorPreferences) => void,
+  ): Promise<() => void> {
+    return this.#preferencesGateway.listen(callback);
   }
 
   changeMultiCursorModifier(
@@ -57,10 +55,10 @@ export class EditorPreferencesController {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       multiCursorModifier,
-    };
+    });
   }
 
   changeAppFont(currentPreferences: EditorPreferences, appFontId: AppFontId): EditorPreferences {
@@ -68,10 +66,10 @@ export class EditorPreferencesController {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       appFontId,
-    };
+    });
   }
 
   changeEditFont(currentPreferences: EditorPreferences, editFontId: EditFontId): EditorPreferences {
@@ -79,23 +77,26 @@ export class EditorPreferencesController {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       editFontId,
-    };
+    });
   }
 
   changeEditFontSize(currentPreferences: EditorPreferences, editFontSizePx: EditFontSizePx): EditorPreferences {
-    const nextEditFontSizePx = clampEditFontSizePx(editFontSizePx);
+    const nextEditFontSizePx = this.#preferencesGateway.normalize({
+      ...currentPreferences,
+      editFontSizePx,
+    }).editFontSizePx;
 
     if (currentPreferences.editFontSizePx === nextEditFontSizePx) {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       editFontSizePx: nextEditFontSizePx,
-    };
+    });
   }
 
   changeShowLineNumbers(currentPreferences: EditorPreferences, showLineNumbers: boolean): EditorPreferences {
@@ -103,10 +104,10 @@ export class EditorPreferencesController {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       showLineNumbers,
-    };
+    });
   }
 
   changeStartupEditMode(currentPreferences: EditorPreferences, startupEditMode: StartupEditMode): EditorPreferences {
@@ -114,10 +115,10 @@ export class EditorPreferencesController {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       startupEditMode,
-    };
+    });
   }
 
   changeWindowsStartupTrayResident(
@@ -128,9 +129,9 @@ export class EditorPreferencesController {
       return currentPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreferences,
       windowsStartupTrayResidentEnabled,
-    };
+    });
   }
 }

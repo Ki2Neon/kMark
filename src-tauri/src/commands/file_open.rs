@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
+use kmark_core::MarkdownDocument;
 use tauri::State;
 
 use super::error::CommandErrorPayload;
 use crate::{
-    domain::MarkdownDocument,
     usecase::{
         clear_pending_markdown_open_requests as clear_pending_markdown_open_requests_usecase,
         take_pending_markdown_documents,

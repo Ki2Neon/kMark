@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::domain::is_supported_markdown_path;
+use kmark_core::is_supported_markdown_path;
 
 pub fn collect_markdown_file_paths<I, T>(args: I, current_dir: &Path) -> Vec<PathBuf>
 where

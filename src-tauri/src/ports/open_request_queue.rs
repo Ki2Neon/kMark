@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::MarkdownDocumentError;
+use kmark_core::MarkdownDocumentError;
 
 pub trait OpenRequestQueue: Send + Sync {
     fn enqueue(&self, paths: Vec<PathBuf>) -> Result<(), MarkdownDocumentError>;

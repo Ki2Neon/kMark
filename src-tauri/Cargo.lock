@@ -1707,6 +1707,7 @@ name = "kmark"
 version = "1.0.0"
 dependencies = [
  "fs2",
+ "kmark-core",
  "serde",
  "serde_json",
  "tauri",
@@ -1714,6 +1715,10 @@ dependencies = [
  "tauri-plugin-autostart",
  "thiserror 2.0.18",
 ]
+
+[[package]]
+name = "kmark-core"
+version = "0.1.0"
 
 [[package]]
 name = "kuchikiki"

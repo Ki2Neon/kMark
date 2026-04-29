@@ -1,6 +1,7 @@
 mod commands;
-mod domain;
+mod dto;
 mod infra;
+mod ports;
 mod usecase;
 
 use std::{
@@ -19,9 +20,14 @@ use tauri::{
     Manager,
 };
 
-use crate::domain::{PreviewPreferences, PreviewWindowState};
+use kmark_core::{
+    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, PreviewWindowState,
+    StoredEdit, ThemePreferences,
+};
 use infra::{
-    broadcast_command, load_preview_preferences, persist_window_state, restore_window_state,
+    broadcast_command, load_desktop_layout_preferences, load_editor_draft,
+    load_editor_preferences, load_preview_preferences, load_theme_preferences,
+    persist_window_state, restore_window_state,
     FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue, TrayCommandKind,
     TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
 };
@@ -45,6 +51,10 @@ enum TrayRuntimeError {
 pub(crate) struct AppState {
     pub(crate) markdown_document_repository: FileSystemMarkdownDocumentRepository,
     pub(crate) open_request_queue: InMemoryOpenRequestQueue,
+    pub(crate) theme_preferences: Mutex<ThemePreferences>,
+    pub(crate) desktop_layout_preferences: Mutex<DesktopLayoutPreferences>,
+    pub(crate) editor_preferences: Mutex<EditorPreferences>,
+    pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
     pub(crate) preview_window_state: Mutex<PreviewWindowState>,
     pub(crate) next_preview_edit_jump_request_id: AtomicU64,
@@ -315,6 +325,73 @@ pub fn run() {
                 }
             }
 
+            match load_theme_preferences(&app_handle) {
+                Ok(Some(theme_preferences)) => {
+                    if let Ok(mut current_theme_preferences) =
+                        app_handle.state::<AppState>().theme_preferences.lock()
+                    {
+                        *current_theme_preferences = theme_preferences;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to load theme preferences: {error}");
+                }
+            }
+
+            match load_desktop_layout_preferences(&app_handle) {
+                Ok(Some(desktop_layout_preferences)) => {
+                    if let Ok(mut current_desktop_layout_preferences) = app_handle
+                        .state::<AppState>()
+                        .desktop_layout_preferences
+                        .lock()
+                    {
+                        *current_desktop_layout_preferences = desktop_layout_preferences;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to load desktop layout preferences: {error}");
+                }
+            }
+
+            match load_editor_preferences(&app_handle) {
+                Ok(Some(editor_preferences)) => {
+                    if let Ok(mut current_editor_preferences) =
+                        app_handle.state::<AppState>().editor_preferences.lock()
+                    {
+                        *current_editor_preferences = editor_preferences.clone();
+                    }
+
+                    if let Err(error) =
+                        commands::editor_preferences::sync_autostart_preference(
+                            &app_handle,
+                            &editor_preferences,
+                        )
+                    {
+                        eprintln!("failed to sync autostart preference: {}", error.message());
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to load editor preferences: {error}");
+                }
+            }
+
+            match load_editor_draft(&app_handle) {
+                Ok(Some(editor_draft)) => {
+                    if let Ok(mut current_editor_draft) =
+                        app_handle.state::<AppState>().editor_draft.lock()
+                    {
+                        *current_editor_draft = Some(editor_draft);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to load editor draft: {error}");
+                }
+            }
+
             #[cfg(desktop)]
             start_tray_coordinator(&app_handle)?;
 
@@ -327,6 +404,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::desktop_layout_preferences::get_desktop_layout_preferences,
+            commands::desktop_layout_preferences::set_desktop_layout_preferences,
+            commands::editor_draft::get_editor_draft,
+            commands::editor_draft::set_editor_draft,
+            commands::editor_preferences::get_editor_preferences,
+            commands::editor_preferences::set_editor_preferences,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::markdown_render::render_markdown_preview,
             commands::preview_preferences::get_preview_preferences,
@@ -337,6 +420,8 @@ pub fn run() {
             commands::preview_window::sync_preview_window_state,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,
+            commands::theme_preferences::get_theme_preferences,
+            commands::theme_preferences::set_theme_preferences,
         ]);
 
     builder

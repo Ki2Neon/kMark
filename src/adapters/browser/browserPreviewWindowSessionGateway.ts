@@ -1,10 +1,12 @@
-import { type PreviewWindowSessionGateway } from "../../application/previewWindowSession/previewWindowSessionPorts";
+import {
+  type PreviewWindowEditJumpRequest,
+  type PreviewWindowSessionGateway,
+} from "../../application/previewWindowSession/previewWindowSessionPorts";
 import {
   listenForPreviewWindowEditJumpRequests,
   openPreviewWindow,
   syncPreviewWindowState,
 } from "../../infra/previewWindow";
-import { type PreviewWindowEditJumpRequest } from "../../infra/previewWindow";
 
 export function createBrowserPreviewWindowSessionGateway(): PreviewWindowSessionGateway {
   return {

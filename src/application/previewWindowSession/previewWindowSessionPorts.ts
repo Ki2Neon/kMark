@@ -1,12 +1,12 @@
-export type PreviewWindowSnapshot = {
-  readonly content: string;
-  readonly fileName: string;
-};
+export type {
+  PreviewWindowEditJumpRequest,
+  PreviewWindowSnapshot,
+} from "../../domain/previewWindow";
 
-export type PreviewWindowEditJumpRequest = {
-  readonly lineNumber: number;
-  readonly requestId: number;
-};
+import type {
+  PreviewWindowEditJumpRequest,
+  PreviewWindowSnapshot,
+} from "../../domain/previewWindow";
 
 export type PreviewWindowSessionGateway = {
   openWindow(snapshot: PreviewWindowSnapshot, activeSourceLine: number | null): Promise<void>;

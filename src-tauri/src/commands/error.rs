@@ -1,6 +1,7 @@
 use serde::Serialize;
 
-use crate::{domain::MarkdownDocumentError, infra::PreviewPreferencesStoreError};
+use crate::infra::JsonStateStoreError;
+use kmark_core::MarkdownDocumentError;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +38,10 @@ impl CommandErrorPayload {
             format!("failed to access {context} state"),
         )
     }
+
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl From<MarkdownDocumentError> for CommandErrorPayload {
@@ -70,39 +75,55 @@ impl From<MarkdownDocumentError> for CommandErrorPayload {
     }
 }
 
-impl From<PreviewPreferencesStoreError> for CommandErrorPayload {
-    fn from(error: PreviewPreferencesStoreError) -> Self {
+impl From<JsonStateStoreError> for CommandErrorPayload {
+    fn from(error: JsonStateStoreError) -> Self {
         match error {
-            PreviewPreferencesStoreError::ResolveAppConfigDir { source } => Self::with_detail(
+            JsonStateStoreError::ResolveAppConfigDir { scope, source } => Self::with_detail(
                 "app_config_dir_unavailable",
-                "failed to resolve preview preferences storage path",
+                format!("failed to resolve {scope} storage path"),
                 source.to_string(),
             ),
-            PreviewPreferencesStoreError::CreateDirectory { path, source } => Self::with_detail(
-                "preview_preferences_directory_create_failed",
-                format!("failed to create preview preferences directory: {path}"),
+            JsonStateStoreError::CreateDirectory {
+                scope,
+                path,
+                source,
+            } => Self::with_detail(
+                &format!("{scope}_directory_create_failed"),
+                format!("failed to create {scope} directory: {path}"),
                 source.to_string(),
             ),
-            PreviewPreferencesStoreError::ReadPreferences { path, source } => Self::with_detail(
-                "preview_preferences_read_failed",
-                format!("failed to read preview preferences: {path}"),
+            JsonStateStoreError::ReadState {
+                scope,
+                path,
+                source,
+            } => Self::with_detail(
+                &format!("{scope}_read_failed"),
+                format!("failed to read {scope}: {path}"),
                 source.to_string(),
             ),
-            PreviewPreferencesStoreError::WritePreferences { path, source } => Self::with_detail(
-                "preview_preferences_write_failed",
-                format!("failed to write preview preferences: {path}"),
+            JsonStateStoreError::WriteState {
+                scope,
+                path,
+                source,
+            } => Self::with_detail(
+                &format!("{scope}_write_failed"),
+                format!("failed to write {scope}: {path}"),
                 source.to_string(),
             ),
-            PreviewPreferencesStoreError::DeserializePreferences { path, source } => {
+            JsonStateStoreError::DeserializeState {
+                scope,
+                path,
+                source,
+            } => {
                 Self::with_detail(
-                    "preview_preferences_deserialize_failed",
-                    format!("failed to parse preview preferences: {path}"),
+                    &format!("{scope}_deserialize_failed"),
+                    format!("failed to parse {scope}: {path}"),
                     source.to_string(),
                 )
             }
-            PreviewPreferencesStoreError::SerializePreferences { source } => Self::with_detail(
-                "preview_preferences_serialize_failed",
-                "failed to serialize preview preferences",
+            JsonStateStoreError::SerializeState { scope, source } => Self::with_detail(
+                &format!("{scope}_serialize_failed"),
+                format!("failed to serialize {scope}"),
                 source.to_string(),
             ),
         }

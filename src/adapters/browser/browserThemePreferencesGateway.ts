@@ -1,18 +1,30 @@
 import { type ThemePreferencesGateway } from "../../application/appTheme/appThemePorts";
 import {
-  THEME_PREFERENCES_STORAGE_KEY,
+  listenForThemePreferencesChanged,
   loadThemePreferences,
   persistThemePreferences,
 } from "../../infra/themePreferences";
+import {
+  createDefaultThemePreferences,
+  normalizeThemePreferences,
+} from "./browserRustCore";
 
 export function createBrowserThemePreferencesGateway(): ThemePreferencesGateway {
   return {
-    storageKey: THEME_PREFERENCES_STORAGE_KEY,
-    load() {
+    createDefault() {
+      return createDefaultThemePreferences();
+    },
+    async load() {
       return loadThemePreferences();
     },
-    persist(themePreferences) {
-      persistThemePreferences(themePreferences);
+    normalize(themePreferences) {
+      return normalizeThemePreferences(themePreferences);
+    },
+    async persist(themePreferences) {
+      return persistThemePreferences(themePreferences);
+    },
+    async listen(callback) {
+      return listenForThemePreferencesChanged(callback);
     },
   };
 }

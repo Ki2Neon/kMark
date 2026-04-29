@@ -7,6 +7,7 @@ import {
 type UseExternalMarkdownRequestsOptions = {
   readonly clearPendingExternalDocuments: () => Promise<void>;
   readonly confirmDiscard: () => boolean;
+  readonly enabled?: boolean;
   readonly onBeforeLoadExternalDocument: () => void;
   readonly onLoadExternalDocument: (document: ExternalMarkdownDocument) => void;
   readonly subscribeToExternalDocumentRequests: (callback: () => void) => Promise<() => void>;
@@ -16,6 +17,7 @@ type UseExternalMarkdownRequestsOptions = {
 export function useExternalMarkdownRequests({
   clearPendingExternalDocuments,
   confirmDiscard,
+  enabled = true,
   onBeforeLoadExternalDocument,
   onLoadExternalDocument,
   subscribeToExternalDocumentRequests,
@@ -39,10 +41,18 @@ export function useExternalMarkdownRequests({
   });
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     void loadPendingExternalDocumentEvent(false);
-  }, [loadPendingExternalDocumentEvent]);
+  }, [enabled, loadPendingExternalDocumentEvent]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let isDisposed = false;
     let unlisten: (() => void) | null = null;
 
@@ -61,5 +71,5 @@ export function useExternalMarkdownRequests({
       isDisposed = true;
       unlisten?.();
     };
-  }, [loadPendingExternalDocumentEvent, subscribeToExternalDocumentRequests]);
+  }, [enabled, loadPendingExternalDocumentEvent, subscribeToExternalDocumentRequests]);
 }

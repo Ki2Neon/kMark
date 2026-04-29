@@ -3,6 +3,7 @@ import {
   DEFAULT_DESKTOP_SPLIT_RATIO,
   MAX_DESKTOP_SPLIT_RATIO,
   MIN_DESKTOP_SPLIT_RATIO,
+  listenForDesktopSplitRatioChanged,
   loadDesktopSplitRatio,
   persistDesktopSplitRatio,
 } from "../../infra/editorLayout";
@@ -13,10 +14,13 @@ export function createBrowserEditorLayoutGateway(): DesktopWorkspaceSplitGateway
     loadRatio() {
       return loadDesktopSplitRatio();
     },
+    listenRatio(callback) {
+      return listenForDesktopSplitRatioChanged(callback);
+    },
     maximumRatio: MAX_DESKTOP_SPLIT_RATIO,
     minimumRatio: MIN_DESKTOP_SPLIT_RATIO,
     persistRatio(splitRatio) {
-      persistDesktopSplitRatio(splitRatio);
+      return persistDesktopSplitRatio(splitRatio);
     },
   };
 }

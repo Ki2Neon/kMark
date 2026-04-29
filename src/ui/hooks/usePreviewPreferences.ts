@@ -64,7 +64,9 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
       );
 
       if (nextPreviewPreferences !== currentPreviewPreferences && isLoadedRef.current) {
-        void controller.persist(nextPreviewPreferences).catch(() => {});
+        void controller.persist(nextPreviewPreferences).catch(() => {
+          void controller.loadPreferences().then(setPreviewPreferences).catch(() => {});
+        });
       }
 
       return nextPreviewPreferences;
@@ -79,7 +81,9 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
       );
 
       if (nextPreviewPreferences !== currentPreviewPreferences && isLoadedRef.current) {
-        void controller.persist(nextPreviewPreferences).catch(() => {});
+        void controller.persist(nextPreviewPreferences).catch(() => {
+          void controller.loadPreferences().then(setPreviewPreferences).catch(() => {});
+        });
       }
 
       return nextPreviewPreferences;

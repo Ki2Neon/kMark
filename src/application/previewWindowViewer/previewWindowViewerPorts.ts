@@ -1,17 +1,16 @@
-export type PreviewWindowViewerSnapshot = {
-  readonly content: string;
-  readonly fileName: string;
-};
+import type {
+  PreviewWindowSnapshot,
+  PreviewWindowState,
+} from "../../domain/previewWindow";
+
+export type PreviewWindowViewerSnapshot = PreviewWindowSnapshot;
 
 export type PreviewWindowViewerRenderedPreview = {
   readonly html: string;
   readonly pageHtmls: readonly string[];
 };
 
-export type PreviewWindowViewerState = {
-  readonly activeSourceLine: number | null;
-  readonly snapshot: PreviewWindowViewerSnapshot;
-};
+export type PreviewWindowViewerState = PreviewWindowState;
 
 export type PreviewWindowViewerRenderer = {
   render(content: string): Promise<PreviewWindowViewerRenderedPreview>;

@@ -4,8 +4,9 @@ import { EditorSelection, Prec, type Extension } from "@codemirror/state";
 import { EditorView, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
-import { resolveEditFontFamily, type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
+import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 const DESKTOP_EDITOR_BASIC_SETUP = {

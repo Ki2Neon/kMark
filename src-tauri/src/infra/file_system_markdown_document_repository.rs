@@ -1,8 +1,7 @@
 use std::{fs, path::Path};
 
-use crate::domain::{
-    is_supported_markdown_path, MarkdownDocument, MarkdownDocumentError, MarkdownDocumentRepository,
-};
+use crate::ports::MarkdownDocumentRepository;
+use kmark_core::{is_supported_markdown_path, MarkdownDocument, MarkdownDocumentError};
 
 #[derive(Default)]
 pub struct FileSystemMarkdownDocumentRepository;

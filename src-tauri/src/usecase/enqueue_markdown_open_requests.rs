@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use crate::domain::{MarkdownDocumentError, OpenRequestQueue};
+use crate::ports::OpenRequestQueue;
+use kmark_core::MarkdownDocumentError;
 
 pub fn enqueue_markdown_open_requests<Q>(
     queue: &Q,

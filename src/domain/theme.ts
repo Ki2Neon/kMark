@@ -30,12 +30,6 @@ export const APP_THEME_OPTIONS: readonly AppThemeOption[] = [
   { id: "paper", label: "Paper" },
 ] as const;
 
-export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
-  appThemeId: "vscode-dark",
-  previewThemeId: null,
-  previewUsesAppThemeColors: false,
-};
-
 const APP_THEME_ID_SET = new Set<AppThemeId>(APP_THEME_OPTIONS.map((themeOption) => themeOption.id));
 
 export function isAppThemeId(value: string): value is AppThemeId {

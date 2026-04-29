@@ -16,7 +16,7 @@ export class DesktopWorkspaceSplitController {
   }
 
   createState(): number {
-    return this.#gateway.loadRatio() ?? this.#gateway.defaultRatio;
+    return this.#gateway.defaultRatio;
   }
 
   getMaximumRatio(): number {
@@ -27,8 +27,16 @@ export class DesktopWorkspaceSplitController {
     return this.#gateway.minimumRatio;
   }
 
-  persistRatio(splitRatio: number): void {
-    this.#gateway.persistRatio(splitRatio);
+  async loadRatio(): Promise<number> {
+    return this.#gateway.loadRatio();
+  }
+
+  async subscribeToRatio(callback: (splitRatio: number) => void): Promise<() => void> {
+    return this.#gateway.listenRatio(callback);
+  }
+
+  async persistRatio(splitRatio: number): Promise<number> {
+    return this.#gateway.persistRatio(splitRatio);
   }
 
   resetRatio(): number {

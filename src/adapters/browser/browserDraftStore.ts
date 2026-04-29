@@ -3,11 +3,11 @@ import { loadLocalEdit, persistLocalEdit } from "../../infra/localEdit";
 
 export function createBrowserDraftStore(): DraftStore {
   return {
-    load() {
+    async load() {
       return loadLocalEdit();
     },
-    persist(edit) {
-      persistLocalEdit(edit);
+    async persist(edit) {
+      await persistLocalEdit(edit);
     },
   };
 }

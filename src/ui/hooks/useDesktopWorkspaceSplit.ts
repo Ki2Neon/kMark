@@ -37,15 +37,48 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
     desktopSplitRatioRef.current = desktopSplitRatio;
   }, [desktopSplitRatio]);
 
-  const desktopLayoutStyle = useMemo(
-    () => ({ "--desktop-split-ratio": `${desktopSplitRatio}` } as CSSProperties),
-    [desktopSplitRatio],
-  );
-
   const setDesktopSplitRatioValue = useCallback((nextRatio: number) => {
     desktopSplitRatioRef.current = nextRatio;
     setDesktopSplitRatio(nextRatio);
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    let unsubscribe = () => {};
+
+    void controller.loadRatio().then((loadedRatio) => {
+      if (!isActive) {
+        return;
+      }
+
+      setDesktopSplitRatioValue(loadedRatio);
+    }).catch(() => {});
+
+    void controller.subscribeToRatio((nextRatio) => {
+      if (!isActive) {
+        return;
+      }
+
+      setDesktopSplitRatioValue(nextRatio);
+    }).then((nextUnsubscribe) => {
+      if (!isActive) {
+        nextUnsubscribe();
+        return;
+      }
+
+      unsubscribe = nextUnsubscribe;
+    }).catch(() => {});
+
+    return () => {
+      isActive = false;
+      unsubscribe();
+    };
+  }, [controller, setDesktopSplitRatioValue]);
+
+  const desktopLayoutStyle = useMemo(
+    () => ({ "--desktop-split-ratio": `${desktopSplitRatio}` } as CSSProperties),
+    [desktopSplitRatio],
+  );
 
   const updateDesktopSplitRatioFromClientX = useCallback((clientX: number) => {
     const workspace = desktopWorkspaceRef.current;
@@ -63,8 +96,14 @@ export function useDesktopWorkspaceSplit({ layoutMode }: UseDesktopWorkspaceSpli
   }, [controller, setDesktopSplitRatioValue]);
 
   const commitDesktopSplitRatio = useCallback((splitRatio: number) => {
-    controller.persistRatio(splitRatio);
-  }, [controller]);
+    void controller.persistRatio(splitRatio).then((nextRatio) => {
+      setDesktopSplitRatioValue(nextRatio);
+    }).catch(() => {
+      void controller.loadRatio().then((nextRatio) => {
+        setDesktopSplitRatioValue(nextRatio);
+      }).catch(() => {});
+    });
+  }, [controller, setDesktopSplitRatioValue]);
 
   const handleDividerPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {

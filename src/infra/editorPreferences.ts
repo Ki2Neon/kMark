@@ -1,53 +1,56 @@
-import {
-  DEFAULT_EDITOR_PREFERENCES,
-  deserializeAppFontId,
-  deserializeEditFontId,
-  deserializeEditFontSizePx,
-  deserializeShowLineNumbers,
-  deserializeWindowsStartupTrayResidentEnabled,
-  isMultiCursorModifier,
-  isStartupEditMode,
-  type EditorPreferences,
-} from "../domain/editorPreferences";
+import { isTauri } from "@tauri-apps/api/core";
+import { type EditorPreferences } from "../domain/editorPreferences";
+import { createWebJsonStateStore } from "./webStateStore";
+import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
+import { normalizeEditorPreferencesState } from "./webStateNormalization";
 
-const EDITOR_PREFERENCES_STORAGE_KEY = "kmark:editor-preferences:v1";
+const GET_EDITOR_PREFERENCES_COMMAND = "get_editor_preferences";
+const SET_EDITOR_PREFERENCES_COMMAND = "set_editor_preferences";
+const EDITOR_PREFERENCES_UPDATED_EVENT = "editor-preferences-updated";
+const EDITOR_PREFERENCES_FILE_NAME = "editor-preferences.json";
+const EDITOR_PREFERENCES_STORAGE_KEY = "kmark:state:editor-preferences:v2";
 
-export function loadEditorPreferences(): EditorPreferences {
-  try {
-    const storedValue = window.localStorage.getItem(EDITOR_PREFERENCES_STORAGE_KEY);
+const editorPreferencesStore = createWebJsonStateStore<EditorPreferences>({
+  fileName: EDITOR_PREFERENCES_FILE_NAME,
+  storageKey: EDITOR_PREFERENCES_STORAGE_KEY,
+  normalize: normalizeEditorPreferencesState,
+});
 
-    if (storedValue === null) {
-      return DEFAULT_EDITOR_PREFERENCES;
-    }
-
-    const parsedValue = JSON.parse(storedValue) as Partial<EditorPreferences>;
-
-    return {
-      appFontId: deserializeAppFontId(parsedValue.appFontId),
-      editFontId: deserializeEditFontId(parsedValue.editFontId),
-      editFontSizePx: deserializeEditFontSizePx(parsedValue.editFontSizePx),
-      multiCursorModifier:
-        typeof parsedValue.multiCursorModifier === "string" && isMultiCursorModifier(parsedValue.multiCursorModifier)
-          ? parsedValue.multiCursorModifier
-          : DEFAULT_EDITOR_PREFERENCES.multiCursorModifier,
-      showLineNumbers: deserializeShowLineNumbers(parsedValue.showLineNumbers),
-      startupEditMode:
-        typeof parsedValue.startupEditMode === "string" && isStartupEditMode(parsedValue.startupEditMode)
-          ? parsedValue.startupEditMode
-          : DEFAULT_EDITOR_PREFERENCES.startupEditMode,
-      windowsStartupTrayResidentEnabled: deserializeWindowsStartupTrayResidentEnabled(
-        parsedValue.windowsStartupTrayResidentEnabled,
-      ),
-    };
-  } catch {
-    return DEFAULT_EDITOR_PREFERENCES;
+export async function loadEditorPreferences(): Promise<EditorPreferences> {
+  if (isTauri()) {
+    return invokeTauriCommand<EditorPreferences>(
+      GET_EDITOR_PREFERENCES_COMMAND,
+      {},
+      "エディター設定の読込に失敗しました。",
+    );
   }
+
+  return editorPreferencesStore.load();
 }
 
-export function persistEditorPreferences(editorPreferences: EditorPreferences): void {
-  try {
-    window.localStorage.setItem(EDITOR_PREFERENCES_STORAGE_KEY, JSON.stringify(editorPreferences));
-  } catch {
-    // Ignore storage failures to keep editor interaction settings responsive.
+export async function persistEditorPreferences(
+  editorPreferences: EditorPreferences,
+): Promise<EditorPreferences> {
+  if (isTauri()) {
+    return invokeTauriCommand<EditorPreferences>(
+      SET_EDITOR_PREFERENCES_COMMAND,
+      { editorPreferences },
+      "エディター設定の保存に失敗しました。",
+    );
   }
+
+  return editorPreferencesStore.persist(editorPreferences);
+}
+
+export async function listenForEditorPreferencesChanged(
+  callback: (editorPreferences: EditorPreferences) => void,
+): Promise<() => void> {
+  if (isTauri()) {
+    return listenTauriEvent<EditorPreferences>(
+      EDITOR_PREFERENCES_UPDATED_EVENT,
+      callback,
+    );
+  }
+
+  return editorPreferencesStore.listen(callback);
 }

@@ -1,5 +1,4 @@
 import {
-  DEFAULT_PREVIEW_PREFERENCES,
   type PreviewDisplayMode,
   type PreviewPreferences,
 } from "../../domain/preview";
@@ -17,7 +16,7 @@ export class PreviewPreferencesController {
   }
 
   createInitialState(): PreviewPreferences {
-    return DEFAULT_PREVIEW_PREFERENCES;
+    return this.#preferencesGateway.createDefault();
   }
 
   async loadPreferences(): Promise<PreviewPreferences> {
@@ -42,10 +41,10 @@ export class PreviewPreferencesController {
       return currentPreviewPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreviewPreferences,
       previewDisplayMode,
-    };
+    });
   }
 
   changePreviewVisibility(
@@ -56,9 +55,9 @@ export class PreviewPreferencesController {
       return currentPreviewPreferences;
     }
 
-    return {
+    return this.#preferencesGateway.normalize({
       ...currentPreviewPreferences,
       isPreviewVisible,
-    };
+    });
   }
 }

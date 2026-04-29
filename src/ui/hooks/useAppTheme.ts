@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createBrowserThemePreferencesGateway } from "../../adapters/browser/browserThemePreferencesGateway";
 import { AppThemeController } from "../../application/appTheme/appThemeController";
 import { type AppThemeId, type ThemePreferences } from "../../domain/theme";
@@ -8,45 +8,91 @@ const appThemeController = new AppThemeController({
 });
 
 export function useAppTheme() {
-  const [themePreferences, setThemePreferences] = useState<ThemePreferences>(() => appThemeController.createState());
+  const [themePreferences, setThemePreferences] = useState<ThemePreferences>(() => appThemeController.createInitialState());
+  const [isReady, setIsReady] = useState(false);
+  const isLoadedRef = useRef(false);
 
   useEffect(() => {
-    appThemeController.persist(themePreferences);
-  }, [themePreferences]);
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
 
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || !appThemeController.matchesStorageKey(event.key)) {
+    void appThemeController.load().then((nextThemePreferences) => {
+      if (isDisposed) {
         return;
       }
 
-      setThemePreferences((currentThemePreferences) => appThemeController.loadFromStorage(currentThemePreferences));
-    };
+      isLoadedRef.current = true;
+      setThemePreferences(appThemeController.createState(nextThemePreferences));
+      setIsReady(true);
+    }).catch(() => {
+      if (isDisposed) {
+        return;
+      }
 
-    window.addEventListener("storage", handleStorage);
+      setThemePreferences(appThemeController.createInitialState());
+      setIsReady(true);
+    });
+
+    void appThemeController.subscribeToPreferences((nextThemePreferences) => {
+      if (isDisposed) {
+        return;
+      }
+
+      isLoadedRef.current = true;
+      setThemePreferences(appThemeController.createState(nextThemePreferences));
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    }).catch(() => {});
 
     return () => {
-      window.removeEventListener("storage", handleStorage);
+      isDisposed = true;
+      unlisten?.();
     };
   }, []);
 
   const handleAppThemeChange = useCallback((appThemeId: AppThemeId) => {
-    setThemePreferences((currentThemePreferences) => (
-      appThemeController.changeAppTheme(currentThemePreferences, appThemeId)
-    ));
+    setThemePreferences((currentThemePreferences) => {
+      const nextThemePreferences = appThemeController.changeAppTheme(currentThemePreferences, appThemeId);
+
+      if (nextThemePreferences !== currentThemePreferences && isLoadedRef.current) {
+        void appThemeController.persist(nextThemePreferences).catch(() => {
+          void appThemeController.load().then((loadedThemePreferences) => {
+            setThemePreferences(loadedThemePreferences);
+          }).catch(() => {});
+        });
+      }
+
+      return nextThemePreferences;
+    });
   }, []);
 
   const handlePreviewUsesAppThemeColorsChange = useCallback((previewUsesAppThemeColors: boolean) => {
-    setThemePreferences((currentThemePreferences) => (
-      appThemeController.changePreviewUsesAppThemeColors(
+    setThemePreferences((currentThemePreferences) => {
+      const nextThemePreferences = appThemeController.changePreviewUsesAppThemeColors(
         currentThemePreferences,
         previewUsesAppThemeColors,
-      )
-    ));
+      );
+
+      if (nextThemePreferences !== currentThemePreferences && isLoadedRef.current) {
+        void appThemeController.persist(nextThemePreferences).catch(() => {
+          void appThemeController.load().then((loadedThemePreferences) => {
+            setThemePreferences(loadedThemePreferences);
+          }).catch(() => {});
+        });
+      }
+
+      return nextThemePreferences;
+    });
   }, []);
 
   return {
     appThemeId: themePreferences.appThemeId,
+    isReady,
     previewUsesAppThemeColors: themePreferences.previewUsesAppThemeColors,
     onAppThemeChange: handleAppThemeChange,
     onPreviewUsesAppThemeColorsChange: handlePreviewUsesAppThemeColorsChange,

@@ -1,7 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { normalizeMarkdownFileName } from "../adapters/browser/browserRustCore";
 import { type ExternalMarkdownDocument } from "../domain/externalMarkdownDocument";
-import { ensureMarkdownExtension } from "../domain/editor";
 import { invokeTauriCommand } from "./tauriCommand";
 
 type MarkdownPickerType = {
@@ -163,7 +163,7 @@ export function downloadMarkdownDocument(fileName: string, content: string): voi
   );
 
   anchor.href = objectUrl;
-  anchor.download = ensureMarkdownExtension(fileName);
+  anchor.download = normalizeMarkdownFileName(fileName);
   anchor.rel = "noopener";
   anchor.style.display = "none";
 
@@ -177,7 +177,7 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
   fileName: string;
   fileHandle: MarkdownFileHandle | null;
 } | null> {
-  const normalizedFileName = ensureMarkdownExtension(fileName);
+  const normalizedFileName = normalizeMarkdownFileName(fileName);
   const pickerWindow = getPickerWindow();
 
   if (typeof pickerWindow.showSaveFilePicker === "function") {
@@ -190,7 +190,7 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
       await overwriteMarkdownDocument(fileHandle, content);
 
       return {
-        fileName: ensureMarkdownExtension(fileHandle.name),
+        fileName: normalizeMarkdownFileName(fileHandle.name),
         fileHandle,
       };
     } catch (error) {
@@ -208,7 +208,7 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
     return null;
   }
 
-  const nextFileName = ensureMarkdownExtension(promptedFileName);
+  const nextFileName = normalizeMarkdownFileName(promptedFileName);
   downloadMarkdownDocument(nextFileName, content);
 
   return {

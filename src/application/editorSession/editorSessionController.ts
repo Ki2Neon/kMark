@@ -1,7 +1,4 @@
-import {
-  createStartupEditorState,
-  type EditorState,
-} from "../../domain/editor";
+import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode } from "../../domain/preview";
@@ -9,6 +6,7 @@ import { type EditorSessionAction } from "./editorSessionAction";
 import {
   type Clock,
   type DraftStore,
+  type EditorStateRules,
   type MarkdownDocumentGateway,
   type MarkdownDocumentPrinter,
   type MarkdownRenderer,
@@ -35,6 +33,7 @@ type EditorSessionControllerDependencies = {
   readonly documentGateway: MarkdownDocumentGateway;
   readonly printer: MarkdownDocumentPrinter;
   readonly renderer: MarkdownRenderer;
+  readonly rules: EditorStateRules;
 };
 
 export function toEditorSessionErrorMessage(error: unknown): string {
@@ -51,6 +50,7 @@ export class EditorSessionController {
   readonly #documentGateway: MarkdownDocumentGateway;
   readonly #printer: MarkdownDocumentPrinter;
   readonly #renderer: MarkdownRenderer;
+  readonly #rules: EditorStateRules;
 
   constructor(dependencies: EditorSessionControllerDependencies) {
     this.#clock = dependencies.clock;
@@ -58,26 +58,35 @@ export class EditorSessionController {
     this.#documentGateway = dependencies.documentGateway;
     this.#printer = dependencies.printer;
     this.#renderer = dependencies.renderer;
+    this.#rules = dependencies.rules;
   }
 
-  bootstrap(startupEditMode: StartupEditMode): EditorSessionBootstrap {
-    const storedEdit = this.#draftStore.load();
+  createInitialState(startupEditMode: StartupEditMode): EditorSessionBootstrap {
+    return {
+      initialState: this.#rules.createStartupState(startupEditMode, null),
+      shouldSkipInitialPersist: false,
+    };
+  }
+
+  async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
+    const storedEdit = await this.#draftStore.load();
 
     return {
-      initialState: createStartupEditorState({
-        startupEditMode,
-        storedEdit,
-      }),
+      initialState: this.#rules.createStartupState(startupEditMode, storedEdit),
       shouldSkipInitialPersist: startupEditMode !== "last-opened-file" && storedEdit !== null,
     };
+  }
+
+  reduceState(state: EditorState, action: EditorSessionAction): EditorState {
+    return this.#rules.reduce(state, action);
   }
 
   supportsNativeOpenPicker(): boolean {
     return this.#documentGateway.supportsNativeOpenPicker();
   }
 
-  persistDraft(state: EditorState): void {
-    this.#draftStore.persist({
+  async persistDraft(state: EditorState): Promise<void> {
+    await this.#draftStore.persist({
       fileName: state.fileName,
       content: state.content,
       savedAt: state.lastSavedAt,

@@ -1,41 +1,54 @@
-import {
-  DEFAULT_THEME_PREFERENCES,
-  isAppThemeId,
-  type ThemePreferences,
-} from "../domain/theme";
+import { isTauri } from "@tauri-apps/api/core";
+import { type ThemePreferences } from "../domain/theme";
+import { createWebJsonStateStore } from "./webStateStore";
+import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
+import { normalizeThemePreferencesState } from "./webStateNormalization";
 
-export const THEME_PREFERENCES_STORAGE_KEY = "kmark:theme-preferences:v1";
+const GET_THEME_PREFERENCES_COMMAND = "get_theme_preferences";
+const SET_THEME_PREFERENCES_COMMAND = "set_theme_preferences";
+const THEME_PREFERENCES_UPDATED_EVENT = "theme-preferences-updated";
+const THEME_PREFERENCES_FILE_NAME = "theme-preferences.json";
+const THEME_PREFERENCES_STORAGE_KEY = "kmark:state:theme-preferences:v2";
 
-export function loadThemePreferences(): ThemePreferences {
-  try {
-    const storedValue = window.localStorage.getItem(THEME_PREFERENCES_STORAGE_KEY);
+const themePreferencesStore = createWebJsonStateStore<ThemePreferences>({
+  fileName: THEME_PREFERENCES_FILE_NAME,
+  storageKey: THEME_PREFERENCES_STORAGE_KEY,
+  normalize: normalizeThemePreferencesState,
+});
 
-    if (storedValue === null) {
-      return DEFAULT_THEME_PREFERENCES;
-    }
-
-    const parsedValue = JSON.parse(storedValue) as Partial<ThemePreferences>;
-
-    return {
-      appThemeId:
-        typeof parsedValue.appThemeId === "string" && isAppThemeId(parsedValue.appThemeId)
-          ? parsedValue.appThemeId
-          : DEFAULT_THEME_PREFERENCES.appThemeId,
-      previewThemeId: typeof parsedValue.previewThemeId === "string" ? parsedValue.previewThemeId : null,
-      previewUsesAppThemeColors:
-        typeof parsedValue.previewUsesAppThemeColors === "boolean"
-          ? parsedValue.previewUsesAppThemeColors
-          : DEFAULT_THEME_PREFERENCES.previewUsesAppThemeColors,
-    };
-  } catch {
-    return DEFAULT_THEME_PREFERENCES;
+export async function loadThemePreferences(): Promise<ThemePreferences> {
+  if (isTauri()) {
+    return invokeTauriCommand<ThemePreferences>(
+      GET_THEME_PREFERENCES_COMMAND,
+      {},
+      "テーマ設定の読込に失敗しました。",
+    );
   }
+
+  return themePreferencesStore.load();
 }
 
-export function persistThemePreferences(themePreferences: ThemePreferences): void {
-  try {
-    window.localStorage.setItem(THEME_PREFERENCES_STORAGE_KEY, JSON.stringify(themePreferences));
-  } catch {
-    // Ignore storage failures to keep theme switching responsive.
+export async function persistThemePreferences(themePreferences: ThemePreferences): Promise<ThemePreferences> {
+  if (isTauri()) {
+    return invokeTauriCommand<ThemePreferences>(
+      SET_THEME_PREFERENCES_COMMAND,
+      { themePreferences },
+      "テーマ設定の保存に失敗しました。",
+    );
   }
+
+  return themePreferencesStore.persist(themePreferences);
+}
+
+export async function listenForThemePreferencesChanged(
+  callback: (themePreferences: ThemePreferences) => void,
+): Promise<() => void> {
+  if (isTauri()) {
+    return listenTauriEvent<ThemePreferences>(
+      THEME_PREFERENCES_UPDATED_EVENT,
+      callback,
+    );
+  }
+
+  return themePreferencesStore.listen(callback);
 }

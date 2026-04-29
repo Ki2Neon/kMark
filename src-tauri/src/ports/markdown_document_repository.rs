@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{MarkdownDocument, MarkdownDocumentError};
+use kmark_core::{MarkdownDocument, MarkdownDocumentError};
 
 pub trait MarkdownDocumentRepository: Send + Sync {
     fn read(&self, path: &Path) -> Result<MarkdownDocument, MarkdownDocumentError>;

@@ -1,6 +1,5 @@
-use crate::domain::{
-    MarkdownDocument, MarkdownDocumentError, MarkdownDocumentRepository, OpenRequestQueue,
-};
+use crate::ports::{MarkdownDocumentRepository, OpenRequestQueue};
+use kmark_core::{MarkdownDocument, MarkdownDocumentError};
 
 pub fn take_pending_markdown_documents<Q, R>(
     queue: &Q,

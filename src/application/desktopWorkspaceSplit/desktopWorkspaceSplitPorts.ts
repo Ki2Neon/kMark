@@ -2,6 +2,7 @@ export type DesktopWorkspaceSplitGateway = {
   readonly defaultRatio: number;
   readonly maximumRatio: number;
   readonly minimumRatio: number;
-  loadRatio(): number | null;
-  persistRatio(splitRatio: number): void;
+  loadRatio(): Promise<number>;
+  listenRatio(callback: (splitRatio: number) => void): Promise<() => void>;
+  persistRatio(splitRatio: number): Promise<number>;
 };

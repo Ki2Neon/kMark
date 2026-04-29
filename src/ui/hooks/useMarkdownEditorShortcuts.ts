@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent } from "react";
 
 type UseMarkdownEditorShortcutsOptions = {
+  readonly enabled?: boolean;
   readonly onDismissMenu: () => void;
   readonly onMenuToggle: () => void;
   readonly onNewDocument: () => void;
@@ -10,6 +11,7 @@ type UseMarkdownEditorShortcutsOptions = {
 };
 
 export function useMarkdownEditorShortcuts({
+  enabled = true,
   onDismissMenu,
   onMenuToggle,
   onNewDocument,
@@ -42,6 +44,10 @@ export function useMarkdownEditorShortcuts({
   });
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         dismissMenuEvent();
@@ -89,5 +95,5 @@ export function useMarkdownEditorShortcuts({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [dismissMenuEvent, menuToggleEvent, newDocumentEvent, openDocumentEvent, printDocumentEvent, saveDocumentEvent]);
+  }, [dismissMenuEvent, enabled, menuToggleEvent, newDocumentEvent, openDocumentEvent, printDocumentEvent, saveDocumentEvent]);
 }

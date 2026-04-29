@@ -10,6 +10,7 @@ function toPreviewWindowErrorMessage(error: unknown): string {
 type UsePreviewWindowSessionOptions = {
   readonly activeSourceLine: number | null;
   readonly content: string;
+  readonly enabled?: boolean;
   readonly fileName: string;
   readonly onError: (message: string) => void;
   readonly onJumpToSourceLine: (lineNumber: number) => void;
@@ -18,6 +19,7 @@ type UsePreviewWindowSessionOptions = {
 export function usePreviewWindowSession({
   activeSourceLine,
   content,
+  enabled = true,
   fileName,
   onError,
   onJumpToSourceLine,
@@ -33,6 +35,10 @@ export function usePreviewWindowSession({
   const controller = controllerRef.current;
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     void controller.syncPreviewState(
       {
         content,
@@ -42,9 +48,13 @@ export function usePreviewWindowSession({
     ).catch((error) => {
       onError(toPreviewWindowErrorMessage(error));
     });
-  }, [activeSourceLine, content, controller, fileName, onError]);
+  }, [activeSourceLine, content, controller, enabled, fileName, onError]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let isDisposed = false;
     let unlisten: (() => void) | null = null;
 
@@ -73,11 +83,15 @@ export function usePreviewWindowSession({
       isDisposed = true;
       unlisten?.();
     };
-  }, [controller, onError, onJumpToSourceLine]);
+  }, [controller, enabled, onError, onJumpToSourceLine]);
 
   const handleOpenPreviewWindow = useCallback(() => {
     void (async () => {
       try {
+        if (!enabled) {
+          return;
+        }
+
         await controller.openPreviewWindow(
           {
             content,
@@ -89,7 +103,7 @@ export function usePreviewWindowSession({
         onError(toPreviewWindowErrorMessage(error));
       }
     })();
-  }, [activeSourceLine, content, controller, fileName, onError]);
+  }, [activeSourceLine, content, controller, enabled, fileName, onError]);
 
   return {
     openPreviewWindow: handleOpenPreviewWindow,

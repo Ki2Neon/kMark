@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { createBrowserAppRuntimeGateway } from "../../adapters/browser/browserAppRuntimeGateway";
 import { createBrowserDocumentThemeGateway } from "../../adapters/browser/browserDocumentThemeGateway";
+import { createBrowserDocumentThemeResolver } from "../../adapters/browser/browserDocumentThemeResolver";
 import { AppShellController } from "../../application/appShell/appShellController";
 import { type AppFontId, type EditFontId, type EditFontSizePx } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
@@ -19,6 +20,7 @@ function useAppShellController() {
   if (controllerRef.current === null) {
     controllerRef.current = new AppShellController({
       documentThemeGateway: createBrowserDocumentThemeGateway(),
+      documentThemeResolver: createBrowserDocumentThemeResolver(),
       runtimeGateway: createBrowserAppRuntimeGateway(),
     });
   }

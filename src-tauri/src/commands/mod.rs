@@ -1,5 +1,9 @@
+pub mod desktop_layout_preferences;
+pub mod editor_draft;
+pub mod editor_preferences;
 mod error;
 pub mod file_open;
 pub mod markdown_render;
 pub mod preview_preferences;
 pub mod preview_window;
+pub mod theme_preferences;

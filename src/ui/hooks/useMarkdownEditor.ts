@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createBrowserDraftStore } from "../../adapters/browser/browserDraftStore";
+import { createBrowserEditorStateRules } from "../../adapters/browser/browserEditorStateRules";
 import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/browserMarkdownDocumentGateway";
 import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
 import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
@@ -9,7 +10,7 @@ import {
   toEditorSessionErrorMessage,
   type EditorSessionStore,
 } from "../../application/editorSession/editorSessionController";
-import { editorSessionReducer } from "../../application/editorSession/editorSessionReducer";
+import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewDisplayMode } from "../../domain/preview";
@@ -17,7 +18,12 @@ import { type PreviewDisplayMode } from "../../domain/preview";
 export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   const renderRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
+  const rulesRef = useRef<ReturnType<typeof createBrowserEditorStateRules> | null>(null);
   const controllerRef = useRef<EditorSessionController | null>(null);
+
+  if (rulesRef.current === null) {
+    rulesRef.current = createBrowserEditorStateRules();
+  }
 
   if (controllerRef.current === null) {
     controllerRef.current = new EditorSessionController({
@@ -28,16 +34,18 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
       documentGateway: createBrowserMarkdownDocumentGateway(),
       printer: createBrowserMarkdownDocumentPrinter(),
       renderer: createBrowserMarkdownRenderer(),
+      rules: rulesRef.current,
     });
   }
 
   const controller = controllerRef.current;
-  const [state, dispatch] = useReducer(editorSessionReducer, startupEditMode, (initialStartupEditMode) => {
-    const bootstrap = controller.bootstrap(initialStartupEditMode);
-    shouldSkipInitialEditPersistRef.current = bootstrap.shouldSkipInitialPersist;
-
-    return bootstrap.initialState;
-  });
+  const reducer = useMemo(() => createEditorSessionReducer(rulesRef.current!), []);
+  const [isReady, setIsReady] = useState(false);
+  const [state, dispatch] = useReducer(
+    reducer,
+    startupEditMode,
+    (initialStartupEditMode) => controller.createInitialState(initialStartupEditMode).initialState,
+  );
   const stateRef = useRef(state);
   const store = useMemo<EditorSessionStore>(() => ({
     dispatch,
@@ -54,15 +62,53 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   }, [state]);
 
   useEffect(() => {
+    let isDisposed = false;
+
+    void controller.bootstrap(startupEditMode).then((bootstrap) => {
+      if (isDisposed) {
+        return;
+      }
+
+      shouldSkipInitialEditPersistRef.current = bootstrap.shouldSkipInitialPersist;
+      dispatch({
+        type: "editor/bootstrapLoaded",
+        state: bootstrap.initialState,
+      });
+      setIsReady(true);
+    }).catch((error) => {
+      if (isDisposed) {
+        return;
+      }
+
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+      setIsReady(true);
+    });
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [controller, startupEditMode, store]);
+
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
     if (shouldSkipInitialEditPersistRef.current) {
       shouldSkipInitialEditPersistRef.current = false;
       return;
     }
 
-    controller.persistDraft(state);
-  }, [controller, state]);
+    void controller.persistDraft(state).catch((error) => {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    });
+  }, [controller, isReady, state, store]);
 
   useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
     const requestId = renderRequestIdRef.current + 1;
     renderRequestIdRef.current = requestId;
     let disposed = false;
@@ -88,7 +134,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     return () => {
       disposed = true;
     };
-  }, [controller, deferredContent, store]);
+  }, [controller, deferredContent, isReady, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
@@ -190,6 +236,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     errorMessage: state.errorMessage,
     fileName: state.fileName,
     isDirty: state.isDirty,
+    isReady,
     previewHtml: renderedPreview.html,
     previewPageHtmls: renderedPreview.pageHtmls,
     confirmDiscard,
