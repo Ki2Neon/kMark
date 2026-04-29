@@ -8,21 +8,22 @@ use std::{
     ffi::OsStr,
     path::PathBuf,
     sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
     },
 };
 
 use tauri::{
-    Manager,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
 };
 
+use crate::domain::{PreviewPreferences, PreviewWindowState};
 use infra::{
-    FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue,
-    TRAY_COORDINATOR_POLL_INTERVAL, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,
-    broadcast_command, persist_window_state, restore_window_state,
+    broadcast_command, load_preview_preferences, persist_window_state, restore_window_state,
+    FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue, TrayCommandKind,
+    TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
 };
 use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
@@ -44,6 +45,9 @@ enum TrayRuntimeError {
 pub(crate) struct AppState {
     pub(crate) markdown_document_repository: FileSystemMarkdownDocumentRepository,
     pub(crate) open_request_queue: InMemoryOpenRequestQueue,
+    pub(crate) preview_preferences: Mutex<PreviewPreferences>,
+    pub(crate) preview_window_state: Mutex<PreviewWindowState>,
+    pub(crate) next_preview_edit_jump_request_id: AtomicU64,
     pub(crate) should_exit: AtomicBool,
 }
 
@@ -76,8 +80,13 @@ fn should_start_hidden() -> bool {
 
 #[cfg(desktop)]
 fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
-    let show_item =
-        MenuItem::with_id(app, TRAY_SHOW_MENU_ITEM_ID, "Show All kMark", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(
+        app,
+        TRAY_SHOW_MENU_ITEM_ID,
+        "Show All kMark",
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(app, TRAY_QUIT_MENU_ITEM_ID, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
@@ -283,13 +292,26 @@ pub fn run() {
                 _ => {}
             }
         })
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
             if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 if let Err(error) = restore_window_state(&app_handle, &main_window) {
                     eprintln!("failed to restore main window state: {error}");
+                }
+            }
+
+            match load_preview_preferences(&app_handle) {
+                Ok(Some(preview_preferences)) => {
+                    if let Ok(mut current_preview_preferences) =
+                        app_handle.state::<AppState>().preview_preferences.lock()
+                    {
+                        *current_preview_preferences = preview_preferences;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to load preview preferences: {error}");
                 }
             }
 
@@ -305,9 +327,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::app_instance::current_app_instance_id,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::markdown_render::render_markdown_preview,
+            commands::preview_preferences::get_preview_preferences,
+            commands::preview_preferences::set_preview_preferences,
+            commands::preview_window::get_preview_window_state,
+            commands::preview_window::open_preview_window,
+            commands::preview_window::request_preview_window_edit_jump,
+            commands::preview_window::sync_preview_window_state,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,
         ]);

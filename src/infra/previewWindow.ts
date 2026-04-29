@@ -1,214 +1,90 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { WebviewWindow as TauriWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 
-const PREVIEW_WINDOW_LABEL = "preview-window";
 const PREVIEW_WINDOW_QUERY_PARAMETER = "preview-window";
-const PREVIEW_WINDOW_INSTANCE_QUERY_PARAMETER = "preview-instance";
-const APP_INSTANCE_ID_COMMAND = "current_app_instance_id";
-const APP_INSTANCE_SESSION_STORAGE_KEY = "kmark:app-instance-id:v1";
-const PREVIEW_WINDOW_TITLE = "kMark Preview";
+const OPEN_PREVIEW_WINDOW_COMMAND = "open_preview_window";
+const GET_PREVIEW_WINDOW_STATE_COMMAND = "get_preview_window_state";
+const REQUEST_PREVIEW_WINDOW_EDIT_JUMP_COMMAND = "request_preview_window_edit_jump";
+const SYNC_PREVIEW_WINDOW_STATE_COMMAND = "sync_preview_window_state";
+const PREVIEW_WINDOW_EDIT_JUMP_REQUESTED_EVENT = "preview-window-edit-jump-requested";
+const PREVIEW_WINDOW_STATE_UPDATED_EVENT = "preview-window-state-updated";
 
-let cachedAppInstanceId: string | null = null;
-let pendingAppInstanceIdPromise: Promise<string> | null = null;
+export type PreviewWindowSnapshot = {
+  readonly content: string;
+  readonly fileName: string;
+};
 
-function createFallbackAppInstanceId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
+export type PreviewWindowState = {
+  readonly activeSourceLine: number | null;
+  readonly snapshot: PreviewWindowSnapshot;
+};
 
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizePreviewWindowInstanceId(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  const normalizedValue = value.trim();
-
-  return normalizedValue.length > 0 ? normalizedValue : null;
-}
-
-function buildPreviewWindowUrl(instanceId: string): string {
-  const previewWindowUrl = new URL(window.location.href);
-
-  previewWindowUrl.searchParams.set(PREVIEW_WINDOW_QUERY_PARAMETER, "1");
-  previewWindowUrl.searchParams.set(PREVIEW_WINDOW_INSTANCE_QUERY_PARAMETER, instanceId);
-
-  return previewWindowUrl.toString();
-}
-
-function toPreviewWindowErrorMessage(payload: unknown): string {
-  if (payload instanceof Error && payload.message.trim().length > 0) {
-    return payload.message;
-  }
-
-  if (typeof payload === "string" && payload.trim().length > 0) {
-    return payload;
-  }
-
-  return "プレビューウィンドウを開けませんでした。";
-}
-
-function waitForPreviewWindowCreation(previewWindow: TauriWebviewWindow): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cleanupCallbacks: Array<() => void> = [];
-
-    const settle = (callback: () => void) => {
-      while (cleanupCallbacks.length > 0) {
-        cleanupCallbacks.pop()?.();
-      }
-
-      callback();
-    };
-
-    void previewWindow
-      .once("tauri://created", () => {
-        settle(() => {
-          resolve();
-        });
-      })
-      .then(
-        (unlisten) => {
-          cleanupCallbacks.push(unlisten);
-        },
-        (error) => {
-          settle(() => {
-            reject(error);
-          });
-        },
-      );
-
-    void previewWindow
-      .once("tauri://error", (event) => {
-        settle(() => {
-          reject(new Error(toPreviewWindowErrorMessage(event.payload)));
-        });
-      })
-      .then(
-        (unlisten) => {
-          cleanupCallbacks.push(unlisten);
-        },
-        (error) => {
-          settle(() => {
-            reject(error);
-          });
-        },
-      );
-  });
-}
+export type PreviewWindowEditJumpRequest = {
+  readonly lineNumber: number;
+  readonly requestId: number;
+};
 
 export function isPreviewWindowMode(search = typeof window === "undefined" ? "" : window.location.search): boolean {
   return new URLSearchParams(search).get(PREVIEW_WINDOW_QUERY_PARAMETER) === "1";
 }
 
-export function resolvePreviewWindowInstanceId(
-  search = typeof window === "undefined" ? "" : window.location.search,
-): string | null {
-  return normalizePreviewWindowInstanceId(
-    new URLSearchParams(search).get(PREVIEW_WINDOW_INSTANCE_QUERY_PARAMETER),
+export async function openPreviewWindow(
+  snapshot: PreviewWindowSnapshot,
+  activeSourceLine: number | null,
+): Promise<void> {
+  await invokeTauriCommand<void>(
+    OPEN_PREVIEW_WINDOW_COMMAND,
+    {
+      snapshot,
+      activeSourceLine,
+    },
+    "プレビューウィンドウを開けませんでした。",
   );
 }
 
-function getOrCreateFallbackAppInstanceId(): string {
-  const fallbackInstanceId = createFallbackAppInstanceId();
-
-  if (typeof window === "undefined") {
-    return fallbackInstanceId;
-  }
-
-  try {
-    const storedInstanceId = normalizePreviewWindowInstanceId(
-      window.sessionStorage.getItem(APP_INSTANCE_SESSION_STORAGE_KEY),
-    );
-
-    if (storedInstanceId !== null) {
-      return storedInstanceId;
-    }
-
-    window.sessionStorage.setItem(APP_INSTANCE_SESSION_STORAGE_KEY, fallbackInstanceId);
-  } catch {
-    return fallbackInstanceId;
-  }
-
-  return fallbackInstanceId;
-}
-
-export async function resolveAppInstanceId(): Promise<string> {
-  if (cachedAppInstanceId !== null) {
-    return cachedAppInstanceId;
-  }
-
-  if (pendingAppInstanceIdPromise !== null) {
-    return pendingAppInstanceIdPromise;
-  }
-
-  pendingAppInstanceIdPromise = (async () => {
-    if (isTauri()) {
-      try {
-        const appInstanceId = normalizePreviewWindowInstanceId(
-          await invoke<string>(APP_INSTANCE_ID_COMMAND),
-        );
-
-        if (appInstanceId !== null) {
-          cachedAppInstanceId = appInstanceId;
-          return appInstanceId;
-        }
-      } catch {
-        // Fall back to a per-window session id when the Tauri command is unavailable.
-      }
-    }
-
-    const fallbackInstanceId = getOrCreateFallbackAppInstanceId();
-    cachedAppInstanceId = fallbackInstanceId;
-
-    return fallbackInstanceId;
-  })();
-
-  try {
-    return await pendingAppInstanceIdPromise;
-  } finally {
-    pendingAppInstanceIdPromise = null;
-  }
-}
-
-export async function openPreviewWindow(instanceId: string): Promise<void> {
-  const previewWindowUrl = buildPreviewWindowUrl(instanceId);
-
-  if (isTauri()) {
-    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const existingWindow = await WebviewWindow.getByLabel(PREVIEW_WINDOW_LABEL);
-
-    if (existingWindow !== null) {
-      await existingWindow.show();
-      await existingWindow.setFocus();
-      return;
-    }
-
-    const previewWindow = new WebviewWindow(PREVIEW_WINDOW_LABEL, {
-      title: PREVIEW_WINDOW_TITLE,
-      url: previewWindowUrl,
-      width: 820,
-      height: 900,
-      minWidth: 50,
-      minHeight: 50,
-      center: true,
-      resizable: true,
-    });
-
-    await waitForPreviewWindowCreation(previewWindow);
-    return;
-  }
-
-  const previewWindow = window.open(
-    previewWindowUrl,
-    PREVIEW_WINDOW_LABEL,
-    "width=820,height=900,resizable=yes,scrollbars=yes",
+export async function syncPreviewWindowState(
+  snapshot: PreviewWindowSnapshot,
+  activeSourceLine: number | null,
+): Promise<void> {
+  await invokeTauriCommand<void>(
+    SYNC_PREVIEW_WINDOW_STATE_COMMAND,
+    {
+      snapshot,
+      activeSourceLine,
+    },
+    "プレビュー同期に失敗しました。",
   );
+}
 
-  if (previewWindow === null) {
-    throw new Error("プレビューウィンドウを開けませんでした。ブラウザのポップアップ設定を確認してください。");
-  }
+export async function loadPreviewWindowState(): Promise<PreviewWindowState> {
+  return invokeTauriCommand<PreviewWindowState>(
+    GET_PREVIEW_WINDOW_STATE_COMMAND,
+    {},
+    "プレビュー状態の読込に失敗しました。",
+  );
+}
 
-  previewWindow.focus();
+export async function requestPreviewWindowEditJump(lineNumber: number): Promise<void> {
+  await invokeTauriCommand<void>(
+    REQUEST_PREVIEW_WINDOW_EDIT_JUMP_COMMAND,
+    { lineNumber },
+    "プレビュー位置の同期に失敗しました。",
+  );
+}
+
+export async function listenForPreviewWindowStateUpdates(
+  callback: (previewWindowState: PreviewWindowState) => void,
+): Promise<() => void> {
+  return listenTauriEvent<PreviewWindowState>(
+    PREVIEW_WINDOW_STATE_UPDATED_EVENT,
+    callback,
+  );
+}
+
+export async function listenForPreviewWindowEditJumpRequests(
+  callback: (previewWindowEditJumpRequest: PreviewWindowEditJumpRequest) => void,
+): Promise<() => void> {
+  return listenTauriEvent<PreviewWindowEditJumpRequest>(
+    PREVIEW_WINDOW_EDIT_JUMP_REQUESTED_EVENT,
+    callback,
+  );
 }

@@ -27,11 +27,7 @@
     "@codemirror/view": "^6.41.1",
     "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2",
-    "@types/markdown-it": "^14.1.2",
     "@uiw/react-codemirror": "^4.25.9",
-    "dompurify": "^3.4.0",
-    "markdown-it": "^14.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

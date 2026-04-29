@@ -27,7 +27,9 @@ pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
         html: render_markdown_page(content, 0),
         page_htmls: page_segments
             .iter()
-            .map(|page_segment| render_markdown_page(page_segment.content, page_segment.line_offset))
+            .map(|page_segment| {
+                render_markdown_page(page_segment.content, page_segment.line_offset)
+            })
             .collect(),
     }
 }
@@ -150,10 +152,7 @@ fn render_blocks(lines: &[SourceLine<'_>]) -> String {
         if is_horizontal_rule(line.text) {
             push_block(
                 &mut html,
-                &format!(
-                    "<hr{} />",
-                    source_line_attributes(line.number, line.number),
-                ),
+                &format!("<hr{} />", source_line_attributes(line.number, line.number),),
             );
             index += 1;
             continue;
@@ -193,7 +192,9 @@ fn render_blocks(lines: &[SourceLine<'_>]) -> String {
             while index < lines.len() {
                 let current_line = lines[index];
 
-                if let Some((next_ordered, _, next_item_content)) = parse_list_item(current_line.text) {
+                if let Some((next_ordered, _, next_item_content)) =
+                    parse_list_item(current_line.text)
+                {
                     if next_ordered != ordered {
                         break;
                     }
@@ -241,7 +242,10 @@ fn render_blocks(lines: &[SourceLine<'_>]) -> String {
         while index < lines.len() {
             let current_line = lines[index];
 
-            if is_blank(current_line.text) || is_page_break_line(current_line.text) || is_block_start(current_line.text) {
+            if is_blank(current_line.text)
+                || is_page_break_line(current_line.text)
+                || is_block_start(current_line.text)
+            {
                 break;
             }
 
@@ -373,7 +377,10 @@ fn parse_wrapped_span<'a>(text: &'a str, marker: &str) -> Option<(usize, &'a str
     let content_start = marker.len();
     let content_end = content_start + end_index;
 
-    Some((content_end + marker.len(), &text[content_start..content_end]))
+    Some((
+        content_end + marker.len(),
+        &text[content_start..content_end],
+    ))
 }
 
 fn parse_markdown_link(text: &str) -> Option<(usize, &str, &str)> {
@@ -459,7 +466,10 @@ fn parse_fence_start(text: &str) -> Option<(char, usize, &str)> {
         return None;
     }
 
-    let marker_len = trimmed.chars().take_while(|character| *character == marker).count();
+    let marker_len = trimmed
+        .chars()
+        .take_while(|character| *character == marker)
+        .count();
 
     if marker_len < 3 {
         return None;
@@ -473,7 +483,11 @@ fn parse_fence_start(text: &str) -> Option<(char, usize, &str)> {
 fn is_fence_end(text: &str, marker: char, marker_len: usize) -> bool {
     let trimmed = text.trim_start();
 
-    trimmed.chars().take_while(|character| *character == marker).count() >= marker_len
+    trimmed
+        .chars()
+        .take_while(|character| *character == marker)
+        .count()
+        >= marker_len
 }
 
 fn parse_list_item(text: &str) -> Option<(bool, usize, &str)> {
@@ -499,14 +513,19 @@ fn parse_unordered_list_item(text: &str) -> Option<&str> {
 
 fn parse_ordered_list_item(text: &str) -> Option<(usize, &str)> {
     let trimmed = text.trim_start();
-    let digits_end = trimmed.chars().take_while(|character| character.is_ascii_digit()).count();
+    let digits_end = trimmed
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .count();
 
     if digits_end == 0 || !trimmed[digits_end..].starts_with('.') {
         return None;
     }
 
     let content = &trimmed[digits_end + 1..];
-    let content = content.strip_prefix(' ').or_else(|| content.strip_prefix('\t'))?;
+    let content = content
+        .strip_prefix(' ')
+        .or_else(|| content.strip_prefix('\t'))?;
     let start_value = trimmed[..digits_end].parse::<usize>().ok()?;
 
     Some((start_value, content))
@@ -558,8 +577,7 @@ fn is_page_break_line(text: &str) -> bool {
 fn is_page_break_token(text: &str) -> bool {
     text.starts_with(PAGE_BREAK_TOKEN_OPEN)
         && text.ends_with(PAGE_BREAK_TOKEN_CLOSE)
-        && text[PAGE_BREAK_TOKEN_OPEN.len()..text.len() - PAGE_BREAK_TOKEN_CLOSE.len()]
-            .trim()
+        && text[PAGE_BREAK_TOKEN_OPEN.len()..text.len() - PAGE_BREAK_TOKEN_CLOSE.len()].trim()
             == "---"
 }
 
@@ -607,8 +625,9 @@ mod tests {
 
     #[test]
     fn renders_page_breaks_and_source_line_offsets() {
-        let rendered_preview =
-            render_markdown_preview("# Title\nHello [site](https://example.com)\n<!-- --- -->\n- item");
+        let rendered_preview = render_markdown_preview(
+            "# Title\nHello [site](https://example.com)\n<!-- --- -->\n- item",
+        );
 
         assert_eq!(
             rendered_preview.html,

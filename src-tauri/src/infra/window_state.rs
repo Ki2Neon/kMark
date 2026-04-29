@@ -26,7 +26,10 @@ impl StoredWindowState {
 #[derive(Debug, thiserror::Error)]
 pub enum WindowStateError {
     #[error("failed to resolve app config directory")]
-    ResolveAppConfigDir { #[source] source: tauri::Error },
+    ResolveAppConfigDir {
+        #[source]
+        source: tauri::Error,
+    },
     #[error("failed to create window state directory: {path}")]
     CreateDirectory {
         path: String,
@@ -52,15 +55,30 @@ pub enum WindowStateError {
         source: serde_json::Error,
     },
     #[error("failed to serialize window state")]
-    SerializeState { #[source] source: serde_json::Error },
+    SerializeState {
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("failed to query window size")]
-    QueryWindowSize { #[source] source: tauri::Error },
+    QueryWindowSize {
+        #[source]
+        source: tauri::Error,
+    },
     #[error("failed to query window maximize state")]
-    QueryWindowMaximized { #[source] source: tauri::Error },
+    QueryWindowMaximized {
+        #[source]
+        source: tauri::Error,
+    },
     #[error("failed to restore window size")]
-    RestoreWindowSize { #[source] source: tauri::Error },
+    RestoreWindowSize {
+        #[source]
+        source: tauri::Error,
+    },
     #[error("failed to restore window maximized state")]
-    RestoreWindowMaximized { #[source] source: tauri::Error },
+    RestoreWindowMaximized {
+        #[source]
+        source: tauri::Error,
+    },
 }
 
 pub fn restore_window_state<R: Runtime>(
@@ -119,10 +137,13 @@ pub fn persist_window_state<R: Runtime>(
         }
     };
 
-    write_window_state(&path, &StoredWindowState {
-        maximized: is_maximized,
-        ..window_state
-    })
+    write_window_state(
+        &path,
+        &StoredWindowState {
+            maximized: is_maximized,
+            ..window_state
+        },
+    )
 }
 
 fn load_window_state<R: Runtime>(
@@ -134,9 +155,7 @@ fn load_window_state<R: Runtime>(
     load_window_state_from_path(&path)
 }
 
-fn load_window_state_from_path(
-    path: &Path,
-) -> Result<Option<StoredWindowState>, WindowStateError> {
+fn load_window_state_from_path(path: &Path) -> Result<Option<StoredWindowState>, WindowStateError> {
     let payload = match fs::read(path) {
         Ok(payload) => payload,
         Err(source) if source.kind() == ErrorKind::NotFound => return Ok(None),

@@ -4,7 +4,7 @@ import {
 } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
+import { type PreviewDisplayMode } from "../../domain/preview";
 import { type EditorSessionAction } from "./editorSessionAction";
 import {
   type Clock,
@@ -174,7 +174,6 @@ export class EditorSessionController {
   async printDocument(
     store: EditorSessionStore,
     previewDisplayMode: PreviewDisplayMode,
-    renderedA4PreviewPages?: readonly RenderedA4PreviewPage[],
   ): Promise<void> {
     const state = store.getState();
     const renderedPreview = await this.renderPreview(state.content);
@@ -184,7 +183,6 @@ export class EditorSessionController {
       title: state.fileName,
       html: renderedPreview.html,
       pageHtmls: renderedPreview.pageHtmls,
-      renderedA4PreviewPages,
     });
   }
 

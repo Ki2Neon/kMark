@@ -371,17 +371,6 @@ input:focus-visible,
   transform: translateX(0);
 }
 
-.editor-shell__hidden-preview-probe {
-  position: fixed;
-  top: 0;
-  left: -200vw;
-  width: 960px;
-  height: 720px;
-  opacity: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
 .editor-shell__mobile-track {
   position: relative;
   flex: 1;
@@ -721,20 +710,6 @@ input:focus-visible,
   transform-origin: top left;
 }
 
-.preview-section__measure {
-  position: fixed;
-  top: 0;
-  left: -320mm;
-  visibility: hidden;
-  pointer-events: none;
-  opacity: 0;
-}
-
-.preview-section__measure-page {
-  min-height: 0;
-  overflow: visible;
-}
-
 .preview-section__page-stack {
   display: grid;
   justify-items: center;
@@ -758,37 +733,11 @@ input:focus-visible,
 }
 
 .preview-section__page {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative;
   border: 1px solid var(--preview-border);
   background: var(--preview-surface);
-  overflow: hidden;
-  transform-origin: top left;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
-}
-
-.preview-section__page-viewport {
-  position: absolute;
-  background: var(--preview-surface);
-  overflow: hidden;
-}
-
-.preview-section__page-viewport::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--preview-surface);
-  pointer-events: none;
-  z-index: 1;
-}
-
-.preview-section__page-content {
-  position: relative;
   overflow: visible;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
 .markdown-body {
@@ -800,39 +749,6 @@ input:focus-visible,
 
 .markdown-body--a4 {
   padding: 0;
-}
-
-.markdown-body--a4-flow {
-  orphans: 3;
-  widows: 3;
-}
-
-.markdown-body--a4-flow h1,
-.markdown-body--a4-flow h2,
-.markdown-body--a4-flow h3,
-.markdown-body--a4-flow h4,
-.markdown-body--a4-flow h5,
-.markdown-body--a4-flow h6 {
-  break-after: avoid-column;
-  page-break-after: avoid;
-}
-
-.markdown-body--a4-flow blockquote,
-.markdown-body--a4-flow figure,
-.markdown-body--a4-flow pre,
-.markdown-body--a4-flow tr {
-  break-inside: avoid;
-  page-break-inside: avoid;
-}
-
-.markdown-body--a4-flow table {
-  break-inside: auto;
-  page-break-inside: auto;
-}
-
-.markdown-body--a4-flow thead {
-  break-inside: avoid;
-  page-break-inside: avoid;
 }
 
 .markdown-body > :first-child {

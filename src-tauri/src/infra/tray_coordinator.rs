@@ -39,7 +39,10 @@ struct StoredTrayCommand {
 #[derive(Debug, thiserror::Error)]
 pub enum TrayCoordinatorError {
     #[error("failed to resolve app config directory")]
-    ResolveAppConfigDir { #[source] source: tauri::Error },
+    ResolveAppConfigDir {
+        #[source]
+        source: tauri::Error,
+    },
     #[error("failed to create tray coordinator directory: {path}")]
     CreateDirectory {
         path: String,
@@ -71,7 +74,10 @@ pub enum TrayCoordinatorError {
         source: serde_json::Error,
     },
     #[error("failed to serialize tray command")]
-    SerializeCommand { #[source] source: serde_json::Error },
+    SerializeCommand {
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("failed to write tray command file: {path}")]
     WriteCommandFile {
         path: String,
@@ -87,10 +93,10 @@ pub enum TrayCoordinatorError {
 }
 
 impl TrayCoordinator {
-    pub(crate) fn initialize<R: Runtime>(
-        app: &AppHandle<R>,
-    ) -> Result<Self, TrayCoordinatorError> {
-        let last_command_sequence = read_command(app)?.map(|command| command.sequence).unwrap_or(0);
+    pub(crate) fn initialize<R: Runtime>(app: &AppHandle<R>) -> Result<Self, TrayCoordinatorError> {
+        let last_command_sequence = read_command(app)?
+            .map(|command| command.sequence)
+            .unwrap_or(0);
 
         Ok(Self {
             owner_lock: None,
@@ -179,7 +185,9 @@ pub(crate) fn broadcast_command<R: Runtime>(
         })?;
     }
 
-    let next_sequence = read_command(app)?.map(|command| command.sequence + 1).unwrap_or(1);
+    let next_sequence = read_command(app)?
+        .map(|command| command.sequence + 1)
+        .unwrap_or(1);
     let payload = serde_json::to_vec(&StoredTrayCommand {
         sequence: next_sequence,
         kind,
@@ -251,9 +259,7 @@ fn command_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, TrayCoordinat
     Ok(path)
 }
 
-fn temporary_command_path<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<PathBuf, TrayCoordinatorError> {
+fn temporary_command_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, TrayCoordinatorError> {
     let mut path = base_directory(app)?;
     path.push(TRAY_COMMAND_TEMP_FILE_NAME);
     Ok(path)

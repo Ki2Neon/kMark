@@ -9,10 +9,9 @@ export type PreviewWindowEditJumpRequest = {
 };
 
 export type PreviewWindowSessionGateway = {
-  resolveInstanceId(): Promise<string>;
-  openWindow(instanceId: string): Promise<void>;
-  persistSnapshot(instanceId: string, snapshot: PreviewWindowSnapshot): void;
-  persistActiveSourceLine(instanceId: string, activeSourceLine: number | null): void;
-  getEditJumpRequestStorageKey(instanceId: string): string | null;
-  loadEditJumpRequest(instanceId: string): PreviewWindowEditJumpRequest | null;
+  openWindow(snapshot: PreviewWindowSnapshot, activeSourceLine: number | null): Promise<void>;
+  syncState(snapshot: PreviewWindowSnapshot, activeSourceLine: number | null): Promise<void>;
+  listenForEditJumpRequests(
+    callback: (previewWindowEditJumpRequest: PreviewWindowEditJumpRequest) => void,
+  ): Promise<() => void>;
 };

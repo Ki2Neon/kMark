@@ -4,6 +4,7 @@
   "description": "Capability for the detached preview window",
   "windows": ["preview-window"],
   "permissions": [
+    "core:default",
     "core:window:allow-set-title"
   ]
 }

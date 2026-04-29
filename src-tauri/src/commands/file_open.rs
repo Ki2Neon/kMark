@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::State;
 
+use super::error::CommandErrorPayload;
 use crate::{
     domain::MarkdownDocument,
     usecase::{
@@ -34,19 +35,21 @@ impl From<MarkdownDocument> for MarkdownDocumentPayload {
 #[tauri::command]
 pub fn take_pending_markdown_open_requests(
     state: State<'_, AppState>,
-) -> Result<Vec<MarkdownDocumentPayload>, String> {
+) -> Result<Vec<MarkdownDocumentPayload>, CommandErrorPayload> {
     take_pending_markdown_documents(
         &state.open_request_queue,
         &state.markdown_document_repository,
     )
     .map(|documents| documents.into_iter().map(Into::into).collect())
-    .map_err(|error| error.to_string())
+    .map_err(CommandErrorPayload::from)
 }
 
 #[tauri::command]
-pub fn clear_pending_markdown_open_requests(state: State<'_, AppState>) -> Result<(), String> {
+pub fn clear_pending_markdown_open_requests(
+    state: State<'_, AppState>,
+) -> Result<(), CommandErrorPayload> {
     clear_pending_markdown_open_requests_usecase(&state.open_request_queue)
-        .map_err(|error| error.to_string())
+        .map_err(CommandErrorPayload::from)
 }
 
 #[tauri::command]
@@ -54,9 +57,9 @@ pub fn write_markdown_document(
     state: State<'_, AppState>,
     path: String,
     content: String,
-) -> Result<(), String> {
+) -> Result<(), CommandErrorPayload> {
     let file_path = PathBuf::from(&path);
 
     write_markdown_document_usecase(&state.markdown_document_repository, &file_path, &content)
-        .map_err(|error| error.to_string())
+        .map_err(CommandErrorPayload::from)
 }

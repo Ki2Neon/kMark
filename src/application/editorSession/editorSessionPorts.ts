@@ -1,6 +1,6 @@
 import { type StoredEdit } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
-import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
+import { type PreviewDisplayMode } from "../../domain/preview";
 
 export type LoadedMarkdownDocument = {
   readonly fileName: string;
@@ -16,7 +16,6 @@ export type PrintMarkdownDocumentRequest = {
   readonly title: string;
   readonly html: string;
   readonly pageHtmls: readonly string[];
-  readonly renderedA4PreviewPages?: readonly RenderedA4PreviewPage[];
 };
 
 export type Clock = {

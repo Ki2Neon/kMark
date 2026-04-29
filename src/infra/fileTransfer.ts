@@ -1,7 +1,8 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ExternalMarkdownDocument } from "../domain/externalMarkdownDocument";
 import { ensureMarkdownExtension } from "../domain/editor";
+import { invokeTauriCommand } from "./tauriCommand";
 
 type MarkdownPickerType = {
   readonly description: string;
@@ -104,10 +105,14 @@ export async function overwriteMarkdownDocumentAtPath(filePath: string, content:
     throw new Error("Tauri 環境でのみ利用できます。");
   }
 
-  await invoke("write_markdown_document", {
-    path: filePath,
-    content,
-  });
+  await invokeTauriCommand<void>(
+    "write_markdown_document",
+    {
+      path: filePath,
+      content,
+    },
+    "Markdown ファイルの保存に失敗しました。",
+  );
 }
 
 export async function readMarkdownFile(file: File): Promise<{ fileName: string; content: string }> {
@@ -122,7 +127,11 @@ export async function takePendingTauriMarkdownOpenRequests(): Promise<readonly E
     return [];
   }
 
-  return invoke<ExternalMarkdownDocument[]>("take_pending_markdown_open_requests");
+  return invokeTauriCommand<ExternalMarkdownDocument[]>(
+    "take_pending_markdown_open_requests",
+    {},
+    "起動時 Markdown 要求の取得に失敗しました。",
+  );
 }
 
 export async function clearPendingTauriMarkdownOpenRequests(): Promise<void> {
@@ -130,7 +139,11 @@ export async function clearPendingTauriMarkdownOpenRequests(): Promise<void> {
     return;
   }
 
-  await invoke("clear_pending_markdown_open_requests");
+  await invokeTauriCommand<void>(
+    "clear_pending_markdown_open_requests",
+    {},
+    "起動時 Markdown 要求の消去に失敗しました。",
+  );
 }
 
 export async function listenForTauriMarkdownOpenRequests(callback: () => void): Promise<() => void> {

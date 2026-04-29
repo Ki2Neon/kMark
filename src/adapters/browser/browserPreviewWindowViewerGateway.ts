@@ -1,46 +1,28 @@
 import { type PreviewWindowViewerGateway } from "../../application/previewWindowViewer/previewWindowViewerPorts";
-import { resolvePreviewWindowInstanceId } from "../../infra/previewWindow";
 import {
-  getPreviewWindowCursorSyncStorageKey,
-  getPreviewWindowSnapshotStorageKey,
-  loadPreviewWindowActiveSourceLine,
-  loadPreviewWindowSnapshot,
+  loadPreviewWindowState,
+  listenForPreviewWindowStateUpdates,
   requestPreviewWindowEditJump,
-} from "../../infra/previewWindowSync";
+  type PreviewWindowState,
+} from "../../infra/previewWindow";
 
 export function createBrowserPreviewWindowViewerGateway(): PreviewWindowViewerGateway {
   return {
-    getCursorSyncStorageKey(instanceId) {
-      return getPreviewWindowCursorSyncStorageKey(instanceId);
+    async loadState() {
+      return loadPreviewWindowState();
     },
 
-    getSnapshotStorageKey(instanceId) {
-      return getPreviewWindowSnapshotStorageKey(instanceId);
+    async listenForStateUpdates(callback) {
+      return listenForPreviewWindowStateUpdates((previewWindowState: PreviewWindowState) => {
+        callback({
+          activeSourceLine: previewWindowState.activeSourceLine,
+          snapshot: previewWindowState.snapshot,
+        });
+      });
     },
 
-    loadActiveSourceLine(instanceId) {
-      return loadPreviewWindowActiveSourceLine(instanceId);
-    },
-
-    loadSnapshot(instanceId) {
-      const snapshot = loadPreviewWindowSnapshot(instanceId);
-
-      if (snapshot === null) {
-        return null;
-      }
-
-      return {
-        content: snapshot.content,
-        fileName: snapshot.fileName,
-      };
-    },
-
-    requestEditJump(instanceId, lineNumber) {
-      requestPreviewWindowEditJump(instanceId, lineNumber);
-    },
-
-    resolveInstanceId(search) {
-      return resolvePreviewWindowInstanceId(search);
+    async requestEditJump(lineNumber) {
+      await requestPreviewWindowEditJump(lineNumber);
     },
   };
 }

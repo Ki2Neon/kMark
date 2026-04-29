@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import {
   createImportGraph,
   getLayerName,
@@ -6,6 +8,7 @@ import {
 
 const graph = createImportGraph();
 const violations = [];
+const DISALLOWED_BROWSER_GLOBAL_PATTERN = /\b(?:window|document|navigator|localStorage|sessionStorage)\s*\./u;
 
 function verifyLayerBoundary(sourceFilePath, targetFilePath, allowedTargetLayers) {
   const targetLayer = getLayerName(targetFilePath);
@@ -17,11 +20,23 @@ function verifyLayerBoundary(sourceFilePath, targetFilePath, allowedTargetLayers
   }
 }
 
+function verifyNoBrowserGlobals(sourceFilePath) {
+  const sourceContent = fs.readFileSync(sourceFilePath, "utf8");
+
+  if (DISALLOWED_BROWSER_GLOBAL_PATTERN.test(sourceContent)) {
+    violations.push(
+      `${getRepoRelativePath(sourceFilePath)} -> browser global disallowed`,
+    );
+  }
+}
+
 for (const [sourceFilePath, targetFilePaths] of graph.entries()) {
   const sourceLayer = getLayerName(sourceFilePath);
   const sourceRelativePath = getRepoRelativePath(sourceFilePath);
 
   if (sourceLayer === "domain") {
+    verifyNoBrowserGlobals(sourceFilePath);
+
     for (const targetFilePath of targetFilePaths) {
       verifyLayerBoundary(sourceFilePath, targetFilePath, new Set(["domain"]));
     }
@@ -30,6 +45,8 @@ for (const [sourceFilePath, targetFilePaths] of graph.entries()) {
   }
 
   if (sourceLayer === "application") {
+    verifyNoBrowserGlobals(sourceFilePath);
+
     for (const targetFilePath of targetFilePaths) {
       verifyLayerBoundary(sourceFilePath, targetFilePath, new Set(["application", "domain"]));
     }

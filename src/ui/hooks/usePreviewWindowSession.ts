@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createBrowserPreviewWindowSessionGateway } from "../../adapters/browser/browserPreviewWindowSessionGateway";
 import { PreviewWindowSessionController } from "../../application/previewWindowSession/previewWindowSessionController";
+import { toCommandErrorMessage } from "../../infra/tauriCommand";
 
 function toPreviewWindowErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return "プレビューウィンドウを開けませんでした。";
+  return toCommandErrorMessage(error, "プレビューウィンドウを開けませんでした。");
 }
 
 type UsePreviewWindowSessionOptions = {
@@ -26,8 +23,6 @@ export function usePreviewWindowSession({
   onJumpToSourceLine,
 }: UsePreviewWindowSessionOptions) {
   const controllerRef = useRef<PreviewWindowSessionController | null>(null);
-  const lastHandledPreviewWindowJumpRequestIdRef = useRef<number | null>(null);
-  const [previewWindowInstanceId, setPreviewWindowInstanceId] = useState<string | null>(null);
 
   if (controllerRef.current === null) {
     controllerRef.current = new PreviewWindowSessionController({
@@ -36,85 +31,65 @@ export function usePreviewWindowSession({
   }
 
   const controller = controllerRef.current;
-  const previewWindowEditJumpRequestStorageKey = useMemo(
-    () => controller.getEditJumpRequestStorageKey(previewWindowInstanceId),
-    [controller, previewWindowInstanceId],
-  );
 
   useEffect(() => {
-    let isDisposed = false;
-
-    void controller.resolveInstanceId().then((nextInstanceId) => {
-      if (isDisposed) {
-        return;
-      }
-
-      setPreviewWindowInstanceId(nextInstanceId);
-    });
-
-    return () => {
-      isDisposed = true;
-    };
-  }, [controller]);
-
-  useEffect(() => {
-    controller.syncPreviewState(
-      previewWindowInstanceId,
+    void controller.syncPreviewState(
       {
         content,
         fileName,
       },
       activeSourceLine,
-    );
-  }, [activeSourceLine, content, controller, fileName, previewWindowInstanceId]);
+    ).catch((error) => {
+      onError(toPreviewWindowErrorMessage(error));
+    });
+  }, [activeSourceLine, content, controller, fileName, onError]);
 
   useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (
-        event.storageArea !== window.localStorage
-        || previewWindowEditJumpRequestStorageKey === null
-        || event.key !== previewWindowEditJumpRequestStorageKey
-      ) {
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void controller.subscribeToEditJumpRequests((previewWindowEditJumpRequest) => {
+      if (isDisposed) {
         return;
       }
 
-      const nextJumpRequest = controller.readNextEditJumpRequest(
-        previewWindowInstanceId,
-        lastHandledPreviewWindowJumpRequestIdRef.current,
-      );
-
-      if (nextJumpRequest === null) {
+      onJumpToSourceLine(previewWindowEditJumpRequest.lineNumber);
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
         return;
       }
 
-      lastHandledPreviewWindowJumpRequestIdRef.current = nextJumpRequest.requestId;
-      onJumpToSourceLine(nextJumpRequest.lineNumber);
-    };
+      unlisten = nextUnlisten;
+    }).catch((error) => {
+      if (isDisposed) {
+        return;
+      }
 
-    window.addEventListener("storage", handleStorage);
+      onError(toPreviewWindowErrorMessage(error));
+    });
 
     return () => {
-      window.removeEventListener("storage", handleStorage);
+      isDisposed = true;
+      unlisten?.();
     };
-  }, [controller, onJumpToSourceLine, previewWindowEditJumpRequestStorageKey, previewWindowInstanceId]);
+  }, [controller, onError, onJumpToSourceLine]);
 
   const handleOpenPreviewWindow = useCallback(() => {
     void (async () => {
       try {
-        const nextInstanceId = await controller.openPreviewWindow(
-          previewWindowInstanceId,
+        await controller.openPreviewWindow(
           {
             content,
             fileName,
           },
+          activeSourceLine,
         );
-
-        setPreviewWindowInstanceId((currentInstanceId) => currentInstanceId ?? nextInstanceId);
       } catch (error) {
         onError(toPreviewWindowErrorMessage(error));
       }
     })();
-  }, [content, controller, fileName, onError, previewWindowInstanceId]);
+  }, [activeSourceLine, content, controller, fileName, onError]);
 
   return {
     openPreviewWindow: handleOpenPreviewWindow,

@@ -10,10 +10,7 @@ export type PreviewWindowViewerRenderedPreview = {
 
 export type PreviewWindowViewerState = {
   readonly activeSourceLine: number | null;
-  readonly cursorSyncStorageKey: string | null;
-  readonly instanceId: string | null;
   readonly snapshot: PreviewWindowViewerSnapshot;
-  readonly snapshotStorageKey: string | null;
 };
 
 export type PreviewWindowViewerRenderer = {
@@ -21,10 +18,9 @@ export type PreviewWindowViewerRenderer = {
 };
 
 export type PreviewWindowViewerGateway = {
-  getCursorSyncStorageKey(instanceId: string): string | null;
-  getSnapshotStorageKey(instanceId: string): string | null;
-  loadActiveSourceLine(instanceId: string): number | null;
-  loadSnapshot(instanceId: string): PreviewWindowViewerSnapshot | null;
-  requestEditJump(instanceId: string, lineNumber: number): void;
-  resolveInstanceId(search?: string): string | null;
+  loadState(): Promise<PreviewWindowViewerState>;
+  listenForStateUpdates(
+    callback: (previewWindowViewerState: PreviewWindowViewerState) => void,
+  ): Promise<() => void>;
+  requestEditJump(lineNumber: number): Promise<void>;
 };

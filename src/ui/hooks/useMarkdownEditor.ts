@@ -12,7 +12,7 @@ import {
 import { editorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PreviewDisplayMode, type RenderedA4PreviewPage } from "../../domain/preview";
+import { type PreviewDisplayMode } from "../../domain/preview";
 
 export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   const renderRequestIdRef = useRef(0);
@@ -158,10 +158,9 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
 
   const handlePrintDocument = useCallback(async (
     previewDisplayMode: PreviewDisplayMode,
-    renderedA4PreviewPages?: readonly RenderedA4PreviewPage[],
   ) => {
     await executeWithErrorHandling(async () => {
-      await controller.printDocument(store, previewDisplayMode, renderedA4PreviewPages);
+      await controller.printDocument(store, previewDisplayMode);
     });
   }, [controller, executeWithErrorHandling, store]);
 

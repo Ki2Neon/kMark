@@ -1,11 +1,5 @@
 export type PreviewDisplayMode = "standard" | "a4";
 
-export type RenderedA4PreviewPage = {
-  readonly html: string;
-  readonly key: string;
-  readonly offsetPx: number;
-};
-
 export type PreviewDisplayModeOption = {
   readonly id: PreviewDisplayMode;
   readonly label: string;
@@ -34,7 +28,6 @@ export const A4_MARGIN_TOP_MM = 16;
 export const A4_MARGIN_RIGHT_MM = 16;
 export const A4_MARGIN_BOTTOM_MM = 18;
 export const A4_MARGIN_LEFT_MM = 16;
-export const A4_VIEWPORT_OVERSCAN_PX = 4;
 
 export const A4_PAGE_WIDTH_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
 export const A4_PAGE_HEIGHT_PX = A4_PAGE_HEIGHT_MM * CSS_MM_TO_PX;

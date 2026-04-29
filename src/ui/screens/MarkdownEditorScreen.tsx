@@ -5,7 +5,6 @@ import {
   useState,
   type ChangeEvent,
 } from "react";
-import { type RenderedA4PreviewPage } from "../../domain/preview";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
 import { type AppFontId, type EditFontId, type EditFontSizePx, type MultiCursorModifier, type StartupEditMode } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
@@ -130,7 +129,6 @@ export function MarkdownEditorScreen({
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
-  const [renderedA4PreviewPages, setRenderedA4PreviewPages] = useState<readonly RenderedA4PreviewPage[]>([]);
   const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
   const blurActiveElement = useCallback(() => {
     const activeElement = document.activeElement;
@@ -244,8 +242,8 @@ export function MarkdownEditorScreen({
 
   const handleRequestPrint = useCallback(() => {
     closeDesktopMenu();
-    void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
-  }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode, renderedA4PreviewPages]);
+    void handlePrintDocument(previewDisplayMode);
+  }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode]);
 
   const handleRequestNew = useCallback(() => {
     if (!confirmDiscard()) {
@@ -288,10 +286,6 @@ export function MarkdownEditorScreen({
 
   const handleEditCursorLineChange = useCallback((nextCursorLine: number) => {
     setActiveEditCursorLine(nextCursorLine);
-  }, []);
-
-  const handleRenderedA4PagesChange = useCallback((nextRenderedA4Pages: readonly RenderedA4PreviewPage[]) => {
-    setRenderedA4PreviewPages(nextRenderedA4Pages);
   }, []);
 
   const handlePreviewSourceLineDoubleClick = useCallback((lineNumber: number) => {
@@ -394,7 +388,7 @@ export function MarkdownEditorScreen({
     onOpenDocument: handleShortcutOpenDocument,
     onPrintDocument: () => {
       closeDesktopMenu();
-      void handlePrintDocument(previewDisplayMode, renderedA4PreviewPages);
+      void handlePrintDocument(previewDisplayMode);
     },
     onSaveDocument: () => {
       void handleOverwriteSaveDocument();
@@ -511,7 +505,6 @@ export function MarkdownEditorScreen({
                     maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
                     minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
                     onPreviewContextMenu={handlePreviewContextMenu}
-                    onRenderedA4PagesChange={handleRenderedA4PagesChange}
                     onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
                     onZoomScaleChange={handlePreviewZoomScaleChange}
                     pageHtmls={previewPageHtmls}
@@ -521,18 +514,6 @@ export function MarkdownEditorScreen({
               </>
             ) : null}
           </section>
-
-          {previewDisplayMode === "a4" && !isPreviewVisible ? (
-            <div className="editor-shell__hidden-preview-probe" aria-hidden="true">
-              <MarkdownPreview
-                displayMode={previewDisplayMode}
-                html={previewHtml}
-                onRenderedA4PagesChange={handleRenderedA4PagesChange}
-                pageHtmls={previewPageHtmls}
-              />
-            </div>
-          ) : null}
-
           {isDesktopMenuMounted ? (
             <div
               className="editor-shell__overlay"
@@ -584,7 +565,6 @@ export function MarkdownEditorScreen({
                       maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
                       minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
                       onPreviewContextMenu={handlePreviewContextMenu}
-                      onRenderedA4PagesChange={handleRenderedA4PagesChange}
                       onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
                       onZoomScaleChange={handlePreviewZoomScaleChange}
                       pageHtmls={previewPageHtmls}

@@ -20,53 +20,40 @@ export class PreviewWindowViewerController {
     this.#renderer = dependencies.renderer;
   }
 
-  createState(
+  createFallbackState(
     fallbackSnapshot: PreviewWindowViewerSnapshot,
-    search = typeof window === "undefined" ? "" : window.location.search,
   ): PreviewWindowViewerState {
-    const instanceId = this.#gateway.resolveInstanceId(search);
-
-    if (instanceId === null) {
-      return {
-        activeSourceLine: null,
-        cursorSyncStorageKey: null,
-        instanceId,
-        snapshot: fallbackSnapshot,
-        snapshotStorageKey: null,
-      };
-    }
-
     return {
-      activeSourceLine: this.#gateway.loadActiveSourceLine(instanceId),
-      cursorSyncStorageKey: this.#gateway.getCursorSyncStorageKey(instanceId),
-      instanceId,
-      snapshot: this.#gateway.loadSnapshot(instanceId) ?? fallbackSnapshot,
-      snapshotStorageKey: this.#gateway.getSnapshotStorageKey(instanceId),
+      activeSourceLine: null,
+      snapshot: fallbackSnapshot,
     };
   }
 
-  loadSnapshot(instanceId: string | null, fallbackSnapshot: PreviewWindowViewerSnapshot): PreviewWindowViewerSnapshot {
-    if (instanceId === null) {
-      return fallbackSnapshot;
-    }
+  async loadState(
+    fallbackSnapshot: PreviewWindowViewerSnapshot,
+  ): Promise<PreviewWindowViewerState> {
+    const previewWindowViewerState = await this.#gateway.loadState();
 
-    return this.#gateway.loadSnapshot(instanceId) ?? fallbackSnapshot;
+    return {
+      activeSourceLine: previewWindowViewerState.activeSourceLine,
+      snapshot: {
+        content: previewWindowViewerState.snapshot.content,
+        fileName:
+          previewWindowViewerState.snapshot.fileName.trim().length > 0
+            ? previewWindowViewerState.snapshot.fileName
+            : fallbackSnapshot.fileName,
+      },
+    };
   }
 
-  loadActiveSourceLine(instanceId: string | null): number | null {
-    if (instanceId === null) {
-      return null;
-    }
-
-    return this.#gateway.loadActiveSourceLine(instanceId);
+  subscribeToStateUpdates(
+    callback: (previewWindowViewerState: PreviewWindowViewerState) => void,
+  ): Promise<() => void> {
+    return this.#gateway.listenForStateUpdates(callback);
   }
 
-  requestEditJump(instanceId: string | null, lineNumber: number): void {
-    if (instanceId === null) {
-      return;
-    }
-
-    this.#gateway.requestEditJump(instanceId, lineNumber);
+  requestEditJump(lineNumber: number): Promise<void> {
+    return this.#gateway.requestEditJump(lineNumber);
   }
 
   async renderSnapshot(snapshot: PreviewWindowViewerSnapshot): Promise<PreviewWindowViewerRenderedPreview> {

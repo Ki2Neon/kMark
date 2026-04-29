@@ -3,7 +3,10 @@ import { createBrowserPreviewWindowViewerRenderer } from "../../adapters/browser
 import { createBrowserPreviewWindowViewerGateway } from "../../adapters/browser/browserPreviewWindowViewerGateway";
 import { PreviewWindowViewerController } from "../../application/previewWindowViewer/previewWindowViewerController";
 import { type PreviewWindowViewerRenderedPreview } from "../../application/previewWindowViewer/previewWindowViewerPorts";
-import { type PreviewWindowViewerSnapshot } from "../../application/previewWindowViewer/previewWindowViewerPorts";
+import {
+  type PreviewWindowViewerSnapshot,
+  type PreviewWindowViewerState,
+} from "../../application/previewWindowViewer/previewWindowViewerPorts";
 
 type UsePreviewWindowViewerOptions = {
   readonly fallbackSnapshot: PreviewWindowViewerSnapshot;
@@ -21,47 +24,55 @@ export function usePreviewWindowViewer({ fallbackSnapshot }: UsePreviewWindowVie
   }
 
   const controller = controllerRef.current;
-  const [viewerState] = useState(() => controller.createState(fallbackSnapshot));
-  const [snapshot, setSnapshot] = useState(viewerState.snapshot);
-  const [activeSourceLine, setActiveSourceLine] = useState(viewerState.activeSourceLine);
+  const [viewerState, setViewerState] = useState<PreviewWindowViewerState>(() => controller.createFallbackState(fallbackSnapshot));
   const [renderedPreview, setRenderedPreview] = useState<PreviewWindowViewerRenderedPreview>({
     html: "",
     pageHtmls: [],
   });
 
   useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage) {
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void controller.loadState(fallbackSnapshot).then((nextViewerState) => {
+      if (isDisposed) {
         return;
       }
 
-      if (viewerState.snapshotStorageKey !== null && event.key === viewerState.snapshotStorageKey) {
-        setSnapshot(controller.loadSnapshot(viewerState.instanceId, fallbackSnapshot));
+      setViewerState(nextViewerState);
+    }).catch(() => {});
+
+    void controller.subscribeToStateUpdates((nextViewerState) => {
+      if (isDisposed) {
         return;
       }
 
-      if (viewerState.cursorSyncStorageKey !== null && event.key === viewerState.cursorSyncStorageKey) {
-        setActiveSourceLine(controller.loadActiveSourceLine(viewerState.instanceId));
+      setViewerState(nextViewerState);
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
       }
-    };
 
-    window.addEventListener("storage", handleStorage);
+      unlisten = nextUnlisten;
+    }).catch(() => {});
 
     return () => {
-      window.removeEventListener("storage", handleStorage);
+      isDisposed = true;
+      unlisten?.();
     };
-  }, [controller, fallbackSnapshot, viewerState.cursorSyncStorageKey, viewerState.instanceId, viewerState.snapshotStorageKey]);
+  }, [controller, fallbackSnapshot]);
 
   const handleSourceLineDoubleClick = useCallback((lineNumber: number) => {
-    controller.requestEditJump(viewerState.instanceId, lineNumber);
-  }, [controller, viewerState.instanceId]);
+    void controller.requestEditJump(lineNumber);
+  }, [controller]);
 
   useEffect(() => {
     const requestId = renderRequestIdRef.current + 1;
     renderRequestIdRef.current = requestId;
     let disposed = false;
 
-    void controller.renderSnapshot(snapshot)
+    void controller.renderSnapshot(viewerState.snapshot)
       .then((nextRenderedPreview) => {
         if (disposed || renderRequestIdRef.current !== requestId) {
           return;
@@ -87,13 +98,13 @@ export function usePreviewWindowViewer({ fallbackSnapshot }: UsePreviewWindowVie
     return () => {
       disposed = true;
     };
-  }, [controller, snapshot]);
+  }, [controller, viewerState.snapshot]);
 
   return {
-    activeSourceLine,
+    activeSourceLine: viewerState.activeSourceLine,
     onSourceLineDoubleClick: handleSourceLineDoubleClick,
     previewHtml: renderedPreview.html,
     previewPageHtmls: renderedPreview.pageHtmls,
-    snapshot,
+    snapshot: viewerState.snapshot,
   };
 }

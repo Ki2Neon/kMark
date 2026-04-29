@@ -1,8 +1,7 @@
 use std::{fs, path::Path};
 
 use crate::domain::{
-    is_supported_markdown_path, MarkdownDocument, MarkdownDocumentError,
-    MarkdownDocumentRepository,
+    is_supported_markdown_path, MarkdownDocument, MarkdownDocumentError, MarkdownDocumentRepository,
 };
 
 #[derive(Default)]
@@ -16,10 +15,11 @@ impl MarkdownDocumentRepository for FileSystemMarkdownDocumentRepository {
             return Err(MarkdownDocumentError::NotFound(display_path(path)));
         }
 
-        let content = fs::read_to_string(path).map_err(|source| MarkdownDocumentError::ReadFailed {
-            path: display_path(path),
-            source,
-        })?;
+        let content =
+            fs::read_to_string(path).map_err(|source| MarkdownDocumentError::ReadFailed {
+                path: display_path(path),
+                source,
+            })?;
 
         Ok(MarkdownDocument::new(path.to_path_buf(), content))
     }

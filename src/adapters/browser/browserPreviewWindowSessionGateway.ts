@@ -1,36 +1,27 @@
 import { type PreviewWindowSessionGateway } from "../../application/previewWindowSession/previewWindowSessionPorts";
 import {
-  getPreviewWindowEditJumpRequestStorageKey,
-  loadPreviewWindowEditJumpRequest,
-  persistPreviewWindowActiveSourceLine,
-  persistPreviewWindowSnapshot,
-} from "../../infra/previewWindowSync";
-import { openPreviewWindow, resolveAppInstanceId } from "../../infra/previewWindow";
+  listenForPreviewWindowEditJumpRequests,
+  openPreviewWindow,
+  syncPreviewWindowState,
+} from "../../infra/previewWindow";
+import { type PreviewWindowEditJumpRequest } from "../../infra/previewWindow";
 
 export function createBrowserPreviewWindowSessionGateway(): PreviewWindowSessionGateway {
   return {
-    resolveInstanceId() {
-      return resolveAppInstanceId();
+    async openWindow(snapshot, activeSourceLine) {
+      await openPreviewWindow(snapshot, activeSourceLine);
     },
 
-    async openWindow(instanceId) {
-      await openPreviewWindow(instanceId);
+    async syncState(snapshot, activeSourceLine) {
+      await syncPreviewWindowState(snapshot, activeSourceLine);
     },
 
-    persistSnapshot(instanceId, snapshot) {
-      persistPreviewWindowSnapshot(instanceId, snapshot);
-    },
-
-    persistActiveSourceLine(instanceId, activeSourceLine) {
-      persistPreviewWindowActiveSourceLine(instanceId, activeSourceLine);
-    },
-
-    getEditJumpRequestStorageKey(instanceId) {
-      return getPreviewWindowEditJumpRequestStorageKey(instanceId);
-    },
-
-    loadEditJumpRequest(instanceId) {
-      return loadPreviewWindowEditJumpRequest(instanceId);
+    async listenForEditJumpRequests(callback) {
+      return listenForPreviewWindowEditJumpRequests(
+        (previewWindowEditJumpRequest: PreviewWindowEditJumpRequest) => {
+          callback(previewWindowEditJumpRequest);
+        },
+      );
     },
   };
 }
