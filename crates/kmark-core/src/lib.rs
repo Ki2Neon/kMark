@@ -31,5 +31,8 @@ pub use preview_preferences::{PreviewDisplayMode, PreviewPreferences};
 pub use preview_window_state::{
     PreviewWindowEditJumpRequest, PreviewWindowSnapshot, PreviewWindowState,
 };
-pub use render_markdown_preview::{render_markdown_preview, RenderedMarkdownPreview};
+pub use render_markdown_preview::{
+    render_markdown_preview, render_markdown_preview_with_file_path,
+    RenderedMarkdownPreview,
+};
 pub use theme::{AppThemeId, ThemePreferences};

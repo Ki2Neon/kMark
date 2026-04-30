@@ -2,6 +2,7 @@
 pub struct PreviewWindowSnapshot {
     content: String,
     file_name: String,
+    file_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -17,10 +18,17 @@ pub struct PreviewWindowEditJumpRequest {
 }
 
 impl PreviewWindowSnapshot {
-    pub fn new(content: impl Into<String>, file_name: impl Into<String>) -> Self {
+    pub fn new(
+        content: impl Into<String>,
+        file_name: impl Into<String>,
+        file_path: Option<String>,
+    ) -> Self {
         Self {
             content: content.into(),
             file_name: file_name.into(),
+            file_path: file_path
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty()),
         }
     }
 
@@ -30,6 +38,10 @@ impl PreviewWindowSnapshot {
 
     pub fn file_name(&self) -> &str {
         &self.file_name
+    }
+
+    pub fn file_path(&self) -> Option<&str> {
+        self.file_path.as_deref()
     }
 }
 

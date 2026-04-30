@@ -51,6 +51,7 @@ export class EditorSessionController {
   readonly #printer: MarkdownDocumentPrinter;
   readonly #renderer: MarkdownRenderer;
   readonly #rules: EditorStateRules;
+  #currentDocumentFilePath: string | null;
 
   constructor(dependencies: EditorSessionControllerDependencies) {
     this.#clock = dependencies.clock;
@@ -59,9 +60,11 @@ export class EditorSessionController {
     this.#printer = dependencies.printer;
     this.#renderer = dependencies.renderer;
     this.#rules = dependencies.rules;
+    this.#currentDocumentFilePath = null;
   }
 
   createInitialState(startupEditMode: StartupEditMode): EditorSessionBootstrap {
+    this.#currentDocumentFilePath = null;
     return {
       initialState: this.#rules.createStartupState(startupEditMode, null),
       shouldSkipInitialPersist: false,
@@ -70,6 +73,7 @@ export class EditorSessionController {
 
   async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
+    this.#currentDocumentFilePath = null;
 
     return {
       initialState: this.#rules.createStartupState(startupEditMode, storedEdit),
@@ -94,7 +98,11 @@ export class EditorSessionController {
   }
 
   async renderPreview(content: string): Promise<RenderedPreview> {
-    return this.#renderer.render(content);
+    return this.#renderer.render(content, this.#currentDocumentFilePath);
+  }
+
+  getCurrentDocumentFilePath(): string | null {
+    return this.#currentDocumentFilePath;
   }
 
   changeContent(store: EditorSessionStore, content: string): void {
@@ -114,6 +122,7 @@ export class EditorSessionController {
       content: result.content,
       loadedAt: null,
     });
+    this.#currentDocumentFilePath = result.filePath;
   }
 
   async openDocumentFromFile(store: EditorSessionStore, file: File): Promise<void> {
@@ -125,6 +134,7 @@ export class EditorSessionController {
       content: result.content,
       loadedAt: null,
     });
+    this.#currentDocumentFilePath = result.filePath;
   }
 
   loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): void {
@@ -136,6 +146,7 @@ export class EditorSessionController {
       content: loadedDocument.content,
       loadedAt: null,
     });
+    this.#currentDocumentFilePath = loadedDocument.filePath;
   }
 
   async overwriteSaveDocument(store: EditorSessionStore): Promise<void> {
@@ -151,6 +162,7 @@ export class EditorSessionController {
       fileName: result.fileName,
       savedAt: this.#clock.now(),
     });
+    this.#currentDocumentFilePath = result.filePath;
   }
 
   async saveDocumentAs(store: EditorSessionStore): Promise<void> {
@@ -166,6 +178,7 @@ export class EditorSessionController {
       fileName: result.fileName,
       savedAt: this.#clock.now(),
     });
+    this.#currentDocumentFilePath = result.filePath;
   }
 
   async takePendingExternalDocuments(): Promise<readonly ExternalMarkdownDocument[]> {
@@ -197,6 +210,7 @@ export class EditorSessionController {
 
   resetDocument(store: EditorSessionStore): void {
     this.#documentGateway.reset();
+    this.#currentDocumentFilePath = null;
     store.dispatch({ type: "editor/documentReset" });
   }
 

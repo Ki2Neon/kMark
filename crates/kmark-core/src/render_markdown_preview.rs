@@ -1,4 +1,8 @@
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    path::{Component, Path, PathBuf},
+};
 
 use pulldown_cmark::{
     Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options,
@@ -25,10 +29,9 @@ enum TableSection {
 
 #[derive(Debug, Clone)]
 struct ImageContext {
-    destination_url: String,
+    destination_url: Option<String>,
     title: String,
     alt_text: String,
-    safe: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +45,7 @@ type OwnedEvent = (Event<'static>, Range<usize>);
 struct HtmlEmitter<'a> {
     content: &'a str,
     line_offset: usize,
+    markdown_file_path: Option<&'a str>,
     line_starts: Vec<usize>,
     html: String,
     image_stack: Vec<ImageContext>,
@@ -61,10 +65,23 @@ const PAGE_BREAK_TOKEN_CLOSE: &str = "-->";
 const LINK_REL: &str = "noreferrer noopener";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
+    render_markdown_preview_with_file_path(content, None)
+}
+
+pub fn render_markdown_preview_with_file_path(
+    content: &str,
+    markdown_file_path: Option<&str>,
+) -> RenderedMarkdownPreview {
     let page_segments = split_markdown_pages(content);
     let page_htmls = page_segments
         .iter()
-        .map(|page_segment| render_markdown_page(page_segment.content, page_segment.line_offset))
+        .map(|page_segment| {
+            render_markdown_page(
+                page_segment.content,
+                page_segment.line_offset,
+                markdown_file_path,
+            )
+        })
         .collect::<Vec<_>>();
 
     RenderedMarkdownPreview {
@@ -73,9 +90,13 @@ pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     }
 }
 
-fn render_markdown_page(content: &str, line_offset: usize) -> String {
+fn render_markdown_page(
+    content: &str,
+    line_offset: usize,
+    markdown_file_path: Option<&str>,
+) -> String {
     let events = collect_markdown_events(content);
-    let mut emitter = HtmlEmitter::new(content, line_offset);
+    let mut emitter = HtmlEmitter::new(content, line_offset, markdown_file_path);
     emitter.prepare_footnotes(&events);
     emitter.render(events)
 }
@@ -135,10 +156,11 @@ fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
 }
 
 impl<'a> HtmlEmitter<'a> {
-    fn new(content: &'a str, line_offset: usize) -> Self {
+    fn new(content: &'a str, line_offset: usize, markdown_file_path: Option<&'a str>) -> Self {
         Self {
             content,
             line_offset,
+            markdown_file_path,
             line_starts: collect_line_starts(content),
             html: String::new(),
             image_stack: Vec::new(),
@@ -185,7 +207,7 @@ impl<'a> HtmlEmitter<'a> {
             Event::End(tag_end) => self.end_tag(tag_end),
             Event::Text(text) => self.push_text(&text),
             Event::Code(text) => self.push_code(&text),
-            Event::Html(html) | Event::InlineHtml(html) => self.push_text(&html),
+            Event::Html(_) | Event::InlineHtml(_) => {}
             Event::SoftBreak => self.push_soft_break(),
             Event::HardBreak => self.push_hard_break(),
             Event::Rule => self.push_raw(&format!(
@@ -237,10 +259,9 @@ impl<'a> HtmlEmitter<'a> {
         if self.is_collecting_image_alt_text() {
             if matches!(tag, Tag::Image { .. }) {
                 self.image_stack.push(ImageContext {
-                    destination_url: String::new(),
+                    destination_url: None,
                     title: String::new(),
                     alt_text: String::new(),
-                    safe: false,
                 });
             }
             return;
@@ -418,10 +439,12 @@ impl<'a> HtmlEmitter<'a> {
                 dest_url, title, ..
             } => {
                 self.image_stack.push(ImageContext {
-                    destination_url: dest_url.to_string(),
+                    destination_url: resolve_image_destination_url(
+                        &dest_url,
+                        self.markdown_file_path,
+                    ),
                     title: title.to_string(),
                     alt_text: String::new(),
-                    safe: is_safe_url(&dest_url),
                 });
             }
             Tag::MetadataBlock(kind) => {
@@ -533,14 +556,14 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        if !image_context.safe {
+        let Some(destination_url) = image_context.destination_url else {
             self.push_text(&image_context.alt_text);
             return;
-        }
+        };
 
         let mut html = format!(
             "<img src=\"{}\" alt=\"{}\"",
-            escape_html(&image_context.destination_url),
+            escape_html(&destination_url),
             escape_html(&image_context.alt_text),
         );
         if !image_context.title.is_empty() {
@@ -764,6 +787,129 @@ fn is_safe_url(url: &str) -> bool {
     !(normalized.starts_with("javascript:") || normalized.starts_with("data:"))
 }
 
+fn resolve_image_destination_url(
+    destination_url: &str,
+    markdown_file_path: Option<&str>,
+) -> Option<String> {
+    let normalized_url = destination_url.trim();
+
+    if normalized_url.is_empty() || is_unsafe_image_url(normalized_url) {
+        return None;
+    }
+
+    if is_data_url(normalized_url)
+        || is_file_url(normalized_url)
+        || is_remote_url(normalized_url)
+    {
+        return Some(normalized_url.to_owned());
+    }
+
+    if is_windows_absolute_path(normalized_url) || Path::new(normalized_url).is_absolute() {
+        return Some(file_path_to_url(&resolve_existing_path(PathBuf::from(
+            normalized_url,
+        ))));
+    }
+
+    if let Some(markdown_file_path) = markdown_file_path {
+        let markdown_path = Path::new(markdown_file_path);
+        let base_directory = markdown_path.parent().unwrap_or(markdown_path);
+        let resolved_path = resolve_existing_path(base_directory.join(normalized_url));
+        return Some(file_path_to_url(&resolved_path));
+    }
+
+    Some(normalized_url.to_owned())
+}
+
+fn resolve_existing_path(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or_else(|_| normalize_path(&path))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+
+    normalized
+}
+
+fn file_path_to_url(path: &Path) -> String {
+    let normalized_path = path.to_string_lossy().replace('\\', "/");
+    let encoded_path = percent_encode_url_path(&normalized_path);
+
+    if normalized_path.starts_with("//") {
+        return format!("file:{encoded_path}");
+    }
+
+    if is_windows_absolute_path(&normalized_path) {
+        return format!("file:///{encoded_path}");
+    }
+
+    format!("file://{encoded_path}")
+}
+
+fn percent_encode_url_path(path: &str) -> String {
+    let mut encoded = String::with_capacity(path.len());
+
+    for byte in path.bytes() {
+        let character = byte as char;
+
+        if character.is_ascii_alphanumeric()
+            || matches!(character, '-' | '.' | '_' | '~' | '/' | ':')
+        {
+            encoded.push(character);
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+
+    encoded
+}
+
+fn is_unsafe_image_url(url: &str) -> bool {
+    matches!(url_scheme(url).as_deref(), Some("javascript" | "vbscript"))
+}
+
+fn is_remote_url(url: &str) -> bool {
+    url.starts_with("//") || matches!(url_scheme(url).as_deref(), Some("http" | "https"))
+}
+
+fn is_data_url(url: &str) -> bool {
+    matches!(url_scheme(url).as_deref(), Some("data"))
+}
+
+fn is_file_url(url: &str) -> bool {
+    matches!(url_scheme(url).as_deref(), Some("file" | "blob"))
+}
+
+fn is_windows_absolute_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+}
+
+fn url_scheme(url: &str) -> Option<String> {
+    let scheme_end = url.find(':')?;
+    let prefix_end = url
+        .find(['/', '?', '#'])
+        .unwrap_or(url.len());
+
+    (scheme_end < prefix_end).then(|| url[..scheme_end].to_ascii_lowercase())
+}
+
 fn escape_html(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
 
@@ -787,7 +933,16 @@ fn escape_html_character(character: char) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render_markdown_preview;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{
+        render_markdown_preview, render_markdown_preview_with_file_path,
+        resolve_image_destination_url,
+    };
 
     #[test]
     fn renders_page_breaks_and_source_line_offsets() {
@@ -829,13 +984,13 @@ mod tests {
     }
 
     #[test]
-    fn escapes_inline_html_and_suppresses_unsafe_links() {
+    fn suppresses_inline_html_and_unsafe_links() {
         let rendered_preview =
-            render_markdown_preview("[x](javascript:alert(1)) <script>alert(1)</script>");
+            render_markdown_preview("[x](javascript:alert(1))<script>alert(1)</script>");
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x &lt;script&gt;alert(1)&lt;/script&gt;</p>"
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x</p>"
         );
     }
 
@@ -868,5 +1023,54 @@ mod tests {
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\">Note<sup class=\"footnote-reference\" id=\"fnref-1-1\"><a href=\"#fn-1\">1</a></sup>.</p><div class=\"footnote-definition\" id=\"fn-1\" data-source-line-start=\"2\" data-source-line-end=\"2\"><sup class=\"footnote-definition-label\">1</sup>Footnote <em>value</em> <a href=\"#fnref-1-1\" class=\"footnote-backreference\">↩</a></div>"
         );
+    }
+
+    #[test]
+    fn renders_relative_images_against_markdown_file_path() {
+        let sandbox_directory = create_temp_test_directory();
+        let markdown_file_path = sandbox_directory.join("notes.md");
+        let image_file_path = sandbox_directory.join("images").join("plot chart.png");
+        fs::create_dir_all(image_file_path.parent().unwrap()).expect("failed to create image directory");
+        fs::write(&markdown_file_path, "# notes").expect("failed to create markdown file");
+        fs::write(&image_file_path, "img").expect("failed to create image file");
+
+        let rendered_preview = render_markdown_preview_with_file_path(
+            "![plot](./images/plot chart.png)",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        );
+        let resolved_image_url = resolve_image_destination_url(
+            "./images/plot chart.png",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        )
+        .expect("resolved image url");
+
+        assert_eq!(
+            rendered_preview.html,
+            format!(
+                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"{}\" alt=\"plot\" /></p>",
+                resolved_image_url,
+            )
+        );
+    }
+
+    #[test]
+    fn allows_data_urls_for_markdown_images() {
+        let rendered_preview =
+            render_markdown_preview("![badge](data:image/svg+xml,%3Csvg%20viewBox='0%200%201%201'%3E)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"data:image/svg+xml,%3Csvg%20viewBox=&#39;0%200%201%201&#39;%3E\" alt=\"badge\" /></p>"
+        );
+    }
+
+    fn create_temp_test_directory() -> PathBuf {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("kmark-render-test-{unique_suffix}"));
+        fs::create_dir_all(&directory).expect("failed to create temp directory");
+        directory
     }
 }

@@ -18,9 +18,10 @@ type SaveTarget =
   | { readonly kind: "browser-file-handle"; readonly fileHandle: MarkdownFileHandle }
   | { readonly kind: "external-path"; readonly filePath: string };
 
-function toLoadedMarkdownDocument(fileName: string, content: string) {
+function toLoadedMarkdownDocument(fileName: string, content: string, filePath: string | null) {
   return {
     fileName,
+    filePath,
     content,
   };
 }
@@ -46,14 +47,14 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
       saveTarget = resolveNextSaveTarget(result.fileHandle);
 
-      return toLoadedMarkdownDocument(result.fileName, result.content);
+      return toLoadedMarkdownDocument(result.fileName, result.content, null);
     },
 
     async openDocumentFromFile(file) {
       const result = await readMarkdownFile(file);
       saveTarget = { kind: "download" };
 
-      return toLoadedMarkdownDocument(result.fileName, result.content);
+      return toLoadedMarkdownDocument(result.fileName, result.content, null);
     },
 
     loadExternalDocument(document: ExternalMarkdownDocument) {
@@ -62,7 +63,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
         filePath: document.filePath,
       };
 
-      return toLoadedMarkdownDocument(document.fileName, document.content);
+      return toLoadedMarkdownDocument(document.fileName, document.content, document.filePath);
     },
 
     async saveDocument(fileName, content) {
@@ -71,6 +72,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
         return {
           fileName: saveTarget.fileHandle.name,
+          filePath: null,
         };
       }
 
@@ -79,6 +81,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
         return {
           fileName,
+          filePath: saveTarget.filePath,
         };
       }
 
@@ -92,6 +95,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
       return {
         fileName: result.fileName,
+        filePath: null,
       };
     },
 
@@ -106,6 +110,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
       return {
         fileName: result.fileName,
+        filePath: null,
       };
     },
 

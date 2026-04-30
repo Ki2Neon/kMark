@@ -13,7 +13,7 @@ export type PreviewWindowViewerRenderedPreview = {
 export type PreviewWindowViewerState = PreviewWindowState;
 
 export type PreviewWindowViewerRenderer = {
-  render(content: string): Promise<PreviewWindowViewerRenderedPreview>;
+  render(content: string, filePath?: string | null): Promise<PreviewWindowViewerRenderedPreview>;
 };
 
 export type PreviewWindowViewerGateway = {

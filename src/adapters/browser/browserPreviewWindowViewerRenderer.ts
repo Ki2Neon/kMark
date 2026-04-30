@@ -3,8 +3,8 @@ import { renderMarkdownPreview } from "./browserMarkdownPreviewRenderer";
 
 export function createBrowserPreviewWindowViewerRenderer(): PreviewWindowViewerRenderer {
   return {
-    async render(content) {
-      return renderMarkdownPreview(content);
+    async render(content, filePath) {
+      return renderMarkdownPreview(content, filePath);
     },
   };
 }

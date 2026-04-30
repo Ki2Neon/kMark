@@ -233,6 +233,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   return {
     canOpenDocumentWithNativePicker: controller.supportsNativeOpenPicker(),
     content: state.content,
+    currentDocumentFilePath: controller.getCurrentDocumentFilePath(),
     errorMessage: state.errorMessage,
     fileName: state.fileName,
     isDirty: state.isDirty,

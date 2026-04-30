@@ -9,14 +9,17 @@ type RenderedMarkdownPreviewPayload = {
   readonly pageHtmls: readonly string[];
 };
 
-export async function renderMarkdownPreview(content: string): Promise<RenderedMarkdownPreviewPayload> {
+export async function renderMarkdownPreview(
+  content: string,
+  filePath?: string | null,
+): Promise<RenderedMarkdownPreviewPayload> {
   if (!isTauri()) {
-    return renderMarkdownPreviewWithWasm(content);
+    return renderMarkdownPreviewWithWasm(content, filePath);
   }
 
   return invokeTauriCommand<RenderedMarkdownPreviewPayload>(
     RENDER_MARKDOWN_PREVIEW_COMMAND,
-    { content },
+    { content, filePath },
     "プレビュー描画に失敗しました。",
   );
 }
