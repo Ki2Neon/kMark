@@ -18,9 +18,10 @@ type SaveTarget =
   | { readonly kind: "browser-file-handle"; readonly fileHandle: MarkdownFileHandle }
   | { readonly kind: "external-path"; readonly filePath: string };
 
-function toLoadedMarkdownDocument(fileName: string, content: string) {
+function toLoadedMarkdownDocument(fileName: string, content: string, filePath: string | null) {
   return {
     fileName,
+    filePath,
     content,
   };
 }
@@ -29,6 +30,20 @@ function resolveNextSaveTarget(fileHandle: MarkdownFileHandle | null): SaveTarge
   return fileHandle === null
     ? { kind: "download" }
     : { kind: "browser-file-handle", fileHandle };
+}
+
+function resolveSaveTargetFromLoadedDocument(result: {
+  readonly fileHandle: MarkdownFileHandle | null;
+  readonly filePath: string | null;
+}): SaveTarget {
+  if (result.filePath !== null) {
+    return {
+      kind: "external-path",
+      filePath: result.filePath,
+    };
+  }
+
+  return resolveNextSaveTarget(result.fileHandle);
 }
 
 export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway {
@@ -44,16 +59,16 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
         return null;
       }
 
-      saveTarget = resolveNextSaveTarget(result.fileHandle);
+      saveTarget = resolveSaveTargetFromLoadedDocument(result);
 
-      return toLoadedMarkdownDocument(result.fileName, result.content);
+      return toLoadedMarkdownDocument(result.fileName, result.content, result.filePath);
     },
 
     async openDocumentFromFile(file) {
       const result = await readMarkdownFile(file);
       saveTarget = { kind: "download" };
 
-      return toLoadedMarkdownDocument(result.fileName, result.content);
+      return toLoadedMarkdownDocument(result.fileName, result.content, null);
     },
 
     loadExternalDocument(document: ExternalMarkdownDocument) {
@@ -62,7 +77,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
         filePath: document.filePath,
       };
 
-      return toLoadedMarkdownDocument(document.fileName, document.content);
+      return toLoadedMarkdownDocument(document.fileName, document.content, document.filePath);
     },
 
     async saveDocument(fileName, content) {
@@ -71,6 +86,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
         return {
           fileName: saveTarget.fileHandle.name,
+          filePath: null,
         };
       }
 
@@ -79,6 +95,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
         return {
           fileName,
+          filePath: saveTarget.filePath,
         };
       }
 
@@ -88,10 +105,11 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
         return null;
       }
 
-      saveTarget = resolveNextSaveTarget(result.fileHandle);
+      saveTarget = resolveSaveTargetFromLoadedDocument(result);
 
       return {
         fileName: result.fileName,
+        filePath: result.filePath,
       };
     },
 
@@ -102,10 +120,11 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
         return null;
       }
 
-      saveTarget = resolveNextSaveTarget(result.fileHandle);
+      saveTarget = resolveSaveTargetFromLoadedDocument(result);
 
       return {
         fileName: result.fileName,
+        filePath: result.filePath,
       };
     },
 

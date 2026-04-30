@@ -1,4 +1,8 @@
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    path::Path,
+};
 
 use pulldown_cmark::{
     Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options,
@@ -25,10 +29,10 @@ enum TableSection {
 
 #[derive(Debug, Clone)]
 struct ImageContext {
-    destination_url: String,
+    destination_url: Option<String>,
     title: String,
     alt_text: String,
-    safe: bool,
+    style: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,15 +41,66 @@ struct FootnoteDefinitionContext {
     paragraph_count: usize,
 }
 
+#[derive(Debug, Clone)]
+struct ParagraphContext {
+    open_tag_start: usize,
+    source_line_end: usize,
+    image_count: usize,
+    contains_non_image_content: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DeferredParagraphClose {
+    resume_offset: usize,
+    resume_line: usize,
+}
+
 type OwnedEvent = (Event<'static>, Range<usize>);
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkImageParams {
+    width: Option<String>,
+    height: Option<String>,
+    fit: Option<String>,
+    position: Option<String>,
+    border_size: Option<String>,
+    border_color: Option<String>,
+    border_style: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkParamBundle {
+    preset_use: Option<String>,
+    params: KmarkImageParams,
+}
+
+#[derive(Debug, Clone)]
+struct PendingKmarkParams {
+    bundle: KmarkParamBundle,
+    end_offset: usize,
+    end_line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KmarkComment {
+    Params(KmarkParamBundle),
+    Define {
+        name: String,
+        bundle: KmarkParamBundle,
+    },
+    ScopeStart(KmarkParamBundle),
+    ScopeEnd,
+}
 
 struct HtmlEmitter<'a> {
     content: &'a str,
     line_offset: usize,
+    markdown_file_path: Option<&'a str>,
     line_starts: Vec<usize>,
     html: String,
     image_stack: Vec<ImageContext>,
     suppressed_link_depth: usize,
+    suppressed_html_text_depth: usize,
     table_section: TableSection,
     table_alignments: Vec<Alignment>,
     table_cell_index: usize,
@@ -54,6 +109,11 @@ struct HtmlEmitter<'a> {
     footnote_reference_ids: HashMap<String, Vec<String>>,
     footnote_reference_render_counts: HashMap<String, usize>,
     footnote_definition_stack: Vec<FootnoteDefinitionContext>,
+    paragraph_context: Option<ParagraphContext>,
+    deferred_paragraph_close: Option<DeferredParagraphClose>,
+    kmark_presets: HashMap<String, KmarkImageParams>,
+    active_kmark_scope: Option<KmarkImageParams>,
+    pending_kmark_params: Option<PendingKmarkParams>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -61,10 +121,23 @@ const PAGE_BREAK_TOKEN_CLOSE: &str = "-->";
 const LINK_REL: &str = "noreferrer noopener";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
+    render_markdown_preview_with_file_path(content, None)
+}
+
+pub fn render_markdown_preview_with_file_path(
+    content: &str,
+    markdown_file_path: Option<&str>,
+) -> RenderedMarkdownPreview {
     let page_segments = split_markdown_pages(content);
     let page_htmls = page_segments
         .iter()
-        .map(|page_segment| render_markdown_page(page_segment.content, page_segment.line_offset))
+        .map(|page_segment| {
+            render_markdown_page(
+                page_segment.content,
+                page_segment.line_offset,
+                markdown_file_path,
+            )
+        })
         .collect::<Vec<_>>();
 
     RenderedMarkdownPreview {
@@ -73,9 +146,13 @@ pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     }
 }
 
-fn render_markdown_page(content: &str, line_offset: usize) -> String {
+fn render_markdown_page(
+    content: &str,
+    line_offset: usize,
+    markdown_file_path: Option<&str>,
+) -> String {
     let events = collect_markdown_events(content);
-    let mut emitter = HtmlEmitter::new(content, line_offset);
+    let mut emitter = HtmlEmitter::new(content, line_offset, markdown_file_path);
     emitter.prepare_footnotes(&events);
     emitter.render(events)
 }
@@ -135,14 +212,16 @@ fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
 }
 
 impl<'a> HtmlEmitter<'a> {
-    fn new(content: &'a str, line_offset: usize) -> Self {
+    fn new(content: &'a str, line_offset: usize, markdown_file_path: Option<&'a str>) -> Self {
         Self {
             content,
             line_offset,
+            markdown_file_path,
             line_starts: collect_line_starts(content),
             html: String::new(),
             image_stack: Vec::new(),
             suppressed_link_depth: 0,
+            suppressed_html_text_depth: 0,
             table_section: TableSection::Head,
             table_alignments: Vec::new(),
             table_cell_index: 0,
@@ -151,6 +230,11 @@ impl<'a> HtmlEmitter<'a> {
             footnote_reference_ids: HashMap::new(),
             footnote_reference_render_counts: HashMap::new(),
             footnote_definition_stack: Vec::new(),
+            paragraph_context: None,
+            deferred_paragraph_close: None,
+            kmark_presets: HashMap::new(),
+            active_kmark_scope: None,
+            pending_kmark_params: None,
         }
     }
 
@@ -176,16 +260,32 @@ impl<'a> HtmlEmitter<'a> {
             self.push_event(event, range);
         }
 
+        self.flush_deferred_paragraph_close();
         self.html
     }
 
     fn push_event(&mut self, event: Event<'static>, range: Range<usize>) {
+        if self.should_resume_deferred_paragraph(&event, &range) {
+            self.resume_deferred_paragraph();
+            return;
+        }
+
+        if self.should_flush_deferred_paragraph_before_event(&event, &range) {
+            self.flush_deferred_paragraph_close();
+        }
+
+        if matches!(event, Event::Html(_) | Event::InlineHtml(_)) {
+            self.push_html_event(event, range);
+            return;
+        }
+
+        self.invalidate_pending_kmark_params_before_event(&event, &range);
+
         match event {
             Event::Start(tag) => self.start_tag(tag, &range),
-            Event::End(tag_end) => self.end_tag(tag_end),
+            Event::End(tag_end) => self.end_tag(tag_end, &range),
             Event::Text(text) => self.push_text(&text),
             Event::Code(text) => self.push_code(&text),
-            Event::Html(html) | Event::InlineHtml(html) => self.push_text(&html),
             Event::SoftBreak => self.push_soft_break(),
             Event::HardBreak => self.push_hard_break(),
             Event::Rule => self.push_raw(&format!(
@@ -196,7 +296,24 @@ impl<'a> HtmlEmitter<'a> {
             Event::TaskListMarker(checked) => self.push_task_list_marker(checked),
             Event::InlineMath(text) => self.push_math_text("math-inline", &text),
             Event::DisplayMath(text) => self.push_math_text("math-display", &text),
+            Event::Html(_) | Event::InlineHtml(_) => unreachable!("html handled earlier"),
         }
+    }
+
+    fn push_html_event(&mut self, event: Event<'static>, range: Range<usize>) {
+        let html = match event {
+            Event::Html(html) | Event::InlineHtml(html) => html,
+            _ => return,
+        };
+
+        if let Some(comment) = parse_kmark_comment(html.as_ref()) {
+            self.apply_kmark_comment(comment, range.clone());
+            self.update_deferred_paragraph_resume_point(range);
+            return;
+        }
+
+        self.pending_kmark_params = None;
+        self.update_html_text_suppression(html.as_ref());
     }
 
     fn push_footnote_reference(&mut self, label: &str) {
@@ -208,6 +325,8 @@ impl<'a> HtmlEmitter<'a> {
             image_context.alt_text.push(']');
             return;
         }
+
+        self.mark_paragraph_non_image_content();
 
         let occurrence_index = {
             let count = self
@@ -237,10 +356,10 @@ impl<'a> HtmlEmitter<'a> {
         if self.is_collecting_image_alt_text() {
             if matches!(tag, Tag::Image { .. }) {
                 self.image_stack.push(ImageContext {
-                    destination_url: String::new(),
+                    destination_url: None,
                     title: String::new(),
                     alt_text: String::new(),
-                    safe: false,
+                    style: None,
                 });
             }
             return;
@@ -252,10 +371,24 @@ impl<'a> HtmlEmitter<'a> {
                     let paragraph_count = self.begin_footnote_paragraph();
                     if paragraph_count > 1 {
                         self.push_raw("<p>");
+                        self.paragraph_context = Some(ParagraphContext {
+                            open_tag_start: self.html.len() - "<p>".len(),
+                            source_line_end: 0,
+                            image_count: 0,
+                            contains_non_image_content: false,
+                        });
                     }
                     return;
                 }
-                self.push_raw(&format!("<p{}>", self.source_line_attributes(range)));
+                let paragraph_open_tag = format!("<p{}>", self.source_line_attributes(range));
+                let open_tag_start = self.html.len();
+                self.push_raw(&paragraph_open_tag);
+                self.paragraph_context = Some(ParagraphContext {
+                    open_tag_start,
+                    source_line_end: self.resolve_range_end_line(range.clone()),
+                    image_count: 0,
+                    contains_non_image_content: false,
+                });
             }
             Tag::Heading {
                 level,
@@ -312,7 +445,9 @@ impl<'a> HtmlEmitter<'a> {
                 html.push('>');
                 self.push_raw(&html);
             }
-            Tag::HtmlBlock => {}
+            Tag::HtmlBlock => {
+                self.suppressed_html_text_depth += 1;
+            }
             Tag::List(Some(1)) => self.push_raw("<ol>"),
             Tag::List(Some(start)) => {
                 self.push_raw(&format!("<ol start=\"{start}\">"));
@@ -417,11 +552,17 @@ impl<'a> HtmlEmitter<'a> {
             Tag::Image {
                 dest_url, title, ..
             } => {
+                self.mark_paragraph_image();
+                let single_params = self.take_pending_kmark_params_for_image(range.start);
+                let image_style = self.resolve_image_style(single_params.as_ref());
                 self.image_stack.push(ImageContext {
-                    destination_url: dest_url.to_string(),
+                    destination_url: resolve_image_destination_url(
+                        &dest_url,
+                        self.markdown_file_path,
+                    ),
                     title: title.to_string(),
                     alt_text: String::new(),
-                    safe: is_safe_url(&dest_url),
+                    style: image_style,
                 });
             }
             Tag::MetadataBlock(kind) => {
@@ -433,7 +574,7 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
-    fn end_tag(&mut self, tag_end: TagEnd) {
+    fn end_tag(&mut self, tag_end: TagEnd, range: &Range<usize>) {
         if self.is_collecting_image_alt_text() {
             if matches!(tag_end, TagEnd::Image) {
                 self.finish_image();
@@ -445,16 +586,25 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::Paragraph => {
                 if self.is_inside_footnote_definition() {
                     if self.current_footnote_paragraph_count() > 1 {
+                        self.finalize_paragraph_context();
                         self.push_raw("</p>");
                     }
                 } else {
+                    self.update_paragraph_source_line_end(self.resolve_range_end_line(range.clone()));
+                    if self.should_defer_paragraph_close() {
+                        self.defer_paragraph_close(range.clone());
+                        return;
+                    }
+                    self.finalize_paragraph_context();
                     self.push_raw("</p>");
                 }
             }
             TagEnd::Heading(level) => self.push_raw(&format!("</{level}>")),
             TagEnd::BlockQuote(_) => self.push_raw("</blockquote>"),
             TagEnd::CodeBlock => self.push_raw("</code></pre>"),
-            TagEnd::HtmlBlock => {}
+            TagEnd::HtmlBlock => {
+                self.suppressed_html_text_depth = self.suppressed_html_text_depth.saturating_sub(1);
+            }
             TagEnd::List(true) => self.push_raw("</ol>"),
             TagEnd::List(false) => self.push_raw("</ul>"),
             TagEnd::Item => self.push_raw("</li>"),
@@ -533,19 +683,24 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        if !image_context.safe {
+        let Some(destination_url) = image_context.destination_url else {
             self.push_text(&image_context.alt_text);
             return;
-        }
+        };
 
         let mut html = format!(
             "<img src=\"{}\" alt=\"{}\"",
-            escape_html(&image_context.destination_url),
+            escape_html(&destination_url),
             escape_html(&image_context.alt_text),
         );
         if !image_context.title.is_empty() {
             html.push_str(" title=\"");
             html.push_str(&escape_html(&image_context.title));
+            html.push('"');
+        }
+        if let Some(style) = image_context.style {
+            html.push_str(" style=\"");
+            html.push_str(&escape_html(&style));
             html.push('"');
         }
         html.push_str(" />");
@@ -559,6 +714,8 @@ impl<'a> HtmlEmitter<'a> {
                 .push_str(if checked { "[x]" } else { "[ ]" });
             return;
         }
+
+        self.mark_paragraph_non_image_content();
 
         let markup = if checked {
             "<span class=\"markdown-task-checkbox\" data-checked=\"true\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 7.5\" /></svg></span>"
@@ -574,6 +731,8 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.mark_paragraph_non_image_content();
+
         self.push_raw(&format!(
             "<span class=\"math {class_name}\">{}</span>",
             escape_html(text),
@@ -586,6 +745,14 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        if self.suppressed_html_text_depth > 0 {
+            return;
+        }
+
+        if !text.trim().is_empty() {
+            self.mark_paragraph_non_image_content();
+        }
+
         self.html.push_str(&escape_html(text));
     }
 
@@ -594,6 +761,12 @@ impl<'a> HtmlEmitter<'a> {
             image_context.alt_text.push_str(text);
             return;
         }
+
+        if self.suppressed_html_text_depth > 0 {
+            return;
+        }
+
+        self.mark_paragraph_non_image_content();
 
         self.push_raw("<code>");
         self.html.push_str(&escape_html(text));
@@ -668,6 +841,409 @@ impl<'a> HtmlEmitter<'a> {
             " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
             start_line, end_line,
         )
+    }
+
+    fn apply_kmark_comment(&mut self, comment: KmarkComment, range: Range<usize>) {
+        self.discard_pending_kmark_params_if_gap_is_incompatible(range.start);
+
+        match comment {
+            KmarkComment::Params(bundle) => {
+                let end_line = self.resolve_range_end_line(range.clone());
+                if let Some(pending) = self.pending_kmark_params.as_mut() {
+                    pending.bundle.merge(&bundle);
+                    pending.end_offset = range.end;
+                    pending.end_line = end_line;
+                } else {
+                    self.pending_kmark_params = Some(PendingKmarkParams {
+                        bundle,
+                        end_offset: range.end,
+                        end_line,
+                    });
+                }
+            }
+            KmarkComment::Define { name, bundle } => {
+                let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
+                final_bundle.merge(&bundle);
+                self.kmark_presets
+                    .insert(name, self.resolve_kmark_bundle(&final_bundle));
+            }
+            KmarkComment::ScopeStart(bundle) => {
+                let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
+                final_bundle.merge(&bundle);
+
+                if self.active_kmark_scope.is_none() {
+                    self.active_kmark_scope = Some(self.resolve_kmark_bundle(&final_bundle));
+                }
+            }
+            KmarkComment::ScopeEnd => {
+                self.pending_kmark_params = None;
+                self.active_kmark_scope = None;
+            }
+        }
+    }
+
+    fn invalidate_pending_kmark_params_before_event(
+        &mut self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) {
+        let Some(pending) = self.pending_kmark_params.as_ref() else {
+            return;
+        };
+
+        let next_start_line = self.resolve_range_start_line(range.clone());
+
+        if next_start_line > pending.end_line + 1 {
+            self.pending_kmark_params = None;
+            return;
+        }
+
+        if range.start < pending.end_offset {
+            if matches!(
+                event,
+                Event::Start(Tag::Paragraph)
+                    | Event::Start(Tag::HtmlBlock)
+                    | Event::Start(Tag::Image { .. })
+                    | Event::End(TagEnd::HtmlBlock)
+            ) {
+                return;
+            }
+
+            self.pending_kmark_params = None;
+            return;
+        }
+
+        let gap = &self.content[pending.end_offset..range.start];
+
+        if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+            self.pending_kmark_params = None;
+            return;
+        }
+
+        if matches!(
+            event,
+            Event::Start(Tag::Paragraph)
+                | Event::Start(Tag::HtmlBlock)
+                | Event::Start(Tag::Image { .. })
+                | Event::End(TagEnd::HtmlBlock)
+        ) {
+            return;
+        }
+
+        self.pending_kmark_params = None;
+    }
+
+    fn discard_pending_kmark_params_if_gap_is_incompatible(&mut self, next_offset: usize) {
+        let Some(pending) = self.pending_kmark_params.as_ref() else {
+            return;
+        };
+
+        let next_start_line = self.resolve_offset_line(next_offset);
+
+        if next_start_line > pending.end_line + 1 {
+            self.pending_kmark_params = None;
+            return;
+        }
+
+        if next_offset < pending.end_offset {
+            return;
+        }
+
+        let gap = &self.content[pending.end_offset..next_offset];
+
+        if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+            self.pending_kmark_params = None;
+        }
+    }
+
+    fn take_pending_kmark_bundle(&mut self) -> Option<KmarkParamBundle> {
+        self.pending_kmark_params.take().map(|pending| pending.bundle)
+    }
+
+    fn take_pending_kmark_params_for_image(
+        &mut self,
+        image_start_offset: usize,
+    ) -> Option<KmarkImageParams> {
+        self.discard_pending_kmark_params_if_gap_is_incompatible(image_start_offset);
+        let bundle = self.take_pending_kmark_bundle()?;
+        Some(self.resolve_kmark_bundle(&bundle))
+    }
+
+    fn resolve_image_style(&self, single_params: Option<&KmarkImageParams>) -> Option<String> {
+        let mut final_params = self.active_kmark_scope.clone().unwrap_or_default();
+
+        if let Some(single_params) = single_params {
+            final_params.merge(single_params);
+        }
+
+        final_params.to_style()
+    }
+
+    fn resolve_kmark_bundle(&self, bundle: &KmarkParamBundle) -> KmarkImageParams {
+        let mut final_params = bundle
+            .preset_use
+            .as_ref()
+            .and_then(|preset_name| self.kmark_presets.get(preset_name))
+            .cloned()
+            .unwrap_or_default();
+        final_params.merge(&bundle.params);
+        final_params
+    }
+
+    fn mark_paragraph_image(&mut self) {
+        if let Some(context) = self.paragraph_context.as_mut() {
+            context.image_count += 1;
+        }
+    }
+
+    fn mark_paragraph_non_image_content(&mut self) {
+        if let Some(context) = self.paragraph_context.as_mut() {
+            context.contains_non_image_content = true;
+        }
+    }
+
+    fn finalize_paragraph_context(&mut self) {
+        let Some(context) = self.paragraph_context.take() else {
+            return;
+        };
+
+        self.patch_paragraph_source_line_end(context.open_tag_start, context.source_line_end);
+    }
+
+    fn update_html_text_suppression(&mut self, html: &str) {
+        let trimmed = html.trim();
+
+        if trimmed.starts_with("<!--") {
+            return;
+        }
+
+        if trimmed.starts_with("</") {
+            self.suppressed_html_text_depth = self.suppressed_html_text_depth.saturating_sub(1);
+            return;
+        }
+
+        if trimmed.starts_with('<') && trimmed.ends_with('>') && !trimmed.ends_with("/>") {
+            self.suppressed_html_text_depth += 1;
+        }
+    }
+
+    fn should_defer_paragraph_close(&self) -> bool {
+        self.active_kmark_scope.is_some()
+            && matches!(
+                self.paragraph_context.as_ref(),
+                Some(context) if context.image_count > 0 && !context.contains_non_image_content
+            )
+    }
+
+    fn defer_paragraph_close(&mut self, range: Range<usize>) {
+        self.deferred_paragraph_close = Some(DeferredParagraphClose {
+            resume_offset: range.end,
+            resume_line: self.resolve_range_end_line(range),
+        });
+    }
+
+    fn flush_deferred_paragraph_close(&mut self) {
+        if self.deferred_paragraph_close.take().is_none() {
+            return;
+        }
+
+        self.finalize_paragraph_context();
+        self.push_raw("</p>");
+    }
+
+    fn should_resume_deferred_paragraph(
+        &self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) -> bool {
+        matches!(event, Event::Start(Tag::Paragraph))
+            && self.deferred_paragraph_close.is_some()
+            && self.is_deferred_paragraph_gap_compatible(range.start)
+    }
+
+    fn resume_deferred_paragraph(&mut self) {
+        self.push_raw("<br />\n");
+        self.deferred_paragraph_close = None;
+    }
+
+    fn should_flush_deferred_paragraph_before_event(
+        &self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) -> bool {
+        let Some(_) = self.deferred_paragraph_close else {
+            return false;
+        };
+
+        if self.should_hold_deferred_paragraph_for_event(event, range) {
+            return false;
+        }
+
+        true
+    }
+
+    fn should_hold_deferred_paragraph_for_event(
+        &self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) -> bool {
+        if !self.is_deferred_paragraph_gap_compatible(range.start) {
+            return false;
+        }
+
+        match event {
+            Event::Start(Tag::HtmlBlock) | Event::End(TagEnd::HtmlBlock) => true,
+            Event::Html(html) | Event::InlineHtml(html) => matches!(
+                parse_kmark_comment(html.as_ref()),
+                Some(KmarkComment::Params(_))
+                    | Some(KmarkComment::Define { .. })
+                    | Some(KmarkComment::ScopeStart(_))
+            ),
+            Event::Start(Tag::Paragraph) => true,
+            _ => false,
+        }
+    }
+
+    fn is_deferred_paragraph_gap_compatible(&self, next_offset: usize) -> bool {
+        let Some(deferred) = self.deferred_paragraph_close.as_ref() else {
+            return false;
+        };
+
+        let next_start_line = self.resolve_offset_line(next_offset);
+        if next_start_line > deferred.resume_line + 1 {
+            return false;
+        }
+
+        if next_offset < deferred.resume_offset {
+            return true;
+        }
+
+        let gap = &self.content[deferred.resume_offset..next_offset];
+        gap.chars().all(char::is_whitespace) && !contains_blank_line(gap)
+    }
+
+    fn update_deferred_paragraph_resume_point(&mut self, range: Range<usize>) {
+        let resume_line = self.resolve_range_end_line(range.clone());
+        if let Some(deferred) = self.deferred_paragraph_close.as_mut() {
+            deferred.resume_offset = range.end;
+            deferred.resume_line = resume_line;
+        }
+    }
+
+    fn update_paragraph_source_line_end(&mut self, source_line_end: usize) {
+        if let Some(context) = self.paragraph_context.as_mut() {
+            context.source_line_end = source_line_end;
+        }
+    }
+
+    fn patch_paragraph_source_line_end(&mut self, open_tag_start: usize, source_line_end: usize) {
+        let Some(relative_tag_end_offset) = self.html[open_tag_start..].find('>') else {
+            return;
+        };
+        let tag_end_offset = open_tag_start + relative_tag_end_offset;
+        let tag_content = &self.html[open_tag_start..tag_end_offset];
+        let Some(attribute_offset) = tag_content.find("data-source-line-end=\"") else {
+            return;
+        };
+        let value_start = open_tag_start + attribute_offset + "data-source-line-end=\"".len();
+        let Some(relative_value_end) = self.html[value_start..tag_end_offset].find('"') else {
+            return;
+        };
+        let value_end = value_start + relative_value_end;
+        self.html
+            .replace_range(value_start..value_end, &source_line_end.to_string());
+    }
+
+    fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
+        resolve_line_number(&self.line_starts, range.start)
+    }
+
+    fn resolve_range_end_line(&self, range: Range<usize>) -> usize {
+        if self.content.is_empty() {
+            return 0;
+        }
+
+        let end_offset = range
+            .end
+            .saturating_sub(1)
+            .min(self.content.len().saturating_sub(1));
+        resolve_line_number(&self.line_starts, end_offset)
+    }
+
+    fn resolve_offset_line(&self, offset: usize) -> usize {
+        if self.content.is_empty() {
+            return 0;
+        }
+
+        let bounded_offset = offset.min(self.content.len().saturating_sub(1));
+        resolve_line_number(&self.line_starts, bounded_offset)
+    }
+}
+
+impl KmarkParamBundle {
+    fn merge(&mut self, other: &Self) {
+        if let Some(preset_use) = &other.preset_use {
+            self.preset_use = Some(preset_use.clone());
+        }
+        self.params.merge(&other.params);
+    }
+}
+
+impl KmarkImageParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(width) = &other.width {
+            self.width = Some(width.clone());
+        }
+        if let Some(height) = &other.height {
+            self.height = Some(height.clone());
+        }
+        if let Some(fit) = &other.fit {
+            self.fit = Some(fit.clone());
+        }
+        if let Some(position) = &other.position {
+            self.position = Some(position.clone());
+        }
+        if let Some(border_size) = &other.border_size {
+            self.border_size = Some(border_size.clone());
+        }
+        if let Some(border_color) = &other.border_color {
+            self.border_color = Some(border_color.clone());
+        }
+        if let Some(border_style) = &other.border_style {
+            self.border_style = Some(border_style.clone());
+        }
+    }
+
+    fn to_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(width) = &self.width {
+            rules.push(format!("width:{width}"));
+        }
+        if let Some(height) = &self.height {
+            rules.push(format!("height:{height}"));
+        }
+        if let Some(fit) = &self.fit {
+            rules.push(format!("object-fit:{fit}"));
+        }
+        if let Some(position) = &self.position {
+            rules.push(format!("object-position:{position}"));
+        }
+        if let Some(border_size) = &self.border_size {
+            rules.push(format!("border-width:{border_size}"));
+        }
+        if let Some(border_style) = self.border_style.as_deref().or_else(|| {
+            self.border_size
+                .as_ref()
+                .map(|_| "solid")
+        }) {
+            rules.push(format!("border-style:{border_style}"));
+        }
+        if let Some(border_color) = &self.border_color {
+            rules.push(format!("border-color:{border_color}"));
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
 }
 
@@ -758,10 +1334,441 @@ fn count_line_breaks(text: &str) -> usize {
     text.chars().filter(|character| *character == '\n').count()
 }
 
+fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
+    let trimmed = html.trim();
+    let body = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
+    let remainder = body.strip_prefix("kmark")?.trim();
+
+    if remainder == "}" {
+        return Some(KmarkComment::ScopeEnd);
+    }
+
+    if let Some(scope_body) = remainder.strip_prefix('{') {
+        return Some(KmarkComment::ScopeStart(parse_kmark_param_bundle(
+            scope_body.trim(),
+        )));
+    }
+
+    let mut define_name = None;
+    let mut bundle = KmarkParamBundle::default();
+
+    for token in remainder.split_whitespace() {
+        let Some((key, value)) = token.split_once(':') else {
+            continue;
+        };
+
+        match key {
+            "define" => {
+                if let Some(preset_name) = normalize_kmark_preset_name(value) {
+                    define_name = Some(preset_name);
+                }
+            }
+            "use" => {
+                if let Some(preset_name) = normalize_kmark_preset_name(value) {
+                    bundle.preset_use = Some(preset_name);
+                }
+            }
+            "w" => bundle.params.width = parse_kmark_size_value(value),
+            "h" => bundle.params.height = parse_kmark_size_value(value),
+            "fit" => bundle.params.fit = parse_kmark_fit_value(value),
+            "pos" => bundle.params.position = parse_kmark_position_value(value),
+            "border_size" => bundle.params.border_size = parse_kmark_border_size_value(value),
+            "border_color" => bundle.params.border_color = parse_kmark_border_color_value(value),
+            "border_style" => bundle.params.border_style = parse_kmark_border_style_value(value),
+            _ => {}
+        }
+    }
+
+    if let Some(name) = define_name {
+        return Some(KmarkComment::Define { name, bundle });
+    }
+
+    Some(KmarkComment::Params(bundle))
+}
+
+fn normalize_kmark_preset_name(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"');
+
+    (!trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')))
+    .then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_param_bundle(input: &str) -> KmarkParamBundle {
+    match parse_kmark_comment(&format!("<!-- kmark {input} -->")) {
+        Some(KmarkComment::Params(bundle)) => bundle,
+        Some(KmarkComment::Define { bundle, .. }) => bundle,
+        Some(KmarkComment::ScopeStart(bundle)) => bundle,
+        Some(KmarkComment::ScopeEnd) | None => KmarkParamBundle::default(),
+    }
+}
+
+fn parse_kmark_size_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, true)
+}
+
+fn parse_kmark_border_size_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
+    let trimmed = value.trim();
+
+    if allow_auto && trimmed.eq_ignore_ascii_case("auto") {
+        return Some("auto".to_owned());
+    }
+
+    if trimmed.chars().all(|character| character.is_ascii_digit()) {
+        return Some(format!("{trimmed}px"));
+    }
+
+    let numeric_end = trimmed
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(trimmed.len());
+
+    if numeric_end == 0 || numeric_end == trimmed.len() {
+        return None;
+    }
+
+    let number = &trimmed[..numeric_end];
+    let unit = &trimmed[numeric_end..];
+
+    if number.parse::<f64>().is_err() {
+        return None;
+    }
+
+    matches!(unit, "px" | "%" | "em" | "rem" | "vw" | "vh" | "vmin" | "vmax")
+        .then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_fit_value(value: &str) -> Option<String> {
+    matches!(
+        value.trim(),
+        "contain" | "cover" | "fill" | "none" | "scale-down"
+    )
+    .then(|| value.trim().to_owned())
+}
+
+fn parse_kmark_position_value(value: &str) -> Option<String> {
+    let normalized = value.trim().replace('_', " ");
+    let parts = normalized.split_whitespace().collect::<Vec<_>>();
+
+    if parts.is_empty() || parts.len() > 2 {
+        return None;
+    }
+
+    parts
+        .iter()
+        .all(|part| matches!(*part, "center" | "top" | "bottom" | "left" | "right"))
+        .then(|| parts.join(" "))
+}
+
+fn parse_kmark_border_color_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+
+    if let Some(hex) = trimmed.strip_prefix('#') {
+        return (matches!(hex.len(), 3 | 4 | 6 | 8)
+            && hex.chars().all(|character| character.is_ascii_hexdigit()))
+        .then(|| trimmed.to_owned());
+    }
+
+    trimmed
+        .chars()
+        .all(|character| character.is_ascii_alphabetic())
+        .then(|| trimmed.to_ascii_lowercase())
+}
+
+fn parse_kmark_border_style_value(value: &str) -> Option<String> {
+    matches!(value.trim(), "solid" | "dashed" | "dotted" | "double" | "none")
+        .then(|| value.trim().to_owned())
+}
+
+fn contains_blank_line(text: &str) -> bool {
+    let mut saw_line_break = false;
+    let mut chars = text.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        match character {
+            '\r' => {
+                if matches!(chars.peek(), Some(&'\n')) {
+                    chars.next();
+                }
+                if saw_line_break {
+                    return true;
+                }
+                saw_line_break = true;
+            }
+            '\n' => {
+                if saw_line_break {
+                    return true;
+                }
+                saw_line_break = true;
+            }
+            ' ' | '\t' => {}
+            _ => saw_line_break = false,
+        }
+    }
+
+    false
+}
+
 fn is_safe_url(url: &str) -> bool {
     let normalized = url.trim().to_ascii_lowercase();
 
     !(normalized.starts_with("javascript:") || normalized.starts_with("data:"))
+}
+
+fn resolve_image_destination_url(
+    destination_url: &str,
+    markdown_file_path: Option<&str>,
+) -> Option<String> {
+    let normalized_url = destination_url.trim();
+
+    if normalized_url.is_empty() || is_unsafe_image_url(normalized_url) {
+        return None;
+    }
+
+    if is_data_url(normalized_url)
+        || is_file_url(normalized_url)
+        || is_remote_url(normalized_url)
+    {
+        return Some(normalized_url.to_owned());
+    }
+
+    if is_windows_absolute_path(normalized_url) || Path::new(normalized_url).is_absolute() {
+        return Some(file_path_to_url(&resolve_existing_path_string(normalized_url)));
+    }
+
+    if let Some(markdown_file_path) = markdown_file_path {
+        let resolved_path =
+            resolve_relative_path_from_markdown_file(markdown_file_path, normalized_url);
+        return Some(file_path_to_url(&resolved_path));
+    }
+
+    Some(normalized_url.to_owned())
+}
+
+fn resolve_relative_path_from_markdown_file(
+    markdown_file_path: &str,
+    relative_path: &str,
+) -> String {
+    let base_directory = parent_path_string(markdown_file_path);
+    resolve_existing_path_string(&join_path_strings(&base_directory, relative_path))
+}
+
+fn resolve_existing_path_string(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .map(|resolved_path| normalize_path_string(&resolved_path.to_string_lossy()))
+        .unwrap_or_else(|_| normalize_path_string(path))
+}
+
+fn join_path_strings(base_directory: &str, relative_path: &str) -> String {
+    let normalized_base_directory = normalize_path_string(base_directory);
+
+    if normalized_base_directory == "." {
+        return normalize_path_string(relative_path);
+    }
+
+    normalize_path_string(&format!(
+        "{}/{}",
+        normalized_base_directory.trim_end_matches('/'),
+        relative_path,
+    ))
+}
+
+fn parent_path_string(path: &str) -> String {
+    let normalized_path = normalize_path_string(path);
+
+    if normalized_path == "." || normalized_path == "/" {
+        return normalized_path;
+    }
+
+    if is_windows_drive_root(&normalized_path) || is_windows_unc_root(&normalized_path) {
+        return normalized_path;
+    }
+
+    let trimmed_path = normalized_path.trim_end_matches('/');
+    let Some(last_separator_index) = trimmed_path.rfind('/') else {
+        return ".".to_owned();
+    };
+
+    if last_separator_index == 0 {
+        return "/".to_owned();
+    }
+
+    trimmed_path[..last_separator_index].to_owned()
+}
+
+fn normalize_path_string(path: &str) -> String {
+    let slash_path = strip_windows_verbatim_prefix(path);
+    let (root, remainder) = split_path_root(&slash_path);
+    let mut normalized_segments = Vec::new();
+
+    for segment in remainder.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+
+        if segment == ".." {
+            if normalized_segments.last().is_some_and(|last| *last != "..") {
+                normalized_segments.pop();
+            } else if root.is_empty() {
+                normalized_segments.push("..");
+            }
+            continue;
+        }
+
+        normalized_segments.push(segment);
+    }
+
+    let normalized_remainder = normalized_segments.join("/");
+
+    if root.is_empty() {
+        return if normalized_remainder.is_empty() {
+            ".".to_owned()
+        } else {
+            normalized_remainder
+        };
+    }
+
+    if normalized_remainder.is_empty() {
+        return root;
+    }
+
+    if root.ends_with('/') {
+        format!("{root}{normalized_remainder}")
+    } else {
+        format!("{root}/{normalized_remainder}")
+    }
+}
+
+fn strip_windows_verbatim_prefix(path: &str) -> String {
+    let slash_path = path.replace('\\', "/");
+
+    if let Some(path_without_prefix) = slash_path.strip_prefix("//?/UNC/") {
+        return format!("//{path_without_prefix}");
+    }
+
+    if let Some(path_without_prefix) = slash_path.strip_prefix("//?/") {
+        return path_without_prefix.to_owned();
+    }
+
+    slash_path
+}
+
+fn split_path_root(path: &str) -> (String, String) {
+    if let Some((root, remainder)) = split_windows_unc_root(path) {
+        return (root, remainder);
+    }
+
+    if is_windows_absolute_path(path) {
+        return (path[..3].to_owned(), path[3..].to_owned());
+    }
+
+    if let Some(remainder) = path.strip_prefix('/') {
+        return ("/".to_owned(), remainder.to_owned());
+    }
+
+    (String::new(), path.to_owned())
+}
+
+fn split_windows_unc_root(path: &str) -> Option<(String, String)> {
+    let unc_path = path.strip_prefix("//")?;
+    let mut segments = unc_path.split('/');
+    let server = segments.next()?;
+    let share = segments.next()?;
+
+    if server.is_empty() || share.is_empty() {
+        return None;
+    }
+
+    Some((format!("//{server}/{share}"), segments.collect::<Vec<_>>().join("/")))
+}
+
+fn is_windows_drive_root(path: &str) -> bool {
+    let bytes = path.as_bytes();
+
+    bytes.len() == 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'/'
+}
+
+fn is_windows_unc_root(path: &str) -> bool {
+    matches!(
+        split_windows_unc_root(path),
+        Some((root, remainder)) if root == path && remainder.is_empty()
+    )
+}
+
+fn file_path_to_url(path: &str) -> String {
+    let normalized_path = path.replace('\\', "/");
+    let encoded_path = percent_encode_url_path(&normalized_path);
+
+    if normalized_path.starts_with("//") {
+        return format!("file:{encoded_path}");
+    }
+
+    if is_windows_absolute_path(&normalized_path) {
+        return format!("file:///{encoded_path}");
+    }
+
+    format!("file://{encoded_path}")
+}
+
+fn percent_encode_url_path(path: &str) -> String {
+    let mut encoded = String::with_capacity(path.len());
+
+    for byte in path.bytes() {
+        let character = byte as char;
+
+        if character.is_ascii_alphanumeric()
+            || matches!(character, '-' | '.' | '_' | '~' | '/' | ':')
+        {
+            encoded.push(character);
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+
+    encoded
+}
+
+fn is_unsafe_image_url(url: &str) -> bool {
+    matches!(url_scheme(url).as_deref(), Some("javascript" | "vbscript"))
+}
+
+fn is_remote_url(url: &str) -> bool {
+    url.starts_with("//") || matches!(url_scheme(url).as_deref(), Some("http" | "https"))
+}
+
+fn is_data_url(url: &str) -> bool {
+    matches!(url_scheme(url).as_deref(), Some("data"))
+}
+
+fn is_file_url(url: &str) -> bool {
+    matches!(url_scheme(url).as_deref(), Some("file" | "blob"))
+}
+
+fn is_windows_absolute_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+}
+
+fn url_scheme(url: &str) -> Option<String> {
+    let scheme_end = url.find(':')?;
+    let prefix_end = url
+        .find(['/', '?', '#'])
+        .unwrap_or(url.len());
+
+    (scheme_end < prefix_end).then(|| url[..scheme_end].to_ascii_lowercase())
 }
 
 fn escape_html(text: &str) -> String {
@@ -787,7 +1794,16 @@ fn escape_html_character(character: char) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render_markdown_preview;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{
+        render_markdown_preview, render_markdown_preview_with_file_path,
+        resolve_image_destination_url,
+    };
 
     #[test]
     fn renders_page_breaks_and_source_line_offsets() {
@@ -829,13 +1845,13 @@ mod tests {
     }
 
     #[test]
-    fn escapes_inline_html_and_suppresses_unsafe_links() {
+    fn suppresses_inline_html_and_unsafe_links() {
         let rendered_preview =
-            render_markdown_preview("[x](javascript:alert(1)) <script>alert(1)</script>");
+            render_markdown_preview("[x](javascript:alert(1))<script>alert(1)</script>");
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x &lt;script&gt;alert(1)&lt;/script&gt;</p>"
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x</p>"
         );
     }
 
@@ -868,5 +1884,173 @@ mod tests {
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\">Note<sup class=\"footnote-reference\" id=\"fnref-1-1\"><a href=\"#fn-1\">1</a></sup>.</p><div class=\"footnote-definition\" id=\"fn-1\" data-source-line-start=\"2\" data-source-line-end=\"2\"><sup class=\"footnote-definition-label\">1</sup>Footnote <em>value</em> <a href=\"#fnref-1-1\" class=\"footnote-backreference\">↩</a></div>"
         );
+    }
+
+    #[test]
+    fn renders_relative_images_against_markdown_file_path() {
+        let sandbox_directory = create_temp_test_directory();
+        let markdown_file_path = sandbox_directory.join("notes.md");
+        let image_file_path = sandbox_directory.join("images").join("plot chart.png");
+        fs::create_dir_all(image_file_path.parent().unwrap()).expect("failed to create image directory");
+        fs::write(&markdown_file_path, "# notes").expect("failed to create markdown file");
+        fs::write(&image_file_path, "img").expect("failed to create image file");
+
+        let rendered_preview = render_markdown_preview_with_file_path(
+            "![plot](<./images/plot chart.png>)",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        );
+        let resolved_image_url = resolve_image_destination_url(
+            "./images/plot chart.png",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        )
+        .expect("resolved image url");
+
+        assert_eq!(
+            rendered_preview.html,
+            format!(
+                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"{}\" alt=\"plot\" /></p>",
+                resolved_image_url,
+            )
+        );
+    }
+
+    #[test]
+    fn allows_data_urls_for_markdown_images() {
+        let rendered_preview =
+            render_markdown_preview("![badge](data:image/svg+xml,%3Csvg%20viewBox='0%200%201%201'%3E)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"data:image/svg+xml,%3Csvg%20viewBox=&#39;0%200%201%201&#39;%3E\" alt=\"badge\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_single_image_size_comment() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 h:100 -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn preserves_alt_text_when_kmark_comment_applies() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 -->\n![基板写真](board.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"board.png\" alt=\"基板写真\" style=\"width:200px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn merges_consecutive_kmark_comments_with_last_write_wins() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 -->\n<!-- kmark h:100 -->\n<!-- kmark w:300 -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" style=\"width:300px;height:100px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn ignores_kmark_single_comment_when_blank_line_exists_before_image() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 -->\n\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_scope_to_all_images_in_scope() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { w:200 h:100 -->\n\n![](a.png)\n\n![](b.png)\n\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"4\" data-source-line-end=\"4\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn lets_single_kmark_override_active_scope() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { w:200 h:100 -->\n\n![](a.png)\n\n<!-- kmark h:300 -->\n![](b.png)\n\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"5\" data-source-line-end=\"5\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:300px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_defined_kmark_preset_to_image_use_comment() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark define:thumb w:200 h:100 fit:cover -->\n\n<!-- kmark use:thumb -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" style=\"width:200px;height:100px;object-fit:cover;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn supports_separated_kmark_preset_definition_and_scope_usage() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 -->\n<!-- kmark h:100 -->\n<!-- kmark fit:cover -->\n<!-- kmark define:thumb -->\n\n<!-- kmark { use:thumb w:300 -->\n![](a.png)\n<!-- kmark h:240 -->\n![](b.png)\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"6\" data-source-line-end=\"8\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;object-fit:cover;\" /><br />\n<img src=\"b.png\" alt=\"\" style=\"width:300px;height:240px;object-fit:cover;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn ignores_undefined_kmark_preset_use() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark use:not_found -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" /></p>"
+        );
+    }
+
+    #[test]
+    fn resolves_relative_images_against_windows_style_markdown_path() {
+        let resolved_image_url = resolve_image_destination_url(
+            "image.png",
+            Some("C:\\workspace\\docs\\notes.md"),
+        )
+        .expect("resolved image url");
+
+        assert_eq!(resolved_image_url, "file:///C:/workspace/docs/image.png");
+    }
+
+    fn create_temp_test_directory() -> PathBuf {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("kmark-render-test-{unique_suffix}"));
+        fs::create_dir_all(&directory).expect("failed to create temp directory");
+        directory
     }
 }

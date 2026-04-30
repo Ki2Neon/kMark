@@ -1,6 +1,7 @@
 export type PreviewWindowSnapshot = {
   readonly content: string;
   readonly fileName: string;
+  readonly filePath: string | null;
 };
 
 export type PreviewWindowState = {

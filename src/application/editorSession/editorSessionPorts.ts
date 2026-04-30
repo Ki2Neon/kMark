@@ -7,11 +7,13 @@ import { type EditorSessionAction } from "./editorSessionAction";
 
 export type LoadedMarkdownDocument = {
   readonly fileName: string;
+  readonly filePath: string | null;
   readonly content: string;
 };
 
 export type SavedMarkdownDocument = {
   readonly fileName: string;
+  readonly filePath: string | null;
 };
 
 export type PrintMarkdownDocumentRequest = {
@@ -36,7 +38,7 @@ export type DraftStore = {
 };
 
 export type MarkdownRenderer = {
-  render(content: string): Promise<{
+  render(content: string, filePath?: string | null): Promise<{
     readonly html: string;
     readonly pageHtmls: readonly string[];
   }>;

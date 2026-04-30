@@ -102,6 +102,7 @@ export function MarkdownEditorScreen({
   const {
     canOpenDocumentWithNativePicker,
     content,
+    currentDocumentFilePath,
     errorMessage,
     fileName,
     isDirty,
@@ -311,6 +312,7 @@ export function MarkdownEditorScreen({
   const { openPreviewWindow } = usePreviewWindowSession({
     activeSourceLine: activeEditCursorLine,
     content,
+    filePath: currentDocumentFilePath,
     enabled: isEditorReady,
     fileName,
     onError: handleErrorRaise,

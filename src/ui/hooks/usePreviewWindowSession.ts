@@ -12,6 +12,7 @@ type UsePreviewWindowSessionOptions = {
   readonly content: string;
   readonly enabled?: boolean;
   readonly fileName: string;
+  readonly filePath: string | null;
   readonly onError: (message: string) => void;
   readonly onJumpToSourceLine: (lineNumber: number) => void;
 };
@@ -21,6 +22,7 @@ export function usePreviewWindowSession({
   content,
   enabled = true,
   fileName,
+  filePath,
   onError,
   onJumpToSourceLine,
 }: UsePreviewWindowSessionOptions) {
@@ -43,12 +45,13 @@ export function usePreviewWindowSession({
       {
         content,
         fileName,
+        filePath,
       },
       activeSourceLine,
     ).catch((error) => {
       onError(toPreviewWindowErrorMessage(error));
     });
-  }, [activeSourceLine, content, controller, enabled, fileName, onError]);
+  }, [activeSourceLine, content, controller, enabled, fileName, filePath, onError]);
 
   useEffect(() => {
     if (!enabled) {
@@ -96,6 +99,7 @@ export function usePreviewWindowSession({
           {
             content,
             fileName,
+            filePath,
           },
           activeSourceLine,
         );
@@ -103,7 +107,7 @@ export function usePreviewWindowSession({
         onError(toPreviewWindowErrorMessage(error));
       }
     })();
-  }, [activeSourceLine, content, controller, enabled, fileName, onError]);
+  }, [activeSourceLine, content, controller, enabled, fileName, filePath, onError]);
 
   return {
     openPreviewWindow: handleOpenPreviewWindow,

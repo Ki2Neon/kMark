@@ -10,6 +10,7 @@ import { openExternalLink } from "../../infra/externalLink";
 const FALLBACK_PREVIEW_SNAPSHOT = {
   content: DEFAULT_MARKDOWN,
   fileName: DEFAULT_FILE_NAME,
+  filePath: null,
 };
 
 export function PreviewWindowScreen() {

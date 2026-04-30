@@ -44,6 +44,19 @@ const MARKDOWN_PICKER_TYPES: readonly MarkdownPickerType[] = [
 ];
 
 const MARKDOWN_OPEN_REQUESTED_EVENT = "markdown-open-requested";
+const OPEN_MARKDOWN_DOCUMENT_DIALOG_COMMAND = "open_markdown_document_dialog";
+const SAVE_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND = "save_markdown_document_as_dialog";
+
+type TauriMarkdownDocumentPayload = {
+  readonly fileName: string;
+  readonly filePath: string;
+  readonly content: string;
+};
+
+type TauriSavedMarkdownDocumentPayload = {
+  readonly fileName: string;
+  readonly filePath: string;
+};
 
 function getPickerWindow(): PickerWindow {
   return window as PickerWindow;
@@ -54,14 +67,30 @@ function isAbortError(error: unknown): boolean {
 }
 
 export function supportsNativeOpenPicker(): boolean {
-  return typeof getPickerWindow().showOpenFilePicker === "function";
+  return isTauri() || typeof getPickerWindow().showOpenFilePicker === "function";
 }
 
 export async function pickMarkdownDocument(): Promise<{
   fileName: string;
+  filePath: string | null;
   content: string;
   fileHandle: MarkdownFileHandle | null;
 } | null> {
+  if (isTauri()) {
+    return invokeTauriCommand<TauriMarkdownDocumentPayload | null>(
+      OPEN_MARKDOWN_DOCUMENT_DIALOG_COMMAND,
+      {},
+      "Markdown ファイルを開けませんでした。",
+    ).then((result) => result === null
+      ? null
+      : {
+          fileName: result.fileName,
+          filePath: result.filePath,
+          content: result.content,
+          fileHandle: null,
+        });
+  }
+
   const pickerWindow = getPickerWindow();
 
   if (typeof pickerWindow.showOpenFilePicker !== "function") {
@@ -83,6 +112,7 @@ export async function pickMarkdownDocument(): Promise<{
 
     return {
       ...result,
+      filePath: null,
       fileHandle,
     };
   } catch (error) {
@@ -175,9 +205,28 @@ export function downloadMarkdownDocument(fileName: string, content: string): voi
 
 export async function saveMarkdownDocumentAs(fileName: string, content: string): Promise<{
   fileName: string;
+  filePath: string | null;
   fileHandle: MarkdownFileHandle | null;
 } | null> {
   const normalizedFileName = normalizeMarkdownFileName(fileName);
+
+  if (isTauri()) {
+    return invokeTauriCommand<TauriSavedMarkdownDocumentPayload | null>(
+      SAVE_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND,
+      {
+        fileName: normalizedFileName,
+        content,
+      },
+      "Markdown ファイルの保存に失敗しました。",
+    ).then((result) => result === null
+      ? null
+      : {
+          fileName: result.fileName,
+          filePath: result.filePath,
+          fileHandle: null,
+        });
+  }
+
   const pickerWindow = getPickerWindow();
 
   if (typeof pickerWindow.showSaveFilePicker === "function") {
@@ -191,6 +240,7 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
 
       return {
         fileName: normalizeMarkdownFileName(fileHandle.name),
+        filePath: null,
         fileHandle,
       };
     } catch (error) {
@@ -213,6 +263,7 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
 
   return {
     fileName: nextFileName,
+    filePath: null,
     fileHandle: null,
   };
 }

@@ -42,6 +42,7 @@ export class PreviewWindowViewerController {
           previewWindowViewerState.snapshot.fileName.trim().length > 0
             ? previewWindowViewerState.snapshot.fileName
             : fallbackSnapshot.fileName,
+        filePath: previewWindowViewerState.snapshot.filePath ?? fallbackSnapshot.filePath,
       },
     };
   }
@@ -57,6 +58,6 @@ export class PreviewWindowViewerController {
   }
 
   async renderSnapshot(snapshot: PreviewWindowViewerSnapshot): Promise<PreviewWindowViewerRenderedPreview> {
-    return this.#renderer.render(snapshot.content);
+    return this.#renderer.render(snapshot.content, snapshot.filePath);
   }
 }

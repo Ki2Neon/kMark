@@ -97,13 +97,30 @@ fn main() {
 
 [OpenAI](https://openai.com)
 
+<!-- kmark border_size:10 border_color:#0000FF w:100 -->
+<!-- kmark { -->
+![](image.png)
+![](image.png)
+<!-- kmark border_color:red -->
+![](image.png)
+![](image.png)
+![](image.png)
+<!-- kmark } -->
+
+
+
 [https://example.com](https://example.com)
 
 ---
 
 ## 8. 画像
 
-![代替テキスト](https://example.com/image.png)
+![](image.png)
+![](image.png)
+![](image.png)
+
+![](image.png)
+![](image.png)
 
 ---
 
@@ -116,8 +133,6 @@ fn main() {
 ---
 
 ---
-
-<!-- --- -->
 
 ## 10. テーブル
 
@@ -172,9 +187,9 @@ English text.
 ## フットノート
 
 
-これは本文です[^note]
+これは本文です[^1]
 
-[^note]: 任意のラベルでOK
+[^1]: 任意のラベルでOK
 
 ---
 

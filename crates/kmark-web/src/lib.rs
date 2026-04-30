@@ -1,6 +1,6 @@
 use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
-    reduce_editor_state, render_markdown_preview, resolve_app_font_family,
+    reduce_editor_state, render_markdown_preview_with_file_path, resolve_app_font_family,
     resolve_edit_font_family, DesktopLayoutPreferences, EditorPreferences, EditorState,
     EditorStateAction, EditorStats, PreviewPreferences, PreviewWindowState, StoredEdit,
     ThemePreferences,
@@ -147,6 +147,7 @@ struct PreviewPreferencesInput {
 struct EditorDraftPayload {
     file_name: String,
     content: String,
+    file_path: Option<String>,
     saved_at: Option<u64>,
 }
 
@@ -155,6 +156,7 @@ struct EditorDraftPayload {
 struct EditorDraftInput {
     file_name: Option<String>,
     content: Option<String>,
+    file_path: Option<String>,
     saved_at: Option<u64>,
 }
 
@@ -163,6 +165,7 @@ struct EditorDraftInput {
 struct PreviewWindowSnapshotPayload {
     content: String,
     file_name: String,
+    file_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -170,6 +173,7 @@ struct PreviewWindowSnapshotPayload {
 struct PreviewWindowSnapshotInput {
     content: Option<String>,
     file_name: Option<String>,
+    file_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -187,8 +191,9 @@ struct PreviewWindowStateInput {
 }
 
 #[wasm_bindgen]
-pub fn render_markdown_preview_json(content: String) -> String {
-    let rendered_preview = render_markdown_preview(&content);
+pub fn render_markdown_preview_json(content: String, file_path: Option<String>) -> String {
+    let rendered_preview =
+        render_markdown_preview_with_file_path(&content, file_path.as_deref());
     stringify(&RenderedMarkdownPreviewPayload {
         html: rendered_preview.html,
         page_htmls: rendered_preview.page_htmls,
@@ -253,7 +258,7 @@ pub fn create_startup_editor_state_json(
     let stored_edit = payload.and_then(|value| {
         let file_name = value.file_name?;
         let content = value.content?;
-        Some(StoredEdit::new(file_name, content, value.saved_at))
+        Some(StoredEdit::new(file_name, content, value.file_path, value.saved_at))
     });
     let editor_state = create_startup_editor_state(
         startup_edit_mode
@@ -315,7 +320,7 @@ pub fn normalize_editor_draft_json(input: Option<String>) -> Option<String> {
     let payload = parse_json::<EditorDraftInput>(input)?;
     let file_name = payload.file_name?;
     let content = payload.content?;
-    let stored_edit = StoredEdit::new(file_name, content, payload.saved_at);
+    let stored_edit = StoredEdit::new(file_name, content, payload.file_path, payload.saved_at);
     Some(stringify(&EditorDraftPayload::from(&stored_edit)))
 }
 
@@ -331,6 +336,7 @@ pub fn normalize_preview_window_state_json(input: Option<String>) -> String {
         kmark_core::PreviewWindowSnapshot::new(
             snapshot.content.unwrap_or_default(),
             snapshot.file_name.unwrap_or_default(),
+            snapshot.file_path,
         ),
         payload.as_ref().and_then(|value| value.active_source_line),
     );
@@ -474,6 +480,7 @@ impl From<&StoredEdit> for EditorDraftPayload {
         Self {
             file_name: stored_edit.file_name().to_owned(),
             content: stored_edit.content().to_owned(),
+            file_path: stored_edit.file_path().map(ToOwned::to_owned),
             saved_at: stored_edit.saved_at(),
         }
     }
@@ -485,6 +492,7 @@ impl From<&PreviewWindowState> for PreviewWindowStatePayload {
             snapshot: PreviewWindowSnapshotPayload {
                 content: preview_window_state.snapshot().content().to_owned(),
                 file_name: preview_window_state.snapshot().file_name().to_owned(),
+                file_path: preview_window_state.snapshot().file_path().map(ToOwned::to_owned),
             },
             active_source_line: preview_window_state.active_source_line(),
         }
@@ -500,7 +508,7 @@ mod tests {
         let markdown = "| Left | Right |\n| :--- | ----: |\n| ~~a~~ | [x] |\n\n- [x] done\n\nNote[^alpha].\n\n[^alpha]: Footnote";
         let core_output = kmark_core::render_markdown_preview(markdown);
         let wasm_output = serde_json::from_str::<RenderedMarkdownPreviewPayload>(
-            &render_markdown_preview_json(markdown.to_owned()),
+            &render_markdown_preview_json(markdown.to_owned(), None),
         )
         .expect("wasm render payload parse failed");
 

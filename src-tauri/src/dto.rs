@@ -99,12 +99,13 @@ impl From<&EditorPreferences> for EditorPreferencesPayload {
 pub struct EditorDraftPayload {
     pub file_name: String,
     pub content: String,
+    pub file_path: Option<String>,
     pub saved_at: Option<u64>,
 }
 
 impl From<EditorDraftPayload> for StoredEdit {
     fn from(payload: EditorDraftPayload) -> Self {
-        StoredEdit::new(payload.file_name, payload.content, payload.saved_at)
+        StoredEdit::new(payload.file_name, payload.content, payload.file_path, payload.saved_at)
     }
 }
 
@@ -113,6 +114,7 @@ impl From<&StoredEdit> for EditorDraftPayload {
         Self {
             file_name: stored_edit.file_name().to_owned(),
             content: stored_edit.content().to_owned(),
+            file_path: stored_edit.file_path().map(ToOwned::to_owned),
             saved_at: stored_edit.saved_at(),
         }
     }
@@ -151,11 +153,12 @@ impl From<&PreviewPreferences> for PreviewPreferencesPayload {
 pub struct PreviewWindowSnapshotPayload {
     pub content: String,
     pub file_name: String,
+    pub file_path: Option<String>,
 }
 
 impl From<PreviewWindowSnapshotPayload> for PreviewWindowSnapshot {
     fn from(payload: PreviewWindowSnapshotPayload) -> Self {
-        PreviewWindowSnapshot::new(payload.content, payload.file_name)
+        PreviewWindowSnapshot::new(payload.content, payload.file_name, payload.file_path)
     }
 }
 
@@ -164,6 +167,7 @@ impl From<&PreviewWindowSnapshot> for PreviewWindowSnapshotPayload {
         Self {
             content: preview_window_snapshot.content().to_owned(),
             file_name: preview_window_snapshot.file_name().to_owned(),
+            file_path: preview_window_snapshot.file_path().map(ToOwned::to_owned),
         }
     }
 }

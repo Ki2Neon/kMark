@@ -41,9 +41,14 @@ export async function initializeKmarkWeb(): Promise<void> {
   }
 }
 
-export async function renderMarkdownPreviewWithWasm(content: string): Promise<RenderedMarkdownPreviewPayload> {
+export async function renderMarkdownPreviewWithWasm(
+  content: string,
+  filePath?: string | null,
+): Promise<RenderedMarkdownPreviewPayload> {
   await initializeKmarkWeb();
-  return parseJsonPayload<RenderedMarkdownPreviewPayload>(loadKmarkWebModuleSync().render_markdown_preview_json(content));
+  return parseJsonPayload<RenderedMarkdownPreviewPayload>(
+    loadKmarkWebModuleSync().render_markdown_preview_json(content, filePath ?? null),
+  );
 }
 
 export function normalizeThemePreferencesJsonWithWasmSync(input: string | null): string {

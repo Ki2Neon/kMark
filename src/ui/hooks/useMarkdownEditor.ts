@@ -52,6 +52,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     getState: () => stateRef.current,
   }), [dispatch]);
   const deferredContent = useDeferredValue(state.content);
+  const currentDocumentFilePath = controller.getCurrentDocumentFilePath();
   const [renderedPreview, setRenderedPreview] = useState<RenderedPreview>({
     html: "",
     pageHtmls: [],
@@ -134,7 +135,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     return () => {
       disposed = true;
     };
-  }, [controller, deferredContent, isReady, store]);
+  }, [controller, currentDocumentFilePath, deferredContent, isReady, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
@@ -233,6 +234,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   return {
     canOpenDocumentWithNativePicker: controller.supportsNativeOpenPicker(),
     content: state.content,
+    currentDocumentFilePath,
     errorMessage: state.errorMessage,
     fileName: state.fileName,
     isDirty: state.isDirty,

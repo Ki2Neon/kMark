@@ -12,7 +12,6 @@ type UseDesktopMenuVisibilityOptions = {
 
 export function useDesktopMenuVisibility({ transitionMs }: UseDesktopMenuVisibilityOptions) {
   const desktopMenuCloseTimeoutRef = useRef<number | null>(null);
-  const desktopMenuOpenFrameRef = useRef<number | null>(null);
   const [isDesktopMenuMounted, setIsDesktopMenuMounted] = useState(false);
   const [isDesktopMenuVisible, setIsDesktopMenuVisible] = useState(false);
 
@@ -20,11 +19,6 @@ export function useDesktopMenuVisibility({ transitionMs }: UseDesktopMenuVisibil
     if (desktopMenuCloseTimeoutRef.current !== null) {
       window.clearTimeout(desktopMenuCloseTimeoutRef.current);
       desktopMenuCloseTimeoutRef.current = null;
-    }
-
-    if (desktopMenuOpenFrameRef.current !== null) {
-      window.cancelAnimationFrame(desktopMenuOpenFrameRef.current);
-      desktopMenuOpenFrameRef.current = null;
     }
   }, []);
 
@@ -46,10 +40,7 @@ export function useDesktopMenuVisibility({ transitionMs }: UseDesktopMenuVisibil
   const openDesktopMenu = useCallback(() => {
     clearDesktopMenuTimers();
     setIsDesktopMenuMounted(true);
-    desktopMenuOpenFrameRef.current = window.requestAnimationFrame(() => {
-      setIsDesktopMenuVisible(true);
-      desktopMenuOpenFrameRef.current = null;
-    });
+    setIsDesktopMenuVisible(true);
   }, [clearDesktopMenuTimers]);
 
   const toggleDesktopMenu = useCallback(() => {
