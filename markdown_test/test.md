@@ -97,13 +97,24 @@ fn main() {
 
 [OpenAI](https://openai.com)
 
+<!-- kmark border_size:10 -->
+<!-- kmark { -->
+![](image.png)
+![](image.png)
+![](image.png)
+![](image.png)
+![](image.png)
+<!-- kmark } -->
+
+
+
 [https://example.com](https://example.com)
 
 ---
 
 ## 8. 画像
 
-![代替テキスト](./image.png)
+!(image.png)
 
 ---
 
@@ -116,8 +127,6 @@ fn main() {
 ---
 
 ---
-
-<!-- --- -->
 
 ## 10. テーブル
 
