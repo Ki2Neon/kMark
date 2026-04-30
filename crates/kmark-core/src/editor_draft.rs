@@ -4,6 +4,7 @@ pub const DEFAULT_FILE_NAME: &str = "untitled.md";
 pub struct StoredEdit {
     file_name: String,
     content: String,
+    file_path: Option<String>,
     saved_at: Option<u64>,
 }
 
@@ -11,11 +12,15 @@ impl StoredEdit {
     pub fn new(
         file_name: impl Into<String>,
         content: impl Into<String>,
+        file_path: Option<String>,
         saved_at: Option<u64>,
     ) -> Self {
         Self {
             file_name: ensure_markdown_file_name(&file_name.into()),
             content: content.into(),
+            file_path: file_path
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty()),
             saved_at,
         }
     }
@@ -26,6 +31,10 @@ impl StoredEdit {
 
     pub fn content(&self) -> &str {
         &self.content
+    }
+
+    pub fn file_path(&self) -> Option<&str> {
+        self.file_path.as_deref()
     }
 
     pub fn saved_at(&self) -> Option<u64> {

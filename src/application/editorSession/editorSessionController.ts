@@ -73,7 +73,7 @@ export class EditorSessionController {
 
   async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
-    this.#currentDocumentFilePath = null;
+    this.#currentDocumentFilePath = storedEdit?.filePath ?? null;
 
     return {
       initialState: this.#rules.createStartupState(startupEditMode, storedEdit),
@@ -93,6 +93,7 @@ export class EditorSessionController {
     await this.#draftStore.persist({
       fileName: state.fileName,
       content: state.content,
+      filePath: this.#currentDocumentFilePath,
       savedAt: state.lastSavedAt,
     });
   }

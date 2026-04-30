@@ -272,6 +272,8 @@ pub fn run() {
             .build(),
     );
 
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+
     let builder = builder
         .on_window_event(|window, event| {
             if window.label() != MAIN_WINDOW_LABEL {
@@ -412,6 +414,7 @@ pub fn run() {
             commands::editor_preferences::set_editor_preferences,
             commands::external_link::open_external_link,
             commands::file_open::clear_pending_markdown_open_requests,
+            commands::file_open::open_markdown_document_dialog,
             commands::markdown_render::render_markdown_preview,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
@@ -419,6 +422,7 @@ pub fn run() {
             commands::preview_window::open_preview_window,
             commands::preview_window::request_preview_window_edit_jump,
             commands::preview_window::sync_preview_window_state,
+            commands::file_open::save_markdown_document_as_dialog,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,
             commands::theme_preferences::get_theme_preferences,

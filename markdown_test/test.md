@@ -103,7 +103,7 @@ fn main() {
 
 ## 8. 画像
 
-![代替テキスト](https://example.com/image.png)
+![代替テキスト](./image.png)
 
 ---
 

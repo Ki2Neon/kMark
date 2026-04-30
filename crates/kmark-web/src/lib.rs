@@ -147,6 +147,7 @@ struct PreviewPreferencesInput {
 struct EditorDraftPayload {
     file_name: String,
     content: String,
+    file_path: Option<String>,
     saved_at: Option<u64>,
 }
 
@@ -155,6 +156,7 @@ struct EditorDraftPayload {
 struct EditorDraftInput {
     file_name: Option<String>,
     content: Option<String>,
+    file_path: Option<String>,
     saved_at: Option<u64>,
 }
 
@@ -256,7 +258,7 @@ pub fn create_startup_editor_state_json(
     let stored_edit = payload.and_then(|value| {
         let file_name = value.file_name?;
         let content = value.content?;
-        Some(StoredEdit::new(file_name, content, value.saved_at))
+        Some(StoredEdit::new(file_name, content, value.file_path, value.saved_at))
     });
     let editor_state = create_startup_editor_state(
         startup_edit_mode
@@ -318,7 +320,7 @@ pub fn normalize_editor_draft_json(input: Option<String>) -> Option<String> {
     let payload = parse_json::<EditorDraftInput>(input)?;
     let file_name = payload.file_name?;
     let content = payload.content?;
-    let stored_edit = StoredEdit::new(file_name, content, payload.saved_at);
+    let stored_edit = StoredEdit::new(file_name, content, payload.file_path, payload.saved_at);
     Some(stringify(&EditorDraftPayload::from(&stored_edit)))
 }
 
@@ -478,6 +480,7 @@ impl From<&StoredEdit> for EditorDraftPayload {
         Self {
             file_name: stored_edit.file_name().to_owned(),
             content: stored_edit.content().to_owned(),
+            file_path: stored_edit.file_path().map(ToOwned::to_owned),
             saved_at: stored_edit.saved_at(),
         }
     }

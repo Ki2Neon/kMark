@@ -18,6 +18,7 @@ export type EditorStats = {
 export type StoredEdit = {
   readonly content: string;
   readonly fileName: string;
+  readonly filePath: string | null;
   readonly savedAt: number | null;
 };
 

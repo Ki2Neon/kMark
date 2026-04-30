@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     ops::Range,
-    path::{Component, Path, PathBuf},
+    path::Path,
 };
 
 use pulldown_cmark::{
@@ -805,45 +805,173 @@ fn resolve_image_destination_url(
     }
 
     if is_windows_absolute_path(normalized_url) || Path::new(normalized_url).is_absolute() {
-        return Some(file_path_to_url(&resolve_existing_path(PathBuf::from(
-            normalized_url,
-        ))));
+        return Some(file_path_to_url(&resolve_existing_path_string(normalized_url)));
     }
 
     if let Some(markdown_file_path) = markdown_file_path {
-        let markdown_path = Path::new(markdown_file_path);
-        let base_directory = markdown_path.parent().unwrap_or(markdown_path);
-        let resolved_path = resolve_existing_path(base_directory.join(normalized_url));
+        let resolved_path =
+            resolve_relative_path_from_markdown_file(markdown_file_path, normalized_url);
         return Some(file_path_to_url(&resolved_path));
     }
 
     Some(normalized_url.to_owned())
 }
 
-fn resolve_existing_path(path: PathBuf) -> PathBuf {
-    std::fs::canonicalize(&path).unwrap_or_else(|_| normalize_path(&path))
+fn resolve_relative_path_from_markdown_file(
+    markdown_file_path: &str,
+    relative_path: &str,
+) -> String {
+    let base_directory = parent_path_string(markdown_file_path);
+    resolve_existing_path_string(&join_path_strings(&base_directory, relative_path))
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
+fn resolve_existing_path_string(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .map(|resolved_path| normalize_path_string(&resolved_path.to_string_lossy()))
+        .unwrap_or_else(|_| normalize_path_string(path))
+}
 
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    normalized.push(component.as_os_str());
-                }
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
+fn join_path_strings(base_directory: &str, relative_path: &str) -> String {
+    let normalized_base_directory = normalize_path_string(base_directory);
+
+    if normalized_base_directory == "." {
+        return normalize_path_string(relative_path);
     }
 
-    normalized
+    normalize_path_string(&format!(
+        "{}/{}",
+        normalized_base_directory.trim_end_matches('/'),
+        relative_path,
+    ))
 }
 
-fn file_path_to_url(path: &Path) -> String {
-    let normalized_path = path.to_string_lossy().replace('\\', "/");
+fn parent_path_string(path: &str) -> String {
+    let normalized_path = normalize_path_string(path);
+
+    if normalized_path == "." || normalized_path == "/" {
+        return normalized_path;
+    }
+
+    if is_windows_drive_root(&normalized_path) || is_windows_unc_root(&normalized_path) {
+        return normalized_path;
+    }
+
+    let trimmed_path = normalized_path.trim_end_matches('/');
+    let Some(last_separator_index) = trimmed_path.rfind('/') else {
+        return ".".to_owned();
+    };
+
+    if last_separator_index == 0 {
+        return "/".to_owned();
+    }
+
+    trimmed_path[..last_separator_index].to_owned()
+}
+
+fn normalize_path_string(path: &str) -> String {
+    let slash_path = strip_windows_verbatim_prefix(path);
+    let (root, remainder) = split_path_root(&slash_path);
+    let mut normalized_segments = Vec::new();
+
+    for segment in remainder.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+
+        if segment == ".." {
+            if normalized_segments.last().is_some_and(|last| *last != "..") {
+                normalized_segments.pop();
+            } else if root.is_empty() {
+                normalized_segments.push("..");
+            }
+            continue;
+        }
+
+        normalized_segments.push(segment);
+    }
+
+    let normalized_remainder = normalized_segments.join("/");
+
+    if root.is_empty() {
+        return if normalized_remainder.is_empty() {
+            ".".to_owned()
+        } else {
+            normalized_remainder
+        };
+    }
+
+    if normalized_remainder.is_empty() {
+        return root;
+    }
+
+    if root.ends_with('/') {
+        format!("{root}{normalized_remainder}")
+    } else {
+        format!("{root}/{normalized_remainder}")
+    }
+}
+
+fn strip_windows_verbatim_prefix(path: &str) -> String {
+    let slash_path = path.replace('\\', "/");
+
+    if let Some(path_without_prefix) = slash_path.strip_prefix("//?/UNC/") {
+        return format!("//{path_without_prefix}");
+    }
+
+    if let Some(path_without_prefix) = slash_path.strip_prefix("//?/") {
+        return path_without_prefix.to_owned();
+    }
+
+    slash_path
+}
+
+fn split_path_root(path: &str) -> (String, String) {
+    if let Some((root, remainder)) = split_windows_unc_root(path) {
+        return (root, remainder);
+    }
+
+    if is_windows_absolute_path(path) {
+        return (path[..3].to_owned(), path[3..].to_owned());
+    }
+
+    if let Some(remainder) = path.strip_prefix('/') {
+        return ("/".to_owned(), remainder.to_owned());
+    }
+
+    (String::new(), path.to_owned())
+}
+
+fn split_windows_unc_root(path: &str) -> Option<(String, String)> {
+    let unc_path = path.strip_prefix("//")?;
+    let mut segments = unc_path.split('/');
+    let server = segments.next()?;
+    let share = segments.next()?;
+
+    if server.is_empty() || share.is_empty() {
+        return None;
+    }
+
+    Some((format!("//{server}/{share}"), segments.collect::<Vec<_>>().join("/")))
+}
+
+fn is_windows_drive_root(path: &str) -> bool {
+    let bytes = path.as_bytes();
+
+    bytes.len() == 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'/'
+}
+
+fn is_windows_unc_root(path: &str) -> bool {
+    matches!(
+        split_windows_unc_root(path),
+        Some((root, remainder)) if root == path && remainder.is_empty()
+    )
+}
+
+fn file_path_to_url(path: &str) -> String {
+    let normalized_path = path.replace('\\', "/");
     let encoded_path = percent_encode_url_path(&normalized_path);
 
     if normalized_path.starts_with("//") {
@@ -1062,6 +1190,17 @@ mod tests {
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"data:image/svg+xml,%3Csvg%20viewBox=&#39;0%200%201%201&#39;%3E\" alt=\"badge\" /></p>"
         );
+    }
+
+    #[test]
+    fn resolves_relative_images_against_windows_style_markdown_path() {
+        let resolved_image_url = resolve_image_destination_url(
+            "image.png",
+            Some("C:\\workspace\\docs\\notes.md"),
+        )
+        .expect("resolved image url");
+
+        assert_eq!(resolved_image_url, "file:///C:/workspace/docs/image.png");
     }
 
     fn create_temp_test_directory() -> PathBuf {
