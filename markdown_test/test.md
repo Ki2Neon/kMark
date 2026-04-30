@@ -97,10 +97,11 @@ fn main() {
 
 [OpenAI](https://openai.com)
 
-<!-- kmark border_size:10 -->
+<!-- kmark border_size:10 border_color:#0000FF w:100 -->
 <!-- kmark { -->
 ![](image.png)
 ![](image.png)
+<!-- kmark border_color:red -->
 ![](image.png)
 ![](image.png)
 ![](image.png)
@@ -114,7 +115,12 @@ fn main() {
 
 ## 8. 画像
 
-!(image.png)
+![](image.png)
+![](image.png)
+![](image.png)
+
+![](image.png)
+![](image.png)
 
 ---
 
@@ -181,9 +187,9 @@ English text.
 ## フットノート
 
 
-これは本文です[^note]
+これは本文です[^1]
 
-[^note]: 任意のラベルでOK
+[^1]: 任意のラベルでOK
 
 ---
 

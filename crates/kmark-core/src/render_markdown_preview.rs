@@ -41,6 +41,20 @@ struct FootnoteDefinitionContext {
     paragraph_count: usize,
 }
 
+#[derive(Debug, Clone)]
+struct ParagraphContext {
+    open_tag_start: usize,
+    source_line_end: usize,
+    image_count: usize,
+    contains_non_image_content: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DeferredParagraphClose {
+    resume_offset: usize,
+    resume_line: usize,
+}
+
 type OwnedEvent = (Event<'static>, Range<usize>);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -95,6 +109,8 @@ struct HtmlEmitter<'a> {
     footnote_reference_ids: HashMap<String, Vec<String>>,
     footnote_reference_render_counts: HashMap<String, usize>,
     footnote_definition_stack: Vec<FootnoteDefinitionContext>,
+    paragraph_context: Option<ParagraphContext>,
+    deferred_paragraph_close: Option<DeferredParagraphClose>,
     kmark_presets: HashMap<String, KmarkImageParams>,
     active_kmark_scope: Option<KmarkImageParams>,
     pending_kmark_params: Option<PendingKmarkParams>,
@@ -214,6 +230,8 @@ impl<'a> HtmlEmitter<'a> {
             footnote_reference_ids: HashMap::new(),
             footnote_reference_render_counts: HashMap::new(),
             footnote_definition_stack: Vec::new(),
+            paragraph_context: None,
+            deferred_paragraph_close: None,
             kmark_presets: HashMap::new(),
             active_kmark_scope: None,
             pending_kmark_params: None,
@@ -242,10 +260,20 @@ impl<'a> HtmlEmitter<'a> {
             self.push_event(event, range);
         }
 
+        self.flush_deferred_paragraph_close();
         self.html
     }
 
     fn push_event(&mut self, event: Event<'static>, range: Range<usize>) {
+        if self.should_resume_deferred_paragraph(&event, &range) {
+            self.resume_deferred_paragraph();
+            return;
+        }
+
+        if self.should_flush_deferred_paragraph_before_event(&event, &range) {
+            self.flush_deferred_paragraph_close();
+        }
+
         if matches!(event, Event::Html(_) | Event::InlineHtml(_)) {
             self.push_html_event(event, range);
             return;
@@ -255,7 +283,7 @@ impl<'a> HtmlEmitter<'a> {
 
         match event {
             Event::Start(tag) => self.start_tag(tag, &range),
-            Event::End(tag_end) => self.end_tag(tag_end),
+            Event::End(tag_end) => self.end_tag(tag_end, &range),
             Event::Text(text) => self.push_text(&text),
             Event::Code(text) => self.push_code(&text),
             Event::SoftBreak => self.push_soft_break(),
@@ -279,7 +307,8 @@ impl<'a> HtmlEmitter<'a> {
         };
 
         if let Some(comment) = parse_kmark_comment(html.as_ref()) {
-            self.apply_kmark_comment(comment, range);
+            self.apply_kmark_comment(comment, range.clone());
+            self.update_deferred_paragraph_resume_point(range);
             return;
         }
 
@@ -296,6 +325,8 @@ impl<'a> HtmlEmitter<'a> {
             image_context.alt_text.push(']');
             return;
         }
+
+        self.mark_paragraph_non_image_content();
 
         let occurrence_index = {
             let count = self
@@ -340,10 +371,24 @@ impl<'a> HtmlEmitter<'a> {
                     let paragraph_count = self.begin_footnote_paragraph();
                     if paragraph_count > 1 {
                         self.push_raw("<p>");
+                        self.paragraph_context = Some(ParagraphContext {
+                            open_tag_start: self.html.len() - "<p>".len(),
+                            source_line_end: 0,
+                            image_count: 0,
+                            contains_non_image_content: false,
+                        });
                     }
                     return;
                 }
-                self.push_raw(&format!("<p{}>", self.source_line_attributes(range)));
+                let paragraph_open_tag = format!("<p{}>", self.source_line_attributes(range));
+                let open_tag_start = self.html.len();
+                self.push_raw(&paragraph_open_tag);
+                self.paragraph_context = Some(ParagraphContext {
+                    open_tag_start,
+                    source_line_end: self.resolve_range_end_line(range.clone()),
+                    image_count: 0,
+                    contains_non_image_content: false,
+                });
             }
             Tag::Heading {
                 level,
@@ -507,6 +552,7 @@ impl<'a> HtmlEmitter<'a> {
             Tag::Image {
                 dest_url, title, ..
             } => {
+                self.mark_paragraph_image();
                 let single_params = self.take_pending_kmark_params_for_image(range.start);
                 let image_style = self.resolve_image_style(single_params.as_ref());
                 self.image_stack.push(ImageContext {
@@ -528,7 +574,7 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
-    fn end_tag(&mut self, tag_end: TagEnd) {
+    fn end_tag(&mut self, tag_end: TagEnd, range: &Range<usize>) {
         if self.is_collecting_image_alt_text() {
             if matches!(tag_end, TagEnd::Image) {
                 self.finish_image();
@@ -540,9 +586,16 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::Paragraph => {
                 if self.is_inside_footnote_definition() {
                     if self.current_footnote_paragraph_count() > 1 {
+                        self.finalize_paragraph_context();
                         self.push_raw("</p>");
                     }
                 } else {
+                    self.update_paragraph_source_line_end(self.resolve_range_end_line(range.clone()));
+                    if self.should_defer_paragraph_close() {
+                        self.defer_paragraph_close(range.clone());
+                        return;
+                    }
+                    self.finalize_paragraph_context();
                     self.push_raw("</p>");
                 }
             }
@@ -662,6 +715,8 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.mark_paragraph_non_image_content();
+
         let markup = if checked {
             "<span class=\"markdown-task-checkbox\" data-checked=\"true\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\" aria-hidden=\"true\"><path d=\"M4.5 12.5 9.5 17.5 19.5 7.5\" /></svg></span>"
         } else {
@@ -675,6 +730,8 @@ impl<'a> HtmlEmitter<'a> {
             image_context.alt_text.push_str(text);
             return;
         }
+
+        self.mark_paragraph_non_image_content();
 
         self.push_raw(&format!(
             "<span class=\"math {class_name}\">{}</span>",
@@ -692,6 +749,10 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        if !text.trim().is_empty() {
+            self.mark_paragraph_non_image_content();
+        }
+
         self.html.push_str(&escape_html(text));
     }
 
@@ -704,6 +765,8 @@ impl<'a> HtmlEmitter<'a> {
         if self.suppressed_html_text_depth > 0 {
             return;
         }
+
+        self.mark_paragraph_non_image_content();
 
         self.push_raw("<code>");
         self.html.push_str(&escape_html(text));
@@ -927,6 +990,26 @@ impl<'a> HtmlEmitter<'a> {
         final_params
     }
 
+    fn mark_paragraph_image(&mut self) {
+        if let Some(context) = self.paragraph_context.as_mut() {
+            context.image_count += 1;
+        }
+    }
+
+    fn mark_paragraph_non_image_content(&mut self) {
+        if let Some(context) = self.paragraph_context.as_mut() {
+            context.contains_non_image_content = true;
+        }
+    }
+
+    fn finalize_paragraph_context(&mut self) {
+        let Some(context) = self.paragraph_context.take() else {
+            return;
+        };
+
+        self.patch_paragraph_source_line_end(context.open_tag_start, context.source_line_end);
+    }
+
     fn update_html_text_suppression(&mut self, html: &str) {
         let trimmed = html.trim();
 
@@ -942,6 +1025,133 @@ impl<'a> HtmlEmitter<'a> {
         if trimmed.starts_with('<') && trimmed.ends_with('>') && !trimmed.ends_with("/>") {
             self.suppressed_html_text_depth += 1;
         }
+    }
+
+    fn should_defer_paragraph_close(&self) -> bool {
+        self.active_kmark_scope.is_some()
+            && matches!(
+                self.paragraph_context.as_ref(),
+                Some(context) if context.image_count > 0 && !context.contains_non_image_content
+            )
+    }
+
+    fn defer_paragraph_close(&mut self, range: Range<usize>) {
+        self.deferred_paragraph_close = Some(DeferredParagraphClose {
+            resume_offset: range.end,
+            resume_line: self.resolve_range_end_line(range),
+        });
+    }
+
+    fn flush_deferred_paragraph_close(&mut self) {
+        if self.deferred_paragraph_close.take().is_none() {
+            return;
+        }
+
+        self.finalize_paragraph_context();
+        self.push_raw("</p>");
+    }
+
+    fn should_resume_deferred_paragraph(
+        &self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) -> bool {
+        matches!(event, Event::Start(Tag::Paragraph))
+            && self.deferred_paragraph_close.is_some()
+            && self.is_deferred_paragraph_gap_compatible(range.start)
+    }
+
+    fn resume_deferred_paragraph(&mut self) {
+        self.push_raw("<br />\n");
+        self.deferred_paragraph_close = None;
+    }
+
+    fn should_flush_deferred_paragraph_before_event(
+        &self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) -> bool {
+        let Some(_) = self.deferred_paragraph_close else {
+            return false;
+        };
+
+        if self.should_hold_deferred_paragraph_for_event(event, range) {
+            return false;
+        }
+
+        true
+    }
+
+    fn should_hold_deferred_paragraph_for_event(
+        &self,
+        event: &Event<'static>,
+        range: &Range<usize>,
+    ) -> bool {
+        if !self.is_deferred_paragraph_gap_compatible(range.start) {
+            return false;
+        }
+
+        match event {
+            Event::Start(Tag::HtmlBlock) | Event::End(TagEnd::HtmlBlock) => true,
+            Event::Html(html) | Event::InlineHtml(html) => matches!(
+                parse_kmark_comment(html.as_ref()),
+                Some(KmarkComment::Params(_))
+                    | Some(KmarkComment::Define { .. })
+                    | Some(KmarkComment::ScopeStart(_))
+            ),
+            Event::Start(Tag::Paragraph) => true,
+            _ => false,
+        }
+    }
+
+    fn is_deferred_paragraph_gap_compatible(&self, next_offset: usize) -> bool {
+        let Some(deferred) = self.deferred_paragraph_close.as_ref() else {
+            return false;
+        };
+
+        let next_start_line = self.resolve_offset_line(next_offset);
+        if next_start_line > deferred.resume_line + 1 {
+            return false;
+        }
+
+        if next_offset < deferred.resume_offset {
+            return true;
+        }
+
+        let gap = &self.content[deferred.resume_offset..next_offset];
+        gap.chars().all(char::is_whitespace) && !contains_blank_line(gap)
+    }
+
+    fn update_deferred_paragraph_resume_point(&mut self, range: Range<usize>) {
+        let resume_line = self.resolve_range_end_line(range.clone());
+        if let Some(deferred) = self.deferred_paragraph_close.as_mut() {
+            deferred.resume_offset = range.end;
+            deferred.resume_line = resume_line;
+        }
+    }
+
+    fn update_paragraph_source_line_end(&mut self, source_line_end: usize) {
+        if let Some(context) = self.paragraph_context.as_mut() {
+            context.source_line_end = source_line_end;
+        }
+    }
+
+    fn patch_paragraph_source_line_end(&mut self, open_tag_start: usize, source_line_end: usize) {
+        let Some(relative_tag_end_offset) = self.html[open_tag_start..].find('>') else {
+            return;
+        };
+        let tag_end_offset = open_tag_start + relative_tag_end_offset;
+        let tag_content = &self.html[open_tag_start..tag_end_offset];
+        let Some(attribute_offset) = tag_content.find("data-source-line-end=\"") else {
+            return;
+        };
+        let value_start = open_tag_start + attribute_offset + "data-source-line-end=\"".len();
+        let Some(relative_value_end) = self.html[value_start..tag_end_offset].find('"') else {
+            return;
+        };
+        let value_end = value_start + relative_value_end;
+        self.html
+            .replace_range(value_start..value_end, &source_line_end.to_string());
     }
 
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
@@ -1807,7 +2017,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"6\" data-source-line-end=\"6\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;object-fit:cover;\" /></p><p data-source-line-start=\"8\" data-source-line-end=\"8\"><img src=\"b.png\" alt=\"\" style=\"width:300px;height:240px;object-fit:cover;\" /></p>"
+            "<p data-source-line-start=\"6\" data-source-line-end=\"8\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;object-fit:cover;\" /><br />\n<img src=\"b.png\" alt=\"\" style=\"width:300px;height:240px;object-fit:cover;\" /></p>"
         );
     }
 
