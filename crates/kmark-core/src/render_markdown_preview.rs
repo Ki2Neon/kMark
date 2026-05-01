@@ -172,6 +172,7 @@ struct HtmlEmitter<'a> {
     kmark_scope_stack: Vec<KmarkScopeContext>,
     pending_kmark_params: Option<PendingKmarkParams>,
     active_kmark_single_block: Option<ActiveKmarkSingleBlock>,
+    pending_kmark_block_style: Option<String>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -293,6 +294,7 @@ impl<'a> HtmlEmitter<'a> {
             kmark_scope_stack: Vec::new(),
             pending_kmark_params: None,
             active_kmark_single_block: None,
+            pending_kmark_block_style: None,
         }
     }
 
@@ -414,7 +416,7 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         self.track_active_kmark_single_block_nested_start(&tag);
-        self.start_pending_kmark_single_block_wrapper(&tag, range.start);
+        self.start_pending_kmark_single_block(&tag, range.start);
 
         match tag {
             Tag::Paragraph => {
@@ -432,7 +434,11 @@ impl<'a> HtmlEmitter<'a> {
                     }
                     return;
                 }
-                let paragraph_open_tag = format!("<p{}>", self.source_line_attributes(range));
+                let paragraph_open_tag = format!(
+                    "<p{}{}>",
+                    self.source_line_attributes(range),
+                    self.take_pending_kmark_block_style_attribute(),
+                );
                 let open_tag_start = self.html.len();
                 self.push_raw(&paragraph_open_tag);
                 self.paragraph_context = Some(ParagraphContext {
@@ -465,6 +471,7 @@ impl<'a> HtmlEmitter<'a> {
                     }
                     html.push('"');
                 }
+                html.push_str(&self.take_pending_kmark_block_style_attribute());
                 for (attribute, value) in attrs {
                     html.push(' ');
                     html.push_str(&escape_html(&attribute));
@@ -485,11 +492,16 @@ impl<'a> HtmlEmitter<'a> {
                     html.push_str(class_name);
                     html.push('"');
                 }
+                html.push_str(&self.take_pending_kmark_block_style_attribute());
                 html.push('>');
                 self.push_raw(&html);
             }
             Tag::CodeBlock(kind) => {
-                let mut html = format!("<pre{}><code", self.source_line_attributes(range));
+                let mut html = format!(
+                    "<pre{}{}><code",
+                    self.source_line_attributes(range),
+                    self.take_pending_kmark_block_style_attribute(),
+                );
                 if let Some(language) = code_block_language(kind) {
                     html.push_str(" class=\"language-");
                     html.push_str(&escape_html(&language));
@@ -501,11 +513,18 @@ impl<'a> HtmlEmitter<'a> {
             Tag::HtmlBlock => {
                 self.suppressed_html_text_depth += 1;
             }
-            Tag::List(Some(1)) => self.push_raw("<ol>"),
-            Tag::List(Some(start)) => {
-                self.push_raw(&format!("<ol start=\"{start}\">"));
+            Tag::List(Some(1)) => {
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
+                self.push_raw(&format!("<ol{}>", style_attribute));
             }
-            Tag::List(None) => self.push_raw("<ul>"),
+            Tag::List(Some(start)) => {
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
+                self.push_raw(&format!("<ol start=\"{start}\"{}>", style_attribute));
+            }
+            Tag::List(None) => {
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
+                self.push_raw(&format!("<ul{}>", style_attribute));
+            }
             Tag::Item => {
                 self.push_raw(&format!("<li{}>", self.source_line_attributes(range)));
             }
@@ -517,14 +536,20 @@ impl<'a> HtmlEmitter<'a> {
                         label,
                         paragraph_count: 0,
                     });
+                let source_line_attributes = self.source_line_attributes(range);
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
                 self.push_raw(&format!(
-                    "<div class=\"footnote-definition\" id=\"{}\"{}><sup class=\"footnote-definition-label\">{}</sup>",
+                    "<div class=\"footnote-definition\" id=\"{}\"{}{}><sup class=\"footnote-definition-label\">{}</sup>",
                     footnote_definition_id(number),
-                    self.source_line_attributes(range),
+                    source_line_attributes,
+                    style_attribute,
                     number,
                 ));
             }
-            Tag::DefinitionList => self.push_raw("<dl>"),
+            Tag::DefinitionList => {
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
+                self.push_raw(&format!("<dl{}>", style_attribute));
+            }
             Tag::DefinitionListTitle => self.push_raw("<dt>"),
             Tag::DefinitionListDefinition => self.push_raw("<dd>"),
             Tag::Table(alignments) => {
@@ -532,7 +557,8 @@ impl<'a> HtmlEmitter<'a> {
                 self.table_section = TableSection::Head;
                 self.table_cell_index = 0;
                 self.table_body_open = false;
-                self.push_raw("<table>");
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
+                self.push_raw(&format!("<table{}>", style_attribute));
             }
             Tag::TableHead => {
                 self.table_section = TableSection::Head;
@@ -619,9 +645,11 @@ impl<'a> HtmlEmitter<'a> {
                 });
             }
             Tag::MetadataBlock(kind) => {
+                let style_attribute = self.take_pending_kmark_block_style_attribute();
                 self.push_raw(&format!(
-                    "<section data-metadata-block=\"{}\">",
+                    "<section data-metadata-block=\"{}\"{}>",
                     metadata_block_name(kind),
+                    style_attribute,
                 ));
             }
         }
@@ -964,13 +992,7 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         if range.start < pending.end_offset {
-            if matches!(
-                event,
-                Event::Start(Tag::Paragraph)
-                    | Event::Start(Tag::HtmlBlock)
-                    | Event::Start(Tag::Image { .. })
-                    | Event::End(TagEnd::HtmlBlock)
-            ) {
+            if is_pending_kmark_target_event(event) {
                 return;
             }
 
@@ -985,13 +1007,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        if matches!(
-            event,
-            Event::Start(Tag::Paragraph)
-                | Event::Start(Tag::HtmlBlock)
-                | Event::Start(Tag::Image { .. })
-                | Event::End(TagEnd::HtmlBlock)
-        ) {
+        if is_pending_kmark_target_event(event) {
             return;
         }
 
@@ -1080,11 +1096,7 @@ impl<'a> HtmlEmitter<'a> {
         self.resolve_kmark_bundle_layer(bundle).resolved_params()
     }
 
-    fn start_pending_kmark_single_block_wrapper(
-        &mut self,
-        tag: &Tag<'static>,
-        start_offset: usize,
-    ) {
+    fn start_pending_kmark_single_block(&mut self, tag: &Tag<'static>, start_offset: usize) {
         if self.active_kmark_single_block.is_some() {
             return;
         }
@@ -1104,15 +1116,9 @@ impl<'a> HtmlEmitter<'a> {
         };
 
         let layer = self.resolve_kmark_bundle_layer(&bundle);
-        let Some(style) = layer.resolved_params().layout.to_single_wrapper_style() else {
-            return;
-        };
 
         self.pending_kmark_params = None;
-        self.push_raw(&format!(
-            "<div class=\"kmark-block\" style=\"{}\">",
-            escape_html(&style),
-        ));
+        self.pending_kmark_block_style = layer.resolved_params().layout.to_single_block_style();
         self.active_kmark_single_block = Some(ActiveKmarkSingleBlock {
             layer,
             end,
@@ -1148,9 +1154,15 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn close_active_kmark_single_block(&mut self) {
-        if self.active_kmark_single_block.take().is_some() {
-            self.push_raw("</div>");
-        }
+        self.active_kmark_single_block = None;
+        self.pending_kmark_block_style = None;
+    }
+
+    fn take_pending_kmark_block_style_attribute(&mut self) -> String {
+        self.pending_kmark_block_style
+            .take()
+            .map(|style| format!(" style=\"{}\"", escape_html(&style)))
+            .unwrap_or_default()
     }
 
     fn close_kmark_scope(&mut self) {
@@ -1351,7 +1363,17 @@ impl KmarkLayoutParams {
             .unwrap_or_else(|| "display:flex;flex-direction:column;".to_owned())
     }
 
-    fn to_single_wrapper_style(&self) -> Option<String> {
+    fn to_single_block_style(&self) -> Option<String> {
+        if self.layout.is_none()
+            && self.valign.is_none()
+            && self.gap.is_none()
+            && self.wrap.is_none()
+        {
+            return self
+                .align
+                .map(|align| format!("text-align:{}", align.css_text_value()));
+        }
+
         self.has_layout_directives()
             .then(|| self.to_flex_style(true))
             .flatten()
@@ -1416,6 +1438,14 @@ impl KmarkAlign {
             Self::Left => "flex-start",
             Self::Center => "center",
             Self::Right => "flex-end",
+        }
+    }
+
+    fn css_text_value(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
         }
     }
 }
@@ -1628,6 +1658,15 @@ fn is_page_break_token(text: &str) -> bool {
 
 fn count_line_breaks(text: &str) -> usize {
     text.chars().filter(|character| *character == '\n').count()
+}
+
+fn is_pending_kmark_target_event(event: &Event<'static>) -> bool {
+    match event {
+        Event::Start(Tag::HtmlBlock) | Event::End(TagEnd::HtmlBlock) => true,
+        Event::Start(Tag::Image { .. }) => true,
+        Event::Start(tag) => KmarkBlockEnd::from_start_tag(tag).is_some(),
+        _ => false,
+    }
 }
 
 fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
@@ -2437,13 +2476,35 @@ mod tests {
     }
 
     #[test]
-    fn wraps_single_block_alignment_comment() {
+    fn applies_single_block_alignment_comment_without_wrapper() {
         let rendered_preview =
             render_markdown_preview("<!-- kmark align:right w:300 -->\n![](image.png)");
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-block\" style=\"display:flex;flex-direction:column;align-items:flex-end;\"><p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" style=\"width:300px;\" /></p></div>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"text-align:right\"><img src=\"image.png\" alt=\"\" style=\"width:300px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_single_align_to_text_paragraph_without_extra_wrapper_gap() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark align:right -->\ntext1\ntext2\ntext3\ntext4\n\ntext5",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"4\" style=\"text-align:right\">text1<br />\ntext2<br />\ntext3<br />\ntext4</p><p data-source-line-start=\"6\" data-source-line-end=\"6\">text5</p>"
+        );
+    }
+
+    #[test]
+    fn applies_single_layout_to_target_block_without_wrapper() {
+        let rendered_preview = render_markdown_preview("<!-- kmark layout:row gap:8 -->\n- A\n- B");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<ul style=\"display:flex;flex-direction:row;gap:8px;\"><li data-source-line-start=\"1\" data-source-line-end=\"1\">A</li><li data-source-line-start=\"2\" data-source-line-end=\"2\">B</li></ul>"
         );
     }
 
