@@ -1,12 +1,8 @@
-use std::{
-    collections::HashMap,
-    ops::Range,
-    path::Path,
-};
+use std::{collections::HashMap, ops::Range, path::Path};
 
 use pulldown_cmark::{
-    Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options,
-    Parser, Tag, TagEnd,
+    Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options, Parser,
+    Tag, TagEnd,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,12 +43,7 @@ struct ParagraphContext {
     source_line_end: usize,
     image_count: usize,
     contains_non_image_content: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct DeferredParagraphClose {
-    resume_offset: usize,
-    resume_line: usize,
+    soft_break_ranges: Vec<Range<usize>>,
 }
 
 type OwnedEvent = (Event<'static>, Range<usize>);
@@ -69,9 +60,35 @@ struct KmarkImageParams {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkLayoutParams {
+    layout: Option<KmarkLayout>,
+    align: Option<KmarkAlign>,
+    valign: Option<KmarkValign>,
+    gap: Option<String>,
+    wrap: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkParams {
+    image: KmarkImageParams,
+    layout: KmarkLayoutParams,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkParamBundle {
     preset_use: Option<String>,
-    params: KmarkImageParams,
+    params: KmarkParams,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkParamLayer {
+    preset: KmarkParams,
+    direct: KmarkParams,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KmarkScopeContext {
+    layer: KmarkParamLayer,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +96,47 @@ struct PendingKmarkParams {
     bundle: KmarkParamBundle,
     end_offset: usize,
     end_line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveKmarkSingleBlock {
+    layer: KmarkParamLayer,
+    end: KmarkBlockEnd,
+    nested_same_kind_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KmarkLayout {
+    Row,
+    Column,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KmarkAlign {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KmarkValign {
+    Top,
+    Center,
+    Bottom,
+    Stretch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KmarkBlockEnd {
+    Paragraph,
+    Heading,
+    BlockQuote,
+    CodeBlock,
+    List,
+    FootnoteDefinition,
+    DefinitionList,
+    Table,
+    MetadataBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,10 +168,10 @@ struct HtmlEmitter<'a> {
     footnote_reference_render_counts: HashMap<String, usize>,
     footnote_definition_stack: Vec<FootnoteDefinitionContext>,
     paragraph_context: Option<ParagraphContext>,
-    deferred_paragraph_close: Option<DeferredParagraphClose>,
-    kmark_presets: HashMap<String, KmarkImageParams>,
-    active_kmark_scope: Option<KmarkImageParams>,
+    kmark_presets: HashMap<String, KmarkParams>,
+    kmark_scope_stack: Vec<KmarkScopeContext>,
     pending_kmark_params: Option<PendingKmarkParams>,
+    active_kmark_single_block: Option<ActiveKmarkSingleBlock>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -231,10 +289,10 @@ impl<'a> HtmlEmitter<'a> {
             footnote_reference_render_counts: HashMap::new(),
             footnote_definition_stack: Vec::new(),
             paragraph_context: None,
-            deferred_paragraph_close: None,
             kmark_presets: HashMap::new(),
-            active_kmark_scope: None,
+            kmark_scope_stack: Vec::new(),
             pending_kmark_params: None,
+            active_kmark_single_block: None,
         }
     }
 
@@ -260,20 +318,12 @@ impl<'a> HtmlEmitter<'a> {
             self.push_event(event, range);
         }
 
-        self.flush_deferred_paragraph_close();
+        self.close_active_kmark_single_block();
+        self.close_unclosed_kmark_scopes();
         self.html
     }
 
     fn push_event(&mut self, event: Event<'static>, range: Range<usize>) {
-        if self.should_resume_deferred_paragraph(&event, &range) {
-            self.resume_deferred_paragraph();
-            return;
-        }
-
-        if self.should_flush_deferred_paragraph_before_event(&event, &range) {
-            self.flush_deferred_paragraph_close();
-        }
-
         if matches!(event, Event::Html(_) | Event::InlineHtml(_)) {
             self.push_html_event(event, range);
             return;
@@ -288,10 +338,9 @@ impl<'a> HtmlEmitter<'a> {
             Event::Code(text) => self.push_code(&text),
             Event::SoftBreak => self.push_soft_break(),
             Event::HardBreak => self.push_hard_break(),
-            Event::Rule => self.push_raw(&format!(
-                "<hr{} />",
-                self.source_line_attributes(&range),
-            )),
+            Event::Rule => {
+                self.push_raw(&format!("<hr{} />", self.source_line_attributes(&range),))
+            }
             Event::FootnoteReference(label) => self.push_footnote_reference(label.as_ref()),
             Event::TaskListMarker(checked) => self.push_task_list_marker(checked),
             Event::InlineMath(text) => self.push_math_text("math-inline", &text),
@@ -308,7 +357,6 @@ impl<'a> HtmlEmitter<'a> {
 
         if let Some(comment) = parse_kmark_comment(html.as_ref()) {
             self.apply_kmark_comment(comment, range.clone());
-            self.update_deferred_paragraph_resume_point(range);
             return;
         }
 
@@ -365,6 +413,9 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.track_active_kmark_single_block_nested_start(&tag);
+        self.start_pending_kmark_single_block_wrapper(&tag, range.start);
+
         match tag {
             Tag::Paragraph => {
                 if self.is_inside_footnote_definition() {
@@ -376,6 +427,7 @@ impl<'a> HtmlEmitter<'a> {
                             source_line_end: 0,
                             image_count: 0,
                             contains_non_image_content: false,
+                            soft_break_ranges: Vec::new(),
                         });
                     }
                     return;
@@ -388,6 +440,7 @@ impl<'a> HtmlEmitter<'a> {
                     source_line_end: self.resolve_range_end_line(range.clone()),
                     image_count: 0,
                     contains_non_image_content: false,
+                    soft_break_ranges: Vec::new(),
                 });
             }
             Tag::Heading {
@@ -553,8 +606,8 @@ impl<'a> HtmlEmitter<'a> {
                 dest_url, title, ..
             } => {
                 self.mark_paragraph_image();
-                let single_params = self.take_pending_kmark_params_for_image(range.start);
-                let image_style = self.resolve_image_style(single_params.as_ref());
+                let single_layer = self.take_pending_kmark_layer_for_image(range.start);
+                let image_style = self.resolve_image_style(single_layer.as_ref());
                 self.image_stack.push(ImageContext {
                     destination_url: resolve_image_destination_url(
                         &dest_url,
@@ -582,6 +635,8 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        let should_close_kmark_single_block = self.should_close_active_kmark_single_block(&tag_end);
+
         match tag_end {
             TagEnd::Paragraph => {
                 if self.is_inside_footnote_definition() {
@@ -590,11 +645,9 @@ impl<'a> HtmlEmitter<'a> {
                         self.push_raw("</p>");
                     }
                 } else {
-                    self.update_paragraph_source_line_end(self.resolve_range_end_line(range.clone()));
-                    if self.should_defer_paragraph_close() {
-                        self.defer_paragraph_close(range.clone());
-                        return;
-                    }
+                    self.update_paragraph_source_line_end(
+                        self.resolve_range_end_line(range.clone()),
+                    );
                     self.finalize_paragraph_context();
                     self.push_raw("</p>");
                 }
@@ -650,6 +703,10 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::Image => self.finish_image(),
             TagEnd::MetadataBlock(_) => self.push_raw("</section>"),
         }
+
+        if should_close_kmark_single_block {
+            self.close_active_kmark_single_block();
+        }
     }
 
     fn finish_footnote_definition(&mut self) {
@@ -678,7 +735,9 @@ impl<'a> HtmlEmitter<'a> {
 
         if self.is_collecting_image_alt_text() {
             if let Some(parent_image_context) = self.image_stack.last_mut() {
-                parent_image_context.alt_text.push_str(&image_context.alt_text);
+                parent_image_context
+                    .alt_text
+                    .push_str(&image_context.alt_text);
             }
             return;
         }
@@ -779,7 +838,14 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        self.push_raw("<br />\n");
+        const SOFT_BREAK_HTML: &str = "<br />\n";
+        if let Some(context) = self.paragraph_context.as_mut() {
+            let start = self.html.len();
+            context
+                .soft_break_ranges
+                .push(start..start + SOFT_BREAK_HTML.len());
+        }
+        self.push_raw(SOFT_BREAK_HTML);
     }
 
     fn push_hard_break(&mut self) {
@@ -831,12 +897,8 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn source_line_attributes(&self, range: &Range<usize>) -> String {
-        let (start_line, end_line) = resolve_source_line_range(
-            self.content,
-            &self.line_starts,
-            self.line_offset,
-            range,
-        );
+        let (start_line, end_line) =
+            resolve_source_line_range(self.content, &self.line_starts, self.line_offset, range);
         format!(
             " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
             start_line, end_line,
@@ -865,19 +927,22 @@ impl<'a> HtmlEmitter<'a> {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
                 self.kmark_presets
-                    .insert(name, self.resolve_kmark_bundle(&final_bundle));
+                    .insert(name, self.resolve_kmark_bundle_params(&final_bundle));
             }
             KmarkComment::ScopeStart(bundle) => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
-
-                if self.active_kmark_scope.is_none() {
-                    self.active_kmark_scope = Some(self.resolve_kmark_bundle(&final_bundle));
-                }
+                let layer = self.resolve_kmark_bundle_layer(&final_bundle);
+                let style = layer.resolved_params().layout.to_scope_style();
+                self.push_raw(&format!(
+                    "<div class=\"kmark-scope\" style=\"{}\">",
+                    escape_html(&style),
+                ));
+                self.kmark_scope_stack.push(KmarkScopeContext { layer });
             }
             KmarkComment::ScopeEnd => {
                 self.pending_kmark_params = None;
-                self.active_kmark_scope = None;
+                self.close_kmark_scope();
             }
         }
     }
@@ -957,37 +1022,151 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn take_pending_kmark_bundle(&mut self) -> Option<KmarkParamBundle> {
-        self.pending_kmark_params.take().map(|pending| pending.bundle)
+        self.pending_kmark_params
+            .take()
+            .map(|pending| pending.bundle)
     }
 
-    fn take_pending_kmark_params_for_image(
+    fn take_pending_kmark_layer_for_image(
         &mut self,
         image_start_offset: usize,
-    ) -> Option<KmarkImageParams> {
+    ) -> Option<KmarkParamLayer> {
         self.discard_pending_kmark_params_if_gap_is_incompatible(image_start_offset);
         let bundle = self.take_pending_kmark_bundle()?;
-        Some(self.resolve_kmark_bundle(&bundle))
+        Some(self.resolve_kmark_bundle_layer(&bundle))
     }
 
-    fn resolve_image_style(&self, single_params: Option<&KmarkImageParams>) -> Option<String> {
-        let mut final_params = self.active_kmark_scope.clone().unwrap_or_default();
+    fn resolve_image_style(&self, single_layer: Option<&KmarkParamLayer>) -> Option<String> {
+        let mut final_params = KmarkParams::default();
 
-        if let Some(single_params) = single_params {
-            final_params.merge(single_params);
+        for scope in &self.kmark_scope_stack {
+            final_params.merge(&scope.layer.preset);
+        }
+        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
+            final_params.merge(&active_single.layer.preset);
+        }
+        if let Some(single_layer) = single_layer {
+            final_params.merge(&single_layer.preset);
         }
 
-        final_params.to_style()
+        for scope in &self.kmark_scope_stack {
+            final_params.merge(&scope.layer.direct);
+        }
+        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
+            final_params.merge(&active_single.layer.direct);
+        }
+        if let Some(single_layer) = single_layer {
+            final_params.merge(&single_layer.direct);
+        }
+
+        final_params.image.to_style()
     }
 
-    fn resolve_kmark_bundle(&self, bundle: &KmarkParamBundle) -> KmarkImageParams {
-        let mut final_params = bundle
+    fn resolve_kmark_bundle_layer(&self, bundle: &KmarkParamBundle) -> KmarkParamLayer {
+        let preset = bundle
             .preset_use
             .as_ref()
             .and_then(|preset_name| self.kmark_presets.get(preset_name))
             .cloned()
             .unwrap_or_default();
-        final_params.merge(&bundle.params);
-        final_params
+
+        KmarkParamLayer {
+            preset,
+            direct: bundle.params.clone(),
+        }
+    }
+
+    fn resolve_kmark_bundle_params(&self, bundle: &KmarkParamBundle) -> KmarkParams {
+        self.resolve_kmark_bundle_layer(bundle).resolved_params()
+    }
+
+    fn start_pending_kmark_single_block_wrapper(
+        &mut self,
+        tag: &Tag<'static>,
+        start_offset: usize,
+    ) {
+        if self.active_kmark_single_block.is_some() {
+            return;
+        }
+
+        let Some(end) = KmarkBlockEnd::from_start_tag(tag) else {
+            return;
+        };
+
+        self.discard_pending_kmark_params_if_gap_is_incompatible(start_offset);
+
+        let Some(bundle) = self
+            .pending_kmark_params
+            .as_ref()
+            .map(|pending| pending.bundle.clone())
+        else {
+            return;
+        };
+
+        let layer = self.resolve_kmark_bundle_layer(&bundle);
+        let Some(style) = layer.resolved_params().layout.to_single_wrapper_style() else {
+            return;
+        };
+
+        self.pending_kmark_params = None;
+        self.push_raw(&format!(
+            "<div class=\"kmark-block\" style=\"{}\">",
+            escape_html(&style),
+        ));
+        self.active_kmark_single_block = Some(ActiveKmarkSingleBlock {
+            layer,
+            end,
+            nested_same_kind_count: 0,
+        });
+    }
+
+    fn track_active_kmark_single_block_nested_start(&mut self, tag: &Tag<'static>) {
+        let Some(active_single) = self.active_kmark_single_block.as_mut() else {
+            return;
+        };
+
+        if KmarkBlockEnd::from_start_tag(tag).is_some_and(|end| end == active_single.end) {
+            active_single.nested_same_kind_count += 1;
+        }
+    }
+
+    fn should_close_active_kmark_single_block(&mut self, tag_end: &TagEnd) -> bool {
+        let Some(active_single) = self.active_kmark_single_block.as_mut() else {
+            return false;
+        };
+
+        if !active_single.end.matches_end(tag_end) {
+            return false;
+        }
+
+        if active_single.nested_same_kind_count > 0 {
+            active_single.nested_same_kind_count -= 1;
+            return false;
+        }
+
+        true
+    }
+
+    fn close_active_kmark_single_block(&mut self) {
+        if self.active_kmark_single_block.take().is_some() {
+            self.push_raw("</div>");
+        }
+    }
+
+    fn close_kmark_scope(&mut self) {
+        if self.kmark_scope_stack.pop().is_some() {
+            self.push_raw("</div>");
+        }
+    }
+
+    fn close_unclosed_kmark_scopes(&mut self) {
+        while self.kmark_scope_stack.pop().is_some() {
+            self.push_raw("</div>");
+        }
+    }
+
+    fn is_inside_kmark_scope(&self) -> bool {
+        !self.kmark_scope_stack.is_empty()
     }
 
     fn mark_paragraph_image(&mut self) {
@@ -1007,7 +1186,26 @@ impl<'a> HtmlEmitter<'a> {
             return;
         };
 
+        if self.should_flatten_kmark_scope_image_paragraph(&context) {
+            self.remove_soft_breaks(&context.soft_break_ranges);
+            self.patch_tag_style(context.open_tag_start, "display:contents");
+        }
+
         self.patch_paragraph_source_line_end(context.open_tag_start, context.source_line_end);
+    }
+
+    fn should_flatten_kmark_scope_image_paragraph(&self, context: &ParagraphContext) -> bool {
+        self.is_inside_kmark_scope()
+            && context.image_count > 0
+            && !context.contains_non_image_content
+    }
+
+    fn remove_soft_breaks(&mut self, ranges: &[Range<usize>]) {
+        for range in ranges.iter().rev() {
+            if range.end <= self.html.len() {
+                self.html.replace_range(range.clone(), "");
+            }
+        }
     }
 
     fn update_html_text_suppression(&mut self, html: &str) {
@@ -1024,109 +1222,6 @@ impl<'a> HtmlEmitter<'a> {
 
         if trimmed.starts_with('<') && trimmed.ends_with('>') && !trimmed.ends_with("/>") {
             self.suppressed_html_text_depth += 1;
-        }
-    }
-
-    fn should_defer_paragraph_close(&self) -> bool {
-        self.active_kmark_scope.is_some()
-            && matches!(
-                self.paragraph_context.as_ref(),
-                Some(context) if context.image_count > 0 && !context.contains_non_image_content
-            )
-    }
-
-    fn defer_paragraph_close(&mut self, range: Range<usize>) {
-        self.deferred_paragraph_close = Some(DeferredParagraphClose {
-            resume_offset: range.end,
-            resume_line: self.resolve_range_end_line(range),
-        });
-    }
-
-    fn flush_deferred_paragraph_close(&mut self) {
-        if self.deferred_paragraph_close.take().is_none() {
-            return;
-        }
-
-        self.finalize_paragraph_context();
-        self.push_raw("</p>");
-    }
-
-    fn should_resume_deferred_paragraph(
-        &self,
-        event: &Event<'static>,
-        range: &Range<usize>,
-    ) -> bool {
-        matches!(event, Event::Start(Tag::Paragraph))
-            && self.deferred_paragraph_close.is_some()
-            && self.is_deferred_paragraph_gap_compatible(range.start)
-    }
-
-    fn resume_deferred_paragraph(&mut self) {
-        self.push_raw("<br />\n");
-        self.deferred_paragraph_close = None;
-    }
-
-    fn should_flush_deferred_paragraph_before_event(
-        &self,
-        event: &Event<'static>,
-        range: &Range<usize>,
-    ) -> bool {
-        let Some(_) = self.deferred_paragraph_close else {
-            return false;
-        };
-
-        if self.should_hold_deferred_paragraph_for_event(event, range) {
-            return false;
-        }
-
-        true
-    }
-
-    fn should_hold_deferred_paragraph_for_event(
-        &self,
-        event: &Event<'static>,
-        range: &Range<usize>,
-    ) -> bool {
-        if !self.is_deferred_paragraph_gap_compatible(range.start) {
-            return false;
-        }
-
-        match event {
-            Event::Start(Tag::HtmlBlock) | Event::End(TagEnd::HtmlBlock) => true,
-            Event::Html(html) | Event::InlineHtml(html) => matches!(
-                parse_kmark_comment(html.as_ref()),
-                Some(KmarkComment::Params(_))
-                    | Some(KmarkComment::Define { .. })
-                    | Some(KmarkComment::ScopeStart(_))
-            ),
-            Event::Start(Tag::Paragraph) => true,
-            _ => false,
-        }
-    }
-
-    fn is_deferred_paragraph_gap_compatible(&self, next_offset: usize) -> bool {
-        let Some(deferred) = self.deferred_paragraph_close.as_ref() else {
-            return false;
-        };
-
-        let next_start_line = self.resolve_offset_line(next_offset);
-        if next_start_line > deferred.resume_line + 1 {
-            return false;
-        }
-
-        if next_offset < deferred.resume_offset {
-            return true;
-        }
-
-        let gap = &self.content[deferred.resume_offset..next_offset];
-        gap.chars().all(char::is_whitespace) && !contains_blank_line(gap)
-    }
-
-    fn update_deferred_paragraph_resume_point(&mut self, range: Range<usize>) {
-        let resume_line = self.resolve_range_end_line(range.clone());
-        if let Some(deferred) = self.deferred_paragraph_close.as_mut() {
-            deferred.resume_offset = range.end;
-            deferred.resume_line = resume_line;
         }
     }
 
@@ -1152,6 +1247,26 @@ impl<'a> HtmlEmitter<'a> {
         let value_end = value_start + relative_value_end;
         self.html
             .replace_range(value_start..value_end, &source_line_end.to_string());
+    }
+
+    fn patch_tag_style(&mut self, open_tag_start: usize, style_rule: &str) {
+        let Some(relative_tag_end_offset) = self.html[open_tag_start..].find('>') else {
+            return;
+        };
+        let tag_end_offset = open_tag_start + relative_tag_end_offset;
+        let tag_content = &self.html[open_tag_start..tag_end_offset];
+
+        if let Some(style_offset) = tag_content.find("style=\"") {
+            let value_start = open_tag_start + style_offset + "style=\"".len();
+            self.html
+                .insert_str(value_start, &format!("{};", escape_html(style_rule)));
+            return;
+        }
+
+        self.html.insert_str(
+            tag_end_offset,
+            &format!(" style=\"{}\"", escape_html(style_rule)),
+        );
     }
 
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
@@ -1186,6 +1301,187 @@ impl KmarkParamBundle {
             self.preset_use = Some(preset_use.clone());
         }
         self.params.merge(&other.params);
+    }
+}
+
+impl KmarkParamLayer {
+    fn resolved_params(&self) -> KmarkParams {
+        let mut params = self.preset.clone();
+        params.merge(&self.direct);
+        params
+    }
+}
+
+impl KmarkParams {
+    fn merge(&mut self, other: &Self) {
+        self.image.merge(&other.image);
+        self.layout.merge(&other.layout);
+    }
+}
+
+impl KmarkLayoutParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(layout) = other.layout {
+            self.layout = Some(layout);
+        }
+        if let Some(align) = other.align {
+            self.align = Some(align);
+        }
+        if let Some(valign) = other.valign {
+            self.valign = Some(valign);
+        }
+        if let Some(gap) = &other.gap {
+            self.gap = Some(gap.clone());
+        }
+        if let Some(wrap) = other.wrap {
+            self.wrap = Some(wrap);
+        }
+    }
+
+    fn has_layout_directives(&self) -> bool {
+        self.layout.is_some()
+            || self.align.is_some()
+            || self.valign.is_some()
+            || self.gap.is_some()
+            || self.wrap.is_some()
+    }
+
+    fn to_scope_style(&self) -> String {
+        self.to_flex_style(true)
+            .unwrap_or_else(|| "display:flex;flex-direction:column;".to_owned())
+    }
+
+    fn to_single_wrapper_style(&self) -> Option<String> {
+        self.has_layout_directives()
+            .then(|| self.to_flex_style(true))
+            .flatten()
+    }
+
+    fn to_flex_style(&self, force_layout: bool) -> Option<String> {
+        let layout = self.layout.or(force_layout.then_some(KmarkLayout::Column));
+        let mut rules = Vec::new();
+
+        if let Some(layout) = layout {
+            rules.push("display:flex".to_owned());
+            rules.push(format!("flex-direction:{}", layout.css_direction()));
+            if let Some(align) = self.align {
+                let property = match layout {
+                    KmarkLayout::Row => "justify-content",
+                    KmarkLayout::Column => "align-items",
+                };
+                rules.push(format!("{property}:{}", align.css_flex_value()));
+            }
+            if let Some(valign) = self.valign {
+                match layout {
+                    KmarkLayout::Row => {
+                        rules.push(format!("align-items:{}", valign.css_cross_axis_value()));
+                    }
+                    KmarkLayout::Column => {
+                        if matches!(valign, KmarkValign::Stretch) {
+                            rules.push("align-items:stretch".to_owned());
+                        } else {
+                            rules.push(format!("justify-content:{}", valign.css_main_axis_value()));
+                        }
+                    }
+                }
+            }
+            if let Some(wrap) = self.wrap {
+                rules.push(format!(
+                    "flex-wrap:{}",
+                    if wrap { "wrap" } else { "nowrap" },
+                ));
+            }
+        }
+
+        if let Some(gap) = &self.gap {
+            rules.push(format!("gap:{gap}"));
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+    }
+}
+
+impl KmarkLayout {
+    fn css_direction(self) -> &'static str {
+        match self {
+            Self::Row => "row",
+            Self::Column => "column",
+        }
+    }
+}
+
+impl KmarkAlign {
+    fn css_flex_value(self) -> &'static str {
+        match self {
+            Self::Left => "flex-start",
+            Self::Center => "center",
+            Self::Right => "flex-end",
+        }
+    }
+}
+
+impl KmarkValign {
+    fn css_cross_axis_value(self) -> &'static str {
+        match self {
+            Self::Top => "flex-start",
+            Self::Center => "center",
+            Self::Bottom => "flex-end",
+            Self::Stretch => "stretch",
+        }
+    }
+
+    fn css_main_axis_value(self) -> &'static str {
+        match self {
+            Self::Top => "flex-start",
+            Self::Center => "center",
+            Self::Bottom => "flex-end",
+            Self::Stretch => "stretch",
+        }
+    }
+}
+
+impl KmarkBlockEnd {
+    fn from_start_tag(tag: &Tag<'_>) -> Option<Self> {
+        match tag {
+            Tag::Paragraph => Some(Self::Paragraph),
+            Tag::Heading { .. } => Some(Self::Heading),
+            Tag::BlockQuote(_) => Some(Self::BlockQuote),
+            Tag::CodeBlock(_) => Some(Self::CodeBlock),
+            Tag::List(_) => Some(Self::List),
+            Tag::FootnoteDefinition(_) => Some(Self::FootnoteDefinition),
+            Tag::DefinitionList => Some(Self::DefinitionList),
+            Tag::Table(_) => Some(Self::Table),
+            Tag::MetadataBlock(_) => Some(Self::MetadataBlock),
+            Tag::HtmlBlock
+            | Tag::Item
+            | Tag::DefinitionListTitle
+            | Tag::DefinitionListDefinition
+            | Tag::TableHead
+            | Tag::TableRow
+            | Tag::TableCell
+            | Tag::Emphasis
+            | Tag::Strong
+            | Tag::Strikethrough
+            | Tag::Superscript
+            | Tag::Subscript
+            | Tag::Link { .. }
+            | Tag::Image { .. } => None,
+        }
+    }
+
+    fn matches_end(self, tag_end: &TagEnd) -> bool {
+        matches!(
+            (self, tag_end),
+            (Self::Paragraph, TagEnd::Paragraph)
+                | (Self::Heading, TagEnd::Heading(_))
+                | (Self::BlockQuote, TagEnd::BlockQuote(_))
+                | (Self::CodeBlock, TagEnd::CodeBlock)
+                | (Self::List, TagEnd::List(_))
+                | (Self::FootnoteDefinition, TagEnd::FootnoteDefinition)
+                | (Self::DefinitionList, TagEnd::DefinitionList)
+                | (Self::Table, TagEnd::Table)
+                | (Self::MetadataBlock, TagEnd::MetadataBlock(_))
+        )
     }
 }
 
@@ -1232,11 +1528,11 @@ impl KmarkImageParams {
         if let Some(border_size) = &self.border_size {
             rules.push(format!("border-width:{border_size}"));
         }
-        if let Some(border_style) = self.border_style.as_deref().or_else(|| {
-            self.border_size
-                .as_ref()
-                .map(|_| "solid")
-        }) {
+        if let Some(border_style) = self
+            .border_style
+            .as_deref()
+            .or_else(|| self.border_size.as_ref().map(|_| "solid"))
+        {
             rules.push(format!("border-style:{border_style}"));
         }
         if let Some(border_color) = &self.border_color {
@@ -1368,13 +1664,66 @@ fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
                     bundle.preset_use = Some(preset_name);
                 }
             }
-            "w" => bundle.params.width = parse_kmark_size_value(value),
-            "h" => bundle.params.height = parse_kmark_size_value(value),
-            "fit" => bundle.params.fit = parse_kmark_fit_value(value),
-            "pos" => bundle.params.position = parse_kmark_position_value(value),
-            "border_size" => bundle.params.border_size = parse_kmark_border_size_value(value),
-            "border_color" => bundle.params.border_color = parse_kmark_border_color_value(value),
-            "border_style" => bundle.params.border_style = parse_kmark_border_style_value(value),
+            "w" => {
+                if let Some(width) = parse_kmark_size_value(value) {
+                    bundle.params.image.width = Some(width);
+                }
+            }
+            "h" => {
+                if let Some(height) = parse_kmark_size_value(value) {
+                    bundle.params.image.height = Some(height);
+                }
+            }
+            "fit" => {
+                if let Some(fit) = parse_kmark_fit_value(value) {
+                    bundle.params.image.fit = Some(fit);
+                }
+            }
+            "pos" => {
+                if let Some(position) = parse_kmark_position_value(value) {
+                    bundle.params.image.position = Some(position);
+                }
+            }
+            "border_size" => {
+                if let Some(border_size) = parse_kmark_border_size_value(value) {
+                    bundle.params.image.border_size = Some(border_size);
+                }
+            }
+            "border_color" => {
+                if let Some(border_color) = parse_kmark_border_color_value(value) {
+                    bundle.params.image.border_color = Some(border_color);
+                }
+            }
+            "border_style" => {
+                if let Some(border_style) = parse_kmark_border_style_value(value) {
+                    bundle.params.image.border_style = Some(border_style);
+                }
+            }
+            "layout" => {
+                if let Some(layout) = parse_kmark_layout_value(value) {
+                    bundle.params.layout.layout = Some(layout);
+                }
+            }
+            "align" => {
+                if let Some(align) = parse_kmark_align_value(value) {
+                    bundle.params.layout.align = Some(align);
+                }
+            }
+            "valign" => {
+                if let Some(valign) = parse_kmark_valign_value(value) {
+                    bundle.params.layout.valign = Some(valign);
+                }
+            }
+            "gap" => {
+                if let Some(gap) = parse_kmark_gap_value(value) {
+                    bundle.params.layout.gap = Some(gap);
+                }
+            }
+            "wrap" => {
+                if let Some(wrap) = parse_kmark_wrap_value(value) {
+                    bundle.params.layout.wrap = Some(wrap);
+                }
+            }
             _ => {}
         }
     }
@@ -1402,6 +1751,45 @@ fn parse_kmark_param_bundle(input: &str) -> KmarkParamBundle {
         Some(KmarkComment::Define { bundle, .. }) => bundle,
         Some(KmarkComment::ScopeStart(bundle)) => bundle,
         Some(KmarkComment::ScopeEnd) | None => KmarkParamBundle::default(),
+    }
+}
+
+fn parse_kmark_layout_value(value: &str) -> Option<KmarkLayout> {
+    match value.trim() {
+        "row" => Some(KmarkLayout::Row),
+        "column" => Some(KmarkLayout::Column),
+        _ => None,
+    }
+}
+
+fn parse_kmark_align_value(value: &str) -> Option<KmarkAlign> {
+    match value.trim() {
+        "left" => Some(KmarkAlign::Left),
+        "center" => Some(KmarkAlign::Center),
+        "right" => Some(KmarkAlign::Right),
+        _ => None,
+    }
+}
+
+fn parse_kmark_valign_value(value: &str) -> Option<KmarkValign> {
+    match value.trim() {
+        "top" => Some(KmarkValign::Top),
+        "center" => Some(KmarkValign::Center),
+        "bottom" => Some(KmarkValign::Bottom),
+        "stretch" => Some(KmarkValign::Stretch),
+        _ => None,
+    }
+}
+
+fn parse_kmark_gap_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_wrap_value(value: &str) -> Option<bool> {
+    match value.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
     }
 }
 
@@ -1439,8 +1827,11 @@ fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
         return None;
     }
 
-    matches!(unit, "px" | "%" | "em" | "rem" | "vw" | "vh" | "vmin" | "vmax")
-        .then(|| trimmed.to_owned())
+    matches!(
+        unit,
+        "px" | "%" | "em" | "rem" | "vw" | "vh" | "vmin" | "vmax"
+    )
+    .then(|| trimmed.to_owned())
 }
 
 fn parse_kmark_fit_value(value: &str) -> Option<String> {
@@ -1481,8 +1872,11 @@ fn parse_kmark_border_color_value(value: &str) -> Option<String> {
 }
 
 fn parse_kmark_border_style_value(value: &str) -> Option<String> {
-    matches!(value.trim(), "solid" | "dashed" | "dotted" | "double" | "none")
-        .then(|| value.trim().to_owned())
+    matches!(
+        value.trim(),
+        "solid" | "dashed" | "dotted" | "double" | "none"
+    )
+    .then(|| value.trim().to_owned())
 }
 
 fn contains_blank_line(text: &str) -> bool {
@@ -1530,15 +1924,14 @@ fn resolve_image_destination_url(
         return None;
     }
 
-    if is_data_url(normalized_url)
-        || is_file_url(normalized_url)
-        || is_remote_url(normalized_url)
-    {
+    if is_data_url(normalized_url) || is_file_url(normalized_url) || is_remote_url(normalized_url) {
         return Some(normalized_url.to_owned());
     }
 
     if is_windows_absolute_path(normalized_url) || Path::new(normalized_url).is_absolute() {
-        return Some(file_path_to_url(&resolve_existing_path_string(normalized_url)));
+        return Some(file_path_to_url(&resolve_existing_path_string(
+            normalized_url,
+        )));
     }
 
     if let Some(markdown_file_path) = markdown_file_path {
@@ -1684,16 +2077,16 @@ fn split_windows_unc_root(path: &str) -> Option<(String, String)> {
         return None;
     }
 
-    Some((format!("//{server}/{share}"), segments.collect::<Vec<_>>().join("/")))
+    Some((
+        format!("//{server}/{share}"),
+        segments.collect::<Vec<_>>().join("/"),
+    ))
 }
 
 fn is_windows_drive_root(path: &str) -> bool {
     let bytes = path.as_bytes();
 
-    bytes.len() == 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'/'
+    bytes.len() == 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
 fn is_windows_unc_root(path: &str) -> bool {
@@ -1764,9 +2157,7 @@ fn is_windows_absolute_path(path: &str) -> bool {
 
 fn url_scheme(url: &str) -> Option<String> {
     let scheme_end = url.find(':')?;
-    let prefix_end = url
-        .find(['/', '?', '#'])
-        .unwrap_or(url.len());
+    let prefix_end = url.find(['/', '?', '#']).unwrap_or(url.len());
 
     (scheme_end < prefix_end).then(|| url[..scheme_end].to_ascii_lowercase())
 }
@@ -1857,8 +2248,9 @@ mod tests {
 
     #[test]
     fn renders_tables_with_alignment_and_nested_inline() {
-        let rendered_preview =
-            render_markdown_preview("| Left | Center | Right |\n| :--- | :----: | ----: |\n| *a* | **b** | ~~c~~ |");
+        let rendered_preview = render_markdown_preview(
+            "| Left | Center | Right |\n| :--- | :----: | ----: |\n| *a* | **b** | ~~c~~ |",
+        );
 
         assert_eq!(
             rendered_preview.html,
@@ -1878,7 +2270,8 @@ mod tests {
 
     #[test]
     fn renders_footnotes_with_backreferences() {
-        let rendered_preview = render_markdown_preview("Note[^alpha].\n\n[^alpha]: Footnote *value*");
+        let rendered_preview =
+            render_markdown_preview("Note[^alpha].\n\n[^alpha]: Footnote *value*");
 
         assert_eq!(
             rendered_preview.html,
@@ -1891,7 +2284,8 @@ mod tests {
         let sandbox_directory = create_temp_test_directory();
         let markdown_file_path = sandbox_directory.join("notes.md");
         let image_file_path = sandbox_directory.join("images").join("plot chart.png");
-        fs::create_dir_all(image_file_path.parent().unwrap()).expect("failed to create image directory");
+        fs::create_dir_all(image_file_path.parent().unwrap())
+            .expect("failed to create image directory");
         fs::write(&markdown_file_path, "# notes").expect("failed to create markdown file");
         fs::write(&image_file_path, "img").expect("failed to create image file");
 
@@ -1916,8 +2310,9 @@ mod tests {
 
     #[test]
     fn allows_data_urls_for_markdown_images() {
-        let rendered_preview =
-            render_markdown_preview("![badge](data:image/svg+xml,%3Csvg%20viewBox='0%200%201%201'%3E)");
+        let rendered_preview = render_markdown_preview(
+            "![badge](data:image/svg+xml,%3Csvg%20viewBox='0%200%201%201'%3E)",
+        );
 
         assert_eq!(
             rendered_preview.html,
@@ -1927,9 +2322,8 @@ mod tests {
 
     #[test]
     fn applies_kmark_single_image_size_comment() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:200 h:100 -->\n![](image.png)",
-        );
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark w:200 h:100 -->\n![](image.png)");
 
         assert_eq!(
             rendered_preview.html,
@@ -1939,9 +2333,8 @@ mod tests {
 
     #[test]
     fn preserves_alt_text_when_kmark_comment_applies() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:200 -->\n![基板写真](board.png)",
-        );
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark w:200 -->\n![基板写真](board.png)");
 
         assert_eq!(
             rendered_preview.html,
@@ -1963,9 +2356,7 @@ mod tests {
 
     #[test]
     fn ignores_kmark_single_comment_when_blank_line_exists_before_image() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:200 -->\n\n![](image.png)",
-        );
+        let rendered_preview = render_markdown_preview("<!-- kmark w:200 -->\n\n![](image.png)");
 
         assert_eq!(
             rendered_preview.html,
@@ -1981,7 +2372,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"4\" data-source-line-end=\"4\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"4\" data-source-line-end=\"4\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p></div>"
         );
     }
 
@@ -1993,7 +2384,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"5\" data-source-line-end=\"5\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:300px;\" /></p>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:300px;\" /></p></div>"
         );
     }
 
@@ -2017,15 +2408,84 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"6\" data-source-line-end=\"8\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;object-fit:cover;\" /><br />\n<img src=\"b.png\" alt=\"\" style=\"width:300px;height:240px;object-fit:cover;\" /></p>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;object-fit:cover;\" /></p><p data-source-line-start=\"8\" data-source-line-end=\"8\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:300px;height:240px;object-fit:cover;\" /></p></div>"
+        );
+    }
+
+    #[test]
+    fn renders_kmark_scope_layout_styles() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { layout:row gap:16 align:center valign:top wrap:true w:200 fit:cover -->\n\n![](a.png)\n![](b.png)\n\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;justify-content:center;align-items:flex-start;flex-wrap:wrap;gap:16px;\"><p data-source-line-start=\"2\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:200px;object-fit:cover;\" /><img src=\"b.png\" alt=\"\" style=\"width:200px;object-fit:cover;\" /></p></div>"
+        );
+    }
+
+    #[test]
+    fn renders_nested_kmark_scopes_with_scope_precedence() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { layout:row gap:24 w:200 h:100 -->\n\n<!-- kmark { layout:column gap:8 w:300 -->\n![](a.png)\n<!-- kmark } -->\n\n![](b.png)\n\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;gap:24px;\"><div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;gap:8px;\"><p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;\" /></p></div><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p></div>"
+        );
+    }
+
+    #[test]
+    fn wraps_single_block_alignment_comment() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark align:right w:300 -->\n![](image.png)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-block\" style=\"display:flex;flex-direction:column;align-items:flex-end;\"><p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" style=\"width:300px;\" /></p></div>"
+        );
+    }
+
+    #[test]
+    fn closes_unclosed_kmark_scope_at_end_of_document() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark { layout:row gap:1rem -->\n![](image.png)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;gap:1rem;\"><p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" /></p></div>"
+        );
+    }
+
+    #[test]
+    fn keeps_kmark_presets_lower_priority_than_scope_direct_params() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark define:thumb w:200 h:100 -->\n\n<!-- kmark { w:300 -->\n\n<!-- kmark { use:thumb -->\n![](image.png)\n<!-- kmark } -->\n\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" style=\"width:300px;height:100px;\" /></p></div></div>"
+        );
+    }
+
+    #[test]
+    fn ignores_unknown_kmark_keys_invalid_values_and_unmatched_scope_end() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark } -->\n<!-- kmark unknown:abc style:width:999px onclick:alert(1) w:200 w:abc fit:cover fit:bad border_size:2 border_color:url(javascript:alert(1)) -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" style=\"width:200px;object-fit:cover;border-width:2px;border-style:solid;\" /></p>"
         );
     }
 
     #[test]
     fn ignores_undefined_kmark_preset_use() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark use:not_found -->\n![](image.png)",
-        );
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark use:not_found -->\n![](image.png)");
 
         assert_eq!(
             rendered_preview.html,
@@ -2035,11 +2495,9 @@ mod tests {
 
     #[test]
     fn resolves_relative_images_against_windows_style_markdown_path() {
-        let resolved_image_url = resolve_image_destination_url(
-            "image.png",
-            Some("C:\\workspace\\docs\\notes.md"),
-        )
-        .expect("resolved image url");
+        let resolved_image_url =
+            resolve_image_destination_url("image.png", Some("C:\\workspace\\docs\\notes.md"))
+                .expect("resolved image url");
 
         assert_eq!(resolved_image_url, "file:///C:/workspace/docs/image.png");
     }
