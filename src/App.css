@@ -914,6 +914,11 @@ input:focus-visible,
   min-height: 1.5em;
 }
 
+.markdown-body li.kmark-li-continuation:has(> ul:first-child:last-child),
+.markdown-body li.kmark-li-continuation:has(> ol:first-child:last-child) {
+  list-style: none;
+}
+
 .markdown-body blockquote {
   margin-left: 0;
   padding-left: 12px;

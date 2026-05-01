@@ -507,6 +507,112 @@ function isA4PaginationHeadingElement(node: Node): node is HTMLElement {
   return node instanceof HTMLElement && A4_PAGINATION_HEADING_TAG_NAMES.has(node.tagName.toLowerCase());
 }
 
+function cloneA4PaginationMinimumTableKeepNode(element: HTMLElement): HTMLElement {
+  const table = cloneA4PaginationElementShell(element);
+
+  for (const headerNode of getA4TableHeaderNodes(element)) {
+    table.append(headerNode.cloneNode(true));
+  }
+
+  const firstBodyRow = getA4TableBodyRows(element)[0];
+
+  if (firstBodyRow !== undefined) {
+    const tbody = document.createElement("tbody");
+    tbody.append(firstBodyRow.cloneNode(true));
+    table.append(tbody);
+  }
+
+  return table;
+}
+
+function cloneA4PaginationMinimumListItemKeepNode(listItem: HTMLElement): HTMLElement {
+  const listItemClone = cloneA4PaginationListItemShell(listItem, false);
+  const firstUnit = getA4PaginationListItemUnits(listItem)[0];
+
+  if (firstUnit === undefined) {
+    return listItemClone;
+  }
+
+  if (firstUnit.kind === "node") {
+    listItemClone.append(firstUnit.node.cloneNode(true));
+    return listItemClone;
+  }
+
+  const nestedListClone = cloneA4PaginationListShell(firstUnit.list, false);
+  const nestedListItem = getA4PaginationListItems(firstUnit.list)[0];
+
+  if (nestedListItem !== undefined) {
+    nestedListClone.append(cloneA4PaginationMinimumListItemKeepNode(nestedListItem));
+  }
+
+  listItemClone.append(nestedListClone);
+
+  return listItemClone;
+}
+
+function cloneA4PaginationMinimumListKeepNode(element: HTMLElement): HTMLElement {
+  const list = cloneA4PaginationListShell(element, false);
+  const firstListItem = getA4PaginationListItems(element)[0];
+
+  if (firstListItem !== undefined) {
+    list.append(cloneA4PaginationMinimumListItemKeepNode(firstListItem));
+  }
+
+  return list;
+}
+
+function cloneA4PaginationMinimumPreKeepNode(element: HTMLElement): HTMLElement {
+  const pre = cloneA4PaginationElementShell(element);
+  const codeElement = getA4DirectCodeElement(element);
+  const code = codeElement === null ? document.createElement("code") : cloneA4PaginationElementShell(codeElement);
+  const firstCodeLine = splitA4CodeLines(codeElement?.textContent ?? element.textContent ?? "")[0];
+
+  if (firstCodeLine !== undefined) {
+    code.append(document.createTextNode(firstCodeLine));
+  }
+
+  pre.append(code);
+
+  return pre;
+}
+
+function cloneA4PaginationMinimumInlineKeepNode(element: HTMLElement): HTMLElement {
+  const inlineElement = cloneA4PaginationElementShell(element);
+  const firstUnit = getA4InlinePaginationUnits(element)[0];
+
+  if (firstUnit !== undefined) {
+    inlineElement.append(firstUnit.cloneNode(true));
+  }
+
+  return inlineElement;
+}
+
+function cloneA4PaginationMinimumKeepNode(node: Node): Node {
+  if (!(node instanceof HTMLElement)) {
+    return node.cloneNode(true);
+  }
+
+  const tagName = node.tagName.toLowerCase();
+
+  if (tagName === "table") {
+    return cloneA4PaginationMinimumTableKeepNode(node);
+  }
+
+  if (tagName === "ol" || tagName === "ul") {
+    return cloneA4PaginationMinimumListKeepNode(node);
+  }
+
+  if (tagName === "pre") {
+    return cloneA4PaginationMinimumPreKeepNode(node);
+  }
+
+  if (tagName === "p") {
+    return cloneA4PaginationMinimumInlineKeepNode(node);
+  }
+
+  return node.cloneNode(true);
+}
+
 function shouldMoveA4PaginationHeadingWithNext(
   context: A4PaginationContext,
   heading: HTMLElement,
@@ -517,7 +623,7 @@ function shouldMoveA4PaginationHeadingWithNext(
   }
 
   const headingClone = heading.cloneNode(true);
-  const nextNodeClone = nextNode.cloneNode(true);
+  const nextNodeClone = cloneA4PaginationMinimumKeepNode(nextNode);
 
   context.body.append(headingClone, nextNodeClone);
   const shouldMove = isA4PaginationPageOverflowing(context);
@@ -589,8 +695,321 @@ function appendSplitInlineElementToA4Pages(context: A4PaginationContext, element
   return true;
 }
 
+function addA4PaginationClassName(element: HTMLElement, className: string): void {
+  element.classList.add(className);
+}
+
+function hasA4PaginationDeepContent(node: Node): boolean {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return (node.textContent ?? "").trim().length > 0;
+  }
+
+  if (!(node instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (node instanceof HTMLImageElement || node.tagName.toLowerCase() === "br") {
+    return true;
+  }
+
+  return Array.from(node.childNodes).some((childNode) => hasA4PaginationDeepContent(childNode));
+}
+
+function removeA4PaginationElementIfEmpty(element: HTMLElement): void {
+  if (!hasA4PaginationDeepContent(element)) {
+    element.remove();
+  }
+}
+
+function isA4PaginationListElement(node: Node): node is HTMLElement {
+  return node instanceof HTMLElement && (node.tagName.toLowerCase() === "ol" || node.tagName.toLowerCase() === "ul");
+}
+
+function getA4PaginationListItems(element: HTMLElement): readonly HTMLElement[] {
+  return Array.from(element.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === "li",
+  );
+}
+
+function cloneA4PaginationListShell(element: HTMLElement, isContinuation: boolean): HTMLElement {
+  const list = cloneA4PaginationElementShell(element);
+
+  if (isContinuation) {
+    addA4PaginationClassName(list, "kmark-list-continuation");
+  }
+
+  return list;
+}
+
+function cloneA4PaginationListItemShell(element: HTMLElement, isContinuation: boolean): HTMLElement {
+  const listItem = cloneA4PaginationElementShell(element);
+
+  if (isContinuation) {
+    addA4PaginationClassName(listItem, "kmark-li-continuation");
+  }
+
+  return listItem;
+}
+
+type A4PaginationListAccess = {
+  readonly ensureCurrentList: () => HTMLElement;
+  readonly resetAfterPageBreak: () => void;
+  readonly startContinuationList: () => HTMLElement;
+};
+
+type A4PaginationListItemUnit =
+  | {
+    readonly kind: "list";
+    readonly list: HTMLElement;
+  }
+  | {
+    readonly kind: "node";
+    readonly node: Node;
+  };
+
+function getA4PaginationListItemUnits(listItem: HTMLElement): readonly A4PaginationListItemUnit[] {
+  return Array.from(listItem.childNodes).flatMap((node): A4PaginationListItemUnit[] => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return splitA4PaginationText(node.textContent ?? "").map((textNode) => ({
+        kind: "node",
+        node: textNode,
+      }));
+    }
+
+    if (isA4PaginationListElement(node)) {
+      return [{ kind: "list", list: node }];
+    }
+
+    if (isA4PaginationSplittableInlineElement(node)) {
+      return getA4InlinePaginationUnits(node).map((inlineNode) => ({
+        kind: "node",
+        node: inlineNode,
+      }));
+    }
+
+    return [{
+      kind: "node",
+      node: node.cloneNode(true),
+    }];
+  });
+}
+
+function appendA4PaginationNodeToListItem(
+  context: A4PaginationContext,
+  node: Node,
+  ensureCurrentListItem: () => HTMLElement,
+  startContinuationListItem: () => HTMLElement,
+  removeEmptyCurrentListItem: () => void,
+): void {
+  const currentListItem = ensureCurrentListItem();
+  const nodeClone = node.cloneNode(true);
+  currentListItem.append(nodeClone);
+
+  if (!isA4PaginationPageOverflowing(context)) {
+    return;
+  }
+
+  currentListItem.removeChild(nodeClone);
+
+  if (hasA4PaginationDeepContent(currentListItem)) {
+    commitA4PaginationPage(context);
+    startA4PaginationPage(context);
+    const continuationListItem = startContinuationListItem();
+    continuationListItem.append(nodeClone);
+
+    if (isA4PaginationPageOverflowing(context)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      removeEmptyCurrentListItem();
+    }
+    return;
+  }
+
+  removeEmptyCurrentListItem();
+
+  if (hasA4PaginationDeepContent(context.body)) {
+    commitA4PaginationPage(context);
+    startA4PaginationPage(context);
+    startContinuationListItem().append(nodeClone);
+
+    if (isA4PaginationPageOverflowing(context)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      removeEmptyCurrentListItem();
+    }
+    return;
+  }
+
+  ensureCurrentListItem().append(nodeClone);
+
+  if (isA4PaginationPageOverflowing(context)) {
+    commitA4PaginationPage(context);
+    startA4PaginationPage(context);
+    removeEmptyCurrentListItem();
+  }
+}
+
+function appendNestedListToA4ListItemPages(
+  context: A4PaginationContext,
+  nestedList: HTMLElement,
+  ensureCurrentListItem: () => HTMLElement,
+  startContinuationListItem: () => HTMLElement,
+  resetCurrentListItem: () => void,
+): boolean {
+  const nestedListItems = getA4PaginationListItems(nestedList);
+
+  if (nestedListItems.length === 0) {
+    return false;
+  }
+
+  let activeNestedList: HTMLElement | null = null;
+
+  const startNestedList = (isContinuation: boolean): HTMLElement => {
+    const parentListItem = isContinuation ? startContinuationListItem() : ensureCurrentListItem();
+    const nextNestedList = cloneA4PaginationListShell(nestedList, isContinuation);
+    parentListItem.append(nextNestedList);
+    activeNestedList = nextNestedList;
+    return nextNestedList;
+  };
+
+  const resetNestedListAfterPageBreak = (): void => {
+    activeNestedList = null;
+    resetCurrentListItem();
+  };
+
+  const removeEmptyNestedList = (): void => {
+    if (activeNestedList !== null && !hasA4PaginationDeepContent(activeNestedList)) {
+      const parentListItem = activeNestedList.parentElement;
+      activeNestedList.remove();
+      activeNestedList = null;
+
+      if (parentListItem instanceof HTMLElement) {
+        removeA4PaginationElementIfEmpty(parentListItem);
+      }
+    }
+  };
+
+  const nestedListAccess: A4PaginationListAccess = {
+    ensureCurrentList: () => activeNestedList ?? startNestedList(false),
+    resetAfterPageBreak: resetNestedListAfterPageBreak,
+    startContinuationList: () => {
+      activeNestedList = null;
+      return startNestedList(true);
+    },
+  };
+
+  for (const nestedListItem of nestedListItems) {
+    const currentNestedList = nestedListAccess.ensureCurrentList();
+    const nestedListItemClone = nestedListItem.cloneNode(true);
+    currentNestedList.append(nestedListItemClone);
+
+    if (!isA4PaginationPageOverflowing(context)) {
+      continue;
+    }
+
+    currentNestedList.removeChild(nestedListItemClone);
+
+    if (appendSplitListItemToA4Pages(context, nestedListItem, nestedListAccess)) {
+      continue;
+    }
+
+    if (hasA4PaginationDeepContent(currentNestedList)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      nestedListAccess.resetAfterPageBreak();
+      nestedListAccess.startContinuationList().append(nestedListItemClone);
+      continue;
+    }
+
+    removeEmptyNestedList();
+
+    if (hasA4PaginationDeepContent(context.body)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      nestedListAccess.resetAfterPageBreak();
+      nestedListAccess.startContinuationList().append(nestedListItemClone);
+      continue;
+    }
+
+    nestedListAccess.ensureCurrentList().append(nestedListItemClone);
+  }
+
+  return true;
+}
+
+function appendSplitListItemToA4Pages(
+  context: A4PaginationContext,
+  sourceListItem: HTMLElement,
+  listAccess: A4PaginationListAccess,
+): boolean {
+  const units = getA4PaginationListItemUnits(sourceListItem);
+
+  if (units.length === 0) {
+    return false;
+  }
+
+  let activeListItem: HTMLElement | null = null;
+
+  const startListItem = (isContinuation: boolean): HTMLElement => {
+    const list = isContinuation ? listAccess.startContinuationList() : listAccess.ensureCurrentList();
+    const nextListItem = cloneA4PaginationListItemShell(sourceListItem, isContinuation);
+    list.append(nextListItem);
+    activeListItem = nextListItem;
+    return nextListItem;
+  };
+
+  const ensureCurrentListItem = (): HTMLElement => activeListItem ?? startListItem(false);
+
+  const resetCurrentListItem = (): void => {
+    activeListItem = null;
+    listAccess.resetAfterPageBreak();
+  };
+
+  const startContinuationListItem = (): HTMLElement => {
+    activeListItem = null;
+    return startListItem(true);
+  };
+
+  const removeEmptyCurrentListItem = (): void => {
+    if (activeListItem === null) {
+      return;
+    }
+
+    const parentList = activeListItem.parentElement;
+    removeA4PaginationElementIfEmpty(activeListItem);
+    activeListItem = null;
+
+    if (parentList instanceof HTMLElement) {
+      removeA4PaginationElementIfEmpty(parentList);
+    }
+  };
+
+  for (const unit of units) {
+    if (unit.kind === "list") {
+      appendNestedListToA4ListItemPages(
+        context,
+        unit.list,
+        ensureCurrentListItem,
+        startContinuationListItem,
+        resetCurrentListItem,
+      );
+      continue;
+    }
+
+    appendA4PaginationNodeToListItem(
+      context,
+      unit.node,
+      ensureCurrentListItem,
+      startContinuationListItem,
+      removeEmptyCurrentListItem,
+    );
+  }
+
+  return true;
+}
+
 function appendSplitListElementToA4Pages(context: A4PaginationContext, element: HTMLElement): boolean {
-  const listItems = Array.from(element.children).filter((child) => child.tagName.toLowerCase() === "li");
+  const listItems = getA4PaginationListItems(element);
 
   if (listItems.length === 0) {
     return false;
@@ -598,15 +1017,26 @@ function appendSplitListElementToA4Pages(context: A4PaginationContext, element: 
 
   let activeList: HTMLElement | null = null;
 
-  const startList = (): HTMLElement => {
-    const nextList = cloneA4PaginationElementShell(element);
+  const startList = (isContinuation: boolean): HTMLElement => {
+    const nextList = cloneA4PaginationListShell(element, isContinuation);
     context.body.append(nextList);
     activeList = nextList;
     return nextList;
   };
 
+  const listAccess: A4PaginationListAccess = {
+    ensureCurrentList: () => activeList ?? startList(false),
+    resetAfterPageBreak: () => {
+      activeList = null;
+    },
+    startContinuationList: () => {
+      activeList = null;
+      return startList(true);
+    },
+  };
+
   for (const listItem of listItems) {
-    const currentList = activeList ?? startList();
+    const currentList = listAccess.ensureCurrentList();
     const listItemClone = listItem.cloneNode(true);
     currentList.append(listItemClone);
 
@@ -616,36 +1046,43 @@ function appendSplitListElementToA4Pages(context: A4PaginationContext, element: 
 
     currentList.removeChild(listItemClone);
 
+    if (appendSplitListItemToA4Pages(context, listItem, listAccess)) {
+      continue;
+    }
+
     if (hasA4PaginationContent(currentList)) {
       commitA4PaginationPage(context);
       startA4PaginationPage(context);
-      startList().append(listItemClone);
+      listAccess.resetAfterPageBreak();
+      listAccess.startContinuationList().append(listItemClone);
       if (isA4PaginationPageOverflowing(context)) {
         commitA4PaginationPage(context);
         startA4PaginationPage(context);
-        activeList = null;
+        listAccess.resetAfterPageBreak();
       }
       continue;
     }
 
     currentList.remove();
+    listAccess.resetAfterPageBreak();
 
-    if (hasA4PaginationContent(context.body)) {
+    if (hasA4PaginationDeepContent(context.body)) {
       commitA4PaginationPage(context);
       startA4PaginationPage(context);
-      startList().append(listItemClone);
+      listAccess.resetAfterPageBreak();
+      listAccess.startContinuationList().append(listItemClone);
       if (isA4PaginationPageOverflowing(context)) {
         commitA4PaginationPage(context);
         startA4PaginationPage(context);
-        activeList = null;
+        listAccess.resetAfterPageBreak();
       }
       continue;
     }
 
-    startList().append(listItemClone);
+    listAccess.ensureCurrentList().append(listItemClone);
     commitA4PaginationPage(context);
     startA4PaginationPage(context);
-    activeList = null;
+    listAccess.resetAfterPageBreak();
   }
 
   return true;
