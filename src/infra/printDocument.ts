@@ -168,7 +168,6 @@ const A4_PRINT_DOCUMENT_STYLE = `
     position: relative;
     width: ${A4_PAGE_WIDTH_MM}mm;
     height: ${A4_PAGE_HEIGHT_MM}mm;
-    min-height: ${A4_PAGE_HEIGHT_MM}mm;
     margin: 0;
     padding: ${A4_MARGIN_TOP_MM}mm ${A4_MARGIN_RIGHT_MM}mm ${A4_MARGIN_BOTTOM_MM}mm ${A4_MARGIN_LEFT_MM}mm;
     box-sizing: border-box;
