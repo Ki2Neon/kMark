@@ -17,6 +17,19 @@ struct MarkdownPageSegment<'a> {
     line_offset: usize,
 }
 
+#[derive(Clone, Copy)]
+struct MarkdownLineSpan {
+    start: usize,
+    content_end: usize,
+    end: usize,
+}
+
+#[derive(Clone, Copy)]
+struct MarkdownFence {
+    marker: char,
+    length: usize,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum TableSection {
     Head,
@@ -235,31 +248,46 @@ fn markdown_options() -> Options {
 fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
     let mut page_segments = Vec::new();
     let mut last_index = 0;
-    let mut line_offset = 0;
-    let mut search_index = 0;
+    let mut line_offset = 0usize;
+    let mut active_fence = None;
+    let mut is_inside_html_comment_block = false;
 
-    while let Some(open_offset) = content[search_index..].find(PAGE_BREAK_TOKEN_OPEN) {
-        let token_start = search_index + open_offset;
-        let token_body_start = token_start + PAGE_BREAK_TOKEN_OPEN.len();
-        let Some(close_offset) = content[token_body_start..].find(PAGE_BREAK_TOKEN_CLOSE) else {
-            break;
-        };
-        let token_end = token_body_start + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
-        let token = &content[token_start..token_end];
+    for (line_index, line_span) in collect_markdown_line_spans(content).into_iter().enumerate() {
+        let line = &content[line_span.start..line_span.content_end];
 
-        if is_page_break_token(token) {
-            let page_content = &content[last_index..token_start];
+        if is_inside_html_comment_block {
+            if line.contains(PAGE_BREAK_TOKEN_CLOSE) {
+                is_inside_html_comment_block = false;
+            }
+            continue;
+        }
 
+        if let Some(fence) = active_fence {
+            if is_markdown_fence_close(line, fence) {
+                active_fence = None;
+            }
+            continue;
+        }
+
+        if let Some(fence) = parse_markdown_fence_open(line) {
+            active_fence = Some(fence);
+            continue;
+        }
+
+        if is_page_break_line(line) {
             page_segments.push(MarkdownPageSegment {
-                content: page_content,
+                content: &content[last_index..line_span.start],
                 line_offset,
             });
 
-            line_offset += count_line_breaks(page_content) + count_line_breaks(token);
-            last_index = token_end;
+            last_index = line_span.end;
+            line_offset = line_index + 1;
+            continue;
         }
 
-        search_index = token_end;
+        if is_unclosed_html_comment_line(line) {
+            is_inside_html_comment_block = true;
+        }
     }
 
     page_segments.push(MarkdownPageSegment {
@@ -268,6 +296,105 @@ fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
     });
 
     page_segments
+}
+
+fn collect_markdown_line_spans(content: &str) -> Vec<MarkdownLineSpan> {
+    let mut line_spans = Vec::new();
+    let mut start = 0;
+    let bytes = content.as_bytes();
+
+    while start < content.len() {
+        let mut end = start;
+
+        while end < content.len() && bytes[end] != b'\n' {
+            end += 1;
+        }
+
+        let mut content_end = end;
+        if content_end > start && bytes[content_end - 1] == b'\r' {
+            content_end -= 1;
+        }
+
+        let line_end = if end < content.len() { end + 1 } else { end };
+
+        line_spans.push(MarkdownLineSpan {
+            start,
+            content_end,
+            end: line_end,
+        });
+
+        start = line_end;
+    }
+
+    line_spans
+}
+
+fn strip_markdown_fence_indent(line: &str) -> Option<&str> {
+    let indent_width = line
+        .chars()
+        .take_while(|character| *character == ' ')
+        .count();
+
+    if indent_width > 3 {
+        return None;
+    }
+
+    Some(&line[indent_width..])
+}
+
+fn parse_markdown_fence_open(line: &str) -> Option<MarkdownFence> {
+    let rest = strip_markdown_fence_indent(line)?;
+    let marker = rest.chars().next()?;
+
+    if marker != '`' && marker != '~' {
+        return None;
+    }
+
+    let length = rest
+        .chars()
+        .take_while(|character| *character == marker)
+        .count();
+    if length < 3 {
+        return None;
+    }
+
+    let info = &rest[marker.len_utf8() * length..];
+    if marker == '`' && info.contains('`') {
+        return None;
+    }
+
+    Some(MarkdownFence { marker, length })
+}
+
+fn is_markdown_fence_close(line: &str, fence: MarkdownFence) -> bool {
+    let Some(rest) = strip_markdown_fence_indent(line) else {
+        return false;
+    };
+
+    let length = rest
+        .chars()
+        .take_while(|character| *character == fence.marker)
+        .count();
+
+    length >= fence.length && rest[fence.marker.len_utf8() * length..].trim().is_empty()
+}
+
+fn is_page_break_line(line: &str) -> bool {
+    let Some(remainder) = line.strip_prefix(PAGE_BREAK_TOKEN_OPEN) else {
+        return false;
+    };
+    let Some(close_offset) = remainder.find(PAGE_BREAK_TOKEN_CLOSE) else {
+        return false;
+    };
+
+    let token_end = PAGE_BREAK_TOKEN_OPEN.len() + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
+    let token = &line[..token_end];
+
+    is_page_break_token(token) && line[token_end..].trim().is_empty()
+}
+
+fn is_unclosed_html_comment_line(line: &str) -> bool {
+    line.starts_with(PAGE_BREAK_TOKEN_OPEN) && !line.contains(PAGE_BREAK_TOKEN_CLOSE)
 }
 
 impl<'a> HtmlEmitter<'a> {
@@ -1282,28 +1409,28 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
-        resolve_line_number(&self.line_starts, range.start)
+        resolve_line_number(&self.line_starts, range.start) + self.line_offset
     }
 
     fn resolve_range_end_line(&self, range: Range<usize>) -> usize {
         if self.content.is_empty() {
-            return 0;
+            return self.line_offset;
         }
 
         let end_offset = range
             .end
             .saturating_sub(1)
             .min(self.content.len().saturating_sub(1));
-        resolve_line_number(&self.line_starts, end_offset)
+        resolve_line_number(&self.line_starts, end_offset) + self.line_offset
     }
 
     fn resolve_offset_line(&self, offset: usize) -> usize {
         if self.content.is_empty() {
-            return 0;
+            return self.line_offset;
         }
 
         let bounded_offset = offset.min(self.content.len().saturating_sub(1));
-        resolve_line_number(&self.line_starts, bounded_offset)
+        resolve_line_number(&self.line_starts, bounded_offset) + self.line_offset
     }
 }
 
@@ -1654,10 +1781,6 @@ fn is_page_break_token(text: &str) -> bool {
         && text.ends_with(PAGE_BREAK_TOKEN_CLOSE)
         && text[PAGE_BREAK_TOKEN_OPEN.len()..text.len() - PAGE_BREAK_TOKEN_CLOSE.len()].trim()
             == "---"
-}
-
-fn count_line_breaks(text: &str) -> usize {
-    text.chars().filter(|character| *character == '\n').count()
 }
 
 fn is_pending_kmark_target_event(event: &Event<'static>) -> bool {
@@ -2251,6 +2374,40 @@ mod tests {
                 "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p>",
                 "<ul><li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li></ul>",
             ]
+        );
+    }
+
+    #[test]
+    fn ignores_page_break_markers_outside_first_column_standalone_line() {
+        let rendered_preview = render_markdown_preview(
+            "text <!-- --- --> text\n- <!-- --- -->\n  <!-- --- -->\n> <!-- --- -->\n`<!-- --- -->`\n<!-- --- --> text\nlast",
+        );
+
+        assert_eq!(rendered_preview.page_htmls.len(), 1);
+        assert!(rendered_preview.html.contains("text"));
+        assert!(rendered_preview.html.contains("last"));
+    }
+
+    #[test]
+    fn ignores_page_break_markers_inside_fenced_code_blocks() {
+        let rendered_preview = render_markdown_preview("before\n```html\n<!-- --- -->\n```\nafter");
+
+        assert_eq!(rendered_preview.page_htmls.len(), 1);
+        assert!(rendered_preview.html.contains("&lt;!-- --- --&gt;"));
+    }
+
+    #[test]
+    fn accepts_first_column_standalone_page_break_with_trailing_space() {
+        let rendered_preview = render_markdown_preview("before\n<!-- --- -->   \nafter");
+
+        assert_eq!(rendered_preview.page_htmls.len(), 2);
+        assert_eq!(
+            rendered_preview.page_htmls[0],
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">before</p>"
+        );
+        assert_eq!(
+            rendered_preview.page_htmls[1],
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\">after</p>"
         );
     }
 
