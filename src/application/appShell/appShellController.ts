@@ -24,6 +24,7 @@ export class AppShellController {
       appThemeId: documentTheme.appThemeId,
       editFontFamily: this.#documentThemeResolver.resolveEditFontFamily(documentTheme.editFontId),
       editFontSizePx: documentTheme.editFontSizePx,
+      systemFontSizePx: documentTheme.systemFontSizePx,
       previewUsesAppThemeColors: documentTheme.previewUsesAppThemeColors,
     });
   }

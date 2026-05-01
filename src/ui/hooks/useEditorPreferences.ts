@@ -9,6 +9,7 @@ import {
   type EditorPreferences,
   type MultiCursorModifier,
   type StartupEditMode,
+  type SystemFontSizePx,
 } from "../../domain/editorPreferences";
 
 type UseEditorPreferencesOptions = {
@@ -132,6 +133,20 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
     });
   }, [controller]);
 
+  const handleSystemFontSizeChange = useCallback((systemFontSizePx: SystemFontSizePx) => {
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeSystemFontSize(currentPreferences, systemFontSizePx);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
+  }, [controller]);
+
   const handleShowLineNumbersChange = useCallback((showLineNumbers: boolean) => {
     setEditorPreferences((currentPreferences) => {
       const nextPreferences = controller.changeShowLineNumbers(currentPreferences, showLineNumbers);
@@ -186,10 +201,12 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
     multiCursorModifier: editorPreferences.multiCursorModifier,
     showLineNumbers: editorPreferences.showLineNumbers,
     startupEditMode: editorPreferences.startupEditMode,
+    systemFontSizePx: editorPreferences.systemFontSizePx,
     windowsStartupTrayResidentEnabled: editorPreferences.windowsStartupTrayResidentEnabled,
     onAppFontChange: handleAppFontChange,
     onEditFontChange: handleEditFontChange,
     onEditFontSizeChange: handleEditFontSizeChange,
+    onSystemFontSizeChange: handleSystemFontSizeChange,
     onMultiCursorModifierChange: handleMultiCursorModifierChange,
     onShowLineNumbersChange: handleShowLineNumbersChange,
     onStartupEditModeChange: handleStartupEditModeChange,

@@ -20,6 +20,7 @@ function App() {
     multiCursorModifier,
     showLineNumbers,
     startupEditMode,
+    systemFontSizePx,
     windowsStartupTrayResidentEnabled,
     isReady: isEditorPreferencesReady,
     onAppFontChange,
@@ -28,6 +29,7 @@ function App() {
     onMultiCursorModifierChange,
     onShowLineNumbersChange,
     onStartupEditModeChange,
+    onSystemFontSizeChange,
     onWindowsStartupTrayResidentChange,
   } = useEditorPreferences();
   useAppShell({
@@ -35,6 +37,7 @@ function App() {
     appThemeId,
     editFontId,
     editFontSizePx,
+    systemFontSizePx,
     previewUsesAppThemeColors,
   });
 
@@ -52,6 +55,7 @@ function App() {
       multiCursorModifier={multiCursorModifier}
       showLineNumbers={showLineNumbers}
       startupEditMode={startupEditMode}
+      systemFontSizePx={systemFontSizePx}
       windowsStartupTrayResidentEnabled={windowsStartupTrayResidentEnabled}
       onAppFontChange={onAppFontChange}
       onAppThemeChange={onAppThemeChange}
@@ -61,6 +65,7 @@ function App() {
       onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
       onShowLineNumbersChange={onShowLineNumbersChange}
       onStartupEditModeChange={onStartupEditModeChange}
+      onSystemFontSizeChange={onSystemFontSizeChange}
       onWindowsStartupTrayResidentChange={onWindowsStartupTrayResidentChange}
       previewUsesAppThemeColors={previewUsesAppThemeColors}
     />

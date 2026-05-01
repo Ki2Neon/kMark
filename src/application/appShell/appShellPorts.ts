@@ -1,4 +1,9 @@
-import { type AppFontId, type EditFontId, type EditFontSizePx } from "../../domain/editorPreferences";
+import {
+  type AppFontId,
+  type EditFontId,
+  type EditFontSizePx,
+  type SystemFontSizePx,
+} from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 export type AppShellDocumentTheme = {
@@ -6,6 +11,7 @@ export type AppShellDocumentTheme = {
   readonly appThemeId: AppThemeId;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
+  readonly systemFontSizePx: SystemFontSizePx;
   readonly previewUsesAppThemeColors: boolean;
 };
 
@@ -20,6 +26,7 @@ export type AppDocumentThemeGateway = {
     readonly appThemeId: AppThemeId;
     readonly editFontFamily: string;
     readonly editFontSizePx: EditFontSizePx;
+    readonly systemFontSizePx: SystemFontSizePx;
     readonly previewUsesAppThemeColors: boolean;
   }): void;
 };

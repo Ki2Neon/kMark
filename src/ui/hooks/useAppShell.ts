@@ -2,7 +2,12 @@ import { useLayoutEffect, useRef } from "react";
 import { createBrowserDocumentThemeGateway } from "../../adapters/browser/browserDocumentThemeGateway";
 import { createBrowserDocumentThemeResolver } from "../../adapters/browser/browserDocumentThemeResolver";
 import { AppShellController } from "../../application/appShell/appShellController";
-import { type AppFontId, type EditFontId, type EditFontSizePx } from "../../domain/editorPreferences";
+import {
+  type AppFontId,
+  type EditFontId,
+  type EditFontSizePx,
+  type SystemFontSizePx,
+} from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 
 type UseAppShellThemeOptions = {
@@ -10,6 +15,7 @@ type UseAppShellThemeOptions = {
   readonly appThemeId: AppThemeId;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
+  readonly systemFontSizePx: SystemFontSizePx;
   readonly previewUsesAppThemeColors: boolean;
 };
 
@@ -31,6 +37,7 @@ export function useAppShell({
   appThemeId,
   editFontId,
   editFontSizePx,
+  systemFontSizePx,
   previewUsesAppThemeColors,
 }: UseAppShellThemeOptions) {
   const controller = useAppShellController();
@@ -41,7 +48,8 @@ export function useAppShell({
       appThemeId,
       editFontId,
       editFontSizePx,
+      systemFontSizePx,
       previewUsesAppThemeColors,
     });
-  }, [appFontId, appThemeId, controller, editFontId, editFontSizePx, previewUsesAppThemeColors]);
+  }, [appFontId, appThemeId, controller, editFontId, editFontSizePx, previewUsesAppThemeColors, systemFontSizePx]);
 }

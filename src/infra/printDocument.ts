@@ -3,6 +3,8 @@ import {
   A4_MARGIN_LEFT_MM,
   A4_MARGIN_RIGHT_MM,
   A4_MARGIN_TOP_MM,
+  A4_PAGE_HEIGHT_MM,
+  A4_PAGE_WIDTH_MM,
   type PreviewDisplayMode,
 } from "../domain/preview";
 
@@ -132,7 +134,7 @@ const STANDARD_PRINT_DOCUMENT_STYLE = `
 const A4_PRINT_DOCUMENT_STYLE = `
   @page {
     size: A4 portrait;
-    margin: ${A4_MARGIN_TOP_MM}mm ${A4_MARGIN_RIGHT_MM}mm ${A4_MARGIN_BOTTOM_MM}mm ${A4_MARGIN_LEFT_MM}mm;
+    margin: 0;
   }
 
   ${PRINT_DOCUMENT_BASE_STYLE}
@@ -141,9 +143,33 @@ const A4_PRINT_DOCUMENT_STYLE = `
     background: #ffffff;
   }
 
+  .preview-section__page-scale {
+    width: auto;
+    height: auto;
+    transform: none;
+  }
+
+  .preview-section__page-frame {
+    width: ${A4_PAGE_WIDTH_MM}mm;
+    height: ${A4_PAGE_HEIGHT_MM}mm;
+    padding: ${A4_MARGIN_TOP_MM}mm ${A4_MARGIN_RIGHT_MM}mm ${A4_MARGIN_BOTTOM_MM}mm ${A4_MARGIN_LEFT_MM}mm;
+    box-sizing: border-box;
+    background: #ffffff;
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
+    transform: none;
+  }
+
+  .preview-section__page-scale:last-child .preview-section__page-frame {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
   .markdown-body--a4 {
-    min-height: calc(297mm - ${A4_MARGIN_TOP_MM + A4_MARGIN_BOTTOM_MM}mm);
+    min-height: 100%;
     padding: 0;
+    overflow: hidden;
     orphans: 3;
     widows: 3;
   }
@@ -173,16 +199,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
   }
 
   .print-page {
-    min-height: 0;
-  }
-
-  .print-page-break {
-    break-after: page;
-    page-break-after: always;
-  }
-
-  .print-page-break:last-child {
-    display: none;
+    min-height: 100%;
   }
 `;
 
@@ -201,9 +218,12 @@ function createA4PrintDocumentBodyMarkup(options: PrintMarkdownDocumentOptions):
     : [options.html];
 
   const pageMarkup = pageHtmls
-    .map((pageHtml, index) => `
-      <article class="markdown-body markdown-body--a4 print-page">${pageHtml}</article>
-      ${index < pageHtmls.length - 1 ? '<div class="print-page-break"></div>' : ""}
+    .map((pageHtml) => `
+      <div class="preview-section__page-scale">
+        <div class="preview-section__page-frame">
+          <article class="markdown-body markdown-body--a4 print-page">${pageHtml}</article>
+        </div>
+      </div>
     `)
     .join("");
 

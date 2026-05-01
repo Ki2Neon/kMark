@@ -1,19 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import {
-  A4_MARGIN_BOTTOM_MM,
-  A4_MARGIN_LEFT_MM,
-  A4_MARGIN_RIGHT_MM,
-  A4_MARGIN_TOP_MM,
-  A4_PAGE_HEIGHT_PX,
-  A4_PAGE_WIDTH_PX,
-  CSS_MM_TO_PX,
-  type PreviewDisplayMode,
-} from "../../domain/preview";
+import { A4_PAGE_HEIGHT_MM, A4_PAGE_WIDTH_MM, CSS_MM_TO_PX, type PreviewDisplayMode } from "../../domain/preview";
 
-const A4_MARGIN_TOP_PX = A4_MARGIN_TOP_MM * CSS_MM_TO_PX;
-const A4_MARGIN_RIGHT_PX = A4_MARGIN_RIGHT_MM * CSS_MM_TO_PX;
-const A4_MARGIN_BOTTOM_PX = A4_MARGIN_BOTTOM_MM * CSS_MM_TO_PX;
-const A4_MARGIN_LEFT_PX = A4_MARGIN_LEFT_MM * CSS_MM_TO_PX;
+const A4_PAGE_WIDTH_FOR_FIT_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
 const MIN_A4_SCALE = 0.1;
 const DEFAULT_MAX_PREVIEW_ZOOM_SCALE = 2;
 const INTERACTIVE_PREVIEW_PAN_THRESHOLD_PX = 3;
@@ -485,24 +473,11 @@ function MarkdownPreviewComponent({
     [displayMode, effectiveA4Scale, normalizedZoomScale],
   );
 
-  const a4PageFrameStyle = useMemo(
+  const a4PageScaleStyle = useMemo(
     () => ({
-      width: `${A4_PAGE_WIDTH_PX * effectiveA4Scale}px`,
-      minHeight: `${A4_PAGE_HEIGHT_PX * effectiveA4Scale}px`,
-    } as CSSProperties),
-    [effectiveA4Scale],
-  );
-
-  const a4PageStyle = useMemo(
-    () => ({
-      width: `${A4_PAGE_WIDTH_PX}px`,
-      minHeight: `${A4_PAGE_HEIGHT_PX}px`,
-      padding: `${A4_MARGIN_TOP_PX}px ${A4_MARGIN_RIGHT_PX}px ${A4_MARGIN_BOTTOM_PX}px ${A4_MARGIN_LEFT_PX}px`,
-      position: "relative",
-      top: 0,
-      left: 0,
-      overflow: "visible",
-      zoom: effectiveA4Scale,
+      "--a4-scale": effectiveA4Scale,
+      width: `${A4_PAGE_WIDTH_MM * effectiveA4Scale}mm`,
+      height: `${A4_PAGE_HEIGHT_MM * effectiveA4Scale}mm`,
     } as CSSProperties),
     [effectiveA4Scale],
   );
@@ -531,7 +506,7 @@ function MarkdownPreviewComponent({
       const availableWidth = Math.max(0, previewBody.clientWidth - paddingX);
       const nextScale = Math.max(
         MIN_A4_SCALE,
-        availableWidth / A4_PAGE_WIDTH_PX,
+        availableWidth / A4_PAGE_WIDTH_FOR_FIT_PX,
       );
 
       setA4FitScale((currentScale) => (Math.abs(currentScale - nextScale) < 0.001 ? currentScale : nextScale));
@@ -822,12 +797,13 @@ function MarkdownPreviewComponent({
         >
           <div className="preview-section__page-stack">
             {normalizedPageHtmls.map((pageHtml, index) => (
-              <div key={`${index}-${pageHtml.length}`} className="preview-section__page-frame" style={a4PageFrameStyle}>
-                <article
-                  className="preview-section__page markdown-body markdown-body--a4"
-                  style={a4PageStyle}
-                  dangerouslySetInnerHTML={{ __html: pageHtml }}
-                />
+              <div key={`${index}-${pageHtml.length}`} className="preview-section__page-scale" style={a4PageScaleStyle}>
+                <div className="preview-section__page-frame">
+                  <article
+                    className="preview-section__page markdown-body markdown-body--a4"
+                    dangerouslySetInnerHTML={{ __html: pageHtml }}
+                  />
+                </div>
               </div>
             ))}
           </div>

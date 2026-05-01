@@ -8,6 +8,8 @@ export type EditFontId = string;
 
 export type EditFontSizePx = number;
 
+export type SystemFontSizePx = number;
+
 export type MultiCursorModifierOption = {
   readonly id: MultiCursorModifier;
   readonly label: string;
@@ -31,6 +33,7 @@ export type EditFontOption = {
 export type EditorPreferences = {
   readonly appFontId: AppFontId;
   readonly editFontId: EditFontId;
+  readonly systemFontSizePx: SystemFontSizePx;
   readonly editFontSizePx: EditFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
@@ -43,6 +46,12 @@ export const DEFAULT_EDIT_FONT_SIZE_PX = 15;
 export const MIN_EDIT_FONT_SIZE_PX = 10;
 
 export const MAX_EDIT_FONT_SIZE_PX = 36;
+
+export const DEFAULT_SYSTEM_FONT_SIZE_PX = 16;
+
+export const MIN_SYSTEM_FONT_SIZE_PX = 11;
+
+export const MAX_SYSTEM_FONT_SIZE_PX = 24;
 
 
 export const MULTI_CURSOR_MODIFIER_OPTIONS: readonly MultiCursorModifierOption[] = [

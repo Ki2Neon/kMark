@@ -72,6 +72,8 @@ impl From<&DesktopLayoutPreferences> for DesktopLayoutPreferencesPayload {
 pub struct EditorPreferencesPayload {
     pub app_font_id: String,
     pub edit_font_id: String,
+    #[serde(default = "default_system_font_size_px")]
+    pub system_font_size_px: u32,
     pub edit_font_size_px: u32,
     pub multi_cursor_modifier: String,
     pub show_line_numbers: bool,
@@ -84,6 +86,7 @@ impl From<EditorPreferencesPayload> for EditorPreferences {
         EditorPreferences::new(
             Some(&payload.app_font_id),
             Some(&payload.edit_font_id),
+            Some(payload.system_font_size_px),
             Some(payload.edit_font_size_px),
             Some(&payload.multi_cursor_modifier),
             Some(payload.show_line_numbers),
@@ -98,6 +101,7 @@ impl From<&EditorPreferences> for EditorPreferencesPayload {
         Self {
             app_font_id: editor_preferences.app_font_id().to_owned(),
             edit_font_id: editor_preferences.edit_font_id().to_owned(),
+            system_font_size_px: editor_preferences.system_font_size_px(),
             edit_font_size_px: editor_preferences.edit_font_size_px(),
             multi_cursor_modifier: editor_preferences
                 .multi_cursor_modifier()
@@ -109,6 +113,10 @@ impl From<&EditorPreferences> for EditorPreferencesPayload {
                 .windows_startup_tray_resident_enabled(),
         }
     }
+}
+
+fn default_system_font_size_px() -> u32 {
+    kmark_core::DEFAULT_SYSTEM_FONT_SIZE_PX
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

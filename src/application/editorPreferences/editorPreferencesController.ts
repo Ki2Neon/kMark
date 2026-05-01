@@ -5,6 +5,7 @@ import {
   type EditorPreferences,
   type MultiCursorModifier,
   type StartupEditMode,
+  type SystemFontSizePx,
 } from "../../domain/editorPreferences";
 import {
   type EditorPreferencesGateway,
@@ -96,6 +97,25 @@ export class EditorPreferencesController {
     return this.#preferencesGateway.normalize({
       ...currentPreferences,
       editFontSizePx: nextEditFontSizePx,
+    });
+  }
+
+  changeSystemFontSize(
+    currentPreferences: EditorPreferences,
+    systemFontSizePx: SystemFontSizePx,
+  ): EditorPreferences {
+    const nextSystemFontSizePx = this.#preferencesGateway.normalize({
+      ...currentPreferences,
+      systemFontSizePx,
+    }).systemFontSizePx;
+
+    if (currentPreferences.systemFontSizePx === nextSystemFontSizePx) {
+      return currentPreferences;
+    }
+
+    return this.#preferencesGateway.normalize({
+      ...currentPreferences,
+      systemFontSizePx: nextSystemFontSizePx,
     });
   }
 

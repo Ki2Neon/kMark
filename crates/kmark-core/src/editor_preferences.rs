@@ -1,6 +1,9 @@
 pub type AppFontId = String;
 pub type EditFontId = String;
 
+pub const DEFAULT_SYSTEM_FONT_SIZE_PX: u32 = 16;
+pub const MIN_SYSTEM_FONT_SIZE_PX: u32 = 11;
+pub const MAX_SYSTEM_FONT_SIZE_PX: u32 = 24;
 pub const DEFAULT_EDIT_FONT_SIZE_PX: u32 = 15;
 pub const MIN_EDIT_FONT_SIZE_PX: u32 = 10;
 pub const MAX_EDIT_FONT_SIZE_PX: u32 = 36;
@@ -8,8 +11,7 @@ pub const MAX_EDIT_FONT_SIZE_PX: u32 = 36;
 const DEFAULT_APP_FONT_ID: &str = "Aptos";
 const DEFAULT_EDIT_FONT_ID: &str = "Iosevka Term";
 const DEFAULT_APP_FONT_FAMILY: &str = "\"Aptos\", \"Segoe UI Variable\", \"Segoe UI\", sans-serif";
-const DEFAULT_EDIT_FONT_FAMILY: &str =
-    "\"Iosevka Term\", \"Cascadia Code\", Consolas, monospace";
+const DEFAULT_EDIT_FONT_FAMILY: &str = "\"Iosevka Term\", \"Cascadia Code\", Consolas, monospace";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MultiCursorModifier {
@@ -76,6 +78,7 @@ impl StartupEditMode {
 pub struct EditorPreferences {
     app_font_id: AppFontId,
     edit_font_id: EditFontId,
+    system_font_size_px: u32,
     edit_font_size_px: u32,
     multi_cursor_modifier: MultiCursorModifier,
     show_line_numbers: bool,
@@ -88,6 +91,7 @@ impl Default for EditorPreferences {
         Self {
             app_font_id: DEFAULT_APP_FONT_ID.to_owned(),
             edit_font_id: DEFAULT_EDIT_FONT_ID.to_owned(),
+            system_font_size_px: DEFAULT_SYSTEM_FONT_SIZE_PX,
             edit_font_size_px: DEFAULT_EDIT_FONT_SIZE_PX,
             multi_cursor_modifier: MultiCursorModifier::Alt,
             show_line_numbers: false,
@@ -102,6 +106,7 @@ impl EditorPreferences {
     pub fn new(
         app_font_id: Option<&str>,
         edit_font_id: Option<&str>,
+        system_font_size_px: Option<u32>,
         edit_font_size_px: Option<u32>,
         multi_cursor_modifier: Option<&str>,
         show_line_numbers: Option<bool>,
@@ -111,21 +116,32 @@ impl EditorPreferences {
         let defaults = Self::default();
 
         Self {
-            app_font_id: normalize_font_id(app_font_id, DEFAULT_APP_FONT_ID, &[
-                ("aptos", "Aptos"),
-                ("segoe-ui", "Segoe UI"),
-                ("yu-gothic", "Yu Gothic UI"),
-                ("meiryo", "Meiryo"),
-                ("biz-udp", "BIZ UDPGothic"),
-            ]),
-            edit_font_id: normalize_font_id(edit_font_id, DEFAULT_EDIT_FONT_ID, &[
-                ("iosevka", "Iosevka Term"),
-                ("cascadia", "Cascadia Code"),
-                ("consolas", "Consolas"),
-                ("aptos", "Aptos"),
-                ("yu-gothic", "Yu Gothic UI"),
-                ("meiryo", "Meiryo"),
-            ]),
+            app_font_id: normalize_font_id(
+                app_font_id,
+                DEFAULT_APP_FONT_ID,
+                &[
+                    ("aptos", "Aptos"),
+                    ("segoe-ui", "Segoe UI"),
+                    ("yu-gothic", "Yu Gothic UI"),
+                    ("meiryo", "Meiryo"),
+                    ("biz-udp", "BIZ UDPGothic"),
+                ],
+            ),
+            edit_font_id: normalize_font_id(
+                edit_font_id,
+                DEFAULT_EDIT_FONT_ID,
+                &[
+                    ("iosevka", "Iosevka Term"),
+                    ("cascadia", "Cascadia Code"),
+                    ("consolas", "Consolas"),
+                    ("aptos", "Aptos"),
+                    ("yu-gothic", "Yu Gothic UI"),
+                    ("meiryo", "Meiryo"),
+                ],
+            ),
+            system_font_size_px: clamp_system_font_size_px(
+                system_font_size_px.unwrap_or(defaults.system_font_size_px),
+            ),
             edit_font_size_px: clamp_edit_font_size_px(
                 edit_font_size_px.unwrap_or(defaults.edit_font_size_px),
             ),
@@ -147,6 +163,10 @@ impl EditorPreferences {
 
     pub fn edit_font_id(&self) -> &str {
         &self.edit_font_id
+    }
+
+    pub fn system_font_size_px(&self) -> u32 {
+        self.system_font_size_px
     }
 
     pub fn edit_font_size_px(&self) -> u32 {
@@ -183,7 +203,10 @@ pub fn resolve_app_font_family(app_font_id: &str) -> String {
                 "segoe ui variable",
                 "\"Segoe UI Variable\", \"Segoe UI\", sans-serif",
             ),
-            ("yu gothic ui", "\"Yu Gothic UI\", \"Yu Gothic\", sans-serif"),
+            (
+                "yu gothic ui",
+                "\"Yu Gothic UI\", \"Yu Gothic\", sans-serif",
+            ),
             ("meiryo", "\"Meiryo\", sans-serif"),
             (
                 "biz udpgothic",
@@ -194,7 +217,10 @@ pub fn resolve_app_font_family(app_font_id: &str) -> String {
                 "\"BIZ UDPGothic\", \"Yu Gothic UI\", sans-serif",
             ),
             ("noto sans jp", "\"Noto Sans JP\", sans-serif"),
-            ("inter", "Inter, \"Segoe UI Variable\", \"Segoe UI\", sans-serif"),
+            (
+                "inter",
+                "Inter, \"Segoe UI Variable\", \"Segoe UI\", sans-serif",
+            ),
             ("sans-serif", "sans-serif"),
             ("serif", "serif"),
             ("monospace", "monospace"),
@@ -211,7 +237,10 @@ pub fn resolve_edit_font_family(edit_font_id: &str) -> String {
             ("cascadia code", "\"Cascadia Code\", Consolas, monospace"),
             ("consolas", "\"Consolas\", \"Courier New\", monospace"),
             ("aptos", DEFAULT_APP_FONT_FAMILY),
-            ("yu gothic ui", "\"Yu Gothic UI\", \"Yu Gothic\", sans-serif"),
+            (
+                "yu gothic ui",
+                "\"Yu Gothic UI\", \"Yu Gothic\", sans-serif",
+            ),
             ("meiryo", "\"Meiryo\", sans-serif"),
             ("fira code", "\"Fira Code\", Consolas, monospace"),
             ("jetbrains mono", "\"JetBrains Mono\", Consolas, monospace"),
@@ -276,6 +305,10 @@ fn normalize_font_id(
 
 fn clamp_edit_font_size_px(value: u32) -> u32 {
     value.clamp(MIN_EDIT_FONT_SIZE_PX, MAX_EDIT_FONT_SIZE_PX)
+}
+
+fn clamp_system_font_size_px(value: u32) -> u32 {
+    value.clamp(MIN_SYSTEM_FONT_SIZE_PX, MAX_SYSTEM_FONT_SIZE_PX)
 }
 
 fn normalize_font_family(value: &str) -> String {

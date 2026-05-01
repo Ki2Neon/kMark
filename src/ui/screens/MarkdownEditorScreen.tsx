@@ -6,7 +6,14 @@ import {
   type ChangeEvent,
 } from "react";
 import { selectStartupLayoutMode, type LayoutMode } from "../../domain/editor";
-import { type AppFontId, type EditFontId, type EditFontSizePx, type MultiCursorModifier, type StartupEditMode } from "../../domain/editorPreferences";
+import {
+  type AppFontId,
+  type EditFontId,
+  type EditFontSizePx,
+  type MultiCursorModifier,
+  type StartupEditMode,
+  type SystemFontSizePx,
+} from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
@@ -33,6 +40,7 @@ type MarkdownEditorScreenProps = {
   readonly canControlWindowsStartupTrayResident: boolean;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
+  readonly systemFontSizePx: SystemFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
@@ -41,6 +49,7 @@ type MarkdownEditorScreenProps = {
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
   readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
+  readonly onSystemFontSizeChange: (systemFontSizePx: SystemFontSizePx) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
@@ -77,6 +86,7 @@ export function MarkdownEditorScreen({
   canControlWindowsStartupTrayResident,
   editFontId,
   editFontSizePx,
+  systemFontSizePx,
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
@@ -85,6 +95,7 @@ export function MarkdownEditorScreen({
   onAppThemeChange,
   onEditFontChange,
   onEditFontSizeChange,
+  onSystemFontSizeChange,
   onMultiCursorModifierChange,
   onPreviewUsesAppThemeColorsChange,
   onShowLineNumbersChange,
@@ -398,6 +409,7 @@ export function MarkdownEditorScreen({
     canControlWindowsStartupTrayResident,
     editFontId,
     editFontSizePx,
+    systemFontSizePx,
     isPreviewVisible,
     layoutMode,
     multiCursorModifier,
@@ -405,6 +417,7 @@ export function MarkdownEditorScreen({
     onAppThemeChange,
     onEditFontChange,
     onEditFontSizeChange,
+    onSystemFontSizeChange,
     onLayoutModeChange: handleLayoutModeChange,
     onMultiCursorModifierChange,
     onNewDocument: handleRequestNew,

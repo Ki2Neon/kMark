@@ -17,6 +17,7 @@
   --preview-border: #d7d7d7;
   --preview-code-bg: #f5f5f5;
   --app-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --app-font-size: 16px;
   --edit-font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
   --edit-font-size: 15px;
   --preview-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
@@ -204,6 +205,7 @@ body {
   margin: 0;
   min-height: 100vh;
   overflow: hidden;
+  font-size: var(--app-font-size);
 }
 
 #root {
@@ -463,7 +465,7 @@ input:focus-visible,
   border: 1px solid var(--border-strong);
   background: color-mix(in srgb, var(--surface-muted) 42%, var(--surface));
   color: var(--text);
-  font-size: 0.86rem;
+  font-size: 0.86em;
 }
 
 .menu-section__search-input:focus-visible {
@@ -492,7 +494,7 @@ input:focus-visible,
 
 .menu-section__group-title {
   margin: 0;
-  font-size: 0.76rem;
+  font-size: 0.76em;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: none;
@@ -501,7 +503,7 @@ input:focus-visible,
 
 .menu-section__group-description {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.72em;
   letter-spacing: 0.03em;
   color: var(--text-soft);
 }
@@ -533,7 +535,7 @@ input:focus-visible,
 .menu-section__field-label {
   min-width: 0;
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: 0.78em;
   font-weight: 650;
   letter-spacing: 0;
   overflow-wrap: anywhere;
@@ -568,7 +570,7 @@ input:focus-visible,
 
 .menu-section__mode-label {
   min-width: 0;
-  font-size: 0.8rem;
+  font-size: 0.8em;
   font-weight: 500;
   letter-spacing: 0;
   color: var(--text-soft);
@@ -634,7 +636,7 @@ input:focus-visible,
   padding: 0.38rem 0.55rem;
   border-color: var(--border-strong);
   background: color-mix(in srgb, var(--surface-muted) 34%, var(--surface));
-  font-size: 0.82rem;
+  font-size: 0.82em;
 }
 
 .menu-section__actions {
@@ -650,7 +652,7 @@ input:focus-visible,
   width: 100%;
   min-height: 30px;
   padding: 0.42rem 0.65rem;
-  font-size: 0.82rem;
+  font-size: 0.82em;
   line-height: 1.25;
   text-align: left;
   background: var(--surface-muted);
@@ -660,7 +662,7 @@ input:focus-visible,
   margin: 8px 4px 0;
   padding: 12px;
   color: var(--text-soft);
-  font-size: 0.82rem;
+  font-size: 0.82em;
 }
 
 .edit-section__textarea {
@@ -773,9 +775,24 @@ input:focus-visible,
   gap: 24px;
 }
 
+.preview-section__page-scale {
+  position: relative;
+  flex: 0 0 auto;
+  transform: scale(var(--a4-scale, 1));
+  transform-origin: top left;
+}
+
 .preview-section__page-frame {
   position: relative;
   flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 210mm;
+  height: 297mm;
+  padding: 16mm 16mm 18mm;
+  border: 1px solid var(--preview-border);
+  background: var(--preview-surface);
+  overflow: hidden;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
 .preview-section__cursor-target {
@@ -791,10 +808,10 @@ input:focus-visible,
 
 .preview-section__page {
   position: relative;
-  border: 1px solid var(--preview-border);
-  background: var(--preview-surface);
-  overflow: visible;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  width: 100%;
+  min-height: 100%;
+  background: transparent;
+  overflow: hidden;
 }
 
 .markdown-body {
@@ -947,6 +964,21 @@ input:focus-visible,
 
 ::selection {
   background: var(--selection);
+}
+
+@media print {
+  .preview-section__page-scale {
+    width: auto !important;
+    height: auto !important;
+    transform: none;
+  }
+
+  .preview-section__page-frame {
+    width: 210mm;
+    height: 297mm;
+    padding: 16mm 16mm 18mm;
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 640px) {

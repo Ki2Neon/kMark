@@ -24,11 +24,6 @@ export const A4_MARGIN_RIGHT_MM = 16;
 export const A4_MARGIN_BOTTOM_MM = 18;
 export const A4_MARGIN_LEFT_MM = 16;
 
-export const A4_PAGE_WIDTH_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
-export const A4_PAGE_HEIGHT_PX = A4_PAGE_HEIGHT_MM * CSS_MM_TO_PX;
-export const A4_CONTENT_WIDTH_PX = A4_PAGE_WIDTH_PX - ((A4_MARGIN_LEFT_MM + A4_MARGIN_RIGHT_MM) * CSS_MM_TO_PX);
-export const A4_CONTENT_HEIGHT_PX = A4_PAGE_HEIGHT_PX - ((A4_MARGIN_TOP_MM + A4_MARGIN_BOTTOM_MM) * CSS_MM_TO_PX);
-
 const PREVIEW_DISPLAY_MODE_SET = new Set<PreviewDisplayMode>(
   PREVIEW_DISPLAY_MODE_OPTIONS.map((previewDisplayModeOption) => previewDisplayModeOption.id),
 );

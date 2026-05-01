@@ -47,6 +47,7 @@ struct DesktopLayoutPreferencesInput {
 struct EditorPreferencesPayload {
     app_font_id: String,
     edit_font_id: String,
+    system_font_size_px: u32,
     edit_font_size_px: u32,
     multi_cursor_modifier: String,
     show_line_numbers: bool,
@@ -59,6 +60,7 @@ struct EditorPreferencesPayload {
 struct EditorPreferencesInput {
     app_font_id: Option<String>,
     edit_font_id: Option<String>,
+    system_font_size_px: Option<u32>,
     edit_font_size_px: Option<u32>,
     multi_cursor_modifier: Option<String>,
     show_line_numbers: Option<bool>,
@@ -201,8 +203,13 @@ pub fn normalize_desktop_layout_preferences_json(input: Option<String>) -> Strin
 pub fn normalize_editor_preferences_json(input: Option<String>) -> String {
     let payload = parse_json::<EditorPreferencesInput>(input);
     let editor_preferences = EditorPreferences::new(
-        payload.as_ref().and_then(|value| value.app_font_id.as_deref()),
-        payload.as_ref().and_then(|value| value.edit_font_id.as_deref()),
+        payload
+            .as_ref()
+            .and_then(|value| value.app_font_id.as_deref()),
+        payload
+            .as_ref()
+            .and_then(|value| value.edit_font_id.as_deref()),
+        payload.as_ref().and_then(|value| value.system_font_size_px),
         payload.as_ref().and_then(|value| value.edit_font_size_px),
         payload
             .as_ref()
@@ -330,8 +337,12 @@ impl From<&EditorPreferences> for EditorPreferencesPayload {
         Self {
             app_font_id: editor_preferences.app_font_id().to_owned(),
             edit_font_id: editor_preferences.edit_font_id().to_owned(),
+            system_font_size_px: editor_preferences.system_font_size_px(),
             edit_font_size_px: editor_preferences.edit_font_size_px(),
-            multi_cursor_modifier: editor_preferences.multi_cursor_modifier().as_str().to_owned(),
+            multi_cursor_modifier: editor_preferences
+                .multi_cursor_modifier()
+                .as_str()
+                .to_owned(),
             show_line_numbers: editor_preferences.show_line_numbers(),
             startup_edit_mode: editor_preferences.startup_edit_mode().as_str().to_owned(),
             windows_startup_tray_resident_enabled: editor_preferences

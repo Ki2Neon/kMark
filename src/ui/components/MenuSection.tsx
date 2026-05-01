@@ -4,7 +4,9 @@ import {
   APP_FONT_OPTIONS,
   EDIT_FONT_OPTIONS,
   MAX_EDIT_FONT_SIZE_PX,
+  MAX_SYSTEM_FONT_SIZE_PX,
   MIN_EDIT_FONT_SIZE_PX,
+  MIN_SYSTEM_FONT_SIZE_PX,
   MULTI_CURSOR_MODIFIER_OPTIONS,
   STARTUP_EDIT_MODE_OPTIONS,
   isMultiCursorModifier,
@@ -14,6 +16,7 @@ import {
   type EditFontSizePx,
   type MultiCursorModifier,
   type StartupEditMode,
+  type SystemFontSizePx,
 } from "../../domain/editorPreferences";
 import {
   PREVIEW_DISPLAY_MODE_OPTIONS,
@@ -28,6 +31,7 @@ type MenuSectionProps = {
   readonly canControlWindowsStartupTrayResident: boolean;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
+  readonly systemFontSizePx: SystemFontSizePx;
   readonly previewDisplayMode: PreviewDisplayMode;
   readonly previewUsesAppThemeColors: boolean;
   readonly isPreviewVisible: boolean;
@@ -40,6 +44,7 @@ type MenuSectionProps = {
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
   readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
+  readonly onSystemFontSizeChange: (systemFontSizePx: SystemFontSizePx) => void;
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onNewDocument: () => void;
@@ -68,6 +73,7 @@ function MenuSectionComponent({
   canControlWindowsStartupTrayResident,
   editFontId,
   editFontSizePx,
+  systemFontSizePx,
   previewDisplayMode,
   previewUsesAppThemeColors,
   isPreviewVisible,
@@ -80,6 +86,7 @@ function MenuSectionComponent({
   onAppThemeChange,
   onEditFontChange,
   onEditFontSizeChange,
+  onSystemFontSizeChange,
   onLayoutModeChange,
   onMultiCursorModifierChange,
   onNewDocument,
@@ -121,7 +128,7 @@ function MenuSectionComponent({
   const previewGroupVisible = previewVisibilityVisible || previewDisplayModeVisible || previewColorVisible;
   const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
   const showLineNumbersVisible = editGroupMatched || matchesMenuSearch("行番号", "line number");
-  const editFontSizeVisible = editGroupMatched || matchesMenuSearch("フォントサイズ", "font size");
+  const editFontSizeVisible = editGroupMatched || matchesMenuSearch("エディタフォントサイズ", "font size", "editor");
   const startupEditModeVisible = editGroupMatched || matchesMenuSearch("起動時の表示", "startup");
   const windowsStartupTrayResidentVisible =
     canControlWindowsStartupTrayResident &&
@@ -131,7 +138,8 @@ function MenuSectionComponent({
   const fontGroupMatched = matchesMenuSearch("フォント", "font", "family");
   const editFontVisible = fontGroupMatched || matchesMenuSearch("Edit フォント", "edit font");
   const appFontVisible = fontGroupMatched || matchesMenuSearch("アプリフォント", "app font");
-  const fontGroupVisible = editFontVisible || appFontVisible;
+  const systemFontSizeVisible = fontGroupMatched || matchesMenuSearch("システムフォントサイズ", "system font size");
+  const fontGroupVisible = editFontVisible || appFontVisible || systemFontSizeVisible;
   const appThemeGroupVisible = matchesMenuSearch("アプリテーマ", "配色テーマ", "theme");
   const layoutModeGroupVisible = matchesMenuSearch("表示モード", "レイアウト", "PC", "Mobile", "layout");
   const multiCursorGroupVisible = matchesMenuSearch("マルチカーソル", "追加カーソル", "modifier");
@@ -206,6 +214,16 @@ function MenuSectionComponent({
     }
 
     onEditFontSizeChange(nextEditFontSizePx);
+  };
+
+  const handleSystemFontSizeInput = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextSystemFontSizePx = Number.parseInt(event.currentTarget.value, 10);
+
+    if (Number.isNaN(nextSystemFontSizePx)) {
+      return;
+    }
+
+    onSystemFontSizeChange(nextSystemFontSizePx);
   };
 
   const handleShowLineNumbersSwitch = (event: ChangeEvent<HTMLInputElement>) => {
@@ -379,7 +397,7 @@ function MenuSectionComponent({
 
           {editFontSizeVisible ? (
             <label className="menu-section__label">
-              <span className="menu-section__field-label">フォントサイズ</span>
+              <span className="menu-section__field-label">エディタフォントサイズ</span>
               <input
                 type="number"
                 value={editFontSizePx}
@@ -455,6 +473,22 @@ function MenuSectionComponent({
             <h2 className="menu-section__group-title">フォント</h2>
             <p className="menu-section__group-description">アプリ全体と Edit 本文</p>
           </div>
+          {systemFontSizeVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">システムフォントサイズ</span>
+              <input
+                type="number"
+                value={systemFontSizePx}
+                min={MIN_SYSTEM_FONT_SIZE_PX}
+                max={MAX_SYSTEM_FONT_SIZE_PX}
+                step={1}
+                onChange={handleSystemFontSizeInput}
+                aria-label="システムフォントサイズ"
+                className="menu-section__select"
+              />
+            </label>
+          ) : null}
+
           {editFontVisible ? (
             <label className="menu-section__label">
               <span className="menu-section__field-label">Edit</span>
