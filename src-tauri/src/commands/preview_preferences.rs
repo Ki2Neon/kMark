@@ -1,12 +1,10 @@
 use tauri::{AppHandle, Emitter, Runtime, State};
 
 use super::error::CommandErrorPayload;
-use crate::{
-    dto::PreviewPreferencesPayload,
-    infra::{persist_preview_preferences, PREVIEW_PREFERENCES_UPDATED_EVENT},
-    AppState,
-};
+use crate::{dto::PreviewPreferencesPayload, infra::persist_preview_preferences, AppState};
 use kmark_core::PreviewPreferences;
+
+const PREVIEW_PREFERENCES_UPDATED_EVENT: &str = "preview-preferences-updated";
 
 #[tauri::command]
 pub fn get_preview_preferences(
@@ -36,7 +34,8 @@ pub fn set_preview_preferences<R: Runtime>(
         *current_preview_preferences = next_preview_preferences.clone();
     }
 
-    persist_preview_preferences(&app, &next_preview_preferences).map_err(CommandErrorPayload::from)?;
+    persist_preview_preferences(&app, &next_preview_preferences)
+        .map_err(CommandErrorPayload::from)?;
 
     let payload = PreviewPreferencesPayload::from(&next_preview_preferences);
 

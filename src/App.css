@@ -668,11 +668,7 @@ input:focus-visible,
   user-select: none;
 }
 
-.preview-window {
-  min-height: 100vh;
-}
-
-.preview-window__context-menu {
+.preview-context-menu {
   position: fixed;
   z-index: 40;
   min-width: 132px;
@@ -682,7 +678,7 @@ input:focus-visible,
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
 }
 
-.preview-window__context-menu-item {
+.preview-context-menu__item {
   width: 100%;
   border: 0;
   background: transparent;
@@ -690,8 +686,8 @@ input:focus-visible,
   font-weight: 500;
 }
 
-.preview-window__context-menu-item:hover,
-.preview-window__context-menu-item:focus-visible {
+.preview-context-menu__item:hover,
+.preview-context-menu__item:focus-visible {
   background: var(--surface-muted);
 }
 

@@ -96,15 +96,6 @@ export async function normalizeEditorDraftWithWasm(input: string | null): Promis
   return normalizeEditorDraftJsonWithWasmSync(input);
 }
 
-export function normalizePreviewWindowStateJsonWithWasmSync(input: string | null): string {
-  return loadKmarkWebModuleSync().normalize_preview_window_state_json(input);
-}
-
-export async function normalizePreviewWindowStateWithWasm(input: string | null): Promise<string> {
-  await initializeKmarkWeb();
-  return normalizePreviewWindowStateJsonWithWasmSync(input);
-}
-
 export function createStartupEditorStateJsonWithWasmSync(
   startupEditMode: string | null,
   storedEditJson: string | null,

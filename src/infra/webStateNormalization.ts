@@ -1,14 +1,12 @@
 import { type StoredEdit } from "../domain/editor";
 import { type EditorPreferences } from "../domain/editorPreferences";
 import { type PreviewPreferences } from "../domain/preview";
-import { type PreviewWindowState } from "../domain/previewWindow";
 import { type ThemePreferences } from "../domain/theme";
 import {
   normalizeDesktopLayoutPreferencesWithWasm,
   normalizeEditorDraftWithWasm,
   normalizeEditorPreferencesWithWasm,
   normalizePreviewPreferencesWithWasm,
-  normalizePreviewWindowStateWithWasm,
   normalizeThemePreferencesWithWasm,
 } from "../wasm/kmarkWeb";
 
@@ -77,16 +75,5 @@ export async function normalizePreviewPreferencesState(
   return {
     text: normalizedText,
     value: parseJsonPayload<PreviewPreferences>(normalizedText),
-  };
-}
-
-export async function normalizePreviewWindowState(
-  text: string | null,
-): Promise<NormalizedWebState<PreviewWindowState>> {
-  const normalizedText = await normalizePreviewWindowStateWithWasm(text);
-
-  return {
-    text: normalizedText,
-    value: parseJsonPayload<PreviewWindowState>(normalizedText),
   };
 }

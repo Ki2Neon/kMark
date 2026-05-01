@@ -9,7 +9,7 @@ use std::{
     ffi::OsStr,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard,
     },
 };
@@ -20,16 +20,14 @@ use tauri::{
     Manager,
 };
 
-use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, PreviewWindowState,
-    StoredEdit, ThemePreferences,
-};
 use infra::{
-    broadcast_command, load_desktop_layout_preferences, load_editor_draft,
-    load_editor_preferences, load_preview_preferences, load_theme_preferences,
-    persist_window_state, restore_window_state,
+    broadcast_command, load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
+    load_preview_preferences, load_theme_preferences, persist_window_state, restore_window_state,
     FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue, TrayCommandKind,
     TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
+};
+use kmark_core::{
+    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, StoredEdit, ThemePreferences,
 };
 use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
@@ -56,8 +54,6 @@ pub(crate) struct AppState {
     pub(crate) editor_preferences: Mutex<EditorPreferences>,
     pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
-    pub(crate) preview_window_state: Mutex<PreviewWindowState>,
-    pub(crate) next_preview_edit_jump_request_id: AtomicU64,
     pub(crate) should_exit: AtomicBool,
 }
 
@@ -365,12 +361,10 @@ pub fn run() {
                         *current_editor_preferences = editor_preferences.clone();
                     }
 
-                    if let Err(error) =
-                        commands::editor_preferences::sync_autostart_preference(
-                            &app_handle,
-                            &editor_preferences,
-                        )
-                    {
+                    if let Err(error) = commands::editor_preferences::sync_autostart_preference(
+                        &app_handle,
+                        &editor_preferences,
+                    ) {
                         eprintln!("failed to sync autostart preference: {}", error.message());
                     }
                 }
@@ -418,10 +412,6 @@ pub fn run() {
             commands::markdown_render::render_markdown_preview,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
-            commands::preview_window::get_preview_window_state,
-            commands::preview_window::open_preview_window,
-            commands::preview_window::request_preview_window_edit_jump,
-            commands::preview_window::sync_preview_window_state,
             commands::file_open::save_markdown_document_as_dialog,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,

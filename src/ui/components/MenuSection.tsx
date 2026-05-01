@@ -43,7 +43,6 @@ type MenuSectionProps = {
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onNewDocument: () => void;
-  readonly onOpenPreviewWindow: () => void;
   readonly onOpenDocument: () => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
@@ -80,7 +79,6 @@ function MenuSectionComponent({
   onLayoutModeChange,
   onMultiCursorModifierChange,
   onNewDocument,
-  onOpenPreviewWindow,
   onOpenDocument,
   onOverwriteSaveDocument,
   onPrintDocument,
@@ -262,12 +260,6 @@ function MenuSectionComponent({
             </span>
           </span>
         </label>
-
-        <div className="menu-section__actions" role="group" aria-label="プレビュー操作">
-          <button type="button" onClick={onOpenPreviewWindow}>
-            別ウィンドウで表示
-          </button>
-        </div>
       </div>
 
       <div className="menu-section__group">

@@ -1,12 +1,10 @@
 import "./App.css";
 import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
-import { useAppMode, useAppShell } from "./ui/hooks/useAppShell";
+import { useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
-import { PreviewWindowScreen } from "./ui/screens/PreviewWindowScreen";
 
 function App() {
-  const { previewWindowMode } = useAppMode();
   const {
     appThemeId,
     isReady: isThemeReady,
@@ -31,7 +29,7 @@ function App() {
     onShowLineNumbersChange,
     onStartupEditModeChange,
     onWindowsStartupTrayResidentChange,
-  } = useEditorPreferences({ syncWindowsStartupTrayResident: !previewWindowMode });
+  } = useEditorPreferences();
   useAppShell({
     appFontId,
     appThemeId,
@@ -42,10 +40,6 @@ function App() {
 
   if (!isThemeReady || !isEditorPreferencesReady) {
     return null;
-  }
-
-  if (previewWindowMode) {
-    return <PreviewWindowScreen />;
   }
 
   return (

@@ -1,10 +1,24 @@
 use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences,
-    PreviewWindowEditJumpRequest, PreviewWindowSnapshot, PreviewWindowState, StoredEdit,
-    ThemePreferences,
+    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RenderedMarkdownPreview,
+    StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderedMarkdownPreviewPayload {
+    pub html: String,
+    pub page_htmls: Vec<String>,
+}
+
+impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
+    fn from(rendered_preview: RenderedMarkdownPreview) -> Self {
+        Self {
+            html: rendered_preview.html,
+            page_htmls: rendered_preview.page_htmls,
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemePreferencesPayload {
@@ -85,7 +99,10 @@ impl From<&EditorPreferences> for EditorPreferencesPayload {
             app_font_id: editor_preferences.app_font_id().to_owned(),
             edit_font_id: editor_preferences.edit_font_id().to_owned(),
             edit_font_size_px: editor_preferences.edit_font_size_px(),
-            multi_cursor_modifier: editor_preferences.multi_cursor_modifier().as_str().to_owned(),
+            multi_cursor_modifier: editor_preferences
+                .multi_cursor_modifier()
+                .as_str()
+                .to_owned(),
             show_line_numbers: editor_preferences.show_line_numbers(),
             startup_edit_mode: editor_preferences.startup_edit_mode().as_str().to_owned(),
             windows_startup_tray_resident_enabled: editor_preferences
@@ -105,7 +122,12 @@ pub struct EditorDraftPayload {
 
 impl From<EditorDraftPayload> for StoredEdit {
     fn from(payload: EditorDraftPayload) -> Self {
-        StoredEdit::new(payload.file_name, payload.content, payload.file_path, payload.saved_at)
+        StoredEdit::new(
+            payload.file_name,
+            payload.content,
+            payload.file_path,
+            payload.saved_at,
+        )
     }
 }
 
@@ -144,68 +166,6 @@ impl From<&PreviewPreferences> for PreviewPreferencesPayload {
                 .as_str()
                 .to_owned(),
             is_preview_visible: preview_preferences.is_preview_visible(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewWindowSnapshotPayload {
-    pub content: String,
-    pub file_name: String,
-    pub file_path: Option<String>,
-}
-
-impl From<PreviewWindowSnapshotPayload> for PreviewWindowSnapshot {
-    fn from(payload: PreviewWindowSnapshotPayload) -> Self {
-        PreviewWindowSnapshot::new(payload.content, payload.file_name, payload.file_path)
-    }
-}
-
-impl From<&PreviewWindowSnapshot> for PreviewWindowSnapshotPayload {
-    fn from(preview_window_snapshot: &PreviewWindowSnapshot) -> Self {
-        Self {
-            content: preview_window_snapshot.content().to_owned(),
-            file_name: preview_window_snapshot.file_name().to_owned(),
-            file_path: preview_window_snapshot.file_path().map(ToOwned::to_owned),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewWindowStatePayload {
-    pub snapshot: PreviewWindowSnapshotPayload,
-    pub active_source_line: Option<u32>,
-}
-
-impl From<PreviewWindowStatePayload> for PreviewWindowState {
-    fn from(payload: PreviewWindowStatePayload) -> Self {
-        PreviewWindowState::new(payload.snapshot.into(), payload.active_source_line)
-    }
-}
-
-impl From<&PreviewWindowState> for PreviewWindowStatePayload {
-    fn from(preview_window_state: &PreviewWindowState) -> Self {
-        Self {
-            snapshot: PreviewWindowSnapshotPayload::from(preview_window_state.snapshot()),
-            active_source_line: preview_window_state.active_source_line(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewWindowEditJumpRequestPayload {
-    pub line_number: u32,
-    pub request_id: u64,
-}
-
-impl From<&PreviewWindowEditJumpRequest> for PreviewWindowEditJumpRequestPayload {
-    fn from(preview_window_edit_jump_request: &PreviewWindowEditJumpRequest) -> Self {
-        Self {
-            line_number: preview_window_edit_jump_request.line_number(),
-            request_id: preview_window_edit_jump_request.request_id(),
         }
     }
 }

@@ -9,10 +9,6 @@ export type AppShellDocumentTheme = {
   readonly previewUsesAppThemeColors: boolean;
 };
 
-export type AppRuntimeGateway = {
-  isPreviewWindowMode(search?: string): boolean;
-};
-
 export type AppDocumentThemeResolver = {
   resolveAppFontFamily(appFontId: AppFontId): string;
   resolveEditFontFamily(editFontId: EditFontId): string;

@@ -2,8 +2,7 @@ use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
     reduce_editor_state, render_markdown_preview_with_file_path, resolve_app_font_family,
     resolve_edit_font_family, DesktopLayoutPreferences, EditorPreferences, EditorState,
-    EditorStateAction, EditorStats, PreviewPreferences, PreviewWindowState, StoredEdit,
-    ThemePreferences,
+    EditorStateAction, EditorStats, PreviewPreferences, StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -160,36 +159,6 @@ struct EditorDraftInput {
     saved_at: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PreviewWindowSnapshotPayload {
-    content: String,
-    file_name: String,
-    file_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PreviewWindowSnapshotInput {
-    content: Option<String>,
-    file_name: Option<String>,
-    file_path: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PreviewWindowStatePayload {
-    snapshot: PreviewWindowSnapshotPayload,
-    active_source_line: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PreviewWindowStateInput {
-    snapshot: Option<PreviewWindowSnapshotInput>,
-    active_source_line: Option<u32>,
-}
-
 #[wasm_bindgen]
 pub fn render_markdown_preview_json(content: String, file_path: Option<String>) -> String {
     let rendered_preview =
@@ -322,25 +291,6 @@ pub fn normalize_editor_draft_json(input: Option<String>) -> Option<String> {
     let content = payload.content?;
     let stored_edit = StoredEdit::new(file_name, content, payload.file_path, payload.saved_at);
     Some(stringify(&EditorDraftPayload::from(&stored_edit)))
-}
-
-#[wasm_bindgen]
-pub fn normalize_preview_window_state_json(input: Option<String>) -> String {
-    let payload = parse_json::<PreviewWindowStateInput>(input);
-    let snapshot = payload
-        .as_ref()
-        .and_then(|value| value.snapshot.as_ref())
-        .cloned()
-        .unwrap_or_default();
-    let preview_window_state = PreviewWindowState::new(
-        kmark_core::PreviewWindowSnapshot::new(
-            snapshot.content.unwrap_or_default(),
-            snapshot.file_name.unwrap_or_default(),
-            snapshot.file_path,
-        ),
-        payload.as_ref().and_then(|value| value.active_source_line),
-    );
-    stringify(&PreviewWindowStatePayload::from(&preview_window_state))
 }
 
 fn parse_json<T: for<'de> Deserialize<'de>>(input: Option<String>) -> Option<T> {
@@ -482,19 +432,6 @@ impl From<&StoredEdit> for EditorDraftPayload {
             content: stored_edit.content().to_owned(),
             file_path: stored_edit.file_path().map(ToOwned::to_owned),
             saved_at: stored_edit.saved_at(),
-        }
-    }
-}
-
-impl From<&PreviewWindowState> for PreviewWindowStatePayload {
-    fn from(preview_window_state: &PreviewWindowState) -> Self {
-        Self {
-            snapshot: PreviewWindowSnapshotPayload {
-                content: preview_window_state.snapshot().content().to_owned(),
-                file_name: preview_window_state.snapshot().file_name().to_owned(),
-                file_path: preview_window_state.snapshot().file_path().map(ToOwned::to_owned),
-            },
-            active_source_line: preview_window_state.active_source_line(),
         }
     }
 }

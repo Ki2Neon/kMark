@@ -79,10 +79,7 @@ for (const [sourceFilePath, targetFilePaths] of graph.entries()) {
     continue;
   }
 
-  if (
-    sourceRelativePath === "src/ui/screens/MarkdownEditorScreen.tsx"
-    || sourceRelativePath === "src/ui/screens/PreviewWindowScreen.tsx"
-  ) {
+  if (sourceRelativePath === "src/ui/screens/MarkdownEditorScreen.tsx") {
     for (const targetFilePath of targetFilePaths) {
       verifyLayerBoundary(sourceFilePath, targetFilePath, new Set(["ui", "application", "adapters", "domain"]));
     }

@@ -18,11 +18,10 @@ import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequest
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
 import { useMarkdownEditorShortcuts } from "../hooks/useMarkdownEditorShortcuts";
 import { type MobileSectionId, useMobileSectionNavigation } from "../hooks/useMobileSectionNavigation";
-import { usePreviewWindowSession } from "../hooks/usePreviewWindowSession";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
-import { openExternalLink } from "../../infra/externalLink";
+import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
@@ -102,7 +101,6 @@ export function MarkdownEditorScreen({
   const {
     canOpenDocumentWithNativePicker,
     content,
-    currentDocumentFilePath,
     errorMessage,
     fileName,
     isDirty,
@@ -309,24 +307,6 @@ export function MarkdownEditorScreen({
     });
   }, [handleErrorRaise]);
 
-  const { openPreviewWindow } = usePreviewWindowSession({
-    activeSourceLine: activeEditCursorLine,
-    content,
-    filePath: currentDocumentFilePath,
-    enabled: isEditorReady,
-    fileName,
-    onError: handleErrorRaise,
-    onJumpToSourceLine: handlePreviewSourceLineDoubleClick,
-  });
-
-  const handleRequestOpenPreviewWindow = useCallback(() => {
-    if (layoutMode === "desktop") {
-      closeDesktopMenu();
-    }
-
-    openPreviewWindow();
-  }, [closeDesktopMenu, layoutMode, openPreviewWindow]);
-
   const focusExternalDocument = useCallback(() => {
     if (layoutMode === "desktop") {
       closeDesktopMenu();
@@ -429,7 +409,6 @@ export function MarkdownEditorScreen({
     onMultiCursorModifierChange,
     onNewDocument: handleRequestNew,
     onOpenDocument: handleRequestOpen,
-    onOpenPreviewWindow: handleRequestOpenPreviewWindow,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,
     onPreviewUsesAppThemeColorsChange,

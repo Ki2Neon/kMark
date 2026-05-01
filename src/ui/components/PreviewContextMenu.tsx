@@ -11,12 +11,12 @@ function PreviewContextMenuComponent({ ariaLabel, menuRef, onFit, style }: Previ
   return (
     <div
       ref={menuRef}
-      className="preview-window__context-menu"
+      className="preview-context-menu"
       role="menu"
       aria-label={ariaLabel}
       style={style}
     >
-      <button type="button" className="preview-window__context-menu-item" role="menuitem" onClick={onFit}>
+      <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onFit}>
         Fit
       </button>
     </div>

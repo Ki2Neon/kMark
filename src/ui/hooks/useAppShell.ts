@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef } from "react";
-import { createBrowserAppRuntimeGateway } from "../../adapters/browser/browserAppRuntimeGateway";
 import { createBrowserDocumentThemeGateway } from "../../adapters/browser/browserDocumentThemeGateway";
 import { createBrowserDocumentThemeResolver } from "../../adapters/browser/browserDocumentThemeResolver";
 import { AppShellController } from "../../application/appShell/appShellController";
@@ -21,19 +20,10 @@ function useAppShellController() {
     controllerRef.current = new AppShellController({
       documentThemeGateway: createBrowserDocumentThemeGateway(),
       documentThemeResolver: createBrowserDocumentThemeResolver(),
-      runtimeGateway: createBrowserAppRuntimeGateway(),
     });
   }
 
   return controllerRef.current;
-}
-
-export function useAppMode() {
-  const controller = useAppShellController();
-
-  return {
-    previewWindowMode: controller.isPreviewWindowMode(),
-  };
 }
 
 export function useAppShell({

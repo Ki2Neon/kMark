@@ -19,10 +19,8 @@
   - `src/application/appTheme/*`
   - `src/application/appShell/*`
   - `src/application/desktopWorkspaceSplit/*`
-  - `src/application/previewWindowViewer/*`
   - `DesktopWorkspaceSplitController` : split clamp keyboard pointer ratio rule
-  - `AppShellController` : preview mode判定 document theme同期
-  - `PreviewWindowViewerController` : preview snapshot 読取 render orchestration
+  - `AppShellController` : document theme同期
 - `ui`
   - 描画 入力受付 最小UI状態
   - `src/ui/hooks/useMarkdownEditor.ts`
@@ -35,8 +33,6 @@
   - `BrowserMarkdownDocumentGateway` : picker Tauri path download fallback 吸収
   - `BrowserDraftStore` : localStorage adapter
   - `BrowserMarkdownRenderer` : async preview rendering adapter
-  - `BrowserPreviewWindowViewerRenderer` : preview window render adapter
-  - `BrowserAppRuntimeGateway` : preview query 判定
   - `BrowserDocumentThemeGateway` : documentElement dataset/style 同期
   - `BrowserMarkdownDocumentPrinter` : print adapter
 - `backend adapters`
@@ -52,11 +48,6 @@
   - `BrowserMarkdownRenderer`
   - `Tauri invoke render_markdown_preview`
   - `Rust usecase render_markdown_preview`
-  - `html/pageHtmls DTO` -> `MarkdownPreview`
-- `PreviewWindow`
-  - `storage snapshot` -> `PreviewWindowViewerController`
-  - `BrowserPreviewWindowViewerRenderer`
-  - `render_markdown_preview`
   - `html/pageHtmls DTO` -> `MarkdownPreview`
 - `Web fallback`
   - `Tauri unavailable` 時 `src/infra/markdown.ts` fallback
