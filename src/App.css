@@ -966,21 +966,6 @@ input:focus-visible,
   background: var(--selection);
 }
 
-@media print {
-  .preview-section__page-scale {
-    width: auto !important;
-    height: auto !important;
-    transform: none;
-  }
-
-  .preview-section__page-frame {
-    width: 210mm;
-    height: 297mm;
-    padding: 16mm 16mm 18mm;
-    box-shadow: none;
-  }
-}
-
 @media (max-width: 640px) {
   .menu-section {
     padding: 14px;

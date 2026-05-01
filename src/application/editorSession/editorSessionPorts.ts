@@ -2,7 +2,6 @@ import { type StoredEdit } from "../../domain/editor";
 import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PreviewDisplayMode } from "../../domain/preview";
 import { type EditorSessionAction } from "./editorSessionAction";
 
 export type LoadedMarkdownDocument = {
@@ -16,12 +15,16 @@ export type SavedMarkdownDocument = {
   readonly filePath: string | null;
 };
 
-export type PrintMarkdownDocumentRequest = {
-  readonly displayMode: PreviewDisplayMode;
-  readonly title: string;
-  readonly html: string;
-  readonly pageHtmls: readonly string[];
-};
+export type PrintMarkdownDocumentRequest =
+  | {
+    readonly displayMode: "standard";
+    readonly title: string;
+    readonly html: string;
+  }
+  | {
+    readonly displayMode: "a4";
+    readonly title: string;
+  };
 
 export type Clock = {
   now(): number;

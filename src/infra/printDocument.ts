@@ -8,15 +8,25 @@ import {
   type PreviewDisplayMode,
 } from "../domain/preview";
 
-type PrintMarkdownDocumentOptions = {
-  readonly displayMode: PreviewDisplayMode;
+type StandardPrintMarkdownDocumentOptions = {
+  readonly displayMode: Extract<PreviewDisplayMode, "standard">;
   readonly title: string;
   readonly html: string;
-  readonly pageHtmls?: readonly string[];
 };
+
+type A4PrintMarkdownDocumentOptions = {
+  readonly displayMode: Extract<PreviewDisplayMode, "a4">;
+  readonly title: string;
+};
+
+type PrintMarkdownDocumentOptions =
+  | StandardPrintMarkdownDocumentOptions
+  | A4PrintMarkdownDocumentOptions;
 
 const PRINT_DOCUMENT_LOAD_TIMEOUT_MS = 3000;
 const PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 2000;
+const A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 60000;
+const KMARK_PRINT_ROOT_ID = "kmark-print-root";
 
 const PRINT_DOCUMENT_BASE_STYLE = `
   * {
@@ -79,8 +89,8 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body blockquote {
     margin-left: 0;
-    padding-left: 12px;
-    border-left: 2px solid #d7d7d7;
+    padding-left: 9pt;
+    border-left: 1.5pt solid #d7d7d7;
     color: #555555;
   }
 
@@ -93,8 +103,8 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body pre {
     overflow: visible;
-    padding: 12px;
-    border: 1px solid #d7d7d7;
+    padding: 9pt;
+    border: 0.75pt solid #d7d7d7;
     background: #f5f5f5;
     white-space: pre-wrap;
     word-break: break-word;
@@ -114,7 +124,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body th,
   .markdown-body td {
     padding: 0.65rem 0.75rem;
-    border: 1px solid #d7d7d7;
+    border: 0.75pt solid #d7d7d7;
     text-align: left;
   }
 
@@ -139,34 +149,47 @@ const A4_PRINT_DOCUMENT_STYLE = `
 
   ${PRINT_DOCUMENT_BASE_STYLE}
 
-  .print-document--a4 {
-    background: #ffffff;
-  }
-
-  .preview-section__page-scale {
+  #${KMARK_PRINT_ROOT_ID} {
+    display: block;
+    position: static;
     width: auto;
     height: auto;
-    transform: none;
+    min-height: 0;
+    overflow: visible;
+    background: #ffffff;
   }
 
-  .preview-section__page-frame {
+  #${KMARK_PRINT_ROOT_ID} * {
+    box-sizing: border-box;
+  }
+
+  #${KMARK_PRINT_ROOT_ID} .preview-section__page-frame {
+    display: block;
+    position: relative;
     width: ${A4_PAGE_WIDTH_MM}mm;
     height: ${A4_PAGE_HEIGHT_MM}mm;
+    min-height: ${A4_PAGE_HEIGHT_MM}mm;
+    margin: 0;
     padding: ${A4_MARGIN_TOP_MM}mm ${A4_MARGIN_RIGHT_MM}mm ${A4_MARGIN_BOTTOM_MM}mm ${A4_MARGIN_LEFT_MM}mm;
     box-sizing: border-box;
-    background: #ffffff;
     overflow: hidden;
-    break-after: page;
-    page-break-after: always;
+    background: #ffffff;
+    border: 0;
+    box-shadow: none;
     transform: none;
+    zoom: 1;
+    break-after: page;
+    break-inside: avoid-page;
+    page-break-after: always;
+    page-break-inside: avoid;
   }
 
-  .preview-section__page-scale:last-child .preview-section__page-frame {
+  #${KMARK_PRINT_ROOT_ID} .preview-section__page-frame:last-child {
     break-after: auto;
     page-break-after: auto;
   }
 
-  .markdown-body--a4 {
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 {
     min-height: 100%;
     padding: 0;
     overflow: hidden;
@@ -174,32 +197,38 @@ const A4_PRINT_DOCUMENT_STYLE = `
     widows: 3;
   }
 
-  .markdown-body--a4 h1,
-  .markdown-body--a4 h2,
-  .markdown-body--a4 h3,
-  .markdown-body--a4 h4,
-  .markdown-body--a4 h5,
-  .markdown-body--a4 h6 {
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 h1,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 h2,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 h3,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 h4,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 h5,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 h6 {
     page-break-after: avoid;
   }
 
-  .markdown-body--a4 blockquote,
-  .markdown-body--a4 figure,
-  .markdown-body--a4 pre,
-  .markdown-body--a4 tr {
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 blockquote,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 figure,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 pre,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 tr {
     page-break-inside: avoid;
   }
 
-  .markdown-body--a4 table {
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 table {
     page-break-inside: auto;
   }
 
-  .markdown-body--a4 thead {
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 thead {
     page-break-inside: avoid;
   }
 
-  .print-page {
-    min-height: 100%;
+  @media print {
+    html,
+    body,
+    #${KMARK_PRINT_ROOT_ID} {
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+    }
   }
 `;
 
@@ -212,29 +241,37 @@ function escapeHtml(value: string): string {
     .replace(/'/gu, "&#39;");
 }
 
-function createA4PrintDocumentBodyMarkup(options: PrintMarkdownDocumentOptions): string {
-  const pageHtmls = options.pageHtmls !== undefined && options.pageHtmls.length > 0
-    ? options.pageHtmls
-    : [options.html];
+function isVisiblePreviewElement(element: HTMLElement): boolean {
+  if (!element.isConnected || element.getClientRects().length === 0) {
+    return false;
+  }
 
+  const style = window.getComputedStyle(element);
+
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
+function getDisplayedPreviewA4PageFrameElements(): readonly HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".preview-section__page-frame"))
+    .filter((pageFrame) => !pageFrame.classList.contains("kmark-print-page"))
+    .filter((pageFrame) => pageFrame.closest(`#${KMARK_PRINT_ROOT_ID}`) === null)
+    .filter(isVisiblePreviewElement);
+}
+
+function getDisplayedPreviewA4PageHtmls(): readonly string[] {
+  return getDisplayedPreviewA4PageFrameElements()
+    .map((pageFrame) => pageFrame.querySelector<HTMLElement>(".markdown-body--a4")?.innerHTML ?? pageFrame.innerHTML)
+    .filter((pageHtml) => pageHtml.trim().length > 0);
+}
+
+function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pageHtmls: readonly string[]): string {
   const pageMarkup = pageHtmls
     .map((pageHtml) => `
-      <div class="preview-section__page-scale">
-        <div class="preview-section__page-frame">
-          <article class="markdown-body markdown-body--a4 print-page">${pageHtml}</article>
-        </div>
+      <div class="preview-section__page-frame kmark-print-page">
+        <article class="markdown-body markdown-body--a4 print-page">${pageHtml}</article>
       </div>
     `)
     .join("");
-
-  return `<div class="print-document print-document--a4">${pageMarkup}</div>`;
-}
-
-function createPrintDocumentMarkup(options: PrintMarkdownDocumentOptions): string {
-  const documentStyle = options.displayMode === "a4" ? A4_PRINT_DOCUMENT_STYLE : STANDARD_PRINT_DOCUMENT_STYLE;
-  const bodyMarkup = options.displayMode === "a4"
-    ? createA4PrintDocumentBodyMarkup(options)
-    : `<article class="markdown-body">${options.html}</article>`;
 
   return `<!doctype html>
 <html lang="ja">
@@ -242,7 +279,111 @@ function createPrintDocumentMarkup(options: PrintMarkdownDocumentOptions): strin
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(options.title)}</title>
-    <style>${documentStyle}</style>
+    <style>${A4_PRINT_DOCUMENT_STYLE}</style>
+  </head>
+  <body>
+    <div id="${KMARK_PRINT_ROOT_ID}">
+      ${pageMarkup}
+    </div>
+  </body>
+</html>`;
+}
+
+function printA4MarkdownDocument(options: A4PrintMarkdownDocumentOptions): Promise<void> {
+  const pageHtmls = getDisplayedPreviewA4PageHtmls();
+
+  if (pageHtmls.length === 0) {
+    return Promise.reject(new Error("表示中のA4プレビューページがありません。"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.tabIndex = -1;
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.visibility = "hidden";
+
+    let isSettled = false;
+    let loadTimeoutId: number | null = null;
+    let fallbackTimeoutId: number | null = null;
+
+    const cleanup = () => {
+      if (loadTimeoutId !== null) {
+        window.clearTimeout(loadTimeoutId);
+      }
+
+      if (fallbackTimeoutId !== null) {
+        window.clearTimeout(fallbackTimeoutId);
+      }
+
+      iframe.onload = null;
+      iframe.onerror = null;
+      iframe.remove();
+    };
+
+    const finish = (callback: () => void) => {
+      if (isSettled) {
+        return;
+      }
+
+      isSettled = true;
+      cleanup();
+      callback();
+    };
+
+    iframe.onerror = () => {
+      finish(() => reject(new Error("A4印刷画面の生成に失敗しました。")));
+    };
+
+    iframe.onload = () => {
+      const printWindow = iframe.contentWindow;
+
+      if (printWindow === null) {
+        finish(() => reject(new Error("A4印刷画面を開けませんでした。")));
+        return;
+      }
+
+      const finalizeSuccess = () => {
+        printWindow.removeEventListener("afterprint", finalizeSuccess);
+        finish(resolve);
+      };
+
+      printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
+      fallbackTimeoutId = window.setTimeout(finalizeSuccess, A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
+
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (error) {
+        printWindow.removeEventListener("afterprint", finalizeSuccess);
+        finish(() => reject(error instanceof Error ? error : new Error("印刷に失敗しました。")));
+      }
+    };
+
+    loadTimeoutId = window.setTimeout(() => {
+      finish(() => reject(new Error("A4印刷画面の準備に時間がかかりすぎています。")));
+    }, PRINT_DOCUMENT_LOAD_TIMEOUT_MS);
+
+    iframe.srcdoc = createA4PrintDocumentMarkup(options, pageHtmls);
+    document.body.append(iframe);
+  });
+}
+
+function createPrintDocumentMarkup(options: StandardPrintMarkdownDocumentOptions): string {
+  const bodyMarkup = `<article class="markdown-body">${options.html}</article>`;
+
+  return `<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(options.title)}</title>
+    <style>${STANDARD_PRINT_DOCUMENT_STYLE}</style>
   </head>
   <body>
     ${bodyMarkup}
@@ -253,6 +394,10 @@ function createPrintDocumentMarkup(options: PrintMarkdownDocumentOptions): strin
 export function printMarkdownDocument(options: PrintMarkdownDocumentOptions): Promise<void> {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return Promise.reject(new Error("この環境では印刷できません。"));
+  }
+
+  if (options.displayMode === "a4") {
+    return printA4MarkdownDocument(options);
   }
 
   return new Promise((resolve, reject) => {

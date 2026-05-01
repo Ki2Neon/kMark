@@ -199,13 +199,21 @@ export class EditorSessionController {
     previewDisplayMode: PreviewDisplayMode,
   ): Promise<void> {
     const state = store.getState();
+
+    if (previewDisplayMode === "a4") {
+      await this.#printer.print({
+        displayMode: "a4",
+        title: state.fileName,
+      });
+      return;
+    }
+
     const renderedPreview = await this.renderPreview(state.content);
 
     await this.#printer.print({
-      displayMode: previewDisplayMode,
+      displayMode: "standard",
       title: state.fileName,
       html: renderedPreview.html,
-      pageHtmls: renderedPreview.pageHtmls,
     });
   }
 
