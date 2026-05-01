@@ -1,4 +1,4 @@
-import { memo, type ChangeEvent } from "react";
+import { memo, useState, type ChangeEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
 import {
   APP_FONT_OPTIONS,
@@ -58,6 +58,10 @@ type MenuSectionProps = {
 const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
 const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 
+function normalizeMenuSearchValue(value: string): string {
+  return value.trim().toLocaleLowerCase("ja-JP");
+}
+
 function MenuSectionComponent({
   appFontId,
   appThemeId,
@@ -90,6 +94,60 @@ function MenuSectionComponent({
   onStartupEditModeChange,
   onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
+  const [menuSearchText, setMenuSearchText] = useState("");
+  const normalizedMenuSearchText = normalizeMenuSearchValue(menuSearchText);
+  const matchesMenuSearch = (...values: string[]) => {
+    if (normalizedMenuSearchText.length === 0) {
+      return true;
+    }
+
+    return values.some((value) => normalizeMenuSearchValue(value).includes(normalizedMenuSearchText));
+  };
+
+  const fileGroupVisible = matchesMenuSearch(
+    "ファイル",
+    "作成",
+    "保存",
+    "印刷",
+    "開く",
+    "上書き保存",
+    "名前を付けて保存",
+    "新規作成",
+  );
+  const previewGroupMatched = matchesMenuSearch("プレビュー", "表示方法", "配色", "preview");
+  const previewVisibilityVisible = previewGroupMatched || matchesMenuSearch("表示", "非表示", "visible");
+  const previewDisplayModeVisible = previewGroupMatched || matchesMenuSearch("表示サイズ", "display mode", "size");
+  const previewColorVisible = previewGroupMatched || matchesMenuSearch("配色", "固定色", "アプリテーマ色", "color");
+  const previewGroupVisible = previewVisibilityVisible || previewDisplayModeVisible || previewColorVisible;
+  const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
+  const showLineNumbersVisible = editGroupMatched || matchesMenuSearch("行番号", "line number");
+  const editFontSizeVisible = editGroupMatched || matchesMenuSearch("フォントサイズ", "font size");
+  const startupEditModeVisible = editGroupMatched || matchesMenuSearch("起動時の表示", "startup");
+  const windowsStartupTrayResidentVisible =
+    canControlWindowsStartupTrayResident &&
+    (editGroupMatched || matchesMenuSearch("Windows 起動時の常駐", "タスクトレイ", "autostart"));
+  const editGroupVisible =
+    showLineNumbersVisible || editFontSizeVisible || startupEditModeVisible || windowsStartupTrayResidentVisible;
+  const fontGroupMatched = matchesMenuSearch("フォント", "font", "family");
+  const editFontVisible = fontGroupMatched || matchesMenuSearch("Edit フォント", "edit font");
+  const appFontVisible = fontGroupMatched || matchesMenuSearch("アプリフォント", "app font");
+  const fontGroupVisible = editFontVisible || appFontVisible;
+  const appThemeGroupVisible = matchesMenuSearch("アプリテーマ", "配色テーマ", "theme");
+  const layoutModeGroupVisible = matchesMenuSearch("表示モード", "レイアウト", "PC", "Mobile", "layout");
+  const multiCursorGroupVisible = matchesMenuSearch("マルチカーソル", "追加カーソル", "modifier");
+  const hasVisibleMenuItems =
+    fileGroupVisible ||
+    previewGroupVisible ||
+    editGroupVisible ||
+    fontGroupVisible ||
+    appThemeGroupVisible ||
+    layoutModeGroupVisible ||
+    multiCursorGroupVisible;
+
+  const handleMenuSearchInput = (event: ChangeEvent<HTMLInputElement>) => {
+    setMenuSearchText(event.currentTarget.value);
+  };
+
   const handleAppThemeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextThemeId = event.currentTarget.value;
 
@@ -170,305 +228,356 @@ function MenuSectionComponent({
 
   return (
     <section className="section section--menu menu-section" aria-label="メニュー">
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">ファイル</h2>
-          <p className="menu-section__group-description">作成・保存・印刷まわり</p>
-        </div>
-        <div className="menu-section__actions" role="group" aria-label="ファイル操作">
-          <button type="button" onClick={onOpenDocument}>
-            開く
-          </button>
-          <button type="button" onClick={onOverwriteSaveDocument}>
-            上書き保存
-          </button>
-          <button type="button" onClick={onSaveDocumentAs}>
-            名前を付けて保存
-          </button>
-          <button type="button" onClick={onNewDocument}>
-            新規作成
-          </button>
-          <button type="button" onClick={onPrintDocument}>
-            印刷
-          </button>
-        </div>
+      <div className="menu-section__search" role="search">
+        <input
+          type="search"
+          value={menuSearchText}
+          onChange={handleMenuSearchInput}
+          className="menu-section__search-input"
+          aria-label="メニュー項目を検索"
+          placeholder="設定を検索"
+        />
       </div>
 
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">プレビュー</h2>
-          <p className="menu-section__group-description">表示方法と配色の設定</p>
+      {fileGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">ファイル</h2>
+            <p className="menu-section__group-description">作成・保存・印刷まわり</p>
+          </div>
+          <div className="menu-section__actions" role="group" aria-label="ファイル操作">
+            <button type="button" onClick={onOpenDocument}>
+              開く
+            </button>
+            <button type="button" onClick={onOverwriteSaveDocument}>
+              上書き保存
+            </button>
+            <button type="button" onClick={onSaveDocumentAs}>
+              名前を付けて保存
+            </button>
+            <button type="button" onClick={onNewDocument}>
+              新規作成
+            </button>
+            <button type="button" onClick={onPrintDocument}>
+              印刷
+            </button>
+          </div>
         </div>
-        <label className="menu-section__mode-switch">
-          <span className="menu-section__mode-switch-meta">
-            <span className="menu-section__field-label">表示</span>
-            <span className="menu-section__mode-switch-legend">非表示 / 表示</span>
-          </span>
-          <span className="menu-section__mode-switch-values">
-            <span className={!isPreviewVisible ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              非表示
-            </span>
-            <input
-              type="checkbox"
-              className="menu-section__switch-input"
-              checked={isPreviewVisible}
-              onChange={handlePreviewVisibilitySwitch}
-              aria-label="プレビューの表示を切り替え"
-            />
-            <span className="menu-section__switch" aria-hidden="true" />
-            <span className={isPreviewVisible ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              表示
-            </span>
-          </span>
-        </label>
+      ) : null}
 
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">表示サイズ</span>
-          <select
-            value={previewDisplayMode}
-            onChange={handlePreviewDisplayModeSelect}
-            aria-label="プレビュー表示モード"
-            className="menu-section__select"
-          >
-            {PREVIEW_DISPLAY_MODE_OPTIONS.map((previewDisplayModeOption) => (
-              <option key={previewDisplayModeOption.id} value={previewDisplayModeOption.id}>
-                {previewDisplayModeOption.label}
-              </option>
-            ))}
-          </select>
-        </label>
+      {previewGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">プレビュー</h2>
+            <p className="menu-section__group-description">表示方法と配色の設定</p>
+          </div>
+          {previewVisibilityVisible ? (
+            <label className="menu-section__mode-switch">
+              <span className="menu-section__mode-switch-meta">
+                <span className="menu-section__field-label">表示</span>
+              </span>
+              <span className="menu-section__mode-switch-values">
+                <span className={!isPreviewVisible ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+                  非表示
+                </span>
+                <input
+                  type="checkbox"
+                  className="menu-section__switch-input"
+                  checked={isPreviewVisible}
+                  onChange={handlePreviewVisibilitySwitch}
+                  aria-label="プレビューの表示を切り替え"
+                />
+                <span className="menu-section__switch" aria-hidden="true" />
+                <span className={isPreviewVisible ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+                  表示
+                </span>
+              </span>
+            </label>
+          ) : null}
 
-        <label className="menu-section__mode-switch">
-          <span className="menu-section__mode-switch-meta">
-            <span className="menu-section__field-label">配色</span>
-            <span className="menu-section__mode-switch-legend">固定色 / アプリテーマ色</span>
-          </span>
-          <span className="menu-section__mode-switch-values">
-            <span className={!previewUsesAppThemeColors ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              固定色
-            </span>
-            <input
-              type="checkbox"
-              className="menu-section__switch-input"
-              checked={previewUsesAppThemeColors}
-              onChange={handlePreviewUsesAppThemeColorsSwitch}
-              aria-label="プレビューでアプリテーマ色を使うか切り替え"
-            />
-            <span className="menu-section__switch" aria-hidden="true" />
-            <span className={previewUsesAppThemeColors ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              アプリテーマ色
-            </span>
-          </span>
-        </label>
-      </div>
+          {previewDisplayModeVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">表示サイズ</span>
+              <select
+                value={previewDisplayMode}
+                onChange={handlePreviewDisplayModeSelect}
+                aria-label="プレビュー表示モード"
+                className="menu-section__select"
+              >
+                {PREVIEW_DISPLAY_MODE_OPTIONS.map((previewDisplayModeOption) => (
+                  <option key={previewDisplayModeOption.id} value={previewDisplayModeOption.id}>
+                    {previewDisplayModeOption.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">Edit</h2>
-          <p className="menu-section__group-description">起動時の内容と編集表示</p>
+          {previewColorVisible ? (
+            <label className="menu-section__mode-switch">
+              <span className="menu-section__mode-switch-meta">
+                <span className="menu-section__field-label">配色</span>
+              </span>
+              <span className="menu-section__mode-switch-values">
+                <span
+                  className={
+                    !previewUsesAppThemeColors ? "menu-section__mode-label is-active" : "menu-section__mode-label"
+                  }
+                >
+                  固定色
+                </span>
+                <input
+                  type="checkbox"
+                  className="menu-section__switch-input"
+                  checked={previewUsesAppThemeColors}
+                  onChange={handlePreviewUsesAppThemeColorsSwitch}
+                  aria-label="プレビューでアプリテーマ色を使うか切り替え"
+                />
+                <span className="menu-section__switch" aria-hidden="true" />
+                <span
+                  className={
+                    previewUsesAppThemeColors ? "menu-section__mode-label is-active" : "menu-section__mode-label"
+                  }
+                >
+                  アプリテーマ色
+                </span>
+              </span>
+            </label>
+          ) : null}
         </div>
-        <label className="menu-section__mode-switch">
-          <span className="menu-section__mode-switch-meta">
-            <span className="menu-section__field-label">行番号</span>
-            <span className="menu-section__mode-switch-legend">非表示 / 表示</span>
-          </span>
-          <span className="menu-section__mode-switch-values">
-            <span className={!showLineNumbers ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              非表示
-            </span>
-            <input
-              type="checkbox"
-              className="menu-section__switch-input"
-              checked={showLineNumbers}
-              onChange={handleShowLineNumbersSwitch}
-              aria-label="行番号の表示を切り替え"
-            />
-            <span className="menu-section__switch" aria-hidden="true" />
-            <span className={showLineNumbers ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              表示
-            </span>
-          </span>
-        </label>
+      ) : null}
 
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">フォントサイズ</span>
-          <input
-            type="number"
-            value={editFontSizePx}
-            min={MIN_EDIT_FONT_SIZE_PX}
-            max={MAX_EDIT_FONT_SIZE_PX}
-            step={1}
-            onChange={handleEditFontSizeInput}
-            aria-label="Edit のフォントサイズ"
-            className="menu-section__select"
-          />
-        </label>
+      {editGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">Edit</h2>
+            <p className="menu-section__group-description">起動時の内容と編集表示</p>
+          </div>
+          {showLineNumbersVisible ? (
+            <label className="menu-section__mode-switch">
+              <span className="menu-section__mode-switch-meta">
+                <span className="menu-section__field-label">行番号</span>
+              </span>
+              <span className="menu-section__mode-switch-values">
+                <span className={!showLineNumbers ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+                  非表示
+                </span>
+                <input
+                  type="checkbox"
+                  className="menu-section__switch-input"
+                  checked={showLineNumbers}
+                  onChange={handleShowLineNumbersSwitch}
+                  aria-label="行番号の表示を切り替え"
+                />
+                <span className="menu-section__switch" aria-hidden="true" />
+                <span className={showLineNumbers ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+                  表示
+                </span>
+              </span>
+            </label>
+          ) : null}
 
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">起動時の表示</span>
-          <select
-            value={startupEditMode}
-            onChange={handleStartupEditModeSelect}
-            aria-label="起動時に Edit へ表示する内容"
-            className="menu-section__select"
-          >
-            {STARTUP_EDIT_MODE_OPTIONS.map((startupEditModeOption) => (
-              <option key={startupEditModeOption.id} value={startupEditModeOption.id}>
-                {startupEditModeOption.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          {editFontSizeVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">フォントサイズ</span>
+              <input
+                type="number"
+                value={editFontSizePx}
+                min={MIN_EDIT_FONT_SIZE_PX}
+                max={MAX_EDIT_FONT_SIZE_PX}
+                step={1}
+                onChange={handleEditFontSizeInput}
+                aria-label="Edit のフォントサイズ"
+                className="menu-section__select"
+              />
+            </label>
+          ) : null}
 
-        {canControlWindowsStartupTrayResident ? (
+          {startupEditModeVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">起動時の表示</span>
+              <select
+                value={startupEditMode}
+                onChange={handleStartupEditModeSelect}
+                aria-label="起動時に Edit へ表示する内容"
+                className="menu-section__select"
+              >
+                {STARTUP_EDIT_MODE_OPTIONS.map((startupEditModeOption) => (
+                  <option key={startupEditModeOption.id} value={startupEditModeOption.id}>
+                    {startupEditModeOption.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          {windowsStartupTrayResidentVisible ? (
+            <label className="menu-section__mode-switch">
+              <span className="menu-section__mode-switch-meta">
+                <span className="menu-section__field-label">Windows 起動時の常駐</span>
+              </span>
+              <span className="menu-section__mode-switch-values">
+                <span
+                  className={
+                    !windowsStartupTrayResidentEnabled
+                      ? "menu-section__mode-label is-active"
+                      : "menu-section__mode-label"
+                  }
+                >
+                  無効
+                </span>
+                <input
+                  type="checkbox"
+                  className="menu-section__switch-input"
+                  checked={windowsStartupTrayResidentEnabled}
+                  onChange={handleWindowsStartupTrayResidentSwitch}
+                  aria-label="Windows 起動時のタスクトレイ常駐を切り替え"
+                />
+                <span className="menu-section__switch" aria-hidden="true" />
+                <span
+                  className={
+                    windowsStartupTrayResidentEnabled
+                      ? "menu-section__mode-label is-active"
+                      : "menu-section__mode-label"
+                  }
+                >
+                  常駐
+                </span>
+              </span>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+
+      {fontGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">フォント</h2>
+            <p className="menu-section__group-description">アプリ全体と Edit 本文</p>
+          </div>
+          {editFontVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">Edit</span>
+              <input
+                type="text"
+                value={editFontId}
+                onChange={handleEditFontInput}
+                aria-label="Edit フォント"
+                className="menu-section__select"
+                list={EDIT_FONT_DATALIST_ID}
+                placeholder='例: Iosevka Term, "Fira Code", monospace'
+                spellCheck={false}
+              />
+              <datalist id={EDIT_FONT_DATALIST_ID}>
+                {EDIT_FONT_OPTIONS.map((fontOption) => (
+                  <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
+                ))}
+              </datalist>
+            </label>
+          ) : null}
+
+          {appFontVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">アプリ</span>
+              <input
+                type="text"
+                value={appFontId}
+                onChange={handleAppFontInput}
+                aria-label="アプリフォント"
+                className="menu-section__select"
+                list={APP_FONT_DATALIST_ID}
+                placeholder='例: Aptos, "Segoe UI", sans-serif'
+                spellCheck={false}
+              />
+              <datalist id={APP_FONT_DATALIST_ID}>
+                {APP_FONT_OPTIONS.map((fontOption) => (
+                  <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
+                ))}
+              </datalist>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+
+      {appThemeGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">アプリテーマ</h2>
+            <p className="menu-section__group-description">ウィンドウ全体の配色</p>
+          </div>
+          <label className="menu-section__label">
+            <span className="menu-section__field-label">配色テーマ</span>
+            <select
+              value={appThemeId}
+              onChange={handleAppThemeSelect}
+              aria-label="アプリ表示テーマ"
+              className="menu-section__select"
+            >
+              {APP_THEME_OPTIONS.map((themeOption) => (
+                <option key={themeOption.id} value={themeOption.id}>
+                  {themeOption.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
+      {layoutModeGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">表示モード</h2>
+            <p className="menu-section__group-description">PC と Mobile のレイアウト切替</p>
+          </div>
           <label className="menu-section__mode-switch">
             <span className="menu-section__mode-switch-meta">
-              <span className="menu-section__field-label">Windows 起動時の常駐</span>
-              <span className="menu-section__mode-switch-legend">無効 / タスクトレイ常駐</span>
+              <span className="menu-section__field-label">レイアウト</span>
             </span>
             <span className="menu-section__mode-switch-values">
-              <span
-                className={
-                  !windowsStartupTrayResidentEnabled
-                    ? "menu-section__mode-label is-active"
-                    : "menu-section__mode-label"
-                }
-              >
-                無効
+              <span className={layoutMode === "desktop" ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+                PC
               </span>
               <input
                 type="checkbox"
                 className="menu-section__switch-input"
-                checked={windowsStartupTrayResidentEnabled}
-                onChange={handleWindowsStartupTrayResidentSwitch}
-                aria-label="Windows 起動時のタスクトレイ常駐を切り替え"
+                checked={layoutMode === "mobile"}
+                onChange={handleLayoutModeSwitch}
+                aria-label="PC モードとモバイルモードを切り替え"
               />
               <span className="menu-section__switch" aria-hidden="true" />
-              <span
-                className={
-                  windowsStartupTrayResidentEnabled
-                    ? "menu-section__mode-label is-active"
-                    : "menu-section__mode-label"
-                }
-              >
-                常駐
+              <span className={layoutMode === "mobile" ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
+                Mobile
               </span>
             </span>
           </label>
-        ) : null}
-      </div>
-
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">フォント</h2>
-          <p className="menu-section__group-description">アプリ全体と Edit 本文</p>
         </div>
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">Edit</span>
-          <input
-            type="text"
-            value={editFontId}
-            onChange={handleEditFontInput}
-            aria-label="Edit フォント"
-            className="menu-section__select"
-            list={EDIT_FONT_DATALIST_ID}
-            placeholder='例: Iosevka Term, "Fira Code", monospace'
-            spellCheck={false}
-          />
-          <datalist id={EDIT_FONT_DATALIST_ID}>
-            {EDIT_FONT_OPTIONS.map((fontOption) => (
-              <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
-            ))}
-          </datalist>
-        </label>
+      ) : null}
 
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">アプリ</span>
-          <input
-            type="text"
-            value={appFontId}
-            onChange={handleAppFontInput}
-            aria-label="アプリフォント"
-            className="menu-section__select"
-            list={APP_FONT_DATALIST_ID}
-            placeholder='例: Aptos, "Segoe UI", sans-serif'
-            spellCheck={false}
-          />
-          <datalist id={APP_FONT_DATALIST_ID}>
-            {APP_FONT_OPTIONS.map((fontOption) => (
-              <option key={fontOption.value} value={fontOption.value} label={fontOption.label} />
-            ))}
-          </datalist>
-        </label>
-      </div>
-
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">アプリテーマ</h2>
-          <p className="menu-section__group-description">ウィンドウ全体の配色</p>
+      {multiCursorGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">マルチカーソル</h2>
+            <p className="menu-section__group-description">追加カーソルのクリック修飾キー</p>
+          </div>
+          <label className="menu-section__label">
+            <span className="menu-section__field-label">追加カーソル</span>
+            <select
+              value={multiCursorModifier}
+              onChange={handleMultiCursorModifierSelect}
+              aria-label="マルチカーソルのクリック修飾キー"
+              className="menu-section__select"
+            >
+              {MULTI_CURSOR_MODIFIER_OPTIONS.map((modifierOption) => (
+                <option key={modifierOption.id} value={modifierOption.id}>
+                  {modifierOption.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">配色テーマ</span>
-          <select value={appThemeId} onChange={handleAppThemeSelect} aria-label="アプリ表示テーマ" className="menu-section__select">
-            {APP_THEME_OPTIONS.map((themeOption) => (
-              <option key={themeOption.id} value={themeOption.id}>
-                {themeOption.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      ) : null}
 
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">表示モード</h2>
-          <p className="menu-section__group-description">PC と Mobile のレイアウト切替</p>
-        </div>
-        <label className="menu-section__mode-switch">
-          <span className="menu-section__mode-switch-meta">
-            <span className="menu-section__field-label">レイアウト</span>
-            <span className="menu-section__mode-switch-legend">PC / Mobile</span>
-          </span>
-          <span className="menu-section__mode-switch-values">
-            <span className={layoutMode === "desktop" ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              PC
-            </span>
-            <input
-              type="checkbox"
-              className="menu-section__switch-input"
-              checked={layoutMode === "mobile"}
-              onChange={handleLayoutModeSwitch}
-              aria-label="PC モードとモバイルモードを切り替え"
-            />
-            <span className="menu-section__switch" aria-hidden="true" />
-            <span className={layoutMode === "mobile" ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
-              Mobile
-            </span>
-          </span>
-        </label>
-      </div>
-
-      <div className="menu-section__group">
-        <div className="menu-section__group-header">
-          <h2 className="menu-section__group-title">マルチカーソル</h2>
-          <p className="menu-section__group-description">追加カーソルのクリック修飾キー</p>
-        </div>
-        <label className="menu-section__label">
-          <span className="menu-section__field-label">追加カーソル</span>
-          <select
-            value={multiCursorModifier}
-            onChange={handleMultiCursorModifierSelect}
-            aria-label="マルチカーソルのクリック修飾キー"
-            className="menu-section__select"
-          >
-            {MULTI_CURSOR_MODIFIER_OPTIONS.map((modifierOption) => (
-              <option key={modifierOption.id} value={modifierOption.id}>
-                {modifierOption.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {!hasVisibleMenuItems ? <p className="menu-section__empty">一致する設定なし</p> : null}
     </section>
   );
 }
