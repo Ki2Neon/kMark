@@ -1,7 +1,7 @@
 import { autocompletion, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, type Completion } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { EditorSelection, Prec, type Extension } from "@codemirror/state";
-import { EditorView, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
+import { EditorSelection, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { Decoration, EditorView, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
@@ -29,6 +29,40 @@ const DESKTOP_EDITOR_BASIC_SETUP = {
 const EDITOR_CONTENT_ATTRIBUTES = EditorView.contentAttributes.of({
   "aria-label": "Markdown エディター",
   spellcheck: "false",
+});
+
+const setPreviewRequestedLineHighlightEffect = StateEffect.define<number>();
+
+const previewRequestedLineHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(highlights, transaction) {
+    const hasHighlightEffect = transaction.effects.some((effect) => (
+      effect.is(setPreviewRequestedLineHighlightEffect)
+    ));
+    let nextHighlights = hasHighlightEffect || !(transaction.docChanged || transaction.selection !== undefined)
+      ? highlights.map(transaction.changes)
+      : Decoration.none;
+
+    for (const effect of transaction.effects) {
+      if (!effect.is(setPreviewRequestedLineHighlightEffect)) {
+        continue;
+      }
+
+      const nextLineNumber = Math.min(
+        transaction.state.doc.lines,
+        Math.max(1, effect.value),
+      );
+      const nextLine = transaction.state.doc.line(nextLineNumber);
+      nextHighlights = Decoration.set([
+        Decoration.line({ class: "cm-previewRequestedLine" }).range(nextLine.from),
+      ]);
+    }
+
+    return nextHighlights;
+  },
+  provide: (field) => EditorView.decorations.from(field),
 });
 
 const MARKDOWN_SNIPPET_COMPLETIONS: readonly Completion[] = MARKDOWN_SNIPPET_DEFINITIONS.map((snippetDefinition, index) => (
@@ -179,7 +213,10 @@ function DesktopMarkdownInputComponent({
     lastHandledLineSelectionRequestIdRef.current = request.requestId;
     view.focus();
     view.dispatch({
-      effects: EditorView.scrollIntoView(nextCursorOffset, { y: "center" }),
+      effects: [
+        EditorView.scrollIntoView(nextCursorOffset, { y: "center" }),
+        setPreviewRequestedLineHighlightEffect.of(nextLineNumber),
+      ],
       selection: EditorSelection.cursor(nextCursorOffset),
     });
     onCursorLineChange?.(nextLineNumber);
@@ -263,6 +300,9 @@ function DesktopMarkdownInputComponent({
     ".cm-line": {
       padding: "0",
     },
+    ".cm-previewRequestedLine": {
+      backgroundColor: "color-mix(in srgb, var(--focus) 15%, transparent)",
+    },
     ".cm-panels": {
       backgroundColor: "var(--surface-muted)",
       borderBottom: "1px solid var(--border)",
@@ -336,6 +376,7 @@ function DesktopMarkdownInputComponent({
       markdownLanguage.data.of({
         autocomplete: MARKDOWN_SNIPPET_COMPLETION_SOURCE,
       }),
+      previewRequestedLineHighlightField,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,

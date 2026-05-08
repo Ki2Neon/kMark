@@ -797,9 +797,8 @@ input:focus-visible,
 
 .preview-section__cursor-target {
   scroll-margin-block: 72px;
-  outline: 1px solid var(--focus);
-  outline-offset: -1px;
-  box-shadow: inset 3px 0 0 var(--focus);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 .preview-section__body [data-source-line-start][data-source-line-end] {
