@@ -49,7 +49,6 @@ struct MarkdownPageSegment {
 
 struct MarkdownPageSegments {
     segments: Vec<MarkdownPageSegment>,
-    document_directive: PartialPageDirective,
 }
 
 #[derive(Clone, Copy)]
@@ -189,12 +188,6 @@ enum KmarkBlockEnd {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PageScope {
-    Document,
-    Page,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PageSizePreset {
     A3,
     A4,
@@ -214,7 +207,6 @@ enum PageOrientation {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct PartialPageDirective {
-    scope: Option<PageScope>,
     page_size: Option<PageSizePreset>,
     page_orientation: Option<PageOrientation>,
     page_width: Option<CssLength>,
@@ -258,7 +250,6 @@ enum KmarkComment {
     },
     ScopeStart(KmarkParamBundle),
     ScopeEnd,
-    PageDirective,
 }
 
 struct HtmlEmitter<'a> {
@@ -306,7 +297,7 @@ pub fn render_markdown_preview_with_file_path(
     markdown_file_path: Option<&str>,
 ) -> RenderedMarkdownPreview {
     let markdown_pages = split_markdown_pages(content);
-    let document_page_config = DocumentPageConfig::resolve(&markdown_pages.document_directive);
+    let document_page_config = DocumentPageConfig::default_config();
     let pages = markdown_pages
         .segments
         .iter()
@@ -372,9 +363,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
     let mut line_offset = 0usize;
     let mut active_fence = None;
     let mut is_inside_html_comment_block = false;
-    let mut document_directive = PartialPageDirective::default();
     let mut active_scope_lines: Vec<ActiveKmarkScopeLine> = Vec::new();
-    let mut one_page_directive = PartialPageDirective::default();
     let mut segment_has_rendered_content = false;
 
     for (line_index, line_span) in collect_markdown_line_spans(content).into_iter().enumerate() {
@@ -401,16 +390,14 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         }
 
         if let Some(scope_page_directive) = parse_kmark_scope_start_page_directive_line(line) {
-            let current_page_directive =
-                resolve_active_page_directive(&active_scope_lines, &one_page_directive);
+            let current_page_directive = resolve_active_page_directive(&active_scope_lines);
             let mut next_scope_lines = active_scope_lines.clone();
             next_scope_lines.push(ActiveKmarkScopeLine {
                 line: line.to_owned(),
                 end_offset: line_span.end,
                 page_directive: scope_page_directive,
             });
-            let next_page_directive =
-                resolve_active_page_directive(&next_scope_lines, &one_page_directive);
+            let next_page_directive = resolve_active_page_directive(&next_scope_lines);
 
             if segment_has_rendered_content
                 && current_page_directive.has_different_page_style_than(&next_page_directive)
@@ -434,12 +421,10 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         }
 
         if is_kmark_scope_end_line(line) {
-            let current_page_directive =
-                resolve_active_page_directive(&active_scope_lines, &one_page_directive);
+            let current_page_directive = resolve_active_page_directive(&active_scope_lines);
             let mut next_scope_lines = active_scope_lines.clone();
             next_scope_lines.pop();
-            let next_page_directive =
-                resolve_active_page_directive(&next_scope_lines, &one_page_directive);
+            let next_page_directive = resolve_active_page_directive(&next_scope_lines);
 
             if segment_has_rendered_content
                 && current_page_directive.has_different_page_style_than(&next_page_directive)
@@ -463,36 +448,9 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
             active_scope_lines = next_scope_lines;
         }
 
-        if let Some(page_directive) = parse_kmark_page_directive_line(line) {
-            match page_directive.scope.unwrap_or(PageScope::Document) {
-                PageScope::Document => document_directive.merge(&page_directive),
-                PageScope::Page => {
-                    if segment_has_rendered_content {
-                        let current_page_directive =
-                            resolve_active_page_directive(&active_scope_lines, &one_page_directive);
-                        push_markdown_page_segment(
-                            &mut page_segments,
-                            content,
-                            last_index,
-                            line_span.start,
-                            line_offset,
-                            current_page_directive,
-                            &active_scope_lines,
-                        );
-                        last_index = line_span.end;
-                        line_offset = line_index + 1;
-                        segment_has_rendered_content = false;
-                    }
-                    one_page_directive.merge(&page_directive);
-                }
-            }
-            continue;
-        }
-
         if is_page_break_line(line) {
-            let current_page_directive =
-                resolve_active_page_directive(&active_scope_lines, &one_page_directive);
-            let did_push = if segment_has_rendered_content {
+            let current_page_directive = resolve_active_page_directive(&active_scope_lines);
+            if segment_has_rendered_content {
                 push_markdown_page_segment(
                     &mut page_segments,
                     content,
@@ -502,16 +460,10 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
                     current_page_directive,
                     &active_scope_lines,
                 );
-                true
-            } else {
-                false
-            };
+            }
 
             last_index = line_span.end;
             line_offset = line_index + 1;
-            if did_push {
-                one_page_directive = PartialPageDirective::default();
-            }
             segment_has_rendered_content = false;
             continue;
         }
@@ -528,8 +480,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
     }
 
     if segment_has_rendered_content {
-        let current_page_directive =
-            resolve_active_page_directive(&active_scope_lines, &one_page_directive);
+        let current_page_directive = resolve_active_page_directive(&active_scope_lines);
         push_markdown_page_segment(
             &mut page_segments,
             content,
@@ -551,7 +502,6 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
 
     MarkdownPageSegments {
         segments: page_segments,
-        document_directive,
     }
 }
 
@@ -586,14 +536,12 @@ fn push_markdown_page_segment(
 
 fn resolve_active_page_directive(
     active_scope_lines: &[ActiveKmarkScopeLine],
-    one_page_directive: &PartialPageDirective,
 ) -> PartialPageDirective {
     let mut page_directive = PartialPageDirective::default();
 
     for scope_line in active_scope_lines {
         page_directive.merge(&scope_line.page_directive);
     }
-    page_directive.merge(one_page_directive);
 
     page_directive
 }
@@ -1444,9 +1392,6 @@ impl<'a> HtmlEmitter<'a> {
                 self.pending_kmark_params = None;
                 self.close_kmark_scope();
             }
-            KmarkComment::PageDirective => {
-                self.pending_kmark_params = None;
-            }
         }
     }
 
@@ -2100,9 +2045,6 @@ impl PageSizePreset {
 
 impl PartialPageDirective {
     fn merge(&mut self, other: &Self) {
-        if let Some(scope) = other.scope {
-            self.scope = Some(scope);
-        }
         if let Some(page_size) = other.page_size {
             self.page_size = Some(page_size);
         }
@@ -2136,8 +2078,7 @@ impl PartialPageDirective {
     }
 
     fn has_page_directive(&self) -> bool {
-        self.scope.is_some()
-            || self.page_size.is_some()
+        self.page_size.is_some()
             || self.page_orientation.is_some()
             || self.page_width.is_some()
             || self.page_height.is_some()
@@ -2170,10 +2111,6 @@ impl DocumentPageConfig {
             default_page_style: PageStyle::default_a4(),
             default_text_style: PreviewTextStyle::default_preview(),
         }
-    }
-
-    fn resolve(document_directive: &PartialPageDirective) -> Self {
-        Self::default_config().resolve_page(document_directive)
     }
 
     fn resolve_page(&self, page_directive: &PartialPageDirective) -> Self {
@@ -2377,16 +2314,6 @@ fn is_pending_kmark_target_event(event: &Event<'static>) -> bool {
     }
 }
 
-fn parse_kmark_page_directive_line(line: &str) -> Option<PartialPageDirective> {
-    let remainder = parse_kmark_comment_body(line)?;
-
-    if remainder.starts_with('{') || remainder == "}" {
-        return None;
-    }
-
-    parse_kmark_page_directive_tokens(remainder)
-}
-
 fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective> {
     let mut directive = PartialPageDirective::default();
 
@@ -2396,11 +2323,6 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
         };
 
         match key {
-            "page_scope" => {
-                if let Some(scope) = parse_kmark_page_scope_value(value) {
-                    directive.scope = Some(scope);
-                }
-            }
             "page_size" => {
                 if let Some(page_size) = parse_kmark_page_size_value(value) {
                     directive.page_size = Some(page_size);
@@ -2458,14 +2380,6 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
     directive.has_page_directive().then_some(directive)
 }
 
-fn parse_kmark_page_scope_value(value: &str) -> Option<PageScope> {
-    match value.trim() {
-        "document" => Some(PageScope::Document),
-        "page" => Some(PageScope::Page),
-        _ => None,
-    }
-}
-
 fn parse_kmark_page_size_value(value: &str) -> Option<PageSizePreset> {
     match value.trim().to_ascii_lowercase().as_str() {
         "a3" => Some(PageSizePreset::A3),
@@ -2511,13 +2425,6 @@ fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
 
     if let Some(name) = define_name {
         return Some(KmarkComment::Define { name, bundle });
-    }
-
-    if !bundle.params.has_directives()
-        && bundle.preset_use.is_none()
-        && parse_kmark_page_directive_tokens(remainder).is_some()
-    {
-        return Some(KmarkComment::PageDirective);
     }
 
     Some(KmarkComment::Params(bundle))
@@ -3141,14 +3048,14 @@ mod tests {
     }
 
     #[test]
-    fn resolves_document_and_page_scoped_page_directives() {
+    fn applies_unclosed_scope_page_settings_and_nested_overrides() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_scope:document page_size:A4 page_orientation:portrait page_margin:12mm font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm font_size:11pt -->\n\
              # 1\n\
              <!-- --- -->\n\
-             <!-- kmark page_scope:page page_orientation:landscape font_size:9pt page_margin:8mm -->\n\
+             <!-- kmark { page_orientation:landscape font_size:9pt page_margin:8mm -->\n\
              # 2\n\
-             <!-- --- -->\n\
+             <!-- kmark } -->\n\
              # 3",
         );
 
@@ -3157,11 +3064,11 @@ mod tests {
         assert_eq!(rendered_preview.default_page_style.height.as_str(), "297mm");
         assert_eq!(
             rendered_preview.default_page_style.margin_top.as_str(),
-            "12mm"
+            "16mm"
         );
         assert_eq!(
             rendered_preview.default_text_style.font_size.as_str(),
-            "11pt"
+            "16px"
         );
         assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "210mm");
         assert_eq!(
@@ -3197,10 +3104,11 @@ mod tests {
     }
 
     #[test]
-    fn keeps_page_directives_out_of_block_decoration_route() {
+    fn keeps_scope_page_directives_out_of_block_decoration_route() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_scope:page page_width:297mm page_height:210mm page_margin:8mm font_size:10pt -->\n\
-             ![](image.png)",
+            "<!-- kmark { page_width:297mm page_height:210mm page_margin:8mm font_size:10pt -->\n\
+             ![](image.png)\n\
+             <!-- kmark } -->",
         );
 
         assert_eq!(
@@ -3221,8 +3129,9 @@ mod tests {
     #[test]
     fn lets_individual_page_margins_override_common_page_margin() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_scope:page page_margin:10mm page_margin_left:4mm page_margin_bottom:6mm -->\n\
-             text",
+            "<!-- kmark { page_margin:10mm page_margin_left:4mm page_margin_bottom:6mm -->\n\
+             text\n\
+             <!-- kmark } -->",
         );
 
         let page_style = &rendered_preview.pages[0].page_style;
@@ -3235,7 +3144,7 @@ mod tests {
     #[test]
     fn splits_pages_when_scope_page_style_starts_and_ends() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_scope:document page_size:A4 page_orientation:portrait font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_orientation:portrait font_size:11pt -->\n\
              # Normal\n\
              <!-- kmark { page_orientation:landscape font_size:9pt align:center -->\n\
              # Wide\n\
@@ -3281,6 +3190,25 @@ mod tests {
             assert_eq!(page.text_style.font_size.as_str(), "9pt");
             assert!(page.html.contains("align-items:center"));
         }
+    }
+
+    #[test]
+    fn ignores_legacy_page_scope_comments_as_page_settings() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_scope:page page_width:297mm page_height:210mm font_size:10pt -->\n\
+             # Legacy",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 1);
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.height.as_str(),
+            "297mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "16px"
+        );
     }
 
     #[test]
