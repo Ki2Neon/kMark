@@ -202,7 +202,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
   #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 {
     min-height: 100%;
     padding: 0;
-    font-size: var(--kmark-preview-font-size, 16px);
+    font-size: var(--kmark-font-size, 16px);
     overflow: hidden;
     orphans: 3;
     widows: 3;

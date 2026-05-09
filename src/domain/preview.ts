@@ -20,7 +20,7 @@ export type PageStyle = {
 };
 
 export type PreviewTextStyle = {
-  readonly baseFontSize: string;
+  readonly fontSize: string;
 };
 
 export type RenderedPreviewPage = {
@@ -54,7 +54,7 @@ export const DEFAULT_PAGE_STYLE: PageStyle = {
 } as const;
 
 export const DEFAULT_PREVIEW_TEXT_STYLE: PreviewTextStyle = {
-  baseFontSize: DEFAULT_PREVIEW_FONT_SIZE,
+  fontSize: DEFAULT_PREVIEW_FONT_SIZE,
 } as const;
 
 const PREVIEW_DISPLAY_MODE_SET = new Set<PreviewDisplayMode>(

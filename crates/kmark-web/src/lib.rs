@@ -40,7 +40,7 @@ struct PageStylePayload {
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct PreviewTextStylePayload {
-    base_font_size: String,
+    font_size: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -371,7 +371,7 @@ impl From<PageStyle> for PageStylePayload {
 impl From<PreviewTextStyle> for PreviewTextStylePayload {
     fn from(text_style: PreviewTextStyle) -> Self {
         Self {
-            base_font_size: text_style.base_font_size.as_str().to_owned(),
+            font_size: text_style.font_size.as_str().to_owned(),
         }
     }
 }

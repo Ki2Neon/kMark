@@ -826,7 +826,7 @@ input:focus-visible,
 
 .markdown-body--a4 {
   padding: 0;
-  font-size: var(--kmark-preview-font-size, 16px);
+  font-size: var(--kmark-font-size, 16px);
 }
 
 .markdown-body > :first-child {

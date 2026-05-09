@@ -71,7 +71,6 @@ type NearestPreviewTargetCandidate = PreviewTargetCandidate & {
 
 type A4PaginationContext = {
   body: HTMLElement;
-  readonly defaultPageConfig: PreviewPageConfig;
   frame: HTMLElement;
   maxContentHeight: number;
   pageConfig: PreviewPageConfig;
@@ -109,7 +108,7 @@ function arePageStylesEqual(left: PageStyle, right: PageStyle): boolean {
 }
 
 function arePreviewTextStylesEqual(left: PreviewTextStyle, right: PreviewTextStyle): boolean {
-  return left.baseFontSize === right.baseFontSize;
+  return left.fontSize === right.fontSize;
 }
 
 function pageStyleKey(pageStyle: PageStyle): string {
@@ -124,7 +123,7 @@ function pageStyleKey(pageStyle: PageStyle): string {
 }
 
 function previewTextStyleKey(textStyle: PreviewTextStyle): string {
-  return textStyle.baseFontSize;
+  return textStyle.fontSize;
 }
 
 function previewPageKey(page: RenderedPreviewPage): string {
@@ -150,7 +149,7 @@ function getPreviewPageStyle(pageConfig: PreviewPageConfig): CSSProperties {
     "--kmark-page-margin-right": pageConfig.pageStyle.marginRight,
     "--kmark-page-margin-bottom": pageConfig.pageStyle.marginBottom,
     "--kmark-page-margin-left": pageConfig.pageStyle.marginLeft,
-    "--kmark-preview-font-size": pageConfig.textStyle.baseFontSize,
+    "--kmark-font-size": pageConfig.textStyle.fontSize,
   } as CSSProperties;
 }
 
@@ -161,7 +160,7 @@ function applyPreviewPageStyle(element: HTMLElement, pageConfig: PreviewPageConf
   element.style.setProperty("--kmark-page-margin-right", pageConfig.pageStyle.marginRight);
   element.style.setProperty("--kmark-page-margin-bottom", pageConfig.pageStyle.marginBottom);
   element.style.setProperty("--kmark-page-margin-left", pageConfig.pageStyle.marginLeft);
-  element.style.setProperty("--kmark-preview-font-size", pageConfig.textStyle.baseFontSize);
+  element.style.setProperty("--kmark-font-size", pageConfig.textStyle.fontSize);
 }
 
 function getPreviewPageScaleStyle(page: RenderedPreviewPage, scale: number): CSSProperties {
@@ -570,11 +569,10 @@ function createA4PaginationPage(
 }
 
 function startA4PaginationPage(context: A4PaginationContext): void {
-  const page = createA4PaginationPage(context.root, context.defaultPageConfig);
+  const page = createA4PaginationPage(context.root, context.pageConfig);
   context.body = page.body;
   context.frame = page.frame;
   context.maxContentHeight = page.maxContentHeight;
-  context.pageConfig = context.defaultPageConfig;
 }
 
 function hasA4PaginationContent(element: HTMLElement): boolean {
@@ -1637,16 +1635,12 @@ function appendNodeToA4Pages(context: A4PaginationContext, node: Node): void {
   context.body.append(node.cloneNode(true));
 }
 
-function paginateA4HtmlSegment(
-  page: RenderedPreviewPage,
-  defaultPageConfig: PreviewPageConfig,
-): readonly RenderedPreviewPage[] {
+function paginateA4HtmlSegment(page: RenderedPreviewPage): readonly RenderedPreviewPage[] {
   const root = createA4PaginationMeasureRoot();
   const firstPageConfig = getPreviewPageConfig(page);
   const firstPage = createA4PaginationPage(root, firstPageConfig);
   const context: A4PaginationContext = {
     body: firstPage.body,
-    defaultPageConfig,
     frame: firstPage.frame,
     maxContentHeight: firstPage.maxContentHeight,
     pageConfig: firstPageConfig,
@@ -1684,9 +1678,8 @@ function paginateA4HtmlSegment(
 
 function paginateA4HtmlSegments(
   pages: readonly RenderedPreviewPage[],
-  defaultPageConfig: PreviewPageConfig,
 ): readonly RenderedPreviewPage[] {
-  return pages.flatMap((page) => [...paginateA4HtmlSegment(page, defaultPageConfig)]);
+  return pages.flatMap((page) => [...paginateA4HtmlSegment(page)]);
 }
 
 function MarkdownPreviewComponent({
@@ -1726,13 +1719,6 @@ function MarkdownPreviewComponent({
   const [a4FitScale, setA4FitScale] = useState(1);
   const [isViewportPanning, setIsViewportPanning] = useState(false);
 
-  const defaultPageConfig = useMemo(
-    () => ({
-      pageStyle: defaultPageStyle,
-      textStyle: defaultTextStyle,
-    }),
-    [defaultPageStyle, defaultTextStyle],
-  );
   const normalizedPages = useMemo(() => {
     if (pages !== undefined && pages.length > 0) {
       return [...pages];
@@ -1951,7 +1937,7 @@ function MarkdownPreviewComponent({
         return;
       }
 
-      const nextPages = paginateA4HtmlSegments(normalizedPages, defaultPageConfig);
+      const nextPages = paginateA4HtmlSegments(normalizedPages);
 
       setPaginatedA4PageState((currentState) => {
         if (
@@ -2009,7 +1995,7 @@ function MarkdownPreviewComponent({
         previewImage.removeEventListener("error", scheduleA4Pagination);
       }
     };
-  }, [a4PaginationSourceKey, defaultPageConfig, displayMode, normalizedPages]);
+  }, [a4PaginationSourceKey, displayMode, normalizedPages]);
 
   useLayoutEffect(() => {
     const previewViewport = previewViewportRef.current;

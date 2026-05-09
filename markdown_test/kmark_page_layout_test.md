@@ -1,4 +1,4 @@
-<!-- kmark page_scope:document page_size:A4 page_orientation:portrait page_margin:12mm preview_font_size:11pt -->
+<!-- kmark page_scope:document page_size:A4 page_orientation:portrait page_margin:12mm font_size:11pt -->
 
 # kmark ページ割り・ページ設定テスト
 
@@ -24,7 +24,7 @@
 - page_size: A4
 - page_orientation: portrait
 - page_margin: 12mm
-- preview_font_size: 11pt
+- font_size: 11pt
 ```
 
 ### 通常段落
@@ -70,7 +70,7 @@ pub struct PageStyle {
 
 #[derive(Clone, Debug)]
 pub struct PreviewTextStyle {
-    pub base_font_size: CssLength,
+    pub font_size: CssLength,
 }
 ```
 
@@ -90,7 +90,7 @@ pub struct PreviewTextStyle {
 - page_width: 297mm 相当
 - page_height: 210mm 相当
 - page_margin: 12mm
-- preview_font_size: 11pt
+- font_size: 11pt
 ```
 
 ## 横ページ用の広い表
@@ -117,7 +117,7 @@ pub struct PreviewTextStyle {
 ---
 
 <!-- --- -->
-<!-- kmark page_scope:page page_size:A5 page_orientation:portrait page_margin:8mm preview_font_size:10pt -->
+<!-- kmark page_scope:page page_size:A5 page_orientation:portrait page_margin:8mm font_size:10pt -->
 
 # 3ページ目: A5 縦 / 10pt / 余白8mm
 
@@ -128,13 +128,13 @@ pub struct PreviewTextStyle {
 - page_size: A5
 - page_orientation: portrait
 - page_margin: 8mm
-- preview_font_size: 10pt
+- font_size: 10pt
 ```
 
 ## A5ページの確認
 
 A5 は A4 より小さいため、同じ文章量でも早くページが溢れます。  
-ただし、このページでは `preview_font_size:10pt` としているため、11pt よりは少し多くの文字が入る可能性があります。
+ただし、このページでは `font_size:10pt` としているため、11pt よりは少し多くの文字が入る可能性があります。
 
 ### 長めの段落
 
@@ -162,7 +162,7 @@ A5 縦は A4 縦より高さも幅も小さいため、段落の折り返し行�
 ---
 
 <!-- --- -->
-<!-- kmark page_scope:page page_size:A5 page_orientation:landscape page_margin:8mm preview_font_size:9pt -->
+<!-- kmark page_scope:page page_size:A5 page_orientation:landscape page_margin:8mm font_size:9pt -->
 
 # 4ページ目: A5 横 / 9pt / 余白8mm
 
@@ -174,7 +174,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 - page_size: A5
 - page_orientation: landscape
 - page_margin: 8mm
-- preview_font_size: 9pt
+- font_size: 9pt
 ```
 
 ## A5横の横長テーブル
@@ -195,7 +195,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 ---
 
 <!-- --- -->
-<!-- kmark page_scope:page page_width:100mm page_height:148mm page_margin_top:6mm page_margin_right:7mm page_margin_bottom:8mm page_margin_left:9mm preview_font_size:8pt -->
+<!-- kmark page_scope:page page_width:100mm page_height:148mm page_margin_top:6mm page_margin_right:7mm page_margin_bottom:8mm page_margin_left:9mm font_size:8pt -->
 
 # 5ページ目: カスタムサイズ / 個別余白 / 8pt
 
@@ -209,7 +209,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 - margin_right: 7mm
 - margin_bottom: 8mm
 - margin_left: 9mm
-- preview_font_size: 8pt
+- font_size: 8pt
 ```
 
 ## 個別余白テスト
@@ -236,7 +236,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 - page_size: A4
 - page_orientation: portrait
 - page_margin: 12mm
-- preview_font_size: 11pt
+- font_size: 11pt
 ```
 
 ## 戻り確認
@@ -247,7 +247,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 ---
 
 <!-- --- -->
-<!-- kmark page_scope:page page_size:A4 page_orientation:portrait page_margin:12mm preview_font_size:14pt -->
+<!-- kmark page_scope:page page_size:A4 page_orientation:portrait page_margin:12mm font_size:14pt -->
 
 # 7ページ目: A4 縦 / 14pt / 自動ページ割り確認
 
@@ -265,7 +265,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 2. 単純な文字数ベースでは、折り返し幅やフォントサイズの影響を正しく反映できません。
 3. 特に横向きページでは横幅が広くなるため、段落の折り返しは減りますが、ページの高さは減る可能性があります。
 4. A5 ページでは幅も高さも変化するため、A4 と同じ閾値でページ割りを行うと不自然な結果になります。
-5. `preview_font_size` が変化すると、段落、リスト、表、コードブロックの高さが変化します。
+5. `font_size` が変化すると、段落、リスト、表、コードブロックの高さが変化します。
 6. そのため、ページ分割は最終的な表示スタイルに近い状態を基準に判定する必要があります。
 7. 明示ページ区切り `<!-- --- -->` がある場合は、その位置で必ずページを分けます。
 8. ただし、自動ページ割りでは、溢れた部分だけを次ページに送り、余計なブロックを巻き込まないことが望ましいです。
@@ -297,7 +297,7 @@ A5 横は幅は広めですが、高さは小さいため、ページ割りの�
 ---
 
 <!-- --- -->
-<!-- kmark page_scope:page page_size:A4 page_orientation:landscape page_margin:10mm preview_font_size:12pt -->
+<!-- kmark page_scope:page page_size:A4 page_orientation:landscape page_margin:10mm font_size:12pt -->
 
 # 8ページ目: A4 横 / 12pt / コードと表の複合テスト
 
@@ -313,7 +313,7 @@ typedef struct {
     uint16_t margin_right_mm;
     uint16_t margin_bottom_mm;
     uint16_t margin_left_mm;
-    uint8_t  preview_font_size_pt;
+    uint8_t  font_size_pt;
 } kmark_page_style_t;
 
 void kmark_apply_page_style(const kmark_page_style_t* style) {
@@ -336,7 +336,7 @@ void kmark_apply_page_style(const kmark_page_style_t* style) {
 | page_size | A4 | 横向きで反映 |
 | page_orientation | landscape | width/height 入れ替え |
 | page_margin | 10mm | 4辺に反映 |
-| preview_font_size | 12pt | 本文だけに反映 |
+| font_size | 12pt | 本文だけに反映 |
 | code block | C code | 横幅・高さ確認 |
 | table | この表 | はみ出し確認 |
 
@@ -363,7 +363,7 @@ void kmark_apply_page_style(const kmark_page_style_t* style) {
 - [ ] A5縦とA5横が混在できる
 - [ ] カスタムサイズが反映される
 - [ ] 個別余白が反映される
-- [ ] preview_font_size がページごとに反映される
+- [ ] font_size がページごとに反映される
 - [ ] page指定コメントが本文に出ない
 - [ ] 通常Web表示でコメントが本文に出ない
 - [ ] 既存のブロック装飾と干渉しない
