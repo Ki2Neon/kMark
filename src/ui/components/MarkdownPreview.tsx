@@ -44,6 +44,19 @@ type PreviewBlockInfo = {
   readonly visibilityScore: number;
 };
 
+type PreviewTargetCandidate = {
+  readonly area: number;
+  readonly element: HTMLElement;
+  readonly sourceLineEnd: number;
+  readonly sourceLineStart: number;
+  readonly span: number;
+  readonly visibilityScore: number;
+};
+
+type NearestPreviewTargetCandidate = PreviewTargetCandidate & {
+  readonly distance: number;
+};
+
 type A4PaginationContext = {
   body: HTMLElement;
   frame: HTMLElement;
@@ -102,6 +115,52 @@ function getPreviewBlockInfo(
   };
 }
 
+function getRectArea(rect: DOMRect): number {
+  return Math.max(0, rect.width) * Math.max(0, rect.height);
+}
+
+function getPreviewTargetCandidate(
+  previewViewport: HTMLElement,
+  previewBlock: HTMLElement,
+): PreviewTargetCandidate | null {
+  const sourceLineStart = Number.parseInt(previewBlock.dataset.sourceLineStart ?? "", 10);
+  const sourceLineEnd = Number.parseInt(previewBlock.dataset.sourceLineEnd ?? "", 10);
+
+  if (!Number.isFinite(sourceLineStart) || !Number.isFinite(sourceLineEnd)) {
+    return null;
+  }
+
+  const previewBlockInfo = getPreviewBlockInfo(previewViewport, previewBlock);
+
+  return {
+    area: previewBlockInfo === null ? 0 : getRectArea(previewBlockInfo.rect),
+    element: previewBlock,
+    sourceLineEnd,
+    sourceLineStart,
+    span: Math.max(0, sourceLineEnd - sourceLineStart),
+    visibilityScore: previewBlockInfo?.visibilityScore ?? 0,
+  };
+}
+
+function isMoreSpecificPreviewTarget(
+  candidate: PreviewTargetCandidate,
+  current: PreviewTargetCandidate,
+): boolean {
+  if (current.element !== candidate.element && current.element.contains(candidate.element)) {
+    return true;
+  }
+
+  if (current.element !== candidate.element && candidate.element.contains(current.element)) {
+    return false;
+  }
+
+  if (candidate.area > 0 && current.area > 0 && Math.abs(candidate.area - current.area) > 1) {
+    return candidate.area < current.area;
+  }
+
+  return candidate.visibilityScore > current.visibilityScore;
+}
+
 function getSourceLineProgress(
   sourceLineRange: { start: number; end: number },
   activeSourceLine: number,
@@ -118,13 +177,6 @@ function getSourceLineProgress(
   );
 }
 
-function getPreviewBlockVisibilityScore(
-  previewViewport: HTMLElement,
-  previewBlock: HTMLElement,
-): number {
-  return getPreviewBlockInfo(previewViewport, previewBlock)?.visibilityScore ?? 0;
-}
-
 function findPreviewCursorTarget(
   previewViewport: HTMLElement,
   activeSourceLine: number,
@@ -132,50 +184,46 @@ function findPreviewCursorTarget(
   const previewBlocks = Array.from(
     previewViewport.querySelectorAll<HTMLElement>("[data-source-line-start][data-source-line-end]"),
   );
-  let containingBlock: { element: HTMLElement; span: number; visibilityScore: number } | null = null;
-  let nearestBlock: { element: HTMLElement; distance: number; visibilityScore: number } | null = null;
+  let containingBlock: PreviewTargetCandidate | null = null;
+  let nearestBlock: NearestPreviewTargetCandidate | null = null;
 
   for (const previewBlock of previewBlocks) {
-    const sourceLineStart = Number.parseInt(previewBlock.dataset.sourceLineStart ?? "", 10);
-    const sourceLineEnd = Number.parseInt(previewBlock.dataset.sourceLineEnd ?? "", 10);
+    const candidate = getPreviewTargetCandidate(previewViewport, previewBlock);
 
-    if (!Number.isFinite(sourceLineStart) || !Number.isFinite(sourceLineEnd)) {
+    if (candidate === null) {
       continue;
     }
 
-    if (activeSourceLine >= sourceLineStart && activeSourceLine <= sourceLineEnd) {
-      const span = sourceLineEnd - sourceLineStart;
-      const visibilityScore = getPreviewBlockVisibilityScore(previewViewport, previewBlock);
-
+    if (activeSourceLine >= candidate.sourceLineStart && activeSourceLine <= candidate.sourceLineEnd) {
       if (
         containingBlock === null
-        || span < containingBlock.span
-        || (span === containingBlock.span && visibilityScore > containingBlock.visibilityScore)
+        || candidate.span < containingBlock.span
+        || (candidate.span === containingBlock.span && isMoreSpecificPreviewTarget(candidate, containingBlock))
       ) {
-        containingBlock = {
-          element: previewBlock,
-          span,
-          visibilityScore,
-        };
+        containingBlock = candidate;
       }
 
       continue;
     }
 
-    const distance = activeSourceLine < sourceLineStart
-      ? sourceLineStart - activeSourceLine
-      : activeSourceLine - sourceLineEnd;
-    const visibilityScore = getPreviewBlockVisibilityScore(previewViewport, previewBlock);
+    const distance = activeSourceLine < candidate.sourceLineStart
+      ? candidate.sourceLineStart - activeSourceLine
+      : activeSourceLine - candidate.sourceLineEnd;
 
     if (
       nearestBlock === null
       || distance < nearestBlock.distance
-      || (distance === nearestBlock.distance && visibilityScore > nearestBlock.visibilityScore)
+      || (
+        distance === nearestBlock.distance
+        && (
+          candidate.span < nearestBlock.span
+          || (candidate.span === nearestBlock.span && isMoreSpecificPreviewTarget(candidate, nearestBlock))
+        )
+      )
     ) {
       nearestBlock = {
-        element: previewBlock,
+        ...candidate,
         distance,
-        visibilityScore,
       };
     }
   }

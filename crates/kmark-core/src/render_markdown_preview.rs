@@ -42,6 +42,7 @@ struct ImageContext {
     title: String,
     alt_text: String,
     style: Option<String>,
+    source_line_attributes: String,
 }
 
 #[derive(Debug, Clone)]
@@ -537,6 +538,7 @@ impl<'a> HtmlEmitter<'a> {
                     title: String::new(),
                     alt_text: String::new(),
                     style: None,
+                    source_line_attributes: String::new(),
                 });
             }
             return;
@@ -759,6 +761,7 @@ impl<'a> HtmlEmitter<'a> {
                 dest_url, title, ..
             } => {
                 self.mark_paragraph_image();
+                let source_line_attributes = self.source_line_attributes(range);
                 let single_layer = self.take_pending_kmark_layer_for_image(range.start);
                 let image_style = self.resolve_image_style(single_layer.as_ref());
                 self.image_stack.push(ImageContext {
@@ -769,6 +772,7 @@ impl<'a> HtmlEmitter<'a> {
                     title: title.to_string(),
                     alt_text: String::new(),
                     style: image_style,
+                    source_line_attributes,
                 });
             }
             Tag::MetadataBlock(kind) => {
@@ -903,9 +907,10 @@ impl<'a> HtmlEmitter<'a> {
         };
 
         let mut html = format!(
-            "<img src=\"{}\" alt=\"{}\"",
+            "<img src=\"{}\" alt=\"{}\"{}",
             escape_html(&destination_url),
             escape_html(&image_context.alt_text),
+            image_context.source_line_attributes,
         );
         if !image_context.title.is_empty() {
             html.push_str(" title=\"");
@@ -2498,7 +2503,7 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             format!(
-                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"{}\" alt=\"plot\" /></p>",
+                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"{}\" alt=\"plot\" data-source-line-start=\"0\" data-source-line-end=\"0\" /></p>",
                 resolved_image_url,
             )
         );
@@ -2512,7 +2517,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"data:image/svg+xml,%3Csvg%20viewBox=&#39;0%200%201%201&#39;%3E\" alt=\"badge\" /></p>"
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"data:image/svg+xml,%3Csvg%20viewBox=&#39;0%200%201%201&#39;%3E\" alt=\"badge\" data-source-line-start=\"0\" data-source-line-end=\"0\" /></p>"
         );
     }
 
@@ -2523,7 +2528,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:200px;height:100px;\" /></p>"
         );
     }
 
@@ -2534,7 +2539,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"board.png\" alt=\"基板写真\" style=\"width:200px;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"board.png\" alt=\"基板写真\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:200px;\" /></p>"
         );
     }
 
@@ -2546,7 +2551,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" style=\"width:300px;height:100px;\" /></p>"
+            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:300px;height:100px;\" /></p>"
         );
     }
 
@@ -2556,7 +2561,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" /></p>"
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" /></p>"
         );
     }
 
@@ -2568,7 +2573,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"4\" data-source-line-end=\"4\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"4\" data-source-line-end=\"4\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"4\" data-source-line-end=\"4\" style=\"width:200px;height:100px;\" /></p></div>"
         );
     }
 
@@ -2580,7 +2585,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:300px;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;height:100px;\" /></p><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:200px;height:300px;\" /></p></div>"
         );
     }
 
@@ -2592,7 +2597,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" style=\"width:200px;height:100px;object-fit:cover;\" /></p>"
+            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:200px;height:100px;object-fit:cover;\" /></p>"
         );
     }
 
@@ -2604,7 +2609,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;object-fit:cover;\" /></p><p data-source-line-start=\"8\" data-source-line-end=\"8\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:300px;height:240px;object-fit:cover;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"width:300px;height:100px;object-fit:cover;\" /></p><p data-source-line-start=\"8\" data-source-line-end=\"8\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"8\" data-source-line-end=\"8\" style=\"width:300px;height:240px;object-fit:cover;\" /></p></div>"
         );
     }
 
@@ -2616,7 +2621,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;justify-content:center;align-items:flex-start;flex-wrap:wrap;gap:16px;\"><p data-source-line-start=\"2\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:200px;object-fit:cover;\" /><img src=\"b.png\" alt=\"\" style=\"width:200px;object-fit:cover;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;justify-content:center;align-items:flex-start;flex-wrap:wrap;gap:16px;\"><p data-source-line-start=\"2\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;object-fit:cover;\" /><img src=\"b.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:200px;object-fit:cover;\" /></p></div>"
         );
     }
 
@@ -2628,7 +2633,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;gap:24px;\"><div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;gap:8px;\"><p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" style=\"width:300px;height:100px;\" /></p></div><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" style=\"width:200px;height:100px;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;gap:24px;\"><div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;gap:8px;\"><p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:300px;height:100px;\" /></p></div><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"width:200px;height:100px;\" /></p></div>"
         );
     }
 
@@ -2639,7 +2644,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"text-align:right\"><img src=\"image.png\" alt=\"\" style=\"width:300px;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"text-align:right\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:300px;\" /></p>"
         );
     }
 
@@ -2672,7 +2677,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;gap:1rem;\"><p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;gap:1rem;\"><p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" /></p></div>"
         );
     }
 
@@ -2684,7 +2689,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" style=\"width:300px;height:100px;\" /></p></div></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:300px;height:100px;\" /></p></div></div>"
         );
     }
 
@@ -2696,7 +2701,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" style=\"width:200px;object-fit:cover;border-width:2px;border-style:solid;\" /></p>"
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;object-fit:cover;border-width:2px;border-style:solid;\" /></p>"
         );
     }
 
@@ -2707,7 +2712,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" /></p>"
         );
     }
 
