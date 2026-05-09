@@ -1,7 +1,7 @@
 import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PreviewDisplayMode } from "../../domain/preview";
+import { type PageStyle, type PreviewDisplayMode, type PreviewTextStyle, type RenderedPreviewPage } from "../../domain/preview";
 import { type EditorSessionAction } from "./editorSessionAction";
 import {
   type Clock,
@@ -25,6 +25,9 @@ export type EditorSessionBootstrap = {
 export type RenderedPreview = {
   readonly html: string;
   readonly pageHtmls: readonly string[];
+  readonly pages: readonly RenderedPreviewPage[];
+  readonly defaultPageStyle: PageStyle;
+  readonly defaultTextStyle: PreviewTextStyle;
 };
 
 type EditorSessionControllerDependencies = {

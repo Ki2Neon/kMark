@@ -9,12 +9,48 @@ use pulldown_cmark::{
 pub struct RenderedMarkdownPreview {
     pub html: String,
     pub page_htmls: Vec<String>,
+    pub pages: Vec<RenderedPage>,
+    pub default_page_style: PageStyle,
+    pub default_text_style: PreviewTextStyle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderedPage {
+    pub html: String,
+    pub page_style: PageStyle,
+    pub text_style: PreviewTextStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageStyle {
+    pub width: CssLength,
+    pub height: CssLength,
+    pub margin_top: CssLength,
+    pub margin_right: CssLength,
+    pub margin_bottom: CssLength,
+    pub margin_left: CssLength,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewTextStyle {
+    pub base_font_size: CssLength,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CssLength {
+    value: String,
+}
+
+#[derive(Clone)]
 struct MarkdownPageSegment<'a> {
     content: &'a str,
     line_offset: usize,
+    page_directive: PartialPageDirective,
+}
+
+struct MarkdownPageSegments<'a> {
+    segments: Vec<MarkdownPageSegment<'a>>,
+    document_directive: PartialPageDirective,
 }
 
 #[derive(Clone, Copy)]
@@ -153,6 +189,60 @@ enum KmarkBlockEnd {
     MetadataBlock,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageScope {
+    Document,
+    Page,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageSizePreset {
+    A3,
+    A4,
+    A5,
+    B4,
+    B5,
+    Letter,
+    Legal,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageOrientation {
+    Portrait,
+    Landscape,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PartialPageDirective {
+    scope: Option<PageScope>,
+    page_size: Option<PageSizePreset>,
+    page_orientation: Option<PageOrientation>,
+    page_width: Option<CssLength>,
+    page_height: Option<CssLength>,
+    page_margin: Option<CssLength>,
+    page_margin_top: Option<CssLength>,
+    page_margin_right: Option<CssLength>,
+    page_margin_bottom: Option<CssLength>,
+    page_margin_left: Option<CssLength>,
+    preview_font_size: Option<CssLength>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PageGeometryBasis {
+    page_size: PageSizePreset,
+    page_orientation: PageOrientation,
+    page_width: Option<CssLength>,
+    page_height: Option<CssLength>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DocumentPageConfig {
+    geometry: PageGeometryBasis,
+    default_page_style: PageStyle,
+    default_text_style: PreviewTextStyle,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum KmarkComment {
     Params(KmarkParamBundle),
@@ -162,6 +252,7 @@ enum KmarkComment {
     },
     ScopeStart(KmarkParamBundle),
     ScopeEnd,
+    PageDirective,
 }
 
 struct HtmlEmitter<'a> {
@@ -192,6 +283,13 @@ struct HtmlEmitter<'a> {
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
 const PAGE_BREAK_TOKEN_CLOSE: &str = "-->";
 const LINK_REL: &str = "noreferrer noopener";
+const DEFAULT_PAGE_WIDTH: &str = "210mm";
+const DEFAULT_PAGE_HEIGHT: &str = "297mm";
+const DEFAULT_PAGE_MARGIN_TOP: &str = "16mm";
+const DEFAULT_PAGE_MARGIN_RIGHT: &str = "16mm";
+const DEFAULT_PAGE_MARGIN_BOTTOM: &str = "18mm";
+const DEFAULT_PAGE_MARGIN_LEFT: &str = "16mm";
+const DEFAULT_PREVIEW_FONT_SIZE: &str = "16px";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
@@ -201,21 +299,37 @@ pub fn render_markdown_preview_with_file_path(
     content: &str,
     markdown_file_path: Option<&str>,
 ) -> RenderedMarkdownPreview {
-    let page_segments = split_markdown_pages(content);
-    let page_htmls = page_segments
+    let markdown_pages = split_markdown_pages(content);
+    let document_page_config = DocumentPageConfig::resolve(&markdown_pages.document_directive);
+    let pages = markdown_pages
+        .segments
         .iter()
         .map(|page_segment| {
-            render_markdown_page(
+            let page_config = document_page_config.resolve_page(&page_segment.page_directive);
+            let html = render_markdown_page(
                 page_segment.content,
                 page_segment.line_offset,
                 markdown_file_path,
-            )
+            );
+
+            RenderedPage {
+                html,
+                page_style: page_config.default_page_style,
+                text_style: page_config.default_text_style,
+            }
         })
+        .collect::<Vec<_>>();
+    let page_htmls = pages
+        .iter()
+        .map(|page| page.html.clone())
         .collect::<Vec<_>>();
 
     RenderedMarkdownPreview {
         html: page_htmls.join(""),
         page_htmls,
+        pages,
+        default_page_style: document_page_config.default_page_style,
+        default_text_style: document_page_config.default_text_style,
     }
 }
 
@@ -246,12 +360,16 @@ fn markdown_options() -> Options {
     options
 }
 
-fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
+fn split_markdown_pages(content: &str) -> MarkdownPageSegments<'_> {
     let mut page_segments = Vec::new();
     let mut last_index = 0;
     let mut line_offset = 0usize;
     let mut active_fence = None;
     let mut is_inside_html_comment_block = false;
+    let mut document_directive = PartialPageDirective::default();
+    let mut active_page_directive = PartialPageDirective::default();
+    let mut pending_page_directive = PartialPageDirective::default();
+    let mut segment_has_rendered_content = false;
 
     for (line_index, line_span) in collect_markdown_line_spans(content).into_iter().enumerate() {
         let line = &content[line_span.start..line_span.content_end];
@@ -275,28 +393,56 @@ fn split_markdown_pages(content: &str) -> Vec<MarkdownPageSegment<'_>> {
             continue;
         }
 
+        if let Some(page_directive) = parse_kmark_page_directive_line(line) {
+            match page_directive.scope.unwrap_or(PageScope::Document) {
+                PageScope::Document => document_directive.merge(&page_directive),
+                PageScope::Page => {
+                    if segment_has_rendered_content {
+                        pending_page_directive.merge(&page_directive);
+                    } else {
+                        active_page_directive.merge(&page_directive);
+                    }
+                }
+            }
+            continue;
+        }
+
         if is_page_break_line(line) {
             page_segments.push(MarkdownPageSegment {
                 content: &content[last_index..line_span.start],
                 line_offset,
+                page_directive: active_page_directive.clone(),
             });
 
             last_index = line_span.end;
             line_offset = line_index + 1;
+            active_page_directive = pending_page_directive.clone();
+            pending_page_directive = PartialPageDirective::default();
+            segment_has_rendered_content = false;
             continue;
         }
 
         if is_unclosed_html_comment_line(line) {
             is_inside_html_comment_block = true;
         }
+
+        if line.trim().is_empty() || is_kmark_comment_line(line) {
+            continue;
+        }
+
+        segment_has_rendered_content = true;
     }
 
     page_segments.push(MarkdownPageSegment {
         content: &content[last_index..],
         line_offset,
+        page_directive: active_page_directive,
     });
 
-    page_segments
+    MarkdownPageSegments {
+        segments: page_segments,
+        document_directive,
+    }
 }
 
 fn collect_markdown_line_spans(content: &str) -> Vec<MarkdownLineSpan> {
@@ -396,6 +542,18 @@ fn is_page_break_line(line: &str) -> bool {
 
 fn is_unclosed_html_comment_line(line: &str) -> bool {
     line.starts_with(PAGE_BREAK_TOKEN_OPEN) && !line.contains(PAGE_BREAK_TOKEN_CLOSE)
+}
+
+fn is_kmark_comment_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(body) = trimmed
+        .strip_prefix(PAGE_BREAK_TOKEN_OPEN)
+        .and_then(|body| body.strip_suffix(PAGE_BREAK_TOKEN_CLOSE))
+    else {
+        return false;
+    };
+
+    body.trim().starts_with("kmark")
 }
 
 impl<'a> HtmlEmitter<'a> {
@@ -1104,6 +1262,9 @@ impl<'a> HtmlEmitter<'a> {
                 self.pending_kmark_params = None;
                 self.close_kmark_scope();
             }
+            KmarkComment::PageDirective => {
+                self.pending_kmark_params = None;
+            }
         }
     }
 
@@ -1647,6 +1808,204 @@ impl KmarkBlockEnd {
     }
 }
 
+impl CssLength {
+    fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+}
+
+impl PageStyle {
+    fn default_a4() -> Self {
+        Self {
+            width: CssLength::new(DEFAULT_PAGE_WIDTH),
+            height: CssLength::new(DEFAULT_PAGE_HEIGHT),
+            margin_top: CssLength::new(DEFAULT_PAGE_MARGIN_TOP),
+            margin_right: CssLength::new(DEFAULT_PAGE_MARGIN_RIGHT),
+            margin_bottom: CssLength::new(DEFAULT_PAGE_MARGIN_BOTTOM),
+            margin_left: CssLength::new(DEFAULT_PAGE_MARGIN_LEFT),
+        }
+    }
+}
+
+impl PreviewTextStyle {
+    fn default_preview() -> Self {
+        Self {
+            base_font_size: CssLength::new(DEFAULT_PREVIEW_FONT_SIZE),
+        }
+    }
+}
+
+impl PageGeometryBasis {
+    fn default_a4() -> Self {
+        Self {
+            page_size: PageSizePreset::A4,
+            page_orientation: PageOrientation::Portrait,
+            page_width: None,
+            page_height: None,
+        }
+    }
+
+    fn apply(&mut self, directive: &PartialPageDirective) {
+        if let Some(page_size) = directive.page_size {
+            self.page_size = page_size;
+            if directive.page_width.is_none() || directive.page_height.is_none() {
+                self.page_width = None;
+                self.page_height = None;
+            }
+        }
+
+        if let Some(page_orientation) = directive.page_orientation {
+            self.page_orientation = page_orientation;
+        }
+
+        if let (Some(page_width), Some(page_height)) =
+            (&directive.page_width, &directive.page_height)
+        {
+            self.page_width = Some(page_width.clone());
+            self.page_height = Some(page_height.clone());
+        }
+    }
+
+    fn to_page_size(&self) -> (CssLength, CssLength) {
+        if let (Some(page_width), Some(page_height)) = (&self.page_width, &self.page_height) {
+            return (page_width.clone(), page_height.clone());
+        }
+
+        let (portrait_width, portrait_height) = self.page_size.portrait_size();
+
+        match self.page_orientation {
+            PageOrientation::Portrait => (portrait_width, portrait_height),
+            PageOrientation::Landscape => (portrait_height, portrait_width),
+        }
+    }
+}
+
+impl PageSizePreset {
+    fn portrait_size(self) -> (CssLength, CssLength) {
+        match self {
+            Self::A3 => (CssLength::new("297mm"), CssLength::new("420mm")),
+            Self::A4 | Self::Custom => (CssLength::new("210mm"), CssLength::new("297mm")),
+            Self::A5 => (CssLength::new("148mm"), CssLength::new("210mm")),
+            Self::B4 => (CssLength::new("250mm"), CssLength::new("353mm")),
+            Self::B5 => (CssLength::new("176mm"), CssLength::new("250mm")),
+            Self::Letter => (CssLength::new("8.5in"), CssLength::new("11in")),
+            Self::Legal => (CssLength::new("8.5in"), CssLength::new("14in")),
+        }
+    }
+}
+
+impl PartialPageDirective {
+    fn merge(&mut self, other: &Self) {
+        if let Some(scope) = other.scope {
+            self.scope = Some(scope);
+        }
+        if let Some(page_size) = other.page_size {
+            self.page_size = Some(page_size);
+        }
+        if let Some(page_orientation) = other.page_orientation {
+            self.page_orientation = Some(page_orientation);
+        }
+        if let Some(page_width) = &other.page_width {
+            self.page_width = Some(page_width.clone());
+        }
+        if let Some(page_height) = &other.page_height {
+            self.page_height = Some(page_height.clone());
+        }
+        if let Some(page_margin) = &other.page_margin {
+            self.page_margin = Some(page_margin.clone());
+        }
+        if let Some(page_margin_top) = &other.page_margin_top {
+            self.page_margin_top = Some(page_margin_top.clone());
+        }
+        if let Some(page_margin_right) = &other.page_margin_right {
+            self.page_margin_right = Some(page_margin_right.clone());
+        }
+        if let Some(page_margin_bottom) = &other.page_margin_bottom {
+            self.page_margin_bottom = Some(page_margin_bottom.clone());
+        }
+        if let Some(page_margin_left) = &other.page_margin_left {
+            self.page_margin_left = Some(page_margin_left.clone());
+        }
+        if let Some(preview_font_size) = &other.preview_font_size {
+            self.preview_font_size = Some(preview_font_size.clone());
+        }
+    }
+
+    fn has_page_directive(&self) -> bool {
+        self.scope.is_some()
+            || self.page_size.is_some()
+            || self.page_orientation.is_some()
+            || self.page_width.is_some()
+            || self.page_height.is_some()
+            || self.page_margin.is_some()
+            || self.page_margin_top.is_some()
+            || self.page_margin_right.is_some()
+            || self.page_margin_bottom.is_some()
+            || self.page_margin_left.is_some()
+            || self.preview_font_size.is_some()
+    }
+}
+
+impl DocumentPageConfig {
+    fn default_config() -> Self {
+        Self {
+            geometry: PageGeometryBasis::default_a4(),
+            default_page_style: PageStyle::default_a4(),
+            default_text_style: PreviewTextStyle::default_preview(),
+        }
+    }
+
+    fn resolve(document_directive: &PartialPageDirective) -> Self {
+        Self::default_config().resolve_page(document_directive)
+    }
+
+    fn resolve_page(&self, page_directive: &PartialPageDirective) -> Self {
+        let mut geometry = self.geometry.clone();
+        geometry.apply(page_directive);
+
+        let (width, height) = geometry.to_page_size();
+        let mut page_style = self.default_page_style.clone();
+        page_style.width = width;
+        page_style.height = height;
+
+        if let Some(page_margin) = &page_directive.page_margin {
+            page_style.margin_top = page_margin.clone();
+            page_style.margin_right = page_margin.clone();
+            page_style.margin_bottom = page_margin.clone();
+            page_style.margin_left = page_margin.clone();
+        }
+        if let Some(page_margin_top) = &page_directive.page_margin_top {
+            page_style.margin_top = page_margin_top.clone();
+        }
+        if let Some(page_margin_right) = &page_directive.page_margin_right {
+            page_style.margin_right = page_margin_right.clone();
+        }
+        if let Some(page_margin_bottom) = &page_directive.page_margin_bottom {
+            page_style.margin_bottom = page_margin_bottom.clone();
+        }
+        if let Some(page_margin_left) = &page_directive.page_margin_left {
+            page_style.margin_left = page_margin_left.clone();
+        }
+
+        let mut text_style = self.default_text_style.clone();
+        if let Some(preview_font_size) = &page_directive.preview_font_size {
+            text_style.base_font_size = preview_font_size.clone();
+        }
+
+        Self {
+            geometry,
+            default_page_style: page_style,
+            default_text_style: text_style,
+        }
+    }
+}
+
 impl KmarkImageParams {
     fn merge(&mut self, other: &Self) {
         if let Some(width) = &other.width {
@@ -1797,6 +2156,119 @@ fn is_pending_kmark_target_event(event: &Event<'static>) -> bool {
     }
 }
 
+fn parse_kmark_page_directive_line(line: &str) -> Option<PartialPageDirective> {
+    let trimmed = line.trim();
+    let body = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
+    let remainder = body.strip_prefix("kmark")?.trim();
+
+    parse_kmark_page_directive_tokens(remainder)
+}
+
+fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective> {
+    let mut directive = PartialPageDirective::default();
+
+    for token in input.split_whitespace() {
+        let Some((key, value)) = token.split_once(':') else {
+            continue;
+        };
+
+        match key {
+            "page_scope" => {
+                if let Some(scope) = parse_kmark_page_scope_value(value) {
+                    directive.scope = Some(scope);
+                }
+            }
+            "page_size" => {
+                if let Some(page_size) = parse_kmark_page_size_value(value) {
+                    directive.page_size = Some(page_size);
+                }
+            }
+            "page_orientation" => {
+                if let Some(page_orientation) = parse_kmark_page_orientation_value(value) {
+                    directive.page_orientation = Some(page_orientation);
+                }
+            }
+            "page_width" => {
+                if let Some(page_width) = parse_kmark_page_length_value(value) {
+                    directive.page_width = Some(page_width);
+                }
+            }
+            "page_height" => {
+                if let Some(page_height) = parse_kmark_page_length_value(value) {
+                    directive.page_height = Some(page_height);
+                }
+            }
+            "page_margin" => {
+                if let Some(page_margin) = parse_kmark_page_length_value(value) {
+                    directive.page_margin = Some(page_margin);
+                }
+            }
+            "page_margin_top" => {
+                if let Some(page_margin_top) = parse_kmark_page_length_value(value) {
+                    directive.page_margin_top = Some(page_margin_top);
+                }
+            }
+            "page_margin_right" => {
+                if let Some(page_margin_right) = parse_kmark_page_length_value(value) {
+                    directive.page_margin_right = Some(page_margin_right);
+                }
+            }
+            "page_margin_bottom" => {
+                if let Some(page_margin_bottom) = parse_kmark_page_length_value(value) {
+                    directive.page_margin_bottom = Some(page_margin_bottom);
+                }
+            }
+            "page_margin_left" => {
+                if let Some(page_margin_left) = parse_kmark_page_length_value(value) {
+                    directive.page_margin_left = Some(page_margin_left);
+                }
+            }
+            "preview_font_size" => {
+                if let Some(preview_font_size) = parse_kmark_page_length_value(value) {
+                    directive.preview_font_size = Some(preview_font_size);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    directive.has_page_directive().then_some(directive)
+}
+
+fn parse_kmark_page_scope_value(value: &str) -> Option<PageScope> {
+    match value.trim() {
+        "document" => Some(PageScope::Document),
+        "page" => Some(PageScope::Page),
+        _ => None,
+    }
+}
+
+fn parse_kmark_page_size_value(value: &str) -> Option<PageSizePreset> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "a3" => Some(PageSizePreset::A3),
+        "a4" => Some(PageSizePreset::A4),
+        "a5" => Some(PageSizePreset::A5),
+        "b4" => Some(PageSizePreset::B4),
+        "b5" => Some(PageSizePreset::B5),
+        "letter" => Some(PageSizePreset::Letter),
+        "legal" => Some(PageSizePreset::Legal),
+        "custom" => Some(PageSizePreset::Custom),
+        _ => None,
+    }
+}
+
+fn parse_kmark_page_orientation_value(value: &str) -> Option<PageOrientation> {
+    match value.trim() {
+        "portrait" => Some(PageOrientation::Portrait),
+        "landscape" => Some(PageOrientation::Landscape),
+        _ => None,
+    }
+}
+
+fn parse_kmark_page_length_value(value: &str) -> Option<CssLength> {
+    parse_css_physical_length_value(value).map(CssLength::new)
+}
+
 fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
     let trimmed = html.trim();
     let body = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
@@ -1810,6 +2282,10 @@ fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
         return Some(KmarkComment::ScopeStart(parse_kmark_param_bundle(
             scope_body.trim(),
         )));
+    }
+
+    if parse_kmark_page_directive_tokens(remainder).is_some() {
+        return Some(KmarkComment::PageDirective);
     }
 
     let mut define_name = None;
@@ -1917,7 +2393,9 @@ fn parse_kmark_param_bundle(input: &str) -> KmarkParamBundle {
         Some(KmarkComment::Params(bundle)) => bundle,
         Some(KmarkComment::Define { bundle, .. }) => bundle,
         Some(KmarkComment::ScopeStart(bundle)) => bundle,
-        Some(KmarkComment::ScopeEnd) | None => KmarkParamBundle::default(),
+        Some(KmarkComment::ScopeEnd) | Some(KmarkComment::PageDirective) | None => {
+            KmarkParamBundle::default()
+        }
     }
 }
 
@@ -1999,6 +2477,27 @@ fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
         "px" | "%" | "em" | "rem" | "vw" | "vh" | "vmin" | "vmax"
     )
     .then(|| trimmed.to_owned())
+}
+
+fn parse_css_physical_length_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let numeric_end = trimmed
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(trimmed.len());
+
+    if numeric_end == 0 || numeric_end == trimmed.len() {
+        return None;
+    }
+
+    let number = &trimmed[..numeric_end];
+    let unit = &trimmed[numeric_end..];
+    let numeric_value = number.parse::<f64>().ok()?;
+
+    if numeric_value < 0.0 {
+        return None;
+    }
+
+    matches!(unit, "px" | "mm" | "cm" | "in" | "pt" | "pc").then(|| trimmed.to_owned())
 }
 
 fn parse_kmark_fit_value(value: &str) -> Option<String> {
@@ -2414,6 +2913,98 @@ mod tests {
             rendered_preview.page_htmls[1],
             "<p data-source-line-start=\"2\" data-source-line-end=\"2\">after</p>"
         );
+    }
+
+    #[test]
+    fn resolves_document_and_page_scoped_page_directives() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_scope:document page_size:A4 page_orientation:portrait page_margin:12mm preview_font_size:11pt -->\n\
+             # 1\n\
+             <!-- --- -->\n\
+             <!-- kmark page_scope:page page_orientation:landscape preview_font_size:9pt page_margin:8mm -->\n\
+             # 2\n\
+             <!-- --- -->\n\
+             # 3",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 3);
+        assert_eq!(rendered_preview.default_page_style.width.as_str(), "210mm");
+        assert_eq!(rendered_preview.default_page_style.height.as_str(), "297mm");
+        assert_eq!(
+            rendered_preview.default_page_style.margin_top.as_str(),
+            "12mm"
+        );
+        assert_eq!(
+            rendered_preview.default_text_style.base_font_size.as_str(),
+            "11pt"
+        );
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.height.as_str(),
+            "297mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[0].text_style.base_font_size.as_str(),
+            "11pt"
+        );
+        assert_eq!(rendered_preview.pages[1].page_style.width.as_str(), "297mm");
+        assert_eq!(
+            rendered_preview.pages[1].page_style.height.as_str(),
+            "210mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[1].page_style.margin_left.as_str(),
+            "8mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[1].text_style.base_font_size.as_str(),
+            "9pt"
+        );
+        assert_eq!(rendered_preview.pages[2].page_style.width.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[2].page_style.height.as_str(),
+            "297mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[2].text_style.base_font_size.as_str(),
+            "11pt"
+        );
+    }
+
+    #[test]
+    fn keeps_page_directives_out_of_block_decoration_route() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_scope:page page_width:297mm page_height:210mm page_margin:8mm preview_font_size:10pt -->\n\
+             ![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" /></p>"
+        );
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "297mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.height.as_str(),
+            "210mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[0].text_style.base_font_size.as_str(),
+            "10pt"
+        );
+    }
+
+    #[test]
+    fn lets_individual_page_margins_override_common_page_margin() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_scope:page page_margin:10mm page_margin_left:4mm page_margin_bottom:6mm -->\n\
+             text",
+        );
+
+        let page_style = &rendered_preview.pages[0].page_style;
+        assert_eq!(page_style.margin_top.as_str(), "10mm");
+        assert_eq!(page_style.margin_right.as_str(), "10mm");
+        assert_eq!(page_style.margin_bottom.as_str(), "6mm");
+        assert_eq!(page_style.margin_left.as_str(), "4mm");
     }
 
     #[test]

@@ -1,12 +1,30 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { invokeTauriCommand } from "../../infra/tauriCommand";
 import { renderMarkdownPreviewWithWasm } from "../../wasm/kmarkWeb";
+import {
+  DEFAULT_PAGE_STYLE,
+  DEFAULT_PREVIEW_TEXT_STYLE,
+  type PageStyle,
+  type PreviewTextStyle,
+  type RenderedPreviewPage,
+} from "../../domain/preview";
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
 type RenderedMarkdownPreviewPayload = {
   readonly html: string;
   readonly pageHtmls: readonly string[];
+  readonly pages?: readonly RenderedPreviewPage[];
+  readonly defaultPageStyle?: PageStyle;
+  readonly defaultTextStyle?: PreviewTextStyle;
+};
+
+type NormalizedRenderedMarkdownPreviewPayload = {
+  readonly html: string;
+  readonly pageHtmls: readonly string[];
+  readonly pages: readonly RenderedPreviewPage[];
+  readonly defaultPageStyle: PageStyle;
+  readonly defaultTextStyle: PreviewTextStyle;
 };
 
 const FILE_IMAGE_SOURCE_PATTERN = /(<img\b[^>]*?\bsrc=")(file:[^"]+)(")/giu;
@@ -56,17 +74,33 @@ function normalizePreviewHtmlImageSources(html: string): string {
 
 function normalizeRenderedMarkdownPreview(
   renderedPreview: RenderedMarkdownPreviewPayload,
-): RenderedMarkdownPreviewPayload {
+): NormalizedRenderedMarkdownPreviewPayload {
+  const defaultPageStyle = renderedPreview.defaultPageStyle ?? DEFAULT_PAGE_STYLE;
+  const defaultTextStyle = renderedPreview.defaultTextStyle ?? DEFAULT_PREVIEW_TEXT_STYLE;
+  const pages = renderedPreview.pages !== undefined && renderedPreview.pages.length > 0
+    ? renderedPreview.pages
+    : renderedPreview.pageHtmls.map((pageHtml) => ({
+      html: pageHtml,
+      pageStyle: defaultPageStyle,
+      textStyle: defaultTextStyle,
+    }));
+
   return {
     html: normalizePreviewHtmlImageSources(renderedPreview.html),
     pageHtmls: renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources),
+    pages: pages.map((page) => ({
+      ...page,
+      html: normalizePreviewHtmlImageSources(page.html),
+    })),
+    defaultPageStyle,
+    defaultTextStyle,
   };
 }
 
 export async function renderMarkdownPreview(
   content: string,
   filePath?: string | null,
-): Promise<RenderedMarkdownPreviewPayload> {
+): Promise<NormalizedRenderedMarkdownPreviewPayload> {
   if (!isTauri()) {
     return renderMarkdownPreviewWithWasm(content, filePath);
   }
