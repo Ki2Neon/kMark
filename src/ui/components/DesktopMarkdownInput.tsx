@@ -9,6 +9,7 @@ import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAct
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
+import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
 
 const DESKTOP_EDITOR_BASIC_SETUP = {
   autocompletion: false,
@@ -78,6 +79,7 @@ const MARKDOWN_SNIPPET_COMPLETIONS: readonly Completion[] = MARKDOWN_SNIPPET_DEF
 
 const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COMPLETIONS);
 const KMARK_COMPLETION_SOURCE = createCodeMirrorKmarkCompletionSource();
+const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
 const EDITOR_COMPLETION_SOURCE: CompletionSource = (context) => (
   KMARK_COMPLETION_SOURCE(context) ?? (context.explicit ? MARKDOWN_SNIPPET_COMPLETION_SOURCE(context) : null)
 );
@@ -379,6 +381,7 @@ function DesktopMarkdownInputComponent({
     return [
       markdown(),
       previewRequestedLineHighlightField,
+      KMARK_VALIDATION_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
