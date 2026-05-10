@@ -125,6 +125,7 @@ export function MarkdownEditorScreen({
     confirmDiscard,
     handleContentChange,
     handleLoadExternalDocument,
+    handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
     handlePickedFile,
     handleResetDocument,
@@ -244,6 +245,11 @@ export function MarkdownEditorScreen({
 
     fileInputRef.current?.click();
   }, [canOpenDocumentWithNativePicker, closeDesktopMenu, confirmDiscard, handleOpenDocumentFromPicker]);
+
+  const handleRequestOpenCurrentDocumentFolder = useCallback(() => {
+    closeDesktopMenu();
+    void handleOpenCurrentDocumentFolder();
+  }, [closeDesktopMenu, handleOpenCurrentDocumentFolder]);
 
   const handleRequestOverwriteSave = useCallback(() => {
     closeDesktopMenu();
@@ -424,6 +430,7 @@ export function MarkdownEditorScreen({
     onLayoutModeChange: handleLayoutModeChange,
     onMultiCursorModifierChange,
     onNewDocument: handleRequestNew,
+    onOpenCurrentDocumentFolder: handleRequestOpenCurrentDocumentFolder,
     onOpenDocument: handleRequestOpen,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,

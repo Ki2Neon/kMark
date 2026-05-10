@@ -658,6 +658,10 @@ input:focus-visible,
   background: var(--surface-muted);
 }
 
+.menu-section__actions .menu-section__action-spaced {
+  margin-top: 10px;
+}
+
 .menu-section__empty {
   margin: 8px 4px 0;
   padding: 12px;

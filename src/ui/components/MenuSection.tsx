@@ -48,6 +48,7 @@ type MenuSectionProps = {
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onNewDocument: () => void;
+  readonly onOpenCurrentDocumentFolder: () => void;
   readonly onOpenDocument: () => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
@@ -90,6 +91,7 @@ function MenuSectionComponent({
   onLayoutModeChange,
   onMultiCursorModifierChange,
   onNewDocument,
+  onOpenCurrentDocumentFolder,
   onOpenDocument,
   onOverwriteSaveDocument,
   onPrintDocument,
@@ -117,6 +119,9 @@ function MenuSectionComponent({
     "保存",
     "印刷",
     "開く",
+    ".md",
+    "フォルダー",
+    "Explorer",
     "上書き保存",
     "名前を付けて保存",
     "新規作成",
@@ -278,6 +283,13 @@ function MenuSectionComponent({
             </button>
             <button type="button" onClick={onPrintDocument}>
               印刷
+            </button>
+            <button
+              type="button"
+              className="menu-section__action-spaced"
+              onClick={onOpenCurrentDocumentFolder}
+            >
+              .mdのフォルダーを開く
             </button>
           </div>
         </div>

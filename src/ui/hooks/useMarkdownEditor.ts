@@ -161,6 +161,12 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     });
   }, [controller, executeWithErrorHandling, store]);
 
+  const handleOpenCurrentDocumentFolder = useCallback(async () => {
+    await executeWithErrorHandling(async () => {
+      await controller.openCurrentDocumentFolder();
+    });
+  }, [controller, executeWithErrorHandling]);
+
   const handlePickedFile = useCallback(async (file: File | null) => {
     if (file === null) {
       return;
@@ -253,6 +259,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     handleErrorClear,
     handleErrorRaise,
     handleLoadExternalDocument,
+    handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
     handlePickedFile,
     handleResetDocument,

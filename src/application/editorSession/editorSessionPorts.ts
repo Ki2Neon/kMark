@@ -55,6 +55,7 @@ export type MarkdownDocumentGateway = {
   supportsNativeOpenPicker(): boolean;
   openDocumentFromPicker(): Promise<LoadedMarkdownDocument | null>;
   openDocumentFromFile(file: File): Promise<LoadedMarkdownDocument>;
+  openDocumentFolder(filePath: string): Promise<void>;
   loadExternalDocument(document: ExternalMarkdownDocument): LoadedMarkdownDocument;
   saveDocument(fileName: string, content: string): Promise<SavedMarkdownDocument | null>;
   saveDocumentAs(fileName: string, content: string): Promise<SavedMarkdownDocument | null>;

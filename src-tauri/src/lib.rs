@@ -409,6 +409,7 @@ pub fn run() {
             commands::external_link::open_external_link,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::file_open::open_markdown_document_dialog,
+            commands::file_open::open_markdown_document_folder,
             commands::markdown_render::render_markdown_preview,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,

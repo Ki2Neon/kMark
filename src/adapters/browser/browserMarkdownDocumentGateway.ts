@@ -3,6 +3,7 @@ import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocu
 import {
   clearPendingTauriMarkdownOpenRequests,
   listenForTauriMarkdownOpenRequests,
+  openMarkdownDocumentFolder,
   overwriteMarkdownDocument,
   overwriteMarkdownDocumentAtPath,
   pickMarkdownDocument,
@@ -69,6 +70,10 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
       saveTarget = { kind: "download" };
 
       return toLoadedMarkdownDocument(result.fileName, result.content, null);
+    },
+
+    async openDocumentFolder(filePath) {
+      await openMarkdownDocumentFolder(filePath);
     },
 
     loadExternalDocument(document: ExternalMarkdownDocument) {

@@ -141,6 +141,14 @@ export class EditorSessionController {
     this.#currentDocumentFilePath = result.filePath;
   }
 
+  async openCurrentDocumentFolder(): Promise<void> {
+    if (this.#currentDocumentFilePath === null) {
+      throw new Error("保存済みMarkdownファイルのフォルダーがありません。");
+    }
+
+    await this.#documentGateway.openDocumentFolder(this.#currentDocumentFilePath);
+  }
+
   loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): void {
     const loadedDocument = this.#documentGateway.loadExternalDocument(document);
 

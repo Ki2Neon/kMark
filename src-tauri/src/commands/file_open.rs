@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, path::PathBuf};
 
+use kmark_core::{is_supported_markdown_path, MarkdownDocument};
 use serde::Serialize;
-use kmark_core::MarkdownDocument;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
@@ -9,8 +9,7 @@ use super::error::CommandErrorPayload;
 use crate::{
     usecase::{
         clear_pending_markdown_open_requests as clear_pending_markdown_open_requests_usecase,
-        read_markdown_document,
-        take_pending_markdown_documents,
+        read_markdown_document, take_pending_markdown_documents,
         write_markdown_document as write_markdown_document_usecase,
     },
     AppState,
@@ -97,7 +96,10 @@ pub async fn open_markdown_document_dialog(
         app_handle
             .dialog()
             .file()
-            .add_filter(MARKDOWN_DIALOG_FILTER_NAME, MARKDOWN_DIALOG_FILTER_EXTENSIONS)
+            .add_filter(
+                MARKDOWN_DIALOG_FILTER_NAME,
+                MARKDOWN_DIALOG_FILTER_EXTENSIONS,
+            )
             .blocking_pick_file()
     })
     .await
@@ -119,6 +121,43 @@ pub async fn open_markdown_document_dialog(
         .map(Into::into)
         .map(Some)
         .map_err(CommandErrorPayload::from)
+}
+
+#[tauri::command]
+pub fn open_markdown_document_folder(path: String) -> Result<(), CommandErrorPayload> {
+    let file_path = PathBuf::from(path.trim());
+
+    if !is_supported_markdown_path(&file_path) {
+        return Err(CommandErrorPayload::with_detail(
+            "unsupported_markdown_path",
+            "unsupported markdown file path",
+            file_path.to_string_lossy(),
+        ));
+    }
+
+    let Some(folder_path) = file_path.parent() else {
+        return Err(CommandErrorPayload::with_detail(
+            "markdown_folder_not_found",
+            "markdown document folder not found",
+            file_path.to_string_lossy(),
+        ));
+    };
+
+    if !folder_path.is_dir() {
+        return Err(CommandErrorPayload::with_detail(
+            "markdown_folder_not_found",
+            "markdown document folder not found",
+            folder_path.to_string_lossy(),
+        ));
+    }
+
+    tauri_plugin_opener::open_path(folder_path, None::<&str>).map_err(|source| {
+        CommandErrorPayload::with_detail(
+            "markdown_folder_open_failed",
+            "failed to open markdown document folder",
+            source.to_string(),
+        )
+    })
 }
 
 #[tauri::command]
@@ -146,7 +185,10 @@ pub async fn save_markdown_document_as_dialog(
         app_handle
             .dialog()
             .file()
-            .add_filter(MARKDOWN_DIALOG_FILTER_NAME, MARKDOWN_DIALOG_FILTER_EXTENSIONS)
+            .add_filter(
+                MARKDOWN_DIALOG_FILTER_NAME,
+                MARKDOWN_DIALOG_FILTER_EXTENSIONS,
+            )
             .set_file_name(suggested_file_name)
             .blocking_save_file()
     })
