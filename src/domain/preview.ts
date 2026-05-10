@@ -42,7 +42,7 @@ export const A4_MARGIN_TOP_MM = 16;
 export const A4_MARGIN_RIGHT_MM = 16;
 export const A4_MARGIN_BOTTOM_MM = 18;
 export const A4_MARGIN_LEFT_MM = 16;
-export const DEFAULT_PREVIEW_FONT_SIZE = "16px";
+export const DEFAULT_PREVIEW_FONT_SIZE = "10.5pt";
 
 export const DEFAULT_PAGE_STYLE: PageStyle = {
   width: `${A4_PAGE_WIDTH_MM}mm`,

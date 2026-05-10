@@ -286,7 +286,7 @@ const DEFAULT_PAGE_MARGIN_TOP: &str = "16mm";
 const DEFAULT_PAGE_MARGIN_RIGHT: &str = "16mm";
 const DEFAULT_PAGE_MARGIN_BOTTOM: &str = "18mm";
 const DEFAULT_PAGE_MARGIN_LEFT: &str = "16mm";
-const DEFAULT_PREVIEW_FONT_SIZE: &str = "16px";
+const DEFAULT_PREVIEW_FONT_SIZE: &str = "10.5pt";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
@@ -3068,7 +3068,7 @@ mod tests {
         );
         assert_eq!(
             rendered_preview.default_text_style.font_size.as_str(),
-            "16px"
+            "10.5pt"
         );
         assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "210mm");
         assert_eq!(
@@ -3207,7 +3207,7 @@ mod tests {
         );
         assert_eq!(
             rendered_preview.pages[0].text_style.font_size.as_str(),
-            "16px"
+            "10.5pt"
         );
     }
 

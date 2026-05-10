@@ -57,7 +57,9 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body {
+    --markdown-body-font-size: var(--kmark-font-size, 1rem);
     max-width: none;
+    font-size: var(--markdown-body-font-size);
     color: #111111;
   }
 
@@ -74,12 +76,12 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body h1 {
-    font-size: 1.8rem;
+    font-size: 1.8em;
   }
 
   .markdown-body h2 {
-    margin-top: 1.75rem;
-    font-size: 1.35rem;
+    margin-top: 1.2963em;
+    font-size: 1.35em;
   }
 
   .markdown-body p,
@@ -88,7 +90,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body blockquote,
   .markdown-body pre,
   .markdown-body table {
-    margin: 1rem 0;
+    margin: 1em 0;
   }
 
   .markdown-body a {
@@ -103,7 +105,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body code {
-    padding: 0.08rem 0.3rem;
+    padding: 0.08em 0.3em;
     font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
     font-size: 0.92em;
     background: #f5f5f5;
@@ -131,7 +133,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body th,
   .markdown-body td {
-    padding: 0.65rem 0.75rem;
+    padding: 0.65em 0.75em;
     border: 0.75pt solid #d7d7d7;
     text-align: left;
   }
@@ -202,7 +204,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
   #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 {
     min-height: 100%;
     padding: 0;
-    font-size: var(--kmark-font-size, 16px);
+    font-size: var(--kmark-font-size, 10.5pt);
     overflow: hidden;
     orphans: 3;
     widows: 3;
