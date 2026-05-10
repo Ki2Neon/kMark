@@ -2464,12 +2464,12 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.preset_use = Some(preset_name);
                 }
             }
-            "w" => {
+            "w" | "width" => {
                 if let Some(width) = parse_kmark_size_value(value) {
                     bundle.params.image.width = Some(width);
                 }
             }
-            "h" => {
+            "h" | "height" => {
                 if let Some(height) = parse_kmark_size_value(value) {
                     bundle.params.image.height = Some(height);
                 }
@@ -3339,6 +3339,17 @@ mod tests {
     fn applies_kmark_single_image_size_comment() {
         let rendered_preview =
             render_markdown_preview("<!-- kmark w:200 h:100 -->\n![](image.png)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:200px;height:100px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn accepts_image_size_aliases_used_by_completion_schema() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark width:200 height:100 -->\n![](image.png)");
 
         assert_eq!(
             rendered_preview.html,
