@@ -60,6 +60,16 @@ export const KMARK_PARAM_SPECS: readonly KmarkParamSpec[] = [
     priority: 80,
   },
   {
+    name: "border_style",
+    type: "enum",
+    contexts: ["single", "image", "scope", "shape"],
+    values: ["solid", "dashed", "dotted", "double", "none"],
+    insertText: "border_style:",
+    description: "枠線の種類を指定する",
+    examples: ["<!-- kmark border_style:dashed -->"],
+    priority: 75,
+  },
+  {
     name: "layout",
     type: "enum",
     contexts: ["scope"],

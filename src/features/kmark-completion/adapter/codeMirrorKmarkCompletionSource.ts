@@ -1,12 +1,25 @@
 import {
+  insertCompletionText,
   snippetCompletion,
+  startCompletion,
   type Completion,
   type CompletionContext,
   type CompletionResult,
+  type CompletionSection,
   type CompletionSource,
 } from "@codemirror/autocomplete";
 import { createKmarkSuggestions } from "../core/createKmarkSuggestions";
-import { type KmarkCompletionItem } from "../core/types";
+import { type KmarkCompletionItem, type KmarkCompletionSection } from "../core/types";
+
+const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, CompletionSection> = {
+  image: { name: "Image", rank: 10 },
+  page: { name: "Page", rank: 20 },
+  scope: { name: "Scope", rank: 30 },
+  text: { name: "Text", rank: 40 },
+  style: { name: "Style", rank: 50 },
+  snippet: { name: "Snippet", rank: 60 },
+  general: { name: "General", rank: 70 },
+};
 
 export function createCodeMirrorKmarkCompletionSource(): CompletionSource {
   return (context: CompletionContext): CompletionResult | null => {
@@ -33,6 +46,7 @@ function toCodeMirrorCompletion(item: KmarkCompletionItem): Completion {
     detail: item.detail,
     info: item.description,
     label: item.label,
+    section: item.section === undefined ? undefined : CODE_MIRROR_COMPLETION_SECTIONS[item.section],
     sortText: item.sortText,
     type: toCodeMirrorCompletionType(item.kind),
   };
@@ -43,7 +57,17 @@ function toCodeMirrorCompletion(item: KmarkCompletionItem): Completion {
 
   return {
     ...completion,
-    apply: item.insertText,
+    apply: item.kind === "parameter" ? applyParameterCompletion(item) : item.insertText,
+  };
+}
+
+function applyParameterCompletion(item: KmarkCompletionItem): Completion["apply"] {
+  return (view, _completion, from, to) => {
+    view.dispatch(insertCompletionText(view.state, item.insertText, from, to));
+
+    window.setTimeout(() => {
+      startCompletion(view);
+    }, 0);
   };
 }
 

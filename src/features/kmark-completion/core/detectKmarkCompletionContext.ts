@@ -138,32 +138,45 @@ function resolveCompletionContexts(input: {
   readonly parsedFragment: ReturnType<typeof parseKmarkDirectiveFragment>;
   readonly tokenText: string;
 }): readonly KmarkParamContext[] {
-  const contexts = new Set<KmarkParamContext>();
+  const contexts: KmarkParamContext[] = [];
   const isScope = input.parsedFragment.hasScopeOpen;
   const isAtDirectiveStart = input.tokenText.trim().length === 0;
+  const nextBlockKind = resolveNextBlockKind(input.markdown, input.lineEnd);
+  const isPageCandidate = input.parsedFragment.hasPageParam
+    || ((isScope || isAtDirectiveStart) && isDocumentStart(input.markdown, input.lineStart));
 
-  contexts.add("single");
+  if (nextBlockKind === "image") {
+    addContext(contexts, "image");
+  }
+
+  if (isPageCandidate) {
+    addContext(contexts, "page");
+  }
 
   if (isScope || isAtDirectiveStart) {
-    contexts.add("scope");
+    addContext(contexts, "scope");
   }
 
-  if (isScope && (input.parsedFragment.hasPageParam || isDocumentStart(input.markdown, input.lineStart) || isAtDirectiveStart)) {
-    contexts.add("page");
+  if (nextBlockKind === "text" || (!isScope && nextBlockKind === "none")) {
+    addContext(contexts, "text");
   }
 
-  if (isNextBlockImage(input.markdown, input.lineEnd)) {
-    contexts.add("image");
-  }
+  addContext(contexts, "single");
 
-  return [...contexts];
+  return contexts;
+}
+
+function addContext(contexts: KmarkParamContext[], context: KmarkParamContext): void {
+  if (!contexts.includes(context)) {
+    contexts.push(context);
+  }
 }
 
 function isDocumentStart(markdown: string, lineStart: number): boolean {
   return markdown.slice(0, lineStart).split(/\r?\n/u).length <= 5;
 }
 
-function isNextBlockImage(markdown: string, lineEnd: number): boolean {
+function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "text" | "none" {
   const followingLines = markdown.slice(lineEnd).split(/\r?\n/u).slice(1);
 
   for (const line of followingLines) {
@@ -173,10 +186,10 @@ function isNextBlockImage(markdown: string, lineEnd: number): boolean {
       continue;
     }
 
-    return /^!\[[^\]]*\]\([^)]+?\)/u.test(trimmedLine);
+    return /^!\[[^\]]*\]\([^)]+?\)/u.test(trimmedLine) ? "image" : "text";
   }
 
-  return false;
+  return "none";
 }
 
 function isInsideInlineCode(lineBeforeCursor: string): boolean {

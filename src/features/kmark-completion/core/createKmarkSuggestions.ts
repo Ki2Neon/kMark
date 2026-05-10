@@ -12,9 +12,39 @@ import {
   type KmarkCompletionContext,
   type KmarkCompletionItem,
   type KmarkCompletionResult,
+  type KmarkCompletionSection,
   type KmarkParamContext,
   type KmarkParamSpec,
 } from "./types";
+
+const IMAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["w", 500],
+  ["h", 490],
+  ["fit", 480],
+  ["border_size", 430],
+  ["border_color", 420],
+  ["border_style", 415],
+  ["align", 410],
+]);
+
+const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["image size", 470],
+  ["image border", 460],
+  ["image width", 455],
+]);
+
+const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["page_size", 500],
+  ["orientation", 490],
+  ["font_size", 480],
+  ["margin", 470],
+]);
+
+const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["layout", 500],
+  ["gap", 490],
+  ["wrap", 480],
+]);
 
 export function createKmarkSuggestions(input: {
   readonly markdown: string;
@@ -54,17 +84,22 @@ function createParamNameSuggestions(context: KmarkCompletionContext): readonly K
 
   return KMARK_PARAM_SPECS
     .filter((spec) => matchesAnyContext(spec.contexts, context.contexts))
-    .filter((spec) => !context.usedParamNames.has(spec.name) || spec.allowMultiple === true)
+    .filter((spec) => !hasUsedParamName(spec, context.usedParamNames) || spec.allowMultiple === true)
     .filter((spec) => matchesParamPrefix(spec, paramPrefix))
-    .map((spec) => ({
-      label: spec.name,
-      insertText: spec.insertText ?? `${spec.name}:`,
-      description: formatDescription(spec.description, spec.examples),
-      detail: "kmark parameter",
-      kind: "parameter",
-      priority: scoreParamSpec(spec, context, paramPrefix),
-      sortText: sortTextForSpec(spec, context, paramPrefix),
-    }));
+    .map((spec) => {
+      const priority = scoreParamSpec(spec, context, paramPrefix);
+
+      return {
+        label: spec.name,
+        insertText: spec.insertText ?? `${spec.name}:`,
+        description: formatDescription(spec.description, spec.examples),
+        detail: detailForSection(resolveCompletionSection(spec.contexts, context.contexts, "general")),
+        kind: "parameter",
+        priority,
+        section: resolveCompletionSection(spec.contexts, context.contexts, "general"),
+        sortText: sortTextForScore(priority, spec.name),
+      };
+    });
 }
 
 function createValueSuggestions(context: KmarkCompletionContext): readonly KmarkCompletionItem[] {
@@ -86,6 +121,7 @@ function createValueSuggestions(context: KmarkCompletionContext): readonly Kmark
       description: spec.description,
       detail: spec.name,
       kind: "value",
+      section: resolveCompletionSection(spec.contexts, context.contexts, "general"),
       priority: (spec.priority ?? 0) - index,
       sortText: `${String(index).padStart(3, "0")}-${value}`,
     }));
@@ -97,16 +133,22 @@ function createSnippetSuggestions(context: KmarkCompletionContext): readonly Kma
   return KMARK_SNIPPET_SPECS
     .filter((snippet) => matchesAnyContext(snippet.contexts, context.contexts))
     .filter((snippet) => matchesSnippetPrefix(snippet, prefix))
-    .map((snippet) => ({
-      label: snippet.label,
-      insertText: snippet.insertText,
-      description: formatDescription(snippet.description, snippet.examples),
-      detail: "kmark snippet",
-      kind: "snippet",
-      snippet: true,
-      priority: scoreSnippetSpec(snippet.contexts, context, snippet.priority ?? 0, prefix),
-      sortText: `snippet-${snippet.label}`,
-    }));
+    .map((snippet) => {
+      const section = resolveCompletionSection(snippet.contexts, context.contexts, "snippet");
+      const priority = scoreSnippetSpec(snippet.label, snippet.contexts, context, snippet.priority ?? 0, prefix);
+
+      return {
+        label: snippet.label,
+        insertText: snippet.insertText,
+        description: formatDescription(snippet.description, snippet.examples),
+        detail: detailForSection(section),
+        kind: "snippet",
+        priority,
+        section,
+        snippet: true,
+        sortText: sortTextForScore(priority, snippet.label),
+      };
+    });
 }
 
 function createStyleUseSuggestions(context: KmarkCompletionContext, markdown: string): readonly KmarkCompletionItem[] {
@@ -120,6 +162,7 @@ function createStyleUseSuggestions(context: KmarkCompletionContext, markdown: st
       description: `定義済みkmarkスタイル ${name} を使用する`,
       detail: "kmark style",
       kind: "style",
+      section: "style",
       priority: 100 - index,
       sortText: `${String(index).padStart(3, "0")}-${name}`,
     }));
@@ -155,6 +198,11 @@ function findParamSpec(name: string): KmarkParamSpec | null {
   )) ?? null;
 }
 
+function hasUsedParamName(spec: KmarkParamSpec, usedParamNames: ReadonlySet<string>): boolean {
+  return usedParamNames.has(spec.name)
+    || spec.aliases?.some((alias) => usedParamNames.has(alias)) === true;
+}
+
 function matchesParamPrefix(spec: KmarkParamSpec, prefix: string): boolean {
   if (prefix.length === 0) {
     return true;
@@ -184,31 +232,71 @@ function matchesAnyContext(
 }
 
 function scoreParamSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, prefix: string): number {
-  const imageBoost = context.contexts.includes("image") && spec.contexts.includes("image") ? 60 : 0;
-  const pageBoost = context.contexts.includes("page") && spec.contexts.includes("page") ? 40 : 0;
-  const scopeBoost = context.contexts.includes("scope") && spec.contexts.includes("scope") ? 20 : 0;
-  const prefixBoost = prefix.length > 0 && spec.name.toLocaleLowerCase("en-US").startsWith(prefix) ? 80 : 0;
+  const prefixBoost = scorePrefix(spec, prefix);
 
-  return (spec.priority ?? 0) + imageBoost + pageBoost + scopeBoost + prefixBoost;
+  if (context.contexts.includes("image") && spec.contexts.includes("image")) {
+    return 10_000 + (IMAGE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
+  if (context.contexts.includes("page") && spec.contexts.includes("page")) {
+    return 8_000 + (PAGE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
+  if (context.contexts.includes("scope") && spec.contexts.includes("scope")) {
+    return 6_000 + (SCOPE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
+  if (context.contexts.includes("text") && spec.contexts.includes("text")) {
+    return 4_000 + (spec.priority ?? 0) + prefixBoost;
+  }
+
+  return (spec.priority ?? 0) + prefixBoost;
 }
 
 function scoreSnippetSpec(
+  label: string,
   snippetContexts: readonly KmarkParamContext[],
   context: KmarkCompletionContext,
   basePriority: number,
   prefix: string,
 ): number {
-  const imageBoost = context.contexts.includes("image") && snippetContexts.includes("image") ? 50 : 0;
-  const pageBoost = context.contexts.includes("page") && snippetContexts.includes("page") ? 30 : 0;
-  const prefixBoost = prefix.length > 0 ? 70 : 0;
+  const prefixBoost = prefix.length > 0 ? 700 : 0;
 
-  return basePriority + imageBoost + pageBoost + prefixBoost - 10;
+  if (context.contexts.includes("image") && snippetContexts.includes("image")) {
+    return 10_000 + (IMAGE_SNIPPET_PRIORITY.get(label) ?? 350) + prefixBoost;
+  }
+
+  if (context.contexts.includes("page") && snippetContexts.includes("page")) {
+    return 8_000 + basePriority + prefixBoost;
+  }
+
+  if (context.contexts.includes("scope") && snippetContexts.includes("scope")) {
+    return 6_000 + basePriority + prefixBoost;
+  }
+
+  return basePriority + prefixBoost - 10;
 }
 
-function sortTextForSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, prefix: string): string {
-  const score = scoreParamSpec(spec, context, prefix);
+function scorePrefix(spec: KmarkParamSpec, prefix: string): number {
+  if (prefix.length === 0) {
+    return 0;
+  }
 
-  return `${String(999 - score).padStart(3, "0")}-${spec.name}`;
+  const lowerPrefix = prefix.toLocaleLowerCase("en-US");
+
+  if (spec.name.toLocaleLowerCase("en-US").startsWith(lowerPrefix)) {
+    return 1_000;
+  }
+
+  return spec.aliases?.some((alias) => alias.toLocaleLowerCase("en-US").startsWith(lowerPrefix)) === true
+    ? 900
+    : 0;
+}
+
+function sortTextForScore(score: number, label: string): string {
+  const inverseScore = Math.max(0, 99_999 - score);
+
+  return `${String(inverseScore).padStart(5, "0")}-${label}`;
 }
 
 function compareCompletionItems(left: KmarkCompletionItem, right: KmarkCompletionItem): number {
@@ -225,6 +313,49 @@ function withOptionalTrailingSpace(value: string, context: KmarkCompletionContex
   return /^\s*(?:\}|-->)/u.test(context.suffixAfterCursor) || context.suffixAfterCursor.startsWith(" ")
     ? value
     : `${value} `;
+}
+
+function resolveCompletionSection(
+  candidateContexts: readonly KmarkParamContext[],
+  activeContexts: readonly KmarkParamContext[],
+  fallback: KmarkCompletionSection,
+): KmarkCompletionSection {
+  if (activeContexts.includes("image") && candidateContexts.includes("image")) {
+    return "image";
+  }
+
+  if (activeContexts.includes("page") && candidateContexts.includes("page")) {
+    return "page";
+  }
+
+  if (activeContexts.includes("scope") && candidateContexts.includes("scope")) {
+    return "scope";
+  }
+
+  if (activeContexts.includes("text") && candidateContexts.includes("text")) {
+    return "text";
+  }
+
+  return fallback;
+}
+
+function detailForSection(section: KmarkCompletionSection): string {
+  switch (section) {
+    case "image":
+      return "kmark image";
+    case "page":
+      return "kmark page";
+    case "scope":
+      return "kmark scope";
+    case "text":
+      return "kmark text";
+    case "style":
+      return "kmark style";
+    case "snippet":
+      return "kmark snippet";
+    case "general":
+      return "kmark parameter";
+  }
 }
 
 function formatDescription(description: string, examples: readonly string[] | undefined): string {

@@ -75,12 +75,22 @@ export type KmarkCompletionContext = {
 
 export type KmarkCompletionItemKind = "parameter" | "value" | "snippet" | "style";
 
+export type KmarkCompletionSection =
+  | "image"
+  | "page"
+  | "scope"
+  | "text"
+  | "style"
+  | "snippet"
+  | "general";
+
 export type KmarkCompletionItem = {
   readonly label: string;
   readonly insertText: string;
   readonly description: string;
   readonly detail?: string;
   readonly kind: KmarkCompletionItemKind;
+  readonly section?: KmarkCompletionSection;
   readonly snippet?: boolean;
   readonly priority?: number;
   readonly sortText?: string;

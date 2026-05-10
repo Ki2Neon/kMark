@@ -33,7 +33,7 @@ export const KMARK_SNIPPET_SPECS: readonly KmarkSnippetSpec[] = [
     label: "image border",
     description: "画像に枠線を付ける",
     contexts: ["image", "single"],
-    insertText: "border_size:${1:2} border_color:${2:#000000}",
+    insertText: "border_size:${1:2} border_color:${2:#000000} border_style:${3:solid}",
     priority: 90,
   },
   {
