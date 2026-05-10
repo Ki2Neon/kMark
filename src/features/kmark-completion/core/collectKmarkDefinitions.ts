@@ -1,13 +1,11 @@
-const KMARK_COMMENT_PATTERN = /<!--\s*kmark\b([\s\S]*?)-->/gu;
+import { collectKmarkDirectiveOccurrences } from "./scanKmarkDirectives";
 
 export function collectKmarkDefinitions(markdown: string): readonly string[] {
   const definitions = new Set<string>();
 
-  for (const match of markdown.matchAll(KMARK_COMMENT_PATTERN)) {
-    const directiveText = match[1] ?? "";
-
-    for (const token of directiveText.split(/\s+/u)) {
-      const [name, value] = token.split(":", 2);
+  for (const occurrence of collectKmarkDirectiveOccurrences(markdown)) {
+    for (const token of occurrence.directiveText.matchAll(/[^\s{}]+/gu)) {
+      const [name, value] = token[0].split(":", 2);
 
       if (name !== "define" || value === undefined) {
         continue;
@@ -24,7 +22,7 @@ export function collectKmarkDefinitions(markdown: string): readonly string[] {
   return [...definitions].sort((left, right) => left.localeCompare(right, "ja-JP"));
 }
 
-function normalizeKmarkDefinitionName(value: string): string | null {
+export function normalizeKmarkDefinitionName(value: string): string | null {
   const normalized = value.trim().replace(/^["']|["']$/gu, "");
 
   if (!/^[A-Za-z0-9_-]+$/u.test(normalized)) {
