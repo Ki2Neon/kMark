@@ -53,6 +53,7 @@ export type MarkdownRenderer = {
 
 export type MarkdownDocumentGateway = {
   supportsNativeOpenPicker(): boolean;
+  restoreDocumentReference(filePath: string | null): void;
   openDocumentFromPicker(): Promise<LoadedMarkdownDocument | null>;
   openDocumentFromFile(file: File): Promise<LoadedMarkdownDocument>;
   openDocumentFolder(filePath: string): Promise<void>;

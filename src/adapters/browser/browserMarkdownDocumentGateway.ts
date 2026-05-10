@@ -47,11 +47,21 @@ function resolveSaveTargetFromLoadedDocument(result: {
   return resolveNextSaveTarget(result.fileHandle);
 }
 
+function resolveSaveTargetFromFilePath(filePath: string | null): SaveTarget {
+  return filePath === null
+    ? { kind: "download" }
+    : { kind: "external-path", filePath };
+}
+
 export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway {
   let saveTarget: SaveTarget = { kind: "download" };
 
   return {
     supportsNativeOpenPicker,
+
+    restoreDocumentReference(filePath) {
+      saveTarget = resolveSaveTargetFromFilePath(filePath);
+    },
 
     async openDocumentFromPicker() {
       const result = await pickMarkdownDocument();

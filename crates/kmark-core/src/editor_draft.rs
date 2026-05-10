@@ -15,12 +15,15 @@ impl StoredEdit {
         file_path: Option<String>,
         saved_at: Option<u64>,
     ) -> Self {
+        let raw_file_name = file_name.into();
+        let normalized_file_path = file_path
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+
         Self {
-            file_name: ensure_markdown_file_name(&file_name.into()),
+            file_name: resolve_stored_file_name(&raw_file_name, normalized_file_path.as_deref()),
             content: content.into(),
-            file_path: file_path
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty()),
+            file_path: normalized_file_path,
             saved_at,
         }
     }
@@ -69,6 +72,34 @@ pub fn ensure_markdown_file_name(value: &str) -> String {
     }
 }
 
+fn resolve_stored_file_name(file_name: &str, file_path: Option<&str>) -> String {
+    let normalized_file_name = ensure_markdown_file_name(file_name);
+
+    if normalized_file_name != DEFAULT_FILE_NAME {
+        return normalized_file_name;
+    }
+
+    file_path
+        .and_then(extract_file_name_from_path)
+        .map(ensure_markdown_file_name)
+        .unwrap_or(normalized_file_name)
+}
+
+fn extract_file_name_from_path(file_path: &str) -> Option<&str> {
+    let trimmed_path = file_path
+        .trim()
+        .trim_end_matches(|character| character == '/' || character == '\\');
+
+    if trimmed_path.is_empty() {
+        return None;
+    }
+
+    trimmed_path
+        .rsplit(|character| character == '/' || character == '\\')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+}
+
 fn has_markdown_extension(value: &str) -> bool {
     value.rsplit_once('.')
         .map(|(_, extension)| {
@@ -82,7 +113,7 @@ fn has_markdown_extension(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_markdown_file_name;
+    use super::{ensure_markdown_file_name, StoredEdit};
 
     #[test]
     fn normalizes_markdown_file_name() {
@@ -90,5 +121,24 @@ mod tests {
         assert_eq!(ensure_markdown_file_name(" notes "), "notes.md");
         assert_eq!(ensure_markdown_file_name("report.txt"), "report.txt");
         assert_eq!(ensure_markdown_file_name("bad:name"), "bad-name.md");
+    }
+
+    #[test]
+    fn derives_default_stored_file_name_from_file_path() {
+        let windows_edit = StoredEdit::new(
+            "untitled.md",
+            "content",
+            Some("C:\\docs\\report.md".to_owned()),
+            None,
+        );
+        let unix_edit = StoredEdit::new(
+            "",
+            "content",
+            Some("/home/user/notes.markdown".to_owned()),
+            None,
+        );
+
+        assert_eq!(windows_edit.file_name(), "report.md");
+        assert_eq!(unix_edit.file_name(), "notes.markdown");
     }
 }

@@ -68,6 +68,7 @@ export class EditorSessionController {
 
   createInitialState(startupEditMode: StartupEditMode): EditorSessionBootstrap {
     this.#currentDocumentFilePath = null;
+    this.#documentGateway.restoreDocumentReference(null);
     return {
       initialState: this.#rules.createStartupState(startupEditMode, null),
       shouldSkipInitialPersist: false,
@@ -76,7 +77,10 @@ export class EditorSessionController {
 
   async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
-    this.#currentDocumentFilePath = storedEdit?.filePath ?? null;
+    this.#currentDocumentFilePath = startupEditMode === "last-opened-file"
+      ? storedEdit?.filePath ?? null
+      : null;
+    this.#documentGateway.restoreDocumentReference(this.#currentDocumentFilePath);
 
     return {
       initialState: this.#rules.createStartupState(startupEditMode, storedEdit),
@@ -120,25 +124,25 @@ export class EditorSessionController {
       return;
     }
 
+    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: result.fileName,
       content: result.content,
       loadedAt: null,
     });
-    this.#currentDocumentFilePath = result.filePath;
   }
 
   async openDocumentFromFile(store: EditorSessionStore, file: File): Promise<void> {
     const result = await this.#documentGateway.openDocumentFromFile(file);
 
+    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: result.fileName,
       content: result.content,
       loadedAt: null,
     });
-    this.#currentDocumentFilePath = result.filePath;
   }
 
   async openCurrentDocumentFolder(): Promise<void> {
@@ -152,13 +156,13 @@ export class EditorSessionController {
   loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): void {
     const loadedDocument = this.#documentGateway.loadExternalDocument(document);
 
+    this.#currentDocumentFilePath = loadedDocument.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: loadedDocument.fileName,
       content: loadedDocument.content,
       loadedAt: null,
     });
-    this.#currentDocumentFilePath = loadedDocument.filePath;
   }
 
   async overwriteSaveDocument(store: EditorSessionStore): Promise<void> {
@@ -169,12 +173,12 @@ export class EditorSessionController {
       return;
     }
 
+    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/saveSucceeded",
       fileName: result.fileName,
       savedAt: this.#clock.now(),
     });
-    this.#currentDocumentFilePath = result.filePath;
   }
 
   async saveDocumentAs(store: EditorSessionStore): Promise<void> {
@@ -185,12 +189,12 @@ export class EditorSessionController {
       return;
     }
 
+    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/saveSucceeded",
       fileName: result.fileName,
       savedAt: this.#clock.now(),
     });
-    this.#currentDocumentFilePath = result.filePath;
   }
 
   async takePendingExternalDocuments(): Promise<readonly ExternalMarkdownDocument[]> {
