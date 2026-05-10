@@ -31,7 +31,7 @@ export type RenderedPreviewPage = {
 
 export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] = [
   { id: "standard", label: "通常" },
-  { id: "a4", label: "A4" },
+  { id: "a4", label: "用紙" },
 ] as const;
 
 export const CSS_MM_TO_PX = 96 / 25.4;

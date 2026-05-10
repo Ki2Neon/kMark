@@ -126,9 +126,10 @@ function MenuSectionComponent({
     "名前を付けて保存",
     "新規作成",
   );
-  const previewGroupMatched = matchesMenuSearch("プレビュー", "表示方法", "配色", "preview");
+  const previewGroupMatched = matchesMenuSearch("プレビュー", "表示形式", "表示方法", "用紙", "paper", "配色", "preview");
   const previewVisibilityVisible = previewGroupMatched || matchesMenuSearch("表示", "非表示", "visible");
-  const previewDisplayModeVisible = previewGroupMatched || matchesMenuSearch("表示サイズ", "display mode", "size");
+  const previewDisplayModeVisible =
+    previewGroupMatched || matchesMenuSearch("表示形式", "用紙", "paper", "display format", "display mode");
   const previewColorVisible = previewGroupMatched || matchesMenuSearch("配色", "固定色", "アプリテーマ色", "color");
   const previewGroupVisible = previewVisibilityVisible || previewDisplayModeVisible || previewColorVisible;
   const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
@@ -299,7 +300,7 @@ function MenuSectionComponent({
         <div className="menu-section__group">
           <div className="menu-section__group-header">
             <h2 className="menu-section__group-title">プレビュー</h2>
-            <p className="menu-section__group-description">表示方法と配色の設定</p>
+            <p className="menu-section__group-description">表示形式と配色の設定</p>
           </div>
           {previewVisibilityVisible ? (
             <label className="menu-section__mode-switch">
@@ -327,11 +328,11 @@ function MenuSectionComponent({
 
           {previewDisplayModeVisible ? (
             <label className="menu-section__label">
-              <span className="menu-section__field-label">表示サイズ</span>
+              <span className="menu-section__field-label">表示形式</span>
               <select
                 value={previewDisplayMode}
                 onChange={handlePreviewDisplayModeSelect}
-                aria-label="プレビュー表示モード"
+                aria-label="プレビュー表示形式"
                 className="menu-section__select"
               >
                 {PREVIEW_DISPLAY_MODE_OPTIONS.map((previewDisplayModeOption) => (

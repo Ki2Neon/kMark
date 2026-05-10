@@ -2328,7 +2328,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_size = Some(page_size);
                 }
             }
-            "page_orientation" => {
+            "page_orientation" | "orientation" => {
                 if let Some(page_orientation) = parse_kmark_page_orientation_value(value) {
                     directive.page_orientation = Some(page_orientation);
                 }
@@ -2343,7 +2343,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_height = Some(page_height);
                 }
             }
-            "page_margin" => {
+            "page_margin" | "margin" => {
                 if let Some(page_margin) = parse_kmark_page_length_value(value) {
                     directive.page_margin = Some(page_margin);
                 }
@@ -2464,12 +2464,12 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.preset_use = Some(preset_name);
                 }
             }
-            "w" => {
+            "w" | "width" => {
                 if let Some(width) = parse_kmark_size_value(value) {
                     bundle.params.image.width = Some(width);
                 }
             }
-            "h" => {
+            "h" | "height" => {
                 if let Some(height) = parse_kmark_size_value(value) {
                     bundle.params.image.height = Some(height);
                 }
@@ -3142,6 +3142,25 @@ mod tests {
     }
 
     #[test]
+    fn accepts_page_directive_aliases_used_by_completion() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { page_size:A4 orientation:landscape margin:15mm font_size:12pt } -->\n\
+             # Alias",
+        );
+
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "297mm");
+        assert_eq!(rendered_preview.pages[0].page_style.height.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.margin_top.as_str(),
+            "15mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "12pt"
+        );
+    }
+
+    #[test]
     fn splits_pages_when_scope_page_style_starts_and_ends() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark { page_size:A4 page_orientation:portrait font_size:11pt -->\n\
@@ -3320,6 +3339,17 @@ mod tests {
     fn applies_kmark_single_image_size_comment() {
         let rendered_preview =
             render_markdown_preview("<!-- kmark w:200 h:100 -->\n![](image.png)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:200px;height:100px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn accepts_image_size_aliases_used_by_completion_schema() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark width:200 height:100 -->\n![](image.png)");
 
         assert_eq!(
             rendered_preview.html,

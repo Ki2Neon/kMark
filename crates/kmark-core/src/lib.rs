@@ -2,6 +2,7 @@ mod desktop_layout;
 mod editor_draft;
 mod editor_preferences;
 mod editor_state;
+mod kmark_param_schema;
 mod markdown_document;
 mod markdown_document_error;
 mod preview_preferences;
@@ -25,6 +26,7 @@ pub use editor_state::{
     derive_editor_stats, reduce_editor_state, EditorState, EditorStateAction, EditorStats,
     DEFAULT_MARKDOWN,
 };
+pub use kmark_param_schema::{kmark_param_schema_json, KMARK_PARAM_SCHEMA_VERSION};
 pub use markdown_document::{is_supported_markdown_path, MarkdownDocument};
 pub use markdown_document_error::MarkdownDocumentError;
 pub use preview_preferences::{PreviewDisplayMode, PreviewPreferences};
