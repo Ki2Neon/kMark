@@ -2328,7 +2328,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_size = Some(page_size);
                 }
             }
-            "page_orientation" => {
+            "page_orientation" | "orientation" => {
                 if let Some(page_orientation) = parse_kmark_page_orientation_value(value) {
                     directive.page_orientation = Some(page_orientation);
                 }
@@ -2343,7 +2343,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_height = Some(page_height);
                 }
             }
-            "page_margin" => {
+            "page_margin" | "margin" => {
                 if let Some(page_margin) = parse_kmark_page_length_value(value) {
                     directive.page_margin = Some(page_margin);
                 }
@@ -3139,6 +3139,25 @@ mod tests {
         assert_eq!(page_style.margin_right.as_str(), "10mm");
         assert_eq!(page_style.margin_bottom.as_str(), "6mm");
         assert_eq!(page_style.margin_left.as_str(), "4mm");
+    }
+
+    #[test]
+    fn accepts_page_directive_aliases_used_by_completion() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { page_size:A4 orientation:landscape margin:15mm font_size:12pt } -->\n\
+             # Alias",
+        );
+
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "297mm");
+        assert_eq!(rendered_preview.pages[0].page_style.height.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.margin_top.as_str(),
+            "15mm"
+        );
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "12pt"
+        );
     }
 
     #[test]
