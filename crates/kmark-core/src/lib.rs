@@ -29,6 +29,7 @@ pub use markdown_document::{is_supported_markdown_path, MarkdownDocument};
 pub use markdown_document_error::MarkdownDocumentError;
 pub use preview_preferences::{PreviewDisplayMode, PreviewPreferences};
 pub use render_markdown_preview::{
-    render_markdown_preview, render_markdown_preview_with_file_path, RenderedMarkdownPreview,
+    render_markdown_preview, render_markdown_preview_with_file_path, CssLength, PageStyle,
+    PreviewTextStyle, RenderedMarkdownPreview, RenderedPage,
 };
 pub use theme::{AppThemeId, ThemePreferences};

@@ -2,7 +2,8 @@ use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
     reduce_editor_state, render_markdown_preview_with_file_path, resolve_app_font_family,
     resolve_edit_font_family, DesktopLayoutPreferences, EditorPreferences, EditorState,
-    EditorStateAction, EditorStats, PreviewPreferences, StoredEdit, ThemePreferences,
+    EditorStateAction, EditorStats, PageStyle, PreviewPreferences, PreviewTextStyle, RenderedPage,
+    StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -12,6 +13,34 @@ use wasm_bindgen::prelude::*;
 struct RenderedMarkdownPreviewPayload {
     html: String,
     page_htmls: Vec<String>,
+    pages: Vec<RenderedPagePayload>,
+    default_page_style: PageStylePayload,
+    default_text_style: PreviewTextStylePayload,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RenderedPagePayload {
+    html: String,
+    page_style: PageStylePayload,
+    text_style: PreviewTextStylePayload,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PageStylePayload {
+    width: String,
+    height: String,
+    margin_top: String,
+    margin_right: String,
+    margin_bottom: String,
+    margin_left: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PreviewTextStylePayload {
+    font_size: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,13 +130,9 @@ struct EditorStatsPayload {
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 enum EditorStateActionInput {
     #[serde(rename = "editor/bootstrapLoaded")]
-    BootstrapLoaded {
-        state: EditorStateInput,
-    },
+    BootstrapLoaded { state: EditorStateInput },
     #[serde(rename = "editor/contentChanged")]
-    ContentChanged {
-        content: String,
-    },
+    ContentChanged { content: String },
     #[serde(rename = "editor/documentLoaded")]
     DocumentLoaded {
         file_name: String,
@@ -117,14 +142,9 @@ enum EditorStateActionInput {
     #[serde(rename = "editor/documentReset")]
     DocumentReset,
     #[serde(rename = "editor/saveSucceeded")]
-    SaveSucceeded {
-        file_name: String,
-        saved_at: u64,
-    },
+    SaveSucceeded { file_name: String, saved_at: u64 },
     #[serde(rename = "editor/errorRaised")]
-    ErrorRaised {
-        message: String,
-    },
+    ErrorRaised { message: String },
     #[serde(rename = "editor/errorCleared")]
     ErrorCleared,
 }
@@ -163,11 +183,17 @@ struct EditorDraftInput {
 
 #[wasm_bindgen]
 pub fn render_markdown_preview_json(content: String, file_path: Option<String>) -> String {
-    let rendered_preview =
-        render_markdown_preview_with_file_path(&content, file_path.as_deref());
+    let rendered_preview = render_markdown_preview_with_file_path(&content, file_path.as_deref());
     stringify(&RenderedMarkdownPreviewPayload {
         html: rendered_preview.html,
         page_htmls: rendered_preview.page_htmls,
+        pages: rendered_preview
+            .pages
+            .into_iter()
+            .map(RenderedPagePayload::from)
+            .collect(),
+        default_page_style: PageStylePayload::from(rendered_preview.default_page_style),
+        default_text_style: PreviewTextStylePayload::from(rendered_preview.default_text_style),
     })
 }
 
@@ -175,7 +201,9 @@ pub fn render_markdown_preview_json(content: String, file_path: Option<String>) 
 pub fn normalize_theme_preferences_json(input: Option<String>) -> String {
     let payload = parse_json::<ThemePreferencesInput>(input);
     let theme_preferences = ThemePreferences::new(
-        payload.as_ref().and_then(|value| value.app_theme_id.as_deref()),
+        payload
+            .as_ref()
+            .and_then(|value| value.app_theme_id.as_deref()),
         payload
             .as_ref()
             .and_then(|value| value.preview_theme_id.as_deref()),
@@ -189,11 +217,8 @@ pub fn normalize_theme_preferences_json(input: Option<String>) -> String {
 #[wasm_bindgen]
 pub fn normalize_desktop_layout_preferences_json(input: Option<String>) -> String {
     let payload = parse_json::<DesktopLayoutPreferencesInput>(input);
-    let desktop_layout_preferences = DesktopLayoutPreferences::new(
-        payload
-            .as_ref()
-            .and_then(|value| value.desktop_split_ratio),
-    );
+    let desktop_layout_preferences =
+        DesktopLayoutPreferences::new(payload.as_ref().and_then(|value| value.desktop_split_ratio));
     stringify(&DesktopLayoutPreferencesPayload::from(
         &desktop_layout_preferences,
     ))
@@ -234,7 +259,12 @@ pub fn create_startup_editor_state_json(
     let stored_edit = payload.and_then(|value| {
         let file_name = value.file_name?;
         let content = value.content?;
-        Some(StoredEdit::new(file_name, content, value.file_path, value.saved_at))
+        Some(StoredEdit::new(
+            file_name,
+            content,
+            value.file_path,
+            value.saved_at,
+        ))
     });
     let editor_state = create_startup_editor_state(
         startup_edit_mode
@@ -248,8 +278,9 @@ pub fn create_startup_editor_state_json(
 
 #[wasm_bindgen]
 pub fn reduce_editor_state_json(current_state_input: String, action_input: String) -> String {
-    let current_state =
-        EditorState::from(parse_json::<EditorStateInput>(Some(current_state_input)).unwrap_or_default());
+    let current_state = EditorState::from(
+        parse_json::<EditorStateInput>(Some(current_state_input)).unwrap_or_default(),
+    );
     let action = parse_json::<EditorStateActionInput>(Some(action_input))
         .map(EditorStateAction::from)
         .unwrap_or(EditorStateAction::BootstrapLoaded(current_state.clone()));
@@ -312,6 +343,37 @@ fn parse_json<T: for<'de> Deserialize<'de>>(input: Option<String>) -> Option<T> 
 
 fn stringify<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("json serialization failed")
+}
+
+impl From<RenderedPage> for RenderedPagePayload {
+    fn from(page: RenderedPage) -> Self {
+        Self {
+            html: page.html,
+            page_style: PageStylePayload::from(page.page_style),
+            text_style: PreviewTextStylePayload::from(page.text_style),
+        }
+    }
+}
+
+impl From<PageStyle> for PageStylePayload {
+    fn from(page_style: PageStyle) -> Self {
+        Self {
+            width: page_style.width.as_str().to_owned(),
+            height: page_style.height.as_str().to_owned(),
+            margin_top: page_style.margin_top.as_str().to_owned(),
+            margin_right: page_style.margin_right.as_str().to_owned(),
+            margin_bottom: page_style.margin_bottom.as_str().to_owned(),
+            margin_left: page_style.margin_left.as_str().to_owned(),
+        }
+    }
+}
+
+impl From<PreviewTextStyle> for PreviewTextStylePayload {
+    fn from(text_style: PreviewTextStyle) -> Self {
+        Self {
+            font_size: text_style.font_size.as_str().to_owned(),
+        }
+    }
 }
 
 impl From<&ThemePreferences> for ThemePreferencesPayload {
@@ -415,9 +477,13 @@ impl From<EditorStateActionInput> for EditorStateAction {
                 loaded_at,
             },
             EditorStateActionInput::DocumentReset => Self::DocumentReset,
-            EditorStateActionInput::SaveSucceeded { file_name, saved_at } => {
-                Self::SaveSucceeded { file_name, saved_at }
-            }
+            EditorStateActionInput::SaveSucceeded {
+                file_name,
+                saved_at,
+            } => Self::SaveSucceeded {
+                file_name,
+                saved_at,
+            },
             EditorStateActionInput::ErrorRaised { message } => Self::ErrorRaised(message),
             EditorStateActionInput::ErrorCleared => Self::ErrorCleared,
         }

@@ -1,5 +1,14 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { A4_PAGE_HEIGHT_MM, A4_PAGE_WIDTH_MM, CSS_MM_TO_PX, type PreviewDisplayMode } from "../../domain/preview";
+import {
+  A4_PAGE_WIDTH_MM,
+  CSS_MM_TO_PX,
+  DEFAULT_PAGE_STYLE,
+  DEFAULT_PREVIEW_TEXT_STYLE,
+  type PageStyle,
+  type PreviewDisplayMode,
+  type PreviewTextStyle,
+  type RenderedPreviewPage,
+} from "../../domain/preview";
 
 const A4_PAGE_WIDTH_FOR_FIT_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
 const MIN_A4_SCALE = 0.1;
@@ -25,6 +34,8 @@ const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
 
 type MarkdownPreviewProps = {
   readonly activeSourceLine?: number | null;
+  readonly defaultPageStyle?: PageStyle;
+  readonly defaultTextStyle?: PreviewTextStyle;
   readonly displayMode: PreviewDisplayMode;
   readonly enableInteractiveViewportNavigation?: boolean;
   readonly html: string;
@@ -35,6 +46,7 @@ type MarkdownPreviewProps = {
   readonly onSourceLineDoubleClick?: (lineNumber: number) => void;
   readonly onZoomScaleChange?: (zoomScale: number) => void;
   readonly pageHtmls?: readonly string[];
+  readonly pages?: readonly RenderedPreviewPage[];
   readonly zoomScale?: number;
 };
 
@@ -60,17 +72,138 @@ type NearestPreviewTargetCandidate = PreviewTargetCandidate & {
 type A4PaginationContext = {
   body: HTMLElement;
   frame: HTMLElement;
-  readonly maxContentHeight: number;
-  pageHtmls: string[];
+  maxContentHeight: number;
+  pageConfig: PreviewPageConfig;
+  pages: RenderedPreviewPage[];
   readonly root: HTMLElement;
+};
+
+type PreviewPageConfig = {
+  readonly pageStyle: PageStyle;
+  readonly textStyle: PreviewTextStyle;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
+function arePreviewPagesEqual(left: readonly RenderedPreviewPage[], right: readonly RenderedPreviewPage[]): boolean {
+  return left.length === right.length && left.every((leftPage, index) => {
+    const rightPage = right[index];
+
+    return rightPage !== undefined
+      && leftPage.html === rightPage.html
+      && arePageStylesEqual(leftPage.pageStyle, rightPage.pageStyle)
+      && arePreviewTextStylesEqual(leftPage.textStyle, rightPage.textStyle);
+  });
+}
+
+function arePageStylesEqual(left: PageStyle, right: PageStyle): boolean {
+  return left.width === right.width
+    && left.height === right.height
+    && left.marginTop === right.marginTop
+    && left.marginRight === right.marginRight
+    && left.marginBottom === right.marginBottom
+    && left.marginLeft === right.marginLeft;
+}
+
+function arePreviewTextStylesEqual(left: PreviewTextStyle, right: PreviewTextStyle): boolean {
+  return left.fontSize === right.fontSize;
+}
+
+function pageStyleKey(pageStyle: PageStyle): string {
+  return [
+    pageStyle.width,
+    pageStyle.height,
+    pageStyle.marginTop,
+    pageStyle.marginRight,
+    pageStyle.marginBottom,
+    pageStyle.marginLeft,
+  ].join("|");
+}
+
+function previewTextStyleKey(textStyle: PreviewTextStyle): string {
+  return textStyle.fontSize;
+}
+
+function previewPageKey(page: RenderedPreviewPage): string {
+  return [
+    page.html,
+    pageStyleKey(page.pageStyle),
+    previewTextStyleKey(page.textStyle),
+  ].join(A4_PAGINATION_SOURCE_SEPARATOR);
+}
+
+function getPreviewPageConfig(page: RenderedPreviewPage): PreviewPageConfig {
+  return {
+    pageStyle: page.pageStyle,
+    textStyle: page.textStyle,
+  };
+}
+
+function getPreviewPageStyle(pageConfig: PreviewPageConfig): CSSProperties {
+  return {
+    "--kmark-page-width": pageConfig.pageStyle.width,
+    "--kmark-page-height": pageConfig.pageStyle.height,
+    "--kmark-page-margin-top": pageConfig.pageStyle.marginTop,
+    "--kmark-page-margin-right": pageConfig.pageStyle.marginRight,
+    "--kmark-page-margin-bottom": pageConfig.pageStyle.marginBottom,
+    "--kmark-page-margin-left": pageConfig.pageStyle.marginLeft,
+    "--kmark-font-size": pageConfig.textStyle.fontSize,
+  } as CSSProperties;
+}
+
+function applyPreviewPageStyle(element: HTMLElement, pageConfig: PreviewPageConfig): void {
+  element.style.setProperty("--kmark-page-width", pageConfig.pageStyle.width);
+  element.style.setProperty("--kmark-page-height", pageConfig.pageStyle.height);
+  element.style.setProperty("--kmark-page-margin-top", pageConfig.pageStyle.marginTop);
+  element.style.setProperty("--kmark-page-margin-right", pageConfig.pageStyle.marginRight);
+  element.style.setProperty("--kmark-page-margin-bottom", pageConfig.pageStyle.marginBottom);
+  element.style.setProperty("--kmark-page-margin-left", pageConfig.pageStyle.marginLeft);
+  element.style.setProperty("--kmark-font-size", pageConfig.textStyle.fontSize);
+}
+
+function getPreviewPageScaleStyle(page: RenderedPreviewPage, scale: number): CSSProperties {
+  const widthPx = cssLengthToPx(page.pageStyle.width);
+  const heightPx = cssLengthToPx(page.pageStyle.height);
+
+  return {
+    "--a4-scale": scale,
+    width: Number.isFinite(widthPx) ? `${widthPx * scale}px` : `calc(${page.pageStyle.width} * ${scale})`,
+    height: Number.isFinite(heightPx) ? `${heightPx * scale}px` : `calc(${page.pageStyle.height} * ${scale})`,
+  } as CSSProperties;
+}
+
+function cssLengthToPx(value: string): number {
+  const match = /^([0-9]+(?:\.[0-9]+)?)(px|mm|cm|in|pt|pc)$/iu.exec(value.trim());
+
+  if (match === null) {
+    return Number.NaN;
+  }
+
+  const amount = Number.parseFloat(match[1] ?? "");
+  const unit = (match[2] ?? "").toLowerCase();
+
+  if (!Number.isFinite(amount)) {
+    return Number.NaN;
+  }
+
+  switch (unit) {
+    case "px":
+      return amount;
+    case "mm":
+      return amount * CSS_MM_TO_PX;
+    case "cm":
+      return amount * CSS_MM_TO_PX * 10;
+    case "in":
+      return amount * 96;
+    case "pt":
+      return amount * (96 / 72);
+    case "pc":
+      return amount * 16;
+    default:
+      return Number.NaN;
+  }
 }
 
 function resolveEventTargetElement(eventTarget: EventTarget | null): HTMLElement | null {
@@ -408,9 +541,13 @@ function createA4PaginationMeasureRoot(): HTMLElement {
   return root;
 }
 
-function createA4PaginationPage(root: HTMLElement): Pick<A4PaginationContext, "body" | "frame" | "maxContentHeight"> {
+function createA4PaginationPage(
+  root: HTMLElement,
+  pageConfig: PreviewPageConfig,
+): Pick<A4PaginationContext, "body" | "frame" | "maxContentHeight"> {
   const frame = document.createElement("div");
   frame.className = "preview-section__page-frame";
+  applyPreviewPageStyle(frame, pageConfig);
 
   const body = document.createElement("article");
   body.className = "preview-section__page markdown-body markdown-body--a4";
@@ -432,9 +569,10 @@ function createA4PaginationPage(root: HTMLElement): Pick<A4PaginationContext, "b
 }
 
 function startA4PaginationPage(context: A4PaginationContext): void {
-  const page = createA4PaginationPage(context.root);
+  const page = createA4PaginationPage(context.root, context.pageConfig);
   context.body = page.body;
   context.frame = page.frame;
+  context.maxContentHeight = page.maxContentHeight;
 }
 
 function hasA4PaginationContent(element: HTMLElement): boolean {
@@ -446,7 +584,11 @@ function commitA4PaginationPage(context: A4PaginationContext): void {
     return;
   }
 
-  context.pageHtmls.push(context.body.innerHTML);
+  context.pages.push({
+    html: context.body.innerHTML,
+    pageStyle: context.pageConfig.pageStyle,
+    textStyle: context.pageConfig.textStyle,
+  });
 }
 
 function getA4PaginationNodeBottomOffset(container: HTMLElement, node: Node): number {
@@ -1493,19 +1635,21 @@ function appendNodeToA4Pages(context: A4PaginationContext, node: Node): void {
   context.body.append(node.cloneNode(true));
 }
 
-function paginateA4HtmlSegment(html: string): readonly string[] {
+function paginateA4HtmlSegment(page: RenderedPreviewPage): readonly RenderedPreviewPage[] {
   const root = createA4PaginationMeasureRoot();
-  const firstPage = createA4PaginationPage(root);
+  const firstPageConfig = getPreviewPageConfig(page);
+  const firstPage = createA4PaginationPage(root, firstPageConfig);
   const context: A4PaginationContext = {
     body: firstPage.body,
     frame: firstPage.frame,
     maxContentHeight: firstPage.maxContentHeight,
-    pageHtmls: [],
+    pageConfig: firstPageConfig,
+    pages: [],
     root,
   };
 
   try {
-    const nodes = getA4PaginationNodes(html);
+    const nodes = getA4PaginationNodes(page.html);
 
     for (const [index, node] of nodes.entries()) {
       const nextNode = nodes.slice(index + 1).find((candidate) => !isIgnorableA4PaginationNode(candidate));
@@ -1524,18 +1668,24 @@ function paginateA4HtmlSegment(html: string): readonly string[] {
 
     commitA4PaginationPage(context);
 
-    return context.pageHtmls.length > 0 ? context.pageHtmls : [""];
+    return context.pages.length > 0
+      ? context.pages
+      : [{ ...page, html: "" }];
   } finally {
     root.remove();
   }
 }
 
-function paginateA4HtmlSegments(htmlSegments: readonly string[]): readonly string[] {
-  return htmlSegments.flatMap((htmlSegment) => [...paginateA4HtmlSegment(htmlSegment)]);
+function paginateA4HtmlSegments(
+  pages: readonly RenderedPreviewPage[],
+): readonly RenderedPreviewPage[] {
+  return pages.flatMap((page) => [...paginateA4HtmlSegment(page)]);
 }
 
 function MarkdownPreviewComponent({
   activeSourceLine = null,
+  defaultPageStyle = DEFAULT_PAGE_STYLE,
+  defaultTextStyle = DEFAULT_PREVIEW_TEXT_STYLE,
   displayMode,
   enableInteractiveViewportNavigation = false,
   html,
@@ -1546,6 +1696,7 @@ function MarkdownPreviewComponent({
   onSourceLineDoubleClick,
   onZoomScaleChange,
   pageHtmls,
+  pages,
   zoomScale = 1,
 }: MarkdownPreviewProps) {
   const previewViewportRef = useRef<HTMLElement | null>(null);
@@ -1568,25 +1719,38 @@ function MarkdownPreviewComponent({
   const [a4FitScale, setA4FitScale] = useState(1);
   const [isViewportPanning, setIsViewportPanning] = useState(false);
 
-  const normalizedPageHtmls = useMemo(
-    () => (pageHtmls !== undefined && pageHtmls.length > 0 ? [...pageHtmls] : [html]),
-    [html, pageHtmls],
-  );
+  const normalizedPages = useMemo(() => {
+    if (pages !== undefined && pages.length > 0) {
+      return [...pages];
+    }
+
+    const htmlSegments = pageHtmls !== undefined && pageHtmls.length > 0 ? pageHtmls : [html];
+
+    return htmlSegments.map((pageHtml) => ({
+      html: pageHtml,
+      pageStyle: defaultPageStyle,
+      textStyle: defaultTextStyle,
+    }));
+  }, [defaultPageStyle, defaultTextStyle, html, pageHtmls, pages]);
   const a4PaginationSourceKey = useMemo(
-    () => normalizedPageHtmls.join(A4_PAGINATION_SOURCE_SEPARATOR),
-    [normalizedPageHtmls],
+    () => normalizedPages.map(previewPageKey).join(A4_PAGINATION_SOURCE_SEPARATOR),
+    [normalizedPages],
   );
   const [paginatedA4PageState, setPaginatedA4PageState] = useState<{
-    readonly pageHtmls: readonly string[];
+    readonly pages: readonly RenderedPreviewPage[];
     readonly sourceKey: string;
   }>({
-    pageHtmls: [],
+    pages: [],
     sourceKey: "",
   });
-  const a4DisplayPageHtmls = paginatedA4PageState.sourceKey === a4PaginationSourceKey
-    ? paginatedA4PageState.pageHtmls
-    : normalizedPageHtmls;
-  const currentPreviewPageHtmls = displayMode === "a4" ? a4DisplayPageHtmls : normalizedPageHtmls;
+  const a4DisplayPages = paginatedA4PageState.sourceKey === a4PaginationSourceKey
+    ? paginatedA4PageState.pages
+    : normalizedPages;
+  const currentPreviewPages = displayMode === "a4" ? a4DisplayPages : normalizedPages;
+  const currentPreviewPageHtmls = useMemo(
+    () => currentPreviewPages.map((page) => page.html),
+    [currentPreviewPages],
+  );
 
   const clearViewportPan = useCallback((previewViewport?: HTMLElement) => {
     const viewport = previewViewport ?? previewViewportRef.current;
@@ -1694,13 +1858,15 @@ function MarkdownPreviewComponent({
     [displayMode, effectiveA4Scale, normalizedZoomScale],
   );
 
-  const a4PageScaleStyle = useMemo(
-    () => ({
-      "--a4-scale": effectiveA4Scale,
-      width: `${A4_PAGE_WIDTH_MM * effectiveA4Scale}mm`,
-      height: `${A4_PAGE_HEIGHT_MM * effectiveA4Scale}mm`,
-    } as CSSProperties),
-    [effectiveA4Scale],
+  const maxA4PageWidthPx = useMemo(
+    () => {
+      const pageWidths = a4DisplayPages
+        .map((page) => cssLengthToPx(page.pageStyle.width))
+        .filter(Number.isFinite);
+
+      return pageWidths.length > 0 ? Math.max(...pageWidths) : A4_PAGE_WIDTH_FOR_FIT_PX;
+    },
+    [a4DisplayPages],
   );
 
   const standardPreviewContentStyle = useMemo(
@@ -1727,7 +1893,7 @@ function MarkdownPreviewComponent({
       const availableWidth = Math.max(0, previewBody.clientWidth - paddingX);
       const nextScale = Math.max(
         MIN_A4_SCALE,
-        availableWidth / A4_PAGE_WIDTH_FOR_FIT_PX,
+        availableWidth / maxA4PageWidthPx,
       );
 
       setA4FitScale((currentScale) => (Math.abs(currentScale - nextScale) < 0.001 ? currentScale : nextScale));
@@ -1755,7 +1921,7 @@ function MarkdownPreviewComponent({
 
       resizeObserver.disconnect();
     };
-  }, [displayMode]);
+  }, [displayMode, maxA4PageWidthPx]);
 
   useLayoutEffect(() => {
     if (displayMode !== "a4") {
@@ -1771,18 +1937,18 @@ function MarkdownPreviewComponent({
         return;
       }
 
-      const nextPageHtmls = paginateA4HtmlSegments(normalizedPageHtmls);
+      const nextPages = paginateA4HtmlSegments(normalizedPages);
 
       setPaginatedA4PageState((currentState) => {
         if (
           currentState.sourceKey === a4PaginationSourceKey
-          && areStringArraysEqual(currentState.pageHtmls, nextPageHtmls)
+          && arePreviewPagesEqual(currentState.pages, nextPages)
         ) {
           return currentState;
         }
 
         return {
-          pageHtmls: nextPageHtmls,
+          pages: nextPages,
           sourceKey: a4PaginationSourceKey,
         };
       });
@@ -1829,7 +1995,7 @@ function MarkdownPreviewComponent({
         previewImage.removeEventListener("error", scheduleA4Pagination);
       }
     };
-  }, [a4PaginationSourceKey, displayMode, normalizedPageHtmls]);
+  }, [a4PaginationSourceKey, displayMode, normalizedPages]);
 
   useLayoutEffect(() => {
     const previewViewport = previewViewportRef.current;
@@ -2091,12 +2257,16 @@ function MarkdownPreviewComponent({
           onWheel={handlePreviewWheel}
         >
           <div className="preview-section__page-stack">
-            {a4DisplayPageHtmls.map((pageHtml, index) => (
-              <div key={`${index}-${pageHtml.length}`} className="preview-section__page-scale" style={a4PageScaleStyle}>
-                <div className="preview-section__page-frame">
+            {a4DisplayPages.map((page, index) => (
+              <div
+                key={`${index}-${page.html.length}-${pageStyleKey(page.pageStyle)}-${previewTextStyleKey(page.textStyle)}`}
+                className="preview-section__page-scale"
+                style={getPreviewPageScaleStyle(page, effectiveA4Scale)}
+              >
+                <div className="preview-section__page-frame" style={getPreviewPageStyle(getPreviewPageConfig(page))}>
                   <article
                     className="preview-section__page markdown-body markdown-body--a4"
-                    dangerouslySetInnerHTML={{ __html: pageHtml }}
+                    dangerouslySetInnerHTML={{ __html: page.html }}
                   />
                 </div>
               </div>

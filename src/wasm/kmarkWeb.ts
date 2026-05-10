@@ -1,3 +1,9 @@
+import {
+  type PageStyle,
+  type PreviewTextStyle,
+  type RenderedPreviewPage,
+} from "../domain/preview";
+
 type KmarkWebModule = typeof import("./pkg/kmark_web");
 
 let loadedModule: KmarkWebModule | null = null;
@@ -6,6 +12,9 @@ let pendingModule: Promise<KmarkWebModule> | null = null;
 type RenderedMarkdownPreviewPayload = {
   readonly html: string;
   readonly pageHtmls: readonly string[];
+  readonly pages: readonly RenderedPreviewPage[];
+  readonly defaultPageStyle: PageStyle;
+  readonly defaultTextStyle: PreviewTextStyle;
 };
 
 export function parseJsonPayload<T>(json: string): T {

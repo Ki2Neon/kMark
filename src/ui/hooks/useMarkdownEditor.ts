@@ -13,7 +13,7 @@ import {
 import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PreviewDisplayMode } from "../../domain/preview";
+import { DEFAULT_PAGE_STYLE, DEFAULT_PREVIEW_TEXT_STYLE, type PreviewDisplayMode } from "../../domain/preview";
 
 export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   const renderRequestIdRef = useRef(0);
@@ -56,6 +56,9 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
   const [renderedPreview, setRenderedPreview] = useState<RenderedPreview>({
     html: "",
     pageHtmls: [],
+    pages: [],
+    defaultPageStyle: DEFAULT_PAGE_STYLE,
+    defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE,
   });
 
   useEffect(() => {
@@ -241,6 +244,9 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     isReady,
     previewHtml: renderedPreview.html,
     previewPageHtmls: renderedPreview.pageHtmls,
+    previewPages: renderedPreview.pages,
+    defaultPreviewPageStyle: renderedPreview.defaultPageStyle,
+    defaultPreviewTextStyle: renderedPreview.defaultTextStyle,
     confirmDiscard,
     handleClearPendingExternalDocuments,
     handleContentChange,

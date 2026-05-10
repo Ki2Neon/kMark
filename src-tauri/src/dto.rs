@@ -1,6 +1,6 @@
 use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RenderedMarkdownPreview,
-    StoredEdit, ThemePreferences,
+    DesktopLayoutPreferences, EditorPreferences, PageStyle, PreviewPreferences, PreviewTextStyle,
+    RenderedMarkdownPreview, RenderedPage, StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,34 @@ use serde::{Deserialize, Serialize};
 pub struct RenderedMarkdownPreviewPayload {
     pub html: String,
     pub page_htmls: Vec<String>,
+    pub pages: Vec<RenderedPagePayload>,
+    pub default_page_style: PageStylePayload,
+    pub default_text_style: PreviewTextStylePayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderedPagePayload {
+    pub html: String,
+    pub page_style: PageStylePayload,
+    pub text_style: PreviewTextStylePayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageStylePayload {
+    pub width: String,
+    pub height: String,
+    pub margin_top: String,
+    pub margin_right: String,
+    pub margin_bottom: String,
+    pub margin_left: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTextStylePayload {
+    pub font_size: String,
 }
 
 impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
@@ -16,6 +44,44 @@ impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
         Self {
             html: rendered_preview.html,
             page_htmls: rendered_preview.page_htmls,
+            pages: rendered_preview
+                .pages
+                .into_iter()
+                .map(RenderedPagePayload::from)
+                .collect(),
+            default_page_style: PageStylePayload::from(rendered_preview.default_page_style),
+            default_text_style: PreviewTextStylePayload::from(rendered_preview.default_text_style),
+        }
+    }
+}
+
+impl From<RenderedPage> for RenderedPagePayload {
+    fn from(page: RenderedPage) -> Self {
+        Self {
+            html: page.html,
+            page_style: PageStylePayload::from(page.page_style),
+            text_style: PreviewTextStylePayload::from(page.text_style),
+        }
+    }
+}
+
+impl From<PageStyle> for PageStylePayload {
+    fn from(page_style: PageStyle) -> Self {
+        Self {
+            width: page_style.width.as_str().to_owned(),
+            height: page_style.height.as_str().to_owned(),
+            margin_top: page_style.margin_top.as_str().to_owned(),
+            margin_right: page_style.margin_right.as_str().to_owned(),
+            margin_bottom: page_style.margin_bottom.as_str().to_owned(),
+            margin_left: page_style.margin_left.as_str().to_owned(),
+        }
+    }
+}
+
+impl From<PreviewTextStyle> for PreviewTextStylePayload {
+    fn from(text_style: PreviewTextStyle) -> Self {
+        Self {
+            font_size: text_style.font_size.as_str().to_owned(),
         }
     }
 }

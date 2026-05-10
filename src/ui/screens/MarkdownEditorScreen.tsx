@@ -119,6 +119,9 @@ export function MarkdownEditorScreen({
     previewHtml,
     handleClearPendingExternalDocuments,
     previewPageHtmls,
+    previewPages,
+    defaultPreviewPageStyle,
+    defaultPreviewTextStyle,
     confirmDiscard,
     handleContentChange,
     handleLoadExternalDocument,
@@ -517,7 +520,10 @@ export function MarkdownEditorScreen({
                     onPreviewContextMenu={handlePreviewContextMenu}
                     onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
                     onZoomScaleChange={handlePreviewZoomScaleChange}
+                    defaultPageStyle={defaultPreviewPageStyle}
+                    defaultTextStyle={defaultPreviewTextStyle}
                     pageHtmls={previewPageHtmls}
+                    pages={previewPages}
                     zoomScale={previewZoomScale}
                   />
                 </div>
@@ -578,7 +584,10 @@ export function MarkdownEditorScreen({
                       onPreviewContextMenu={handlePreviewContextMenu}
                       onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
                       onZoomScaleChange={handlePreviewZoomScaleChange}
+                      defaultPageStyle={defaultPreviewPageStyle}
+                      defaultTextStyle={defaultPreviewTextStyle}
                       pageHtmls={previewPageHtmls}
+                      pages={previewPages}
                       zoomScale={previewZoomScale}
                     />
                   )}
