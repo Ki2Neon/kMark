@@ -11,6 +11,9 @@
   --danger-bg: #3a1d1b;
   --overlay: rgba(0, 0, 0, 0.42);
   --selection: rgba(55, 148, 255, 0.2);
+  --control-hover-border: color-mix(in srgb, var(--focus) 72%, var(--border-strong));
+  --control-hover-overlay: var(--selection);
+  --control-hover-ring: var(--selection);
   --preview-surface: #ffffff;
   --preview-text: #111111;
   --preview-text-soft: #555555;
@@ -519,12 +522,6 @@ input:focus-visible,
   background: transparent;
 }
 
-.menu-section__label:hover,
-.menu-section__mode-switch:hover,
-.menu-section__actions:hover {
-  background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
-}
-
 .menu-section__label:focus-within,
 .menu-section__mode-switch:focus-within,
 .menu-section__actions:focus-within {
@@ -607,6 +604,10 @@ input:focus-visible,
   padding: 2px;
   border: 1px solid var(--border);
   background: var(--surface-muted);
+  transition:
+    border-color 60ms linear,
+    background 60ms linear,
+    box-shadow 60ms linear;
 }
 
 .menu-section__switch::after {
@@ -617,6 +618,14 @@ input:focus-visible,
   transition:
     transform 60ms linear,
     background 60ms linear;
+}
+
+.menu-section__mode-switch:hover .menu-section__switch {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    var(--surface-muted);
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
 }
 
 .menu-section__switch-input:checked + .menu-section__switch::after {
@@ -637,6 +646,18 @@ input:focus-visible,
   border-color: var(--border-strong);
   background: color-mix(in srgb, var(--surface-muted) 34%, var(--surface));
   font-size: 0.82em;
+  transition:
+    border-color 40ms linear,
+    background 40ms linear,
+    box-shadow 40ms linear;
+}
+
+.menu-section__select:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    color-mix(in srgb, var(--surface-muted) 34%, var(--surface));
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
 }
 
 .menu-section__actions {
@@ -656,6 +677,20 @@ input:focus-visible,
   line-height: 1.25;
   text-align: left;
   background: var(--surface-muted);
+  transition:
+    border-color 40ms linear,
+    background 40ms linear,
+    box-shadow 40ms linear,
+    color 40ms linear;
+}
+
+.menu-section__actions button:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    var(--surface-muted);
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
+  color: var(--text);
 }
 
 .menu-section__actions .menu-section__action-spaced {
