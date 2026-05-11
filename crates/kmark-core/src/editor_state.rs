@@ -236,11 +236,10 @@ mod tests {
 
     #[test]
     fn creates_startup_state_from_stored_edit() {
-        let stored_edit = StoredEdit::new("notes", "hello", Some("C:\\notes.md".to_owned()), Some(7));
-        let editor_state = create_startup_editor_state(
-            crate::StartupEditMode::LastOpenedFile,
-            Some(&stored_edit),
-        );
+        let stored_edit =
+            StoredEdit::new("notes", "hello", Some("C:\\notes.md".to_owned()), Some(7));
+        let editor_state =
+            create_startup_editor_state(crate::StartupEditMode::LastOpenedFile, Some(&stored_edit));
 
         assert_eq!(editor_state.content(), "hello");
         assert_eq!(editor_state.file_name(), "notes.md");

@@ -241,6 +241,138 @@
       "priority": 55
     },
     {
+      "name": "page_number",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["page", "scope"],
+      "values": ["show", "hide", "none", "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
+      "insertText": "page_number:",
+      "description": "ページ番号の表示位置を指定する",
+      "examples": ["<!-- kmark { page_number:bottom-center } -->"],
+      "priority": 90
+    },
+    {
+      "name": "page_number_format",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_format:\"{page}\"",
+      "description": "ページ番号の表示形式を指定する",
+      "examples": ["<!-- kmark { page_number_format:\"{page} / {total}\" } -->"],
+      "priority": 86
+    },
+    {
+      "name": "page_number_start",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_start:",
+      "description": "表示ページ番号の開始番号を指定する",
+      "examples": ["<!-- kmark { page_number_start:1 } -->"],
+      "priority": 84
+    },
+    {
+      "name": "page_number_reset",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_reset:",
+      "description": "このスコープからページ番号グループをリセットする",
+      "examples": ["<!-- kmark { page_number_reset:true } -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_number_count",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_count:",
+      "description": "このページをページ番号カウントに含めるか指定する",
+      "examples": ["<!-- kmark { page_number_count:false } -->"],
+      "priority": 82
+    },
+    {
+      "name": "page_number_visible",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_visible:",
+      "description": "ページ番号設定を維持したまま表示有無を指定する",
+      "examples": ["<!-- kmark { page_number_visible:false } -->"],
+      "priority": 81
+    },
+    {
+      "name": "page_number_style",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["page", "scope"],
+      "values": ["decimal", "lower-roman", "upper-roman", "lower-alpha", "upper-alpha"],
+      "insertText": "page_number_style:",
+      "description": "ページ番号の表記スタイルを指定する",
+      "examples": ["<!-- kmark { page_number_style:lower-roman } -->"],
+      "priority": 80
+    },
+    {
+      "name": "page_number_font_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_font_size:",
+      "description": "ページ番号の文字サイズを指定する",
+      "examples": ["<!-- kmark { page_number_font_size:10pt } -->"],
+      "priority": 74
+    },
+    {
+      "name": "page_number_color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_color:",
+      "description": "ページ番号の文字色を指定する",
+      "examples": ["<!-- kmark { page_number_color:#666 } -->"],
+      "priority": 73
+    },
+    {
+      "name": "page_number_margin_top",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_margin_top:",
+      "description": "ページ番号の上端距離を指定する",
+      "examples": ["<!-- kmark { page_number_margin_top:8mm } -->"],
+      "priority": 62
+    },
+    {
+      "name": "page_number_margin_bottom",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_margin_bottom:",
+      "description": "ページ番号の下端距離を指定する",
+      "examples": ["<!-- kmark { page_number_margin_bottom:8mm } -->"],
+      "priority": 62
+    },
+    {
+      "name": "page_number_margin_left",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_margin_left:",
+      "description": "ページ番号の左端距離を指定する",
+      "examples": ["<!-- kmark { page_number_margin_left:12mm } -->"],
+      "priority": 61
+    },
+    {
+      "name": "page_number_margin_right",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_number_margin_right:",
+      "description": "ページ番号の右端距離を指定する",
+      "examples": ["<!-- kmark { page_number_margin_right:12mm } -->"],
+      "priority": 61
+    },
+    {
       "name": "define",
       "aliases": [],
       "type": "identifier",

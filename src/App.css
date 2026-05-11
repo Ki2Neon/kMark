@@ -856,6 +856,49 @@ input:focus-visible,
   overflow: hidden;
 }
 
+.kmark-page-number {
+  position: absolute;
+  z-index: 1;
+  color: var(--kmark-page-number-color, #666);
+  font-size: var(--kmark-page-number-font-size, 10pt);
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.kmark-page-number--bottom-center {
+  left: 50%;
+  bottom: var(--kmark-page-number-margin-bottom, 8mm);
+  transform: translateX(-50%);
+}
+
+.kmark-page-number--bottom-right {
+  right: var(--kmark-page-number-margin-right, 12mm);
+  bottom: var(--kmark-page-number-margin-bottom, 8mm);
+}
+
+.kmark-page-number--bottom-left {
+  left: var(--kmark-page-number-margin-left, 12mm);
+  bottom: var(--kmark-page-number-margin-bottom, 8mm);
+}
+
+.kmark-page-number--top-center {
+  left: 50%;
+  top: var(--kmark-page-number-margin-top, 8mm);
+  transform: translateX(-50%);
+}
+
+.kmark-page-number--top-right {
+  right: var(--kmark-page-number-margin-right, 12mm);
+  top: var(--kmark-page-number-margin-top, 8mm);
+}
+
+.kmark-page-number--top-left {
+  left: var(--kmark-page-number-margin-left, 12mm);
+  top: var(--kmark-page-number-margin-top, 8mm);
+}
+
 .markdown-body {
   --markdown-body-font-size: var(--kmark-font-size, 1rem);
   max-width: none;
