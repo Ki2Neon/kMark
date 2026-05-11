@@ -19,8 +19,6 @@ import {
   type SystemFontSizePx,
 } from "../../domain/editorPreferences";
 import {
-  PREVIEW_DISPLAY_MODE_OPTIONS,
-  isPreviewDisplayMode,
   type PreviewDisplayMode,
 } from "../../domain/preview";
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
@@ -190,14 +188,8 @@ function MenuSectionComponent({
     onPreviewVisibilityChange(event.currentTarget.checked);
   };
 
-  const handlePreviewDisplayModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextPreviewDisplayMode = event.currentTarget.value;
-
-    if (!isPreviewDisplayMode(nextPreviewDisplayMode)) {
-      return;
-    }
-
-    onPreviewDisplayModeChange(nextPreviewDisplayMode);
+  const handlePreviewDisplayModeSwitch = (event: ChangeEvent<HTMLInputElement>) => {
+    onPreviewDisplayModeChange(event.currentTarget.checked ? "a4" : "standard");
   };
 
   const handlePreviewUsesAppThemeColorsSwitch = (event: ChangeEvent<HTMLInputElement>) => {
@@ -327,20 +319,34 @@ function MenuSectionComponent({
           ) : null}
 
           {previewDisplayModeVisible ? (
-            <label className="menu-section__label">
-              <span className="menu-section__field-label">表示形式</span>
-              <select
-                value={previewDisplayMode}
-                onChange={handlePreviewDisplayModeSelect}
-                aria-label="プレビュー表示形式"
-                className="menu-section__select"
-              >
-                {PREVIEW_DISPLAY_MODE_OPTIONS.map((previewDisplayModeOption) => (
-                  <option key={previewDisplayModeOption.id} value={previewDisplayModeOption.id}>
-                    {previewDisplayModeOption.label}
-                  </option>
-                ))}
-              </select>
+            <label className="menu-section__mode-switch">
+              <span className="menu-section__mode-switch-meta">
+                <span className="menu-section__field-label">表示形式</span>
+              </span>
+              <span className="menu-section__mode-switch-values">
+                <span
+                  className={
+                    previewDisplayMode === "standard" ? "menu-section__mode-label is-active" : "menu-section__mode-label"
+                  }
+                >
+                  通常
+                </span>
+                <input
+                  type="checkbox"
+                  className="menu-section__switch-input"
+                  checked={previewDisplayMode === "a4"}
+                  onChange={handlePreviewDisplayModeSwitch}
+                  aria-label="プレビュー表示形式を切り替え"
+                />
+                <span className="menu-section__switch" aria-hidden="true" />
+                <span
+                  className={
+                    previewDisplayMode === "a4" ? "menu-section__mode-label is-active" : "menu-section__mode-label"
+                  }
+                >
+                  用紙
+                </span>
+              </span>
             </label>
           ) : null}
 
