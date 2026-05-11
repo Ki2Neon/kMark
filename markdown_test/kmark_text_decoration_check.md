@@ -1,3 +1,5 @@
+<!-- kmark page_number:bottom-center page_number_font_size:10mm page_number_format:"-{page}/{total}-" -->
+
 # kmark 文字装飾確認
 
 このfileは `<!-- kmark ... -->` の裸paramが直下Markdown blockへ適用されることを目視確認するためのtest。
@@ -8,6 +10,20 @@
 社外秘 paragraph
 
 このparagraphは通常表示。直前styleが漏れないこと。
+
+## 1.1 text width fit
+
+<!-- kmark color:#7a0000 bg:#fff0f0 border_size:2px border_color:#cc0000 radius:4px padding:2mm -->
+短い文字幅にだけ背景と枠線が付くこと。
+
+<!-- kmark color:#004b7a bg:#eef8ff border_size:2px border_color:#2f8fbd radius:4px padding:2mm align:right -->
+右寄せでも文字幅にだけ背景と枠線が付くこと。
+
+<!-- kmark color:#5b3d00 bg:#fff8d8 border_size:2px border_color:#c9a227 radius:4px padding:2mm align:center -->
+中央寄せでも文字幅にだけ背景と枠線が付くこと。
+
+<!-- kmark w:45mm color:#333 bg:#f4f4f4 border_size:1px border_color:#999 padding:2mm align:center -->
+w指定時は明示幅を優先すること。
 
 ## 2 heading
 

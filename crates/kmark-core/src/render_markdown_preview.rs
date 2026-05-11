@@ -339,7 +339,7 @@ struct PartialPageDirective {
     page_margin_right: Option<CssLength>,
     page_margin_bottom: Option<CssLength>,
     page_margin_left: Option<CssLength>,
-    font_size: Option<CssLength>,
+    page_font_size: Option<CssLength>,
     page_number_position: Option<PageNumberPosition>,
     page_number_display: Option<bool>,
     page_number_format: Option<String>,
@@ -683,7 +683,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         if line.trim().is_empty() {
             if pending_scope_prelude
                 .as_ref()
-                .is_some_and(|pending| pending.page_directive.has_page_directive())
+                .is_some_and(|pending| pending.page_directive.has_standalone_page_directive())
             {
                 if !segment_has_rendered_content {
                     apply_pending_page_directive_before_content(
@@ -708,16 +708,23 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
             continue;
         }
 
-        apply_pending_page_directive_before_content(
-            &mut page_segments,
-            content,
-            &mut last_index,
-            &mut line_offset,
-            &active_scope_lines,
-            &mut active_page_directives,
-            &mut pending_scope_prelude,
-            segment_has_rendered_content,
-        );
+        if pending_scope_prelude
+            .as_ref()
+            .is_some_and(|pending| pending.page_directive.has_standalone_page_directive())
+        {
+            apply_pending_page_directive_before_content(
+                &mut page_segments,
+                content,
+                &mut last_index,
+                &mut line_offset,
+                &active_scope_lines,
+                &mut active_page_directives,
+                &mut pending_scope_prelude,
+                segment_has_rendered_content,
+            );
+        } else {
+            pending_scope_prelude = None;
+        }
         segment_has_rendered_content = true;
     }
 
@@ -1960,9 +1967,6 @@ impl<'a> HtmlEmitter<'a> {
             KmarkComment::ScopeStart(bundle) => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
-                if final_bundle.page_directive.has_page_directive() {
-                    final_bundle.params.text.font_size = None;
-                }
                 let layer = self.resolve_kmark_bundle_layer(&final_bundle);
                 let resolved_params = layer.resolved_params();
                 if !resolved_params.has_directives() {
@@ -2516,6 +2520,9 @@ impl KmarkParams {
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
         }
+        if let Some(width_style) = self.to_text_block_width_style(true) {
+            rules.push(width_style);
+        }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
         }
@@ -2547,6 +2554,9 @@ impl KmarkParams {
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
         }
+        if let Some(width_style) = self.to_text_block_width_style(true) {
+            rules.push(width_style);
+        }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
         }
@@ -2563,11 +2573,46 @@ impl KmarkParams {
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
         }
+        if let Some(width_style) = self.to_text_block_width_style(false) {
+            rules.push(width_style);
+        }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_text_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
+        let mut rules = Vec::new();
+        let should_fit_content = !self.image.has_explicit_width()
+            && (self.image.has_box_directives()
+                || self.text.has_text_directives()
+                || (fit_plain_align && self.layout.has_plain_text_align()));
+
+        if should_fit_content {
+            rules.push("display:table".to_owned());
+            rules.push("width:fit-content".to_owned());
+            rules.push("max-width:100%".to_owned());
+            rules.push("box-sizing:border-box".to_owned());
+        }
+
+        if self.layout.has_plain_text_align()
+            && (should_fit_content || self.image.has_explicit_width())
+        {
+            match self.layout.align {
+                Some(KmarkAlign::Center) => {
+                    rules.push("margin-left:auto".to_owned());
+                    rules.push("margin-right:auto".to_owned());
+                }
+                Some(KmarkAlign::Right) => {
+                    rules.push("margin-left:auto".to_owned());
+                }
+                Some(KmarkAlign::Left) | None => {}
+            }
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
 
     fn to_image_paragraph_root_style(&self) -> Option<String> {
@@ -2663,6 +2708,14 @@ impl KmarkLayoutParams {
             || self.valign.is_some()
             || self.gap.is_some()
             || self.wrap.is_some()
+    }
+
+    fn has_plain_text_align(&self) -> bool {
+        self.align.is_some()
+            && self.layout.is_none()
+            && self.valign.is_none()
+            && self.gap.is_none()
+            && self.wrap.is_none()
     }
 
     fn to_scope_style(&self) -> String {
@@ -3115,8 +3168,8 @@ impl PartialPageDirective {
         if let Some(page_margin_left) = &other.page_margin_left {
             self.page_margin_left = Some(page_margin_left.clone());
         }
-        if let Some(font_size) = &other.font_size {
-            self.font_size = Some(font_size.clone());
+        if let Some(page_font_size) = &other.page_font_size {
+            self.page_font_size = Some(page_font_size.clone());
         }
         if let Some(page_number_position) = other.page_number_position {
             self.page_number_position = Some(page_number_position);
@@ -3181,7 +3234,21 @@ impl PartialPageDirective {
             || self.page_margin_right.is_some()
             || self.page_margin_bottom.is_some()
             || self.page_margin_left.is_some()
-            || self.font_size.is_some()
+            || self.page_font_size.is_some()
+            || self.has_page_number_directive()
+    }
+
+    fn has_standalone_page_directive(&self) -> bool {
+        self.page_size.is_some()
+            || self.page_orientation.is_some()
+            || self.page_width.is_some()
+            || self.page_height.is_some()
+            || self.page_margin.is_some()
+            || self.page_margin_top.is_some()
+            || self.page_margin_right.is_some()
+            || self.page_margin_bottom.is_some()
+            || self.page_margin_left.is_some()
+            || self.page_font_size.is_some()
             || self.has_page_number_directive()
     }
 
@@ -3212,7 +3279,7 @@ impl PartialPageDirective {
             || self.page_margin_right != other.page_margin_right
             || self.page_margin_bottom != other.page_margin_bottom
             || self.page_margin_left != other.page_margin_left
-            || self.font_size != other.font_size
+            || self.page_font_size != other.page_font_size
             || self.page_number_position != other.page_number_position
             || self.page_number_display != other.page_number_display
             || self.page_number_format != other.page_number_format
@@ -3269,8 +3336,8 @@ impl DocumentPageConfig {
         }
 
         let mut text_style = self.default_text_style.clone();
-        if let Some(font_size) = &page_directive.font_size {
-            text_style.font_size = font_size.clone();
+        if let Some(page_font_size) = &page_directive.page_font_size {
+            text_style.font_size = page_font_size.clone();
         }
 
         let mut page_number_config = self.page_number_config.clone();
@@ -3346,6 +3413,25 @@ impl KmarkImageParams {
             || self.shadow.is_some()
             || self.margin.is_some()
             || self.padding.is_some()
+    }
+
+    fn has_box_directives(&self) -> bool {
+        self.width.is_some()
+            || self.height.is_some()
+            || self.border_size.is_some()
+            || self.border_color.is_some()
+            || self.border_style.is_some()
+            || self.radius.is_some()
+            || self.background.is_some()
+            || self.opacity.is_some()
+            || self.rotate.is_some()
+            || self.shadow.is_some()
+            || self.margin.is_some()
+            || self.padding.is_some()
+    }
+
+    fn has_explicit_width(&self) -> bool {
+        self.width.is_some()
     }
 
     fn to_style(&self) -> Option<String> {
@@ -3674,9 +3760,9 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_margin_left = Some(page_margin_left);
                 }
             }
-            "font_size" => {
-                if let Some(font_size) = parse_kmark_page_length_value(value) {
-                    directive.font_size = Some(font_size);
+            "page_font_size" => {
+                if let Some(page_font_size) = parse_kmark_page_length_value(value) {
+                    directive.page_font_size = Some(page_font_size);
                 }
             }
             "page_number" => {
@@ -4860,10 +4946,10 @@ mod tests {
     #[test]
     fn applies_unclosed_scope_page_settings_and_nested_overrides() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm page_font_size:11pt -->\n\
              # 1\n\
              <!-- --- -->\n\
-             <!-- kmark { page_orientation:landscape font_size:9pt page_margin:8mm -->\n\
+             <!-- kmark { page_orientation:landscape page_font_size:9pt page_margin:8mm -->\n\
              # 2\n\
              <!-- kmark } -->\n\
              # 3",
@@ -4916,7 +5002,7 @@ mod tests {
     #[test]
     fn keeps_scope_page_directives_out_of_block_decoration_route() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_width:297mm page_height:210mm page_margin:8mm font_size:10pt -->\n\
+            "<!-- kmark { page_width:297mm page_height:210mm page_margin:8mm page_font_size:10pt -->\n\
              ![](image.png)\n\
              <!-- kmark } -->",
         );
@@ -4937,6 +5023,45 @@ mod tests {
     }
 
     #[test]
+    fn keeps_single_block_font_size_out_of_page_directives() {
+        let rendered_preview = render_markdown_preview(
+            "# Title\n\n\
+             <!-- kmark color:#c00000 font_size:14pt font_weight:bold -->\n\
+             社外秘 paragraph\n\n\
+             <!-- kmark color:#0b3d91 font_size:18pt align:center -->\n\
+             # CONFIDENTIAL heading",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 1);
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "10.5pt"
+        );
+        assert!(rendered_preview.html.contains(
+            "style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:#c00000;font-size:14pt;font-weight:bold;\""
+        ));
+        assert!(rendered_preview.html.contains(
+            "style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;margin-right:auto;color:#0b3d91;font-size:18pt;text-align:center\""
+        ));
+    }
+
+    #[test]
+    fn keeps_scope_font_size_as_text_decoration_not_page_font_size() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { color:#c00000 font_size:16pt -->\n\
+             # Body\n\
+             <!-- kmark } -->",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 1);
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "10.5pt"
+        );
+        assert!(rendered_preview.html.contains("font-size:16pt"));
+    }
+
+    #[test]
     fn lets_individual_page_margins_override_common_page_margin() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark { page_margin:10mm page_margin_left:4mm page_margin_bottom:6mm -->\n\
@@ -4954,7 +5079,7 @@ mod tests {
     #[test]
     fn accepts_page_directives_used_by_completion() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 orientation:landscape page_margin:15mm font_size:12pt } -->\n\
+            "<!-- kmark { page_size:A4 orientation:landscape page_margin:15mm page_font_size:12pt } -->\n\
              # Alias",
         );
 
@@ -4971,6 +5096,22 @@ mod tests {
             rendered_preview.pages[0].text_style.font_size.as_str(),
             "12pt"
         );
+    }
+
+    #[test]
+    fn applies_standalone_page_font_size_to_following_pages() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_font_size:12pt -->\n\
+             \n\
+             # First\n\
+             <!-- --- -->\n\
+             # Second",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        for page in &rendered_preview.pages {
+            assert_eq!(page.text_style.font_size.as_str(), "12pt");
+        }
     }
 
     #[test]
@@ -5017,9 +5158,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_page_number_font_size_separate_from_body_font_size() {
+    fn keeps_page_number_font_size_separate_from_page_font_size() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_number:show font_size:16pt page_number_font_size:8pt -->\n\
+            "<!-- kmark { page_number:show page_font_size:16pt page_number_font_size:8pt -->\n\
              # Body",
         );
         let page = &rendered_preview.pages[0];
@@ -5111,7 +5252,7 @@ mod tests {
              <!-- kmark page_height:90mm -->\n\
              <!-- kmark page_margin:12mm -->\n\
              <!-- kmark page_margin_left:7mm -->\n\
-             <!-- kmark font_size:9pt -->\n\
+             <!-- kmark page_font_size:9pt -->\n\
              <!-- kmark page_number:bottom-center -->\n\
              <!-- kmark page_number_format:\"Page {page}\" -->\n\
              <!-- kmark page_number_reset:true -->\n\
@@ -5186,9 +5327,9 @@ mod tests {
     #[test]
     fn splits_pages_when_scope_page_style_starts_and_ends() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 page_orientation:portrait font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_orientation:portrait page_font_size:11pt -->\n\
              # Normal\n\
-             <!-- kmark { page_orientation:landscape font_size:9pt align:center -->\n\
+             <!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->\n\
              # Wide\n\
              <!-- kmark } -->\n\
              # Back",
@@ -5218,7 +5359,7 @@ mod tests {
     #[test]
     fn keeps_scope_page_style_and_block_decoration_across_explicit_page_break() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_orientation:landscape font_size:9pt align:center -->\n\
+            "<!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->\n\
              # Wide 1\n\
              <!-- --- -->\n\
              # Wide 2\n\
@@ -5311,7 +5452,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<div class=\"kmark-callout kmark-callout--important\" data-callout-type=\"important\" data-source-line-start=\"1\" data-source-line-end=\"2\" style=\"width:80%;text-align:center\">"
+            "<div class=\"kmark-callout kmark-callout--important\" data-callout-type=\"important\" data-source-line-start=\"1\" data-source-line-end=\"2\" style=\"width:80%;margin-left:auto;margin-right:auto;text-align:center\">"
         ));
         assert!(rendered_preview
             .html
@@ -5360,7 +5501,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" class=\"kmark-page-valign kmark-page-valign--bottom\" data-page-valign=\"bottom\" style=\"width:80%;text-align:right\">作成者: 山口</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" class=\"kmark-page-valign kmark-page-valign--bottom\" data-page-valign=\"bottom\" style=\"width:80%;margin-left:auto;text-align:right\">作成者: 山口</p>"
         ));
     }
 
@@ -5521,7 +5662,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:#c00;font-size:14pt;font-weight:700;\">重要</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:#c00;font-size:14pt;font-weight:700;\">重要</p>"
         );
     }
 
@@ -5553,6 +5694,7 @@ mod tests {
         assert!(rendered_preview.html.contains("letter-spacing:0.08em"));
         assert!(rendered_preview.html.contains("line-height:1.2"));
         assert!(rendered_preview.html.contains(">社外秘</h1>"));
+        assert!(!rendered_preview.html.contains("width:fit-content"));
     }
 
     #[test]
@@ -5561,7 +5703,7 @@ mod tests {
             render_markdown_preview("<!-- kmark color:red align:right -->\n# 見出し\n\n本文");
 
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;text-align:right\">見出し</h1>"
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;color:red;text-align:right\">見出し</h1>"
         ));
         assert!(rendered_preview
             .html
@@ -5571,20 +5713,24 @@ mod tests {
     #[test]
     fn applies_block_decoration_to_list_table_blockquote_and_code_roots() {
         let list = render_markdown_preview("<!-- kmark color:red -->\n- A\n- B");
-        assert!(list.html.contains("<ul style=\"color:red;\">"));
+        assert!(list
+            .html
+            .contains("<ul style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
 
         let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
-        assert!(table.html.contains("<table style=\"color:red;\">"));
+        assert!(table
+            .html
+            .contains("<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
 
         let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
-        assert!(blockquote
-            .html
-            .contains("<blockquote data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;\">"));
+        assert!(blockquote.html.contains(
+            "<blockquote data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"
+        ));
 
         let code =
             render_markdown_preview("<!-- kmark color:red bg:#eee -->\n```rust\nfn main() {}\n```");
         assert!(code.html.contains(
-            "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;color:red;\"><code class=\"language-rust\">"
+            "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\"><code class=\"language-rust\">"
         ));
     }
 
@@ -5598,11 +5744,22 @@ mod tests {
             .html
             .contains("<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\">"));
         assert!(rendered_preview.html.contains(
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">本文</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">本文</p>"
         ));
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">見出し</h1>"
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">見出し</h1>"
         ));
+    }
+
+    #[test]
+    fn does_not_shrink_text_block_when_width_is_explicit() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark w:40mm color:red align:center -->\n明示幅");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:40mm;margin-left:auto;margin-right:auto;color:red;text-align:center\">明示幅</p>"
+        );
     }
 
     #[test]
@@ -5757,7 +5914,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"4\" style=\"text-align:right\">text1<br />\ntext2<br />\ntext3<br />\ntext4</p><p data-source-line-start=\"6\" data-source-line-end=\"6\">text5</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"4\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;text-align:right\">text1<br />\ntext2<br />\ntext3<br />\ntext4</p><p data-source-line-start=\"6\" data-source-line-end=\"6\">text5</p>"
         );
     }
 

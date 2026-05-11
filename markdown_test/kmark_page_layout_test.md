@@ -1,4 +1,4 @@
-<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm font_size:11pt -->
+<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm page_font_size:11pt -->
 
 # kmark page scope test
 
@@ -8,7 +8,7 @@
 
 - A4 portrait
 - margin 12mm
-- font_size 11pt
+- page_font_size 11pt
 - scope未closeのためEOFまで外側scope有効
 
 <!-- --- -->
@@ -17,7 +17,7 @@
 
 ここもA4縦、11pt。
 
-<!-- kmark { page_orientation:landscape font_size:9pt align:center -->
+<!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->
 
 # 横ページ範囲開始
 
@@ -36,7 +36,7 @@
 scope終了により外側scopeへ戻る。
 A4縦、11pt。
 
-<!-- kmark { page_size:A5 page_orientation:portrait page_margin:8mm font_size:10pt -->
+<!-- kmark { page_size:A5 page_orientation:portrait page_margin:8mm page_font_size:10pt -->
 
 # A5縦ページ
 
@@ -48,7 +48,7 @@ A5縦、10pt、余白8mm。
 
 外側scopeへ戻り、A4縦、11pt。
 
-<!-- kmark { page_size:A5 page_orientation:landscape page_margin:8mm font_size:9pt -->
+<!-- kmark { page_size:A5 page_orientation:landscape page_margin:8mm page_font_size:9pt -->
 
 # A5横ページ
 
@@ -65,7 +65,7 @@ A5横、9pt、余白8mm。
 
 次scopeで個別余白を確認。
 
-<!-- kmark { page_width:100mm page_height:148mm page_margin_top:6mm page_margin_right:7mm page_margin_bottom:8mm page_margin_left:9mm font_size:8pt -->
+<!-- kmark { page_width:100mm page_height:148mm page_margin_top:6mm page_margin_right:7mm page_margin_bottom:8mm page_margin_left:9mm page_font_size:8pt -->
 
 # custom page
 
@@ -77,7 +77,7 @@ A5横、9pt、余白8mm。
 - margin right 7mm
 - margin bottom 8mm
 - margin left 9mm
-- font_size 8pt
+- page_font_size 8pt
 
 <!-- kmark } -->
 
