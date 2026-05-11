@@ -2,19 +2,25 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { invokeTauriCommand } from "../../infra/tauriCommand";
 import { renderMarkdownPreviewWithWasm } from "../../wasm/kmarkWeb";
 import {
+  DEFAULT_PAGE_NUMBER_CONFIG,
   DEFAULT_PAGE_STYLE,
   DEFAULT_PREVIEW_TEXT_STYLE,
   type PageStyle,
+  type PageNumberConfig,
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../../domain/preview";
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
+type RenderedPreviewPagePayload = Omit<RenderedPreviewPage, "pageNumberConfig"> & {
+  readonly pageNumberConfig?: PageNumberConfig;
+};
+
 type RenderedMarkdownPreviewPayload = {
   readonly html: string;
   readonly pageHtmls: readonly string[];
-  readonly pages?: readonly RenderedPreviewPage[];
+  readonly pages?: readonly RenderedPreviewPagePayload[];
   readonly defaultPageStyle?: PageStyle;
   readonly defaultTextStyle?: PreviewTextStyle;
 };
@@ -83,6 +89,7 @@ function normalizeRenderedMarkdownPreview(
       html: pageHtml,
       pageStyle: defaultPageStyle,
       textStyle: defaultTextStyle,
+      pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
     }));
 
   return {
@@ -91,6 +98,7 @@ function normalizeRenderedMarkdownPreview(
     pages: pages.map((page) => ({
       ...page,
       html: normalizePreviewHtmlImageSources(page.html),
+      pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
     })),
     defaultPageStyle,
     defaultTextStyle,

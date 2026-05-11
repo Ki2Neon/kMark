@@ -1,5 +1,21 @@
 export type PreviewDisplayMode = "standard" | "a4";
 
+export type PageNumberPosition =
+  | "none"
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
+export type PageNumberStyle =
+  | "decimal"
+  | "lower-roman"
+  | "upper-roman"
+  | "lower-alpha"
+  | "upper-alpha";
+
 export type PreviewDisplayModeOption = {
   readonly id: PreviewDisplayMode;
   readonly label: string;
@@ -23,10 +39,27 @@ export type PreviewTextStyle = {
   readonly fontSize: string;
 };
 
+export type PageNumberConfig = {
+  readonly position: PageNumberPosition;
+  readonly format: string;
+  readonly start: number;
+  readonly reset: boolean;
+  readonly count: boolean;
+  readonly visible: boolean;
+  readonly style: PageNumberStyle;
+  readonly fontSize: string;
+  readonly color: string;
+  readonly marginTop: string;
+  readonly marginBottom: string;
+  readonly marginLeft: string;
+  readonly marginRight: string;
+};
+
 export type RenderedPreviewPage = {
   readonly html: string;
   readonly pageStyle: PageStyle;
   readonly textStyle: PreviewTextStyle;
+  readonly pageNumberConfig: PageNumberConfig;
 };
 
 export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] = [
@@ -55,6 +88,22 @@ export const DEFAULT_PAGE_STYLE: PageStyle = {
 
 export const DEFAULT_PREVIEW_TEXT_STYLE: PreviewTextStyle = {
   fontSize: DEFAULT_PREVIEW_FONT_SIZE,
+} as const;
+
+export const DEFAULT_PAGE_NUMBER_CONFIG: PageNumberConfig = {
+  position: "none",
+  format: "{page}",
+  start: 1,
+  reset: false,
+  count: true,
+  visible: true,
+  style: "decimal",
+  fontSize: "10pt",
+  color: "#666",
+  marginTop: "8mm",
+  marginBottom: "8mm",
+  marginLeft: "12mm",
+  marginRight: "12mm",
 } as const;
 
 const PREVIEW_DISPLAY_MODE_SET = new Set<PreviewDisplayMode>(

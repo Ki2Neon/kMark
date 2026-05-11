@@ -2,8 +2,12 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import {
   A4_PAGE_WIDTH_MM,
   CSS_MM_TO_PX,
+  DEFAULT_PAGE_NUMBER_CONFIG,
   DEFAULT_PAGE_STYLE,
   DEFAULT_PREVIEW_TEXT_STYLE,
+  type PageNumberConfig,
+  type PageNumberPosition,
+  type PageNumberStyle,
   type PageStyle,
   type PreviewDisplayMode,
   type PreviewTextStyle,
@@ -88,6 +92,11 @@ type A4PageValignAppendOptions = {
 type PreviewPageConfig = {
   readonly pageStyle: PageStyle;
   readonly textStyle: PreviewTextStyle;
+  readonly pageNumberConfig: PageNumberConfig;
+};
+
+type NumberedRenderedPreviewPage = RenderedPreviewPage & {
+  readonly pageNumberText: string | null;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -101,7 +110,8 @@ function arePreviewPagesEqual(left: readonly RenderedPreviewPage[], right: reado
     return rightPage !== undefined
       && leftPage.html === rightPage.html
       && arePageStylesEqual(leftPage.pageStyle, rightPage.pageStyle)
-      && arePreviewTextStylesEqual(leftPage.textStyle, rightPage.textStyle);
+      && arePreviewTextStylesEqual(leftPage.textStyle, rightPage.textStyle)
+      && arePageNumberConfigsEqual(leftPage.pageNumberConfig, rightPage.pageNumberConfig);
   });
 }
 
@@ -116,6 +126,22 @@ function arePageStylesEqual(left: PageStyle, right: PageStyle): boolean {
 
 function arePreviewTextStylesEqual(left: PreviewTextStyle, right: PreviewTextStyle): boolean {
   return left.fontSize === right.fontSize;
+}
+
+function arePageNumberConfigsEqual(left: PageNumberConfig, right: PageNumberConfig): boolean {
+  return left.position === right.position
+    && left.format === right.format
+    && left.start === right.start
+    && left.reset === right.reset
+    && left.count === right.count
+    && left.visible === right.visible
+    && left.style === right.style
+    && left.fontSize === right.fontSize
+    && left.color === right.color
+    && left.marginTop === right.marginTop
+    && left.marginBottom === right.marginBottom
+    && left.marginLeft === right.marginLeft
+    && left.marginRight === right.marginRight;
 }
 
 function pageStyleKey(pageStyle: PageStyle): string {
@@ -133,11 +159,30 @@ function previewTextStyleKey(textStyle: PreviewTextStyle): string {
   return textStyle.fontSize;
 }
 
+function pageNumberConfigKey(config: PageNumberConfig): string {
+  return [
+    config.position,
+    config.format,
+    config.start,
+    config.reset,
+    config.count,
+    config.visible,
+    config.style,
+    config.fontSize,
+    config.color,
+    config.marginTop,
+    config.marginBottom,
+    config.marginLeft,
+    config.marginRight,
+  ].join("|");
+}
+
 function previewPageKey(page: RenderedPreviewPage): string {
   return [
     page.html,
     pageStyleKey(page.pageStyle),
     previewTextStyleKey(page.textStyle),
+    pageNumberConfigKey(page.pageNumberConfig),
   ].join(A4_PAGINATION_SOURCE_SEPARATOR);
 }
 
@@ -145,6 +190,7 @@ function getPreviewPageConfig(page: RenderedPreviewPage): PreviewPageConfig {
   return {
     pageStyle: page.pageStyle,
     textStyle: page.textStyle,
+    pageNumberConfig: page.pageNumberConfig,
   };
 }
 
@@ -595,6 +641,7 @@ function commitA4PaginationPage(context: A4PaginationContext): void {
     html: context.body.innerHTML,
     pageStyle: context.pageConfig.pageStyle,
     textStyle: context.pageConfig.textStyle,
+    pageNumberConfig: context.pageConfig.pageNumberConfig,
   });
 }
 
@@ -2232,9 +2279,19 @@ function paginateA4HtmlSegment(page: RenderedPreviewPage): readonly RenderedPrev
 
     commitA4PaginationPage(context);
 
-    return context.pages.length > 0
+    const pages = context.pages.length > 0
       ? context.pages
       : [{ ...page, html: "" }];
+
+    return pages.map((nextPage, index) => index === 0
+      ? nextPage
+      : {
+        ...nextPage,
+        pageNumberConfig: {
+          ...nextPage.pageNumberConfig,
+          reset: false,
+        },
+      });
   } finally {
     root.remove();
   }
@@ -2244,6 +2301,152 @@ function paginateA4HtmlSegments(
   pages: readonly RenderedPreviewPage[],
 ): readonly RenderedPreviewPage[] {
   return pages.flatMap((page) => [...paginateA4HtmlSegment(page)]);
+}
+
+function formatDecimalNumber(value: number): string {
+  return String(value);
+}
+
+function formatRomanNumber(value: number): string {
+  if (value <= 0 || value > 3999) {
+    return String(value);
+  }
+
+  const romanTokens: readonly [number, string][] = [
+    [1000, "M"],
+    [900, "CM"],
+    [500, "D"],
+    [400, "CD"],
+    [100, "C"],
+    [90, "XC"],
+    [50, "L"],
+    [40, "XL"],
+    [10, "X"],
+    [9, "IX"],
+    [5, "V"],
+    [4, "IV"],
+    [1, "I"],
+  ];
+  let remaining = value;
+  let output = "";
+
+  for (const [number, token] of romanTokens) {
+    while (remaining >= number) {
+      output += token;
+      remaining -= number;
+    }
+  }
+
+  return output;
+}
+
+function formatAlphaNumber(value: number): string {
+  if (value <= 0) {
+    return String(value);
+  }
+
+  let remaining = value;
+  let output = "";
+
+  while (remaining > 0) {
+    remaining -= 1;
+    output = String.fromCharCode(97 + (remaining % 26)) + output;
+    remaining = Math.floor(remaining / 26);
+  }
+
+  return output;
+}
+
+function formatPageNumberValue(value: number, style: PageNumberStyle): string {
+  switch (style) {
+    case "decimal":
+      return formatDecimalNumber(value);
+    case "lower-roman":
+      return formatRomanNumber(value).toLocaleLowerCase("en-US");
+    case "upper-roman":
+      return formatRomanNumber(value);
+    case "lower-alpha":
+      return formatAlphaNumber(value);
+    case "upper-alpha":
+      return formatAlphaNumber(value).toLocaleUpperCase("en-US");
+  }
+}
+
+function resolvePageNumberText(input: {
+  readonly absPage: number;
+  readonly absTotal: number;
+  readonly config: PageNumberConfig;
+  readonly page: number;
+  readonly total: number;
+}): string {
+  const styledPage = formatPageNumberValue(input.page, input.config.style);
+  const styledTotal = formatPageNumberValue(input.total, input.config.style);
+
+  return input.config.format
+    .replace(/\{abs_page\}/gu, formatDecimalNumber(input.absPage))
+    .replace(/\{abs_total\}/gu, formatDecimalNumber(input.absTotal))
+    .replace(/\{page\}/gu, styledPage)
+    .replace(/\{total\}/gu, styledTotal);
+}
+
+function resolveNumberedPreviewPages(pages: readonly RenderedPreviewPage[]): readonly NumberedRenderedPreviewPage[] {
+  const groupIds: number[] = [];
+  const pageValues: number[] = [];
+  const groupTotals = new Map<number, number>();
+  let activeGroupId = 0;
+  let nextPageNumber = pages[0]?.pageNumberConfig.start ?? DEFAULT_PAGE_NUMBER_CONFIG.start;
+
+  pages.forEach((page, index) => {
+    if (index === 0 || page.pageNumberConfig.reset) {
+      activeGroupId += 1;
+      nextPageNumber = page.pageNumberConfig.start;
+    }
+
+    groupIds[index] = activeGroupId;
+    pageValues[index] = nextPageNumber;
+
+    if (page.pageNumberConfig.count) {
+      groupTotals.set(activeGroupId, (groupTotals.get(activeGroupId) ?? 0) + 1);
+      nextPageNumber += 1;
+    }
+  });
+
+  return pages.map((page, index) => {
+    const config = page.pageNumberConfig;
+
+    if (!config.visible || config.position === "none") {
+      return {
+        ...page,
+        pageNumberText: null,
+      };
+    }
+
+    return {
+      ...page,
+      pageNumberText: resolvePageNumberText({
+        absPage: index + 1,
+        absTotal: pages.length,
+        config,
+        page: pageValues[index] ?? config.start,
+        total: groupTotals.get(groupIds[index] ?? 0) ?? 0,
+      }),
+    };
+  });
+}
+
+function getPageNumberClassName(position: PageNumberPosition): string {
+  return `kmark-page-number kmark-page-number--${position}`;
+}
+
+function getPageNumberStyle(config: PageNumberConfig): CSSProperties {
+  return {
+    "--kmark-page-number-font-size": config.fontSize,
+    "--kmark-page-number-color": config.color,
+    "--kmark-page-number-margin-top": config.marginTop,
+    "--kmark-page-number-margin-bottom": config.marginBottom,
+    "--kmark-page-number-margin-left": config.marginLeft,
+    "--kmark-page-number-margin-right": config.marginRight,
+  } as CSSProperties;
 }
 
 function MarkdownPreviewComponent({
@@ -2294,6 +2497,7 @@ function MarkdownPreviewComponent({
       html: pageHtml,
       pageStyle: defaultPageStyle,
       textStyle: defaultTextStyle,
+      pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
     }));
   }, [defaultPageStyle, defaultTextStyle, html, pageHtmls, pages]);
   const a4PaginationSourceKey = useMemo(
@@ -2310,7 +2514,11 @@ function MarkdownPreviewComponent({
   const a4DisplayPages = paginatedA4PageState.sourceKey === a4PaginationSourceKey
     ? paginatedA4PageState.pages
     : normalizedPages;
-  const currentPreviewPages = displayMode === "a4" ? a4DisplayPages : normalizedPages;
+  const numberedA4DisplayPages = useMemo(
+    () => resolveNumberedPreviewPages(a4DisplayPages),
+    [a4DisplayPages],
+  );
+  const currentPreviewPages = displayMode === "a4" ? numberedA4DisplayPages : normalizedPages;
   const currentPreviewPageHtmls = useMemo(
     () => currentPreviewPages.map((page) => page.html),
     [currentPreviewPages],
@@ -2821,9 +3029,9 @@ function MarkdownPreviewComponent({
           onWheel={handlePreviewWheel}
         >
           <div className="preview-section__page-stack">
-            {a4DisplayPages.map((page, index) => (
+            {numberedA4DisplayPages.map((page, index) => (
               <div
-                key={`${index}-${page.html.length}-${pageStyleKey(page.pageStyle)}-${previewTextStyleKey(page.textStyle)}`}
+                key={`${index}-${page.html.length}-${pageStyleKey(page.pageStyle)}-${previewTextStyleKey(page.textStyle)}-${pageNumberConfigKey(page.pageNumberConfig)}-${page.pageNumberText ?? ""}`}
                 className="preview-section__page-scale"
                 style={getPreviewPageScaleStyle(page, effectiveA4Scale)}
               >
@@ -2832,6 +3040,14 @@ function MarkdownPreviewComponent({
                     className="preview-section__page markdown-body markdown-body--a4"
                     dangerouslySetInnerHTML={{ __html: page.html }}
                   />
+                  {page.pageNumberText === null ? null : (
+                    <div
+                      className={getPageNumberClassName(page.pageNumberConfig.position)}
+                      style={getPageNumberStyle(page.pageNumberConfig)}
+                    >
+                      {page.pageNumberText}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

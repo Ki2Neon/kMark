@@ -56,9 +56,7 @@ pub fn ensure_markdown_file_name(value: &str) -> String {
     let sanitized = normalized
         .chars()
         .map(|character| match character {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\u{0000}'..='\u{001f}' => {
-                '-'
-            }
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\u{0000}'..='\u{001f}' => '-',
             _ => character,
         })
         .collect::<String>();
@@ -101,7 +99,8 @@ fn extract_file_name_from_path(file_path: &str) -> Option<&str> {
 }
 
 fn has_markdown_extension(value: &str) -> bool {
-    value.rsplit_once('.')
+    value
+        .rsplit_once('.')
         .map(|(_, extension)| {
             matches!(
                 extension.to_ascii_lowercase().as_str(),

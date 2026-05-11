@@ -1,6 +1,6 @@
 use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, PageStyle, PreviewPreferences, PreviewTextStyle,
-    RenderedMarkdownPreview, RenderedPage, StoredEdit, ThemePreferences,
+    DesktopLayoutPreferences, EditorPreferences, PageNumberConfig, PageStyle, PreviewPreferences,
+    PreviewTextStyle, RenderedMarkdownPreview, RenderedPage, StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,7 @@ pub struct RenderedPagePayload {
     pub html: String,
     pub page_style: PageStylePayload,
     pub text_style: PreviewTextStylePayload,
+    pub page_number_config: PageNumberConfigPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +38,24 @@ pub struct PageStylePayload {
 #[serde(rename_all = "camelCase")]
 pub struct PreviewTextStylePayload {
     pub font_size: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageNumberConfigPayload {
+    pub position: String,
+    pub format: String,
+    pub start: u32,
+    pub reset: bool,
+    pub count: bool,
+    pub visible: bool,
+    pub style: String,
+    pub font_size: String,
+    pub color: String,
+    pub margin_top: String,
+    pub margin_bottom: String,
+    pub margin_left: String,
+    pub margin_right: String,
 }
 
 impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
@@ -61,6 +80,7 @@ impl From<RenderedPage> for RenderedPagePayload {
             html: page.html,
             page_style: PageStylePayload::from(page.page_style),
             text_style: PreviewTextStylePayload::from(page.text_style),
+            page_number_config: PageNumberConfigPayload::from(page.page_number_config),
         }
     }
 }
@@ -82,6 +102,26 @@ impl From<PreviewTextStyle> for PreviewTextStylePayload {
     fn from(text_style: PreviewTextStyle) -> Self {
         Self {
             font_size: text_style.font_size.as_str().to_owned(),
+        }
+    }
+}
+
+impl From<PageNumberConfig> for PageNumberConfigPayload {
+    fn from(config: PageNumberConfig) -> Self {
+        Self {
+            position: config.position.as_str().to_owned(),
+            format: config.format,
+            start: config.start,
+            reset: config.reset,
+            count: config.count,
+            visible: config.visible,
+            style: config.style.as_str().to_owned(),
+            font_size: config.font_size.as_str().to_owned(),
+            color: config.color,
+            margin_top: config.margin_top.as_str().to_owned(),
+            margin_bottom: config.margin_bottom.as_str().to_owned(),
+            margin_left: config.margin_left.as_str().to_owned(),
+            margin_right: config.margin_right.as_str().to_owned(),
         }
     }
 }

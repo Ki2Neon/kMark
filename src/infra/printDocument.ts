@@ -22,6 +22,7 @@ type A4PrintMarkdownDocumentOptions = {
 type A4PrintPreviewPage = {
   readonly frameStyle: string;
   readonly html: string;
+  readonly pageNumberHtml: string;
   readonly pageName: string;
   readonly pageHeight: string;
   readonly pageWidth: string;
@@ -230,6 +231,49 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     display: none;
   }
 
+  .kmark-page-number {
+    position: absolute;
+    z-index: 1;
+    color: var(--kmark-page-number-color, #666);
+    font-size: var(--kmark-page-number-font-size, 10pt);
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  .kmark-page-number--bottom-center {
+    left: 50%;
+    bottom: var(--kmark-page-number-margin-bottom, 8mm);
+    transform: translateX(-50%);
+  }
+
+  .kmark-page-number--bottom-right {
+    right: var(--kmark-page-number-margin-right, 12mm);
+    bottom: var(--kmark-page-number-margin-bottom, 8mm);
+  }
+
+  .kmark-page-number--bottom-left {
+    left: var(--kmark-page-number-margin-left, 12mm);
+    bottom: var(--kmark-page-number-margin-bottom, 8mm);
+  }
+
+  .kmark-page-number--top-center {
+    left: 50%;
+    top: var(--kmark-page-number-margin-top, 8mm);
+    transform: translateX(-50%);
+  }
+
+  .kmark-page-number--top-right {
+    right: var(--kmark-page-number-margin-right, 12mm);
+    top: var(--kmark-page-number-margin-top, 8mm);
+  }
+
+  .kmark-page-number--top-left {
+    left: var(--kmark-page-number-margin-left, 12mm);
+    top: var(--kmark-page-number-margin-top, 8mm);
+  }
+
   .markdown-body code {
     padding: 0.08em 0.3em;
     font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
@@ -432,6 +476,7 @@ function getDisplayedPreviewA4Pages(): readonly A4PrintPreviewPage[] {
     .map((pageFrame, index) => ({
       frameStyle: pageFrame.getAttribute("style") ?? "",
       html: pageFrame.querySelector<HTMLElement>(".markdown-body--a4")?.innerHTML ?? pageFrame.innerHTML,
+      pageNumberHtml: pageFrame.querySelector<HTMLElement>(".kmark-page-number")?.outerHTML ?? "",
       pageName: `kmark-print-page-${index + 1}`,
       pageHeight: getPageFrameCssLength(pageFrame, "--kmark-page-height", `${A4_PAGE_HEIGHT_MM}mm`),
       pageWidth: getPageFrameCssLength(pageFrame, "--kmark-page-width", `${A4_PAGE_WIDTH_MM}mm`),
@@ -444,6 +489,7 @@ function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pa
     .map((page) => `
       <div class="preview-section__page-frame kmark-print-page" data-kmark-print-page="${page.pageName}" style="${escapeHtml(page.frameStyle)}">
         <article class="markdown-body markdown-body--a4 print-page">${page.html}</article>
+        ${page.pageNumberHtml}
       </div>
     `)
     .join("");
