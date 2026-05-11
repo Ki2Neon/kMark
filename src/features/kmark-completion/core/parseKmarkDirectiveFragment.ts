@@ -8,6 +8,7 @@ export type ParsedKmarkDirectiveFragment = {
   readonly usedParamNames: ReadonlySet<string>;
   readonly hasScopeOpen: boolean;
   readonly hasPageParam: boolean;
+  readonly hasTocParam: boolean;
 };
 
 const PAGE_PARAM_NAMES = new Set([
@@ -31,6 +32,15 @@ const PAGE_PARAM_NAMES = new Set([
   "page_number_margin_bottom",
   "page_number_margin_left",
   "page_number_margin_right",
+]);
+
+const TOC_PARAM_NAMES = new Set([
+  "toc",
+  "toc_depth",
+  "toc_min_depth",
+  "toc_title",
+  "toc_ordered",
+  "toc_links",
 ]);
 
 export function parseKmarkDirectiveFragment(directiveText: string): ParsedKmarkDirectiveFragment {
@@ -59,5 +69,6 @@ export function parseKmarkDirectiveFragment(directiveText: string): ParsedKmarkD
     usedParamNames,
     hasScopeOpen: directiveText.includes("{"),
     hasPageParam: tokens.some((token) => PAGE_PARAM_NAMES.has(token.name)),
+    hasTocParam: tokens.some((token) => TOC_PARAM_NAMES.has(token.name)),
   };
 }

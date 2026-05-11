@@ -16,9 +16,10 @@ const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, Completion
   page: { name: "Page", rank: 20 },
   scope: { name: "Scope", rank: 30 },
   text: { name: "Text", rank: 40 },
-  style: { name: "Style", rank: 50 },
-  snippet: { name: "Snippet", rank: 60 },
-  general: { name: "General", rank: 70 },
+  toc: { name: "TOC", rank: 50 },
+  style: { name: "Style", rank: 60 },
+  snippet: { name: "Snippet", rank: 70 },
+  general: { name: "General", rank: 80 },
 };
 
 export function createCodeMirrorKmarkCompletionSource(): CompletionSource {

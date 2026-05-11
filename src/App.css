@@ -938,6 +938,7 @@ input:focus-visible,
 .markdown-body ul,
 .markdown-body ol,
 .markdown-body blockquote,
+.markdown-body .kmark-toc,
 .markdown-body .kmark-callout,
 .markdown-body pre,
 .markdown-body table {
@@ -953,6 +954,71 @@ input:focus-visible,
 
 .markdown-body a:hover {
   text-decoration-thickness: 2px;
+}
+
+.markdown-body .kmark-toc {
+  max-width: 100%;
+  padding: 0;
+  color: var(--preview-text);
+  box-sizing: border-box;
+}
+
+.markdown-body .kmark-toc__title {
+  margin-bottom: 0.45em;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.markdown-body .kmark-toc__list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.markdown-body .kmark-toc__list--nested {
+  margin-top: 0;
+  padding-left: 1.25em;
+}
+
+.markdown-body--a4 .kmark-toc__list--nested {
+  padding-left: 0;
+}
+
+.markdown-body .kmark-toc__item {
+  margin: 0;
+  line-height: 1.38;
+}
+
+.markdown-body .kmark-toc__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(2.6em, 4.6em);
+  gap: 2.4em;
+  align-items: baseline;
+  min-height: 1.55em;
+  padding: 0.1em 0.35em;
+}
+
+.markdown-body .kmark-toc__row--odd {
+  background: rgb(0 0 0 / 3.5%);
+}
+
+.markdown-body .kmark-toc__row--even {
+  background: rgb(0 0 0 / 1.4%);
+}
+
+.markdown-body .kmark-toc__link,
+.markdown-body .kmark-toc__text {
+  min-width: 0;
+  padding-left: var(--kmark-toc-row-indent, 0);
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body .kmark-toc__page {
+  justify-self: start;
+  color: var(--preview-text-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .markdown-body .markdown-task-checkbox {

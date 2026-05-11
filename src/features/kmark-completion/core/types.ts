@@ -14,7 +14,8 @@ export type KmarkParamContext =
   | "image"
   | "text"
   | "shape"
-  | "table";
+  | "table"
+  | "toc";
 
 export type KmarkParamSpec = {
   readonly name: string;
@@ -81,6 +82,7 @@ export type KmarkCompletionSection =
   | "scope"
   | "text"
   | "style"
+  | "toc"
   | "snippet"
   | "general";
 

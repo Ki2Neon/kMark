@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "params": [
     {
       "name": "align",
@@ -33,6 +33,68 @@
       "description": "対象ブロックを現在ページの本文エリア内で縦配置する",
       "examples": ["<!-- kmark page_valign:bottom -->"],
       "priority": 88
+    },
+    {
+      "name": "toc",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "toc"],
+      "insertText": "toc:true",
+      "description": "現在位置以降の見出しから目次を生成する",
+      "examples": ["<!-- kmark toc:true -->"],
+      "priority": 110
+    },
+    {
+      "name": "toc_depth",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "toc"],
+      "values": ["1", "2", "3", "4", "5", "6"],
+      "insertText": "toc_depth:",
+      "description": "目次へ表示する最大見出し深度を指定する",
+      "examples": ["<!-- kmark toc:true toc_depth:3 -->"],
+      "priority": 96
+    },
+    {
+      "name": "toc_min_depth",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "toc"],
+      "values": ["1", "2", "3", "4", "5", "6"],
+      "insertText": "toc_min_depth:",
+      "description": "目次へ表示する最小見出し深度を指定する",
+      "examples": ["<!-- kmark toc:true toc_min_depth:2 toc_depth:4 -->"],
+      "priority": 82
+    },
+    {
+      "name": "toc_title",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["single", "toc"],
+      "insertText": "toc_title:\"目次\"",
+      "description": "目次タイトルを指定する。空文字で非表示にする",
+      "examples": ["<!-- kmark toc:true toc_title:\"Contents\" -->"],
+      "priority": 92
+    },
+    {
+      "name": "toc_ordered",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "toc"],
+      "insertText": "toc_ordered:",
+      "description": "目次を番号付きリストで表示する",
+      "examples": ["<!-- kmark toc:true toc_ordered:true -->"],
+      "priority": 78
+    },
+    {
+      "name": "toc_links",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "toc"],
+      "insertText": "toc_links:",
+      "description": "目次項目から見出しへのリンク有無を指定する",
+      "examples": ["<!-- kmark toc:true toc_links:false -->"],
+      "priority": 76
     },
     {
       "name": "w",

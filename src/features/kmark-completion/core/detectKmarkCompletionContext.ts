@@ -142,8 +142,15 @@ function resolveCompletionContexts(input: {
   const isScope = input.parsedFragment.hasScopeOpen;
   const isAtDirectiveStart = input.tokenText.trim().length === 0;
   const nextBlockKind = resolveNextBlockKind(input.markdown, input.lineEnd);
+  const isTocCandidate = input.parsedFragment.hasTocParam
+    || isAtDirectiveStart
+    || input.tokenText.toLocaleLowerCase("en-US").startsWith("toc");
   const isPageCandidate = input.parsedFragment.hasPageParam
     || ((isScope || isAtDirectiveStart) && isDocumentStart(input.markdown, input.lineStart));
+
+  if (isTocCandidate) {
+    addContext(contexts, "toc");
+  }
 
   if (nextBlockKind === "image") {
     addContext(contexts, "image");
