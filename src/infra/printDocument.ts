@@ -89,6 +89,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body ul,
   .markdown-body ol,
   .markdown-body blockquote,
+  .markdown-body .kmark-toc,
   .markdown-body .kmark-callout,
   .markdown-body pre,
   .markdown-body table {
@@ -97,6 +98,41 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body a {
     color: inherit;
+  }
+
+  .markdown-body .kmark-toc {
+    max-width: 100%;
+    padding: 0.9em 1em;
+    border: 0.75pt solid #d7d7d7;
+    border-radius: 5pt;
+    background: #f7f7f7;
+    color: #111111;
+    box-sizing: border-box;
+  }
+
+  .markdown-body .kmark-toc__title {
+    margin-bottom: 0.65em;
+    font-weight: 750;
+    line-height: 1.3;
+  }
+
+  .markdown-body .kmark-toc__list {
+    margin: 0;
+    padding-left: 1.25em;
+  }
+
+  .markdown-body .kmark-toc__list--nested {
+    margin-top: 0.18em;
+  }
+
+  .markdown-body .kmark-toc__item {
+    margin: 0.18em 0;
+    line-height: 1.38;
+  }
+
+  .markdown-body .kmark-toc__link,
+  .markdown-body .kmark-toc__text {
+    overflow-wrap: anywhere;
   }
 
   .markdown-body blockquote {

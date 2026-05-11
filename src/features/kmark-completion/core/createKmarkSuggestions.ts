@@ -53,6 +53,15 @@ const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["wrap", 480],
 ]);
 
+const TOC_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["toc", 520],
+  ["toc_depth", 500],
+  ["toc_title", 490],
+  ["toc_min_depth", 470],
+  ["toc_ordered", 460],
+  ["toc_links", 450],
+]);
+
 export function createKmarkSuggestions(input: {
   readonly markdown: string;
   readonly cursorOffset: number;
@@ -253,6 +262,10 @@ function scoreParamSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, p
     return 6_000 + (SCOPE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
 
+  if (context.contexts.includes("toc") && spec.contexts.includes("toc")) {
+    return 5_000 + (TOC_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
   if (context.contexts.includes("text") && spec.contexts.includes("text")) {
     return 4_000 + (spec.priority ?? 0) + prefixBoost;
   }
@@ -339,6 +352,10 @@ function resolveCompletionSection(
     return "scope";
   }
 
+  if (activeContexts.includes("toc") && candidateContexts.includes("toc")) {
+    return "toc";
+  }
+
   if (activeContexts.includes("text") && candidateContexts.includes("text")) {
     return "text";
   }
@@ -358,6 +375,8 @@ function detailForSection(section: KmarkCompletionSection): string {
       return "kmark text";
     case "style":
       return "kmark style";
+    case "toc":
+      return "kmark toc";
     case "snippet":
       return "kmark snippet";
     case "general":

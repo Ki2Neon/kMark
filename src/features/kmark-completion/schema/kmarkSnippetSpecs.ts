@@ -65,6 +65,13 @@ export const KMARK_SNIPPET_SPECS: readonly KmarkSnippetSpec[] = [
     priority: 100,
   },
   {
+    label: "toc",
+    description: "現在位置以降の見出しから目次を作成する",
+    contexts: ["toc", "single"],
+    insertText: "toc:true toc_depth:${1:6}",
+    priority: 100,
+  },
+  {
     label: "use style",
     description: "定義済みスタイルを使用する",
     contexts: ["single", "scope", "page"],

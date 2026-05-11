@@ -1,7 +1,12 @@
-use std::{collections::HashMap, ops::Range, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+    path::Path,
+};
 
 use pulldown_cmark::{
-    Alignment, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options, Parser, Tag, TagEnd,
+    Alignment, CodeBlockKind, Event, HeadingLevel, LinkType, MetadataBlockKind, Options, Parser,
+    Tag, TagEnd,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,6 +223,16 @@ struct KmarkPageParams {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkTocParams {
+    enabled: Option<bool>,
+    max_depth: Option<u8>,
+    min_depth: Option<u8>,
+    title: Option<String>,
+    ordered: Option<bool>,
+    links: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkParams {
     image: KmarkImageParams,
     layout: KmarkLayoutParams,
@@ -229,6 +244,7 @@ struct KmarkParams {
 struct KmarkParamBundle {
     preset_use: Option<String>,
     params: KmarkParams,
+    toc: KmarkTocParams,
     page_directive: PartialPageDirective,
 }
 
@@ -246,6 +262,7 @@ struct KmarkScopeContext {
 #[derive(Debug, Clone)]
 struct PendingKmarkParams {
     bundle: KmarkParamBundle,
+    start_line: usize,
     end_offset: usize,
     end_line: usize,
 }
@@ -396,6 +413,49 @@ struct DocumentPageConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct KmarkTocDocument {
+    headings: Vec<KmarkTocHeading>,
+    generated_heading_ids: HashMap<usize, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KmarkTocHeading {
+    source_line: usize,
+    level: u8,
+    text: String,
+    explicit_id: Option<String>,
+    generated_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KmarkTocConfig {
+    min_depth: u8,
+    max_depth: u8,
+    ordered: bool,
+    links: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KmarkTocRenderNode<'a> {
+    heading: &'a KmarkTocHeading,
+    children: Vec<KmarkTocRenderNode<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KmarkTocDirective {
+    source_line: usize,
+    params: KmarkTocParams,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingKmarkTocHeading {
+    source_line: usize,
+    level: u8,
+    explicit_id: Option<String>,
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum KmarkComment {
     Params(KmarkParamBundle),
     Define {
@@ -410,6 +470,7 @@ struct HtmlEmitter<'a> {
     content: &'a str,
     line_offset: usize,
     markdown_file_path: Option<&'a str>,
+    toc_document: &'a KmarkTocDocument,
     line_starts: Vec<usize>,
     html: String,
     blockquote_stack: Vec<BlockQuoteRenderKind>,
@@ -445,6 +506,7 @@ const DEFAULT_PAGE_MARGIN_RIGHT: &str = "16mm";
 const DEFAULT_PAGE_MARGIN_BOTTOM: &str = "18mm";
 const DEFAULT_PAGE_MARGIN_LEFT: &str = "16mm";
 const DEFAULT_PREVIEW_FONT_SIZE: &str = "10.5pt";
+const DEFAULT_TOC_TITLE: &str = "目次";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
@@ -454,6 +516,7 @@ pub fn render_markdown_preview_with_file_path(
     content: &str,
     markdown_file_path: Option<&str>,
 ) -> RenderedMarkdownPreview {
+    let toc_document = collect_kmark_toc_document(content);
     let markdown_pages = split_markdown_pages(content);
     let document_page_config = DocumentPageConfig::default_config();
     let pages = markdown_pages
@@ -465,6 +528,7 @@ pub fn render_markdown_preview_with_file_path(
                 &page_segment.content,
                 page_segment.line_offset,
                 markdown_file_path,
+                &toc_document,
             );
 
             RenderedPage {
@@ -493,9 +557,10 @@ fn render_markdown_page(
     content: &str,
     line_offset: usize,
     markdown_file_path: Option<&str>,
+    toc_document: &KmarkTocDocument,
 ) -> String {
     let events = collect_markdown_events(content);
-    let mut emitter = HtmlEmitter::new(content, line_offset, markdown_file_path);
+    let mut emitter = HtmlEmitter::new(content, line_offset, markdown_file_path, toc_document);
     emitter.prepare_footnotes(&events);
     emitter.render(events)
 }
@@ -513,7 +578,155 @@ fn markdown_options() -> Options {
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
     options
+}
+
+fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
+    let events = collect_markdown_events(content);
+    let line_starts = collect_line_starts(content);
+    let mut headings = Vec::new();
+    let mut directives = Vec::new();
+    let mut pending_heading: Option<PendingKmarkTocHeading> = None;
+
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::Heading { level, id, .. }) => {
+                pending_heading = Some(PendingKmarkTocHeading {
+                    source_line: resolve_line_number(&line_starts, range.start),
+                    level: heading_level_number(level),
+                    explicit_id: id.map(|value| value.to_string()),
+                    text: String::new(),
+                });
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some(pending) = pending_heading.take() {
+                    let text = normalize_toc_heading_text(&pending.text);
+
+                    if !text.is_empty() {
+                        headings.push(KmarkTocHeading {
+                            source_line: pending.source_line,
+                            level: pending.level,
+                            text,
+                            explicit_id: pending.explicit_id,
+                            generated_id: None,
+                        });
+                    }
+                }
+            }
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text) => {
+                if let Some(pending) = pending_heading.as_mut() {
+                    pending.text.push_str(text.as_ref());
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(pending) = pending_heading.as_mut() {
+                    pending.text.push(' ');
+                }
+            }
+            Event::Html(html) | Event::InlineHtml(html) => {
+                if let Some(KmarkComment::Params(bundle)) = parse_kmark_comment(html.as_ref()) {
+                    if bundle.toc.enabled == Some(true) {
+                        let (_, end_line) =
+                            resolve_source_line_range(content, &line_starts, 0, &range);
+                        directives.push(KmarkTocDirective {
+                            source_line: end_line,
+                            params: bundle.toc,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    apply_generated_toc_heading_ids(&mut headings, &directives);
+    let generated_heading_ids = headings
+        .iter()
+        .filter_map(|heading| {
+            heading
+                .generated_id
+                .as_ref()
+                .map(|id| (heading.source_line, id.clone()))
+        })
+        .collect();
+
+    KmarkTocDocument {
+        headings,
+        generated_heading_ids,
+    }
+}
+
+fn apply_generated_toc_heading_ids(
+    headings: &mut [KmarkTocHeading],
+    directives: &[KmarkTocDirective],
+) {
+    let mut used_ids = headings
+        .iter()
+        .filter_map(|heading| heading.explicit_id.clone())
+        .collect::<HashSet<_>>();
+    let mut generated_lines = HashSet::new();
+
+    for directive in directives {
+        let config = directive.params.to_config();
+
+        if !config.links {
+            continue;
+        }
+
+        for heading in headings.iter_mut().filter(|heading| {
+            heading.source_line > directive.source_line
+                && heading.level >= config.min_depth
+                && heading.level <= config.max_depth
+                && heading.explicit_id.is_none()
+        }) {
+            if generated_lines.contains(&heading.source_line) {
+                continue;
+            }
+
+            let id = next_generated_toc_heading_id(heading.source_line, &mut used_ids);
+            heading.generated_id = Some(id);
+            generated_lines.insert(heading.source_line);
+        }
+    }
+}
+
+fn next_generated_toc_heading_id(source_line: usize, used_ids: &mut HashSet<String>) -> String {
+    let base = format!("kmark-heading-{}", source_line + 1);
+
+    if used_ids.insert(base.clone()) {
+        return base;
+    }
+
+    let mut suffix = 2usize;
+
+    loop {
+        let candidate = format!("{base}-{suffix}");
+
+        if used_ids.insert(candidate.clone()) {
+            return candidate;
+        }
+
+        suffix += 1;
+    }
+}
+
+fn normalize_toc_heading_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn heading_level_number(level: HeadingLevel) -> u8 {
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
 }
 
 fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
@@ -666,6 +879,12 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
 
         if is_unclosed_html_comment_line(line) {
             is_inside_html_comment_block = true;
+        }
+
+        if is_kmark_toc_directive_line(line) {
+            pending_scope_prelude = None;
+            segment_has_rendered_content = true;
+            continue;
         }
 
         if let Some(comment) = parse_kmark_scope_prelude_comment(line) {
@@ -1013,6 +1232,17 @@ fn is_kmark_comment_line(line: &str) -> bool {
     body.trim().starts_with("kmark")
 }
 
+fn is_kmark_toc_directive_line(line: &str) -> bool {
+    parse_kmark_comment_body(line).is_some_and(|body| {
+        if body.starts_with('{') || body == "}" {
+            return false;
+        }
+
+        let (_, bundle) = parse_kmark_param_bundle_parts(body);
+        bundle.toc.enabled == Some(true)
+    })
+}
+
 fn parse_kmark_comment_body(line: &str) -> Option<&str> {
     let trimmed = line.trim();
     let body = trimmed
@@ -1069,11 +1299,17 @@ fn is_kmark_scope_end_line(line: &str) -> bool {
 }
 
 impl<'a> HtmlEmitter<'a> {
-    fn new(content: &'a str, line_offset: usize, markdown_file_path: Option<&'a str>) -> Self {
+    fn new(
+        content: &'a str,
+        line_offset: usize,
+        markdown_file_path: Option<&'a str>,
+        toc_document: &'a KmarkTocDocument,
+    ) -> Self {
         Self {
             content,
             line_offset,
             markdown_file_path,
+            toc_document,
             line_starts: collect_line_starts(content),
             html: String::new(),
             blockquote_stack: Vec::new(),
@@ -1122,6 +1358,7 @@ impl<'a> HtmlEmitter<'a> {
             self.push_event(event, range);
         }
 
+        self.flush_pending_kmark_toc();
         self.close_active_kmark_single_block();
         self.close_unclosed_kmark_scopes();
         self.html
@@ -1133,6 +1370,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.flush_pending_kmark_toc();
         self.invalidate_pending_kmark_params_before_event(&event, &range);
 
         match event {
@@ -1164,6 +1402,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.flush_pending_kmark_toc();
         self.pending_kmark_params = None;
         self.update_html_text_suppression(html.as_ref());
     }
@@ -1265,10 +1504,15 @@ impl<'a> HtmlEmitter<'a> {
                 attrs,
             } => {
                 let decoration = self.take_pending_kmark_block_decoration();
+                let source_line = self.resolve_range_start_line(range.clone());
                 let mut html = format!("<{level}{}", self.source_line_attributes(range));
                 if let Some(id) = id {
                     html.push_str(" id=\"");
                     html.push_str(&escape_html(&id));
+                    html.push('"');
+                } else if let Some(id) = self.toc_document.generated_heading_id(source_line) {
+                    html.push_str(" id=\"");
+                    html.push_str(&escape_html(id));
                     html.push('"');
                 }
                 if !classes.is_empty() || decoration.page_valign.is_some() {
@@ -1804,6 +2048,14 @@ impl<'a> HtmlEmitter<'a> {
         )
     }
 
+    fn source_line_attributes_from_lines(&self, start_line: usize, end_line: usize) -> String {
+        format!(
+            " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
+            start_line,
+            end_line.max(start_line),
+        )
+    }
+
     fn start_callout(&mut self, callout_start: CalloutStart, range: &Range<usize>) {
         let kind_name = callout_start.kind.name();
         let title = if callout_start.title.trim().is_empty() {
@@ -1943,8 +2195,13 @@ impl<'a> HtmlEmitter<'a> {
     fn apply_kmark_comment(&mut self, comment: KmarkComment, range: Range<usize>) {
         self.discard_pending_kmark_params_if_gap_is_incompatible(range.start);
 
+        if !matches!(comment, KmarkComment::Params(_)) {
+            self.flush_pending_kmark_toc();
+        }
+
         match comment {
             KmarkComment::Params(bundle) => {
+                let start_line = self.resolve_range_start_line(range.clone());
                 let end_line = self.resolve_range_end_line(range.clone());
                 if let Some(pending) = self.pending_kmark_params.as_mut() {
                     pending.bundle.merge(&bundle);
@@ -1953,6 +2210,7 @@ impl<'a> HtmlEmitter<'a> {
                 } else {
                     self.pending_kmark_params = Some(PendingKmarkParams {
                         bundle,
+                        start_line,
                         end_offset: range.end,
                         end_line,
                     });
@@ -2038,6 +2296,10 @@ impl<'a> HtmlEmitter<'a> {
             return;
         };
 
+        if pending.bundle.toc.enabled == Some(true) {
+            return;
+        }
+
         let next_start_line = self.resolve_offset_line(next_offset);
 
         if next_start_line > pending.end_line + 1 {
@@ -2060,6 +2322,63 @@ impl<'a> HtmlEmitter<'a> {
         self.pending_kmark_params
             .take()
             .map(|pending| pending.bundle)
+    }
+
+    fn flush_pending_kmark_toc(&mut self) -> bool {
+        let should_render_toc = self
+            .pending_kmark_params
+            .as_ref()
+            .is_some_and(|pending| pending.bundle.toc.enabled == Some(true));
+
+        if !should_render_toc {
+            return false;
+        }
+
+        let Some(pending) = self.pending_kmark_params.take() else {
+            return false;
+        };
+
+        self.push_kmark_toc(&pending);
+        true
+    }
+
+    fn push_kmark_toc(&mut self, pending: &PendingKmarkParams) {
+        let config = pending.bundle.toc.to_config();
+        let headings = self
+            .toc_document
+            .headings_after_line(pending.end_line, &config);
+        let layer = self.resolve_kmark_bundle_layer(&pending.bundle);
+        let resolved_params = layer.resolved_params();
+        let decoration = KmarkRootDecoration {
+            style: resolved_params.to_single_block_root_style(),
+            page_valign: resolved_params.page.valign,
+        };
+        let title = pending
+            .bundle
+            .toc
+            .title
+            .as_deref()
+            .unwrap_or(DEFAULT_TOC_TITLE);
+        let mut html = format!(
+            "<nav class=\"kmark-toc{}\"{}{}>",
+            decoration.class_suffix(),
+            self.source_line_attributes_from_lines(pending.start_line, pending.end_line),
+            decoration.data_and_style_attributes(),
+        );
+
+        if !title.is_empty() {
+            html.push_str("<div class=\"kmark-toc__title\">");
+            html.push_str(&escape_html(title));
+            html.push_str("</div>");
+        }
+
+        if !headings.is_empty() {
+            let tree = build_kmark_toc_tree(&headings);
+            push_kmark_toc_node_list(&mut html, &tree, config.ordered, config.links, false);
+        }
+
+        html.push_str("</nav>");
+        self.push_raw(&html);
     }
 
     fn take_pending_kmark_layer_for_image(
@@ -2481,12 +2800,164 @@ impl<'a> HtmlEmitter<'a> {
     }
 }
 
+impl KmarkTocDocument {
+    fn headings_after_line<'a>(
+        &'a self,
+        source_line: usize,
+        config: &KmarkTocConfig,
+    ) -> Vec<&'a KmarkTocHeading> {
+        self.headings
+            .iter()
+            .filter(|heading| {
+                heading.source_line > source_line
+                    && heading.level >= config.min_depth
+                    && heading.level <= config.max_depth
+            })
+            .collect()
+    }
+
+    fn generated_heading_id(&self, source_line: usize) -> Option<&str> {
+        self.generated_heading_ids
+            .get(&source_line)
+            .map(String::as_str)
+    }
+}
+
+impl KmarkTocHeading {
+    fn link_id(&self) -> Option<&str> {
+        self.explicit_id.as_deref().or(self.generated_id.as_deref())
+    }
+}
+
+impl KmarkTocParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(enabled) = other.enabled {
+            self.enabled = Some(enabled);
+        }
+        if let Some(max_depth) = other.max_depth {
+            self.max_depth = Some(max_depth);
+        }
+        if let Some(min_depth) = other.min_depth {
+            self.min_depth = Some(min_depth);
+        }
+        if let Some(title) = &other.title {
+            self.title = Some(title.clone());
+        }
+        if let Some(ordered) = other.ordered {
+            self.ordered = Some(ordered);
+        }
+        if let Some(links) = other.links {
+            self.links = Some(links);
+        }
+    }
+
+    fn to_config(&self) -> KmarkTocConfig {
+        KmarkTocConfig {
+            min_depth: self.min_depth.unwrap_or(1),
+            max_depth: self.max_depth.unwrap_or(6),
+            ordered: self.ordered.unwrap_or(false),
+            links: self.links.unwrap_or(true),
+        }
+    }
+}
+
+fn build_kmark_toc_tree<'a>(headings: &[&'a KmarkTocHeading]) -> Vec<KmarkTocRenderNode<'a>> {
+    let mut roots = Vec::new();
+    let mut stack: Vec<(u8, Vec<usize>)> = Vec::new();
+
+    for heading in headings {
+        while stack
+            .last()
+            .is_some_and(|(level, _)| *level >= heading.level)
+        {
+            stack.pop();
+        }
+
+        let parent_path = stack
+            .last()
+            .map(|(_, path)| path.clone())
+            .unwrap_or_default();
+        let siblings = kmark_toc_nodes_at_path_mut(&mut roots, &parent_path);
+        let node_index = siblings.len();
+        siblings.push(KmarkTocRenderNode {
+            heading: *heading,
+            children: Vec::new(),
+        });
+
+        let mut node_path = parent_path;
+        node_path.push(node_index);
+        stack.push((heading.level, node_path));
+    }
+
+    roots
+}
+
+fn kmark_toc_nodes_at_path_mut<'nodes, 'heading>(
+    nodes: &'nodes mut Vec<KmarkTocRenderNode<'heading>>,
+    path: &[usize],
+) -> &'nodes mut Vec<KmarkTocRenderNode<'heading>> {
+    if let Some((&index, rest)) = path.split_first() {
+        return kmark_toc_nodes_at_path_mut(&mut nodes[index].children, rest);
+    }
+
+    nodes
+}
+
+fn push_kmark_toc_node_list(
+    html: &mut String,
+    nodes: &[KmarkTocRenderNode<'_>],
+    ordered: bool,
+    links: bool,
+    nested: bool,
+) {
+    let tag_name = if ordered { "ol" } else { "ul" };
+    let class_name = if nested {
+        "kmark-toc__list kmark-toc__list--nested"
+    } else {
+        "kmark-toc__list"
+    };
+
+    html.push_str(&format!("<{tag_name} class=\"{class_name}\">"));
+
+    for node in nodes {
+        html.push_str(&format!(
+            "<li class=\"kmark-toc__item kmark-toc__item--depth-{}\" data-toc-depth=\"{}\">",
+            node.heading.level, node.heading.level,
+        ));
+        push_kmark_toc_node_label(html, node.heading, links);
+        if !node.children.is_empty() {
+            push_kmark_toc_node_list(html, &node.children, ordered, links, true);
+        }
+        html.push_str("</li>");
+    }
+
+    html.push_str(&format!("</{tag_name}>"));
+}
+
+fn push_kmark_toc_node_label(html: &mut String, heading: &KmarkTocHeading, links: bool) {
+    if links {
+        if let Some(id) = heading.link_id() {
+            html.push_str("<a class=\"kmark-toc__link\" href=\"#");
+            html.push_str(&escape_html(id));
+            html.push_str("\">");
+            html.push_str(&escape_html(&heading.text));
+            html.push_str("</a>");
+            return;
+        }
+    }
+
+    html.push_str("<span class=\"kmark-toc__text\">");
+    html.push_str(&escape_html(&heading.text));
+    html.push_str("</span>");
+}
+
 impl KmarkParamBundle {
     fn merge(&mut self, other: &Self) {
         if let Some(preset_use) = &other.preset_use {
             self.preset_use = Some(preset_use.clone());
         }
         self.params.merge(&other.params);
+        self.toc.merge(&other.toc);
         self.page_directive.merge(&other.page_directive);
     }
 }
@@ -4070,6 +4541,36 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.preset_use = Some(preset_name);
                 }
             }
+            "toc" => {
+                if let Some(enabled) = parse_kmark_bool_value(&value) {
+                    bundle.toc.enabled = Some(enabled);
+                }
+            }
+            "toc_depth" => {
+                if let Some(depth) = parse_kmark_toc_depth_value(&value) {
+                    bundle.toc.max_depth = Some(depth);
+                }
+            }
+            "toc_min_depth" => {
+                if let Some(depth) = parse_kmark_toc_depth_value(&value) {
+                    bundle.toc.min_depth = Some(depth);
+                }
+            }
+            "toc_title" => {
+                if let Some(title) = parse_kmark_toc_title_value(&value) {
+                    bundle.toc.title = Some(title);
+                }
+            }
+            "toc_ordered" => {
+                if let Some(ordered) = parse_kmark_bool_value(&value) {
+                    bundle.toc.ordered = Some(ordered);
+                }
+            }
+            "toc_links" => {
+                if let Some(links) = parse_kmark_bool_value(&value) {
+                    bundle.toc.links = Some(links);
+                }
+            }
             "w" | "width" => {
                 if let Some(width) = parse_kmark_size_value(&value) {
                     bundle.params.image.width = Some(width);
@@ -4258,6 +4759,21 @@ fn parse_kmark_wrap_value(value: &str) -> Option<bool> {
         "false" => Some(false),
         _ => None,
     }
+}
+
+fn parse_kmark_toc_depth_value(value: &str) -> Option<u8> {
+    let depth = trim_kmark_quotes(value).trim().parse::<u8>().ok()?;
+
+    (1..=6).contains(&depth).then_some(depth)
+}
+
+fn parse_kmark_toc_title_value(value: &str) -> Option<String> {
+    let title = trim_kmark_quotes(value);
+
+    title
+        .chars()
+        .all(|character| !character.is_control())
+        .then(|| title.replace("\\\"", "\"").replace("\\'", "'"))
 }
 
 fn parse_kmark_size_value(value: &str) -> Option<String> {
@@ -4890,6 +5406,15 @@ mod tests {
         resolve_image_destination_url, PageNumberPosition, PageNumberStyle,
     };
 
+    fn extract_toc_html(html: &str) -> &str {
+        let start = html
+            .find("<nav class=\"kmark-toc")
+            .expect("toc start missing");
+        let end = html[start..].find("</nav>").expect("toc end missing") + start + "</nav>".len();
+
+        &html[start..end]
+    }
+
     #[test]
     fn renders_page_breaks_and_source_line_offsets() {
         let rendered_preview = render_markdown_preview(
@@ -4941,6 +5466,100 @@ mod tests {
             rendered_preview.page_htmls[1],
             "<p data-source-line-start=\"2\" data-source-line-end=\"2\">after</p>"
         );
+    }
+
+    #[test]
+    fn renders_kmark_toc_from_following_headings_across_page_breaks() {
+        let rendered_preview = render_markdown_preview(
+            "# Before\n\n\
+             <!-- kmark toc:true -->\n\n\
+             ## First\n\n\
+             <!-- --- -->\n\
+             ### Child\n\n\
+             # Later",
+        );
+
+        let toc_html = extract_toc_html(&rendered_preview.html);
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert!(toc_html.contains("<div class=\"kmark-toc__title\">目次</div>"));
+        assert!(toc_html.contains("href=\"#kmark-heading-5\""));
+        assert!(toc_html.contains("href=\"#kmark-heading-8\""));
+        assert!(toc_html.contains("href=\"#kmark-heading-10\""));
+        assert!(toc_html.contains(">First</a>"));
+        assert!(toc_html.contains(">Child</a>"));
+        assert!(toc_html.contains(">Later</a>"));
+        assert!(!toc_html.contains("Before"));
+        assert!(rendered_preview
+            .html
+            .contains("<h2 data-source-line-start=\"4\" data-source-line-end=\"4\" id=\"kmark-heading-5\">First</h2>"));
+        assert!(rendered_preview
+            .html
+            .contains("<h3 data-source-line-start=\"7\" data-source-line-end=\"7\" id=\"kmark-heading-8\">Child</h3>"));
+    }
+
+    #[test]
+    fn keeps_kmark_toc_as_rendered_page_content_before_page_break() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark toc:true -->\n<!-- --- -->\n# Later");
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert!(rendered_preview.page_htmls[0].contains("<nav class=\"kmark-toc\""));
+        assert!(rendered_preview.page_htmls[0].contains("href=\"#kmark-heading-3\""));
+        assert!(rendered_preview.page_htmls[1].contains(
+            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" id=\"kmark-heading-3\">Later</h1>"
+        ));
+    }
+
+    #[test]
+    fn renders_kmark_toc_depth_title_ordered_and_link_options() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark toc:true toc_min_depth:2 toc_depth:3 toc_title:\"\" toc_ordered:true toc_links:false -->\n\
+             # One\n\
+             ## Two\n\
+             #### Four\n\
+             ### Three",
+        );
+        let toc_html = extract_toc_html(&rendered_preview.html);
+
+        assert!(!toc_html.contains("kmark-toc__title"));
+        assert!(toc_html.contains("<ol class=\"kmark-toc__list\">"));
+        assert!(!toc_html.contains("href="));
+        assert!(toc_html.contains(">Two</span>"));
+        assert!(toc_html.contains(">Three</span>"));
+        assert!(!toc_html.contains("One"));
+        assert!(!toc_html.contains("Four"));
+        assert!(!rendered_preview.html.contains("id=\"kmark-heading-"));
+    }
+
+    #[test]
+    fn applies_kmark_toc_root_decoration_without_affecting_next_block() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark toc:true w:80% align:center -->\n\
+             # Title\n\n\
+             Body",
+        );
+        let toc_html = extract_toc_html(&rendered_preview.html);
+
+        assert!(toc_html
+            .contains("style=\"width:80%;margin-left:auto;margin-right:auto;text-align:center\""));
+        assert!(rendered_preview
+            .html
+            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"kmark-heading-2\">Title</h1>"));
+        assert!(!rendered_preview.html.contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"kmark-heading-2\" style="));
+    }
+
+    #[test]
+    fn preserves_explicit_heading_id_in_kmark_toc() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark toc:true -->\n# Manual {#manual}\n## Auto");
+        let toc_html = extract_toc_html(&rendered_preview.html);
+
+        assert!(toc_html.contains("href=\"#manual\""));
+        assert!(toc_html.contains("href=\"#kmark-heading-3\""));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"manual\">Manual</h1>"
+        ));
     }
 
     #[test]
