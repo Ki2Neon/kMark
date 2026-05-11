@@ -108,6 +108,77 @@
       "priority": 75
     },
     {
+      "name": "radius",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "radius:",
+      "description": "対象要素の角丸を指定する",
+      "examples": ["<!-- kmark radius:4mm -->"],
+      "priority": 78
+    },
+    {
+      "name": "bg",
+      "aliases": ["background"],
+      "type": "color",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "bg:",
+      "description": "対象要素の背景色を指定する",
+      "examples": ["<!-- kmark bg:#f5f5f5 -->"],
+      "priority": 77
+    },
+    {
+      "name": "opacity",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "opacity:",
+      "description": "対象要素の透明度を0から1で指定する",
+      "examples": ["<!-- kmark opacity:0.5 -->"],
+      "priority": 76
+    },
+    {
+      "name": "rotate",
+      "aliases": [],
+      "type": "angle",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "rotate:",
+      "description": "対象要素の回転角度を指定する",
+      "examples": ["<!-- kmark rotate:-3deg -->"],
+      "priority": 76
+    },
+    {
+      "name": "shadow",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "image", "scope", "shape"],
+      "values": ["none", "soft", "medium", "hard"],
+      "insertText": "shadow:",
+      "description": "対象要素の影を指定する",
+      "examples": ["<!-- kmark shadow:soft -->"],
+      "priority": 76
+    },
+    {
+      "name": "margin",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "margin:",
+      "description": "対象要素の外余白を指定する",
+      "examples": ["<!-- kmark margin:5mm -->"],
+      "priority": 74
+    },
+    {
+      "name": "padding",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "padding:",
+      "description": "対象要素の内余白を指定する",
+      "examples": ["<!-- kmark padding:4mm -->"],
+      "priority": 74
+    },
+    {
       "name": "layout",
       "aliases": [],
       "type": "enum",

@@ -181,6 +181,13 @@ struct KmarkImageParams {
     border_size: Option<String>,
     border_color: Option<String>,
     border_style: Option<String>,
+    radius: Option<String>,
+    background: Option<String>,
+    opacity: Option<String>,
+    rotate: Option<String>,
+    shadow: Option<String>,
+    margin: Option<String>,
+    padding: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3078,6 +3085,27 @@ impl KmarkImageParams {
         if let Some(border_style) = &other.border_style {
             self.border_style = Some(border_style.clone());
         }
+        if let Some(radius) = &other.radius {
+            self.radius = Some(radius.clone());
+        }
+        if let Some(background) = &other.background {
+            self.background = Some(background.clone());
+        }
+        if let Some(opacity) = &other.opacity {
+            self.opacity = Some(opacity.clone());
+        }
+        if let Some(rotate) = &other.rotate {
+            self.rotate = Some(rotate.clone());
+        }
+        if let Some(shadow) = &other.shadow {
+            self.shadow = Some(shadow.clone());
+        }
+        if let Some(margin) = &other.margin {
+            self.margin = Some(margin.clone());
+        }
+        if let Some(padding) = &other.padding {
+            self.padding = Some(padding.clone());
+        }
     }
 
     fn has_image_directives(&self) -> bool {
@@ -3088,6 +3116,13 @@ impl KmarkImageParams {
             || self.border_size.is_some()
             || self.border_color.is_some()
             || self.border_style.is_some()
+            || self.radius.is_some()
+            || self.background.is_some()
+            || self.opacity.is_some()
+            || self.rotate.is_some()
+            || self.shadow.is_some()
+            || self.margin.is_some()
+            || self.padding.is_some()
     }
 
     fn to_style(&self) -> Option<String> {
@@ -3105,18 +3140,42 @@ impl KmarkImageParams {
         if let Some(position) = &self.position {
             rules.push(format!("object-position:{position}"));
         }
+        if self.border_color.is_some() && self.border_size.is_none() {
+            rules.push("border-width:1px".to_owned());
+        }
         if let Some(border_size) = &self.border_size {
             rules.push(format!("border-width:{border_size}"));
         }
-        if let Some(border_style) = self
-            .border_style
-            .as_deref()
-            .or_else(|| self.border_size.as_ref().map(|_| "solid"))
-        {
+        if let Some(border_style) = self.border_style.as_deref().or_else(|| {
+            (self.border_size.is_some() || self.border_color.is_some()).then_some("solid")
+        }) {
             rules.push(format!("border-style:{border_style}"));
         }
         if let Some(border_color) = &self.border_color {
             rules.push(format!("border-color:{border_color}"));
+        }
+        if let Some(radius) = &self.radius {
+            rules.push(format!("border-radius:{radius}"));
+            rules.push("overflow:hidden".to_owned());
+        }
+        if let Some(background) = &self.background {
+            rules.push(format!("background:{background}"));
+        }
+        if let Some(opacity) = &self.opacity {
+            rules.push(format!("opacity:{opacity}"));
+        }
+        if let Some(rotate) = &self.rotate {
+            rules.push(format!("transform:rotate({rotate})"));
+            rules.push("transform-origin:center center".to_owned());
+        }
+        if let Some(shadow) = &self.shadow {
+            rules.push(format!("box-shadow:{shadow}"));
+        }
+        if let Some(margin) = &self.margin {
+            rules.push(format!("margin:{margin}"));
+        }
+        if let Some(padding) = &self.padding {
+            rules.push(format!("padding:{padding}"));
         }
 
         (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
@@ -3672,93 +3731,151 @@ fn parse_kmark_param_bundle(input: &str) -> KmarkParamBundle {
 fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBundle) {
     let mut define_name = None;
     let mut bundle = KmarkParamBundle::default();
+    let tokens = split_kmark_tokens(input);
+    let mut token_index = 0;
 
-    for token in split_kmark_tokens(input) {
+    while token_index < tokens.len() {
+        let token = &tokens[token_index];
         let Some((key, value)) = token.split_once(':') else {
+            token_index += 1;
             continue;
         };
+        let mut value = value.to_owned();
+
+        if should_collect_kmark_value_continuation(key) {
+            while let Some(next_token) = tokens.get(token_index + 1) {
+                if next_token == "}" || next_token.contains(':') {
+                    break;
+                }
+
+                value.push(' ');
+                value.push_str(next_token);
+                token_index += 1;
+            }
+        }
 
         match key {
             "define" => {
-                if let Some(preset_name) = normalize_kmark_preset_name(value) {
+                if let Some(preset_name) = normalize_kmark_preset_name(&value) {
                     define_name = Some(preset_name);
                 }
             }
             "use" => {
-                if let Some(preset_name) = normalize_kmark_preset_name(value) {
+                if let Some(preset_name) = normalize_kmark_preset_name(&value) {
                     bundle.preset_use = Some(preset_name);
                 }
             }
             "w" | "width" => {
-                if let Some(width) = parse_kmark_size_value(value) {
+                if let Some(width) = parse_kmark_size_value(&value) {
                     bundle.params.image.width = Some(width);
                 }
             }
             "h" | "height" => {
-                if let Some(height) = parse_kmark_size_value(value) {
+                if let Some(height) = parse_kmark_size_value(&value) {
                     bundle.params.image.height = Some(height);
                 }
             }
             "fit" => {
-                if let Some(fit) = parse_kmark_fit_value(value) {
+                if let Some(fit) = parse_kmark_fit_value(&value) {
                     bundle.params.image.fit = Some(fit);
                 }
             }
             "pos" => {
-                if let Some(position) = parse_kmark_position_value(value) {
+                if let Some(position) = parse_kmark_position_value(&value) {
                     bundle.params.image.position = Some(position);
                 }
             }
             "border_size" => {
-                if let Some(border_size) = parse_kmark_border_size_value(value) {
+                if let Some(border_size) = parse_kmark_border_size_value(&value) {
                     bundle.params.image.border_size = Some(border_size);
                 }
             }
             "border_color" => {
-                if let Some(border_color) = parse_kmark_border_color_value(value) {
+                if let Some(border_color) = parse_kmark_border_color_value(&value) {
                     bundle.params.image.border_color = Some(border_color);
                 }
             }
             "border_style" => {
-                if let Some(border_style) = parse_kmark_border_style_value(value) {
+                if let Some(border_style) = parse_kmark_border_style_value(&value) {
                     bundle.params.image.border_style = Some(border_style);
                 }
             }
+            "radius" => {
+                if let Some(radius) = parse_kmark_radius_value(&value) {
+                    bundle.params.image.radius = Some(radius);
+                }
+            }
+            "bg" | "background" => {
+                if let Some(background) = parse_kmark_background_value(&value) {
+                    bundle.params.image.background = Some(background);
+                }
+            }
+            "opacity" => {
+                if let Some(opacity) = parse_kmark_opacity_value(&value) {
+                    bundle.params.image.opacity = Some(opacity);
+                }
+            }
+            "rotate" => {
+                if let Some(rotate) = parse_kmark_rotate_value(&value) {
+                    bundle.params.image.rotate = Some(rotate);
+                }
+            }
+            "shadow" => {
+                if let Some(shadow) = parse_kmark_shadow_value(&value) {
+                    bundle.params.image.shadow = Some(shadow);
+                }
+            }
+            "margin" => {
+                if let Some(margin) = parse_kmark_box_spacing_value(&value, true) {
+                    bundle.params.image.margin = Some(margin);
+                }
+            }
+            "padding" => {
+                if let Some(padding) = parse_kmark_box_spacing_value(&value, false) {
+                    bundle.params.image.padding = Some(padding);
+                }
+            }
             "layout" => {
-                if let Some(layout) = parse_kmark_layout_value(value) {
+                if let Some(layout) = parse_kmark_layout_value(&value) {
                     bundle.params.layout.layout = Some(layout);
                 }
             }
             "align" => {
-                if let Some(align) = parse_kmark_align_value(value) {
+                if let Some(align) = parse_kmark_align_value(&value) {
                     bundle.params.layout.align = Some(align);
                 }
             }
             "valign" => {
-                if let Some(valign) = parse_kmark_valign_value(value) {
+                if let Some(valign) = parse_kmark_valign_value(&value) {
                     bundle.params.layout.valign = Some(valign);
                 }
             }
             "page_valign" => {
-                if let Some(valign) = parse_kmark_page_valign_value(value) {
+                if let Some(valign) = parse_kmark_page_valign_value(&value) {
                     bundle.params.page.valign = Some(valign);
                 }
             }
             "gap" => {
-                if let Some(gap) = parse_kmark_gap_value(value) {
+                if let Some(gap) = parse_kmark_gap_value(&value) {
                     bundle.params.layout.gap = Some(gap);
                 }
             }
             "wrap" => {
-                if let Some(wrap) = parse_kmark_wrap_value(value) {
+                if let Some(wrap) = parse_kmark_wrap_value(&value) {
                     bundle.params.layout.wrap = Some(wrap);
                 }
             }
             _ => {}
         }
+
+        token_index += 1;
     }
 
     (define_name, bundle)
+}
+
+fn should_collect_kmark_value_continuation(key: &str) -> bool {
+    matches!(key, "margin" | "padding" | "shadow")
 }
 
 fn parse_kmark_layout_value(value: &str) -> Option<KmarkLayout> {
@@ -3817,8 +3934,75 @@ fn parse_kmark_border_size_value(value: &str) -> Option<String> {
     parse_css_length_value(value, false)
 }
 
+fn parse_kmark_radius_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_background_value(value: &str) -> Option<String> {
+    parse_kmark_border_color_value(trim_kmark_quotes(value))
+}
+
+fn parse_kmark_opacity_value(value: &str) -> Option<String> {
+    let opacity = trim_kmark_quotes(value).trim().parse::<f64>().ok()?;
+
+    if !opacity.is_finite() {
+        return None;
+    }
+
+    Some(format_css_number(opacity.clamp(0.0, 1.0)))
+}
+
+fn parse_kmark_rotate_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let numeric_value = if let Some(number) = trimmed.strip_suffix("deg") {
+        number.trim().parse::<f64>().ok()?
+    } else {
+        trimmed.parse::<f64>().ok()?
+    };
+
+    numeric_value
+        .is_finite()
+        .then(|| format!("{}deg", format_css_number(numeric_value)))
+}
+
+fn parse_kmark_shadow_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let normalized = trimmed.to_ascii_lowercase();
+
+    match normalized.as_str() {
+        "none" => return Some("none".to_owned()),
+        "soft" => return Some("0 2px 8px rgba(0,0,0,0.18)".to_owned()),
+        "medium" => return Some("0 4px 14px rgba(0,0,0,0.24)".to_owned()),
+        "hard" => return Some("0 6px 0 rgba(0,0,0,0.28)".to_owned()),
+        _ => {}
+    }
+
+    is_safe_css_property_value(trimmed).then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_box_spacing_value(value: &str, allow_auto: bool) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+
+    let mut values = Vec::with_capacity(parts.len());
+
+    for part in parts {
+        values.push(parse_css_length_value(part, allow_auto)?);
+    }
+
+    Some(values.join(" "))
+}
+
 fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
-    let trimmed = value.trim();
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if trimmed.is_empty() {
+        return None;
+    }
 
     if allow_auto && trimmed.eq_ignore_ascii_case("auto") {
         return Some("auto".to_owned());
@@ -3845,9 +4029,53 @@ fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
 
     matches!(
         unit,
-        "px" | "%" | "em" | "rem" | "vw" | "vh" | "vmin" | "vmax"
+        "px" | "%"
+            | "em"
+            | "rem"
+            | "mm"
+            | "cm"
+            | "in"
+            | "pt"
+            | "pc"
+            | "vw"
+            | "vh"
+            | "vmin"
+            | "vmax"
     )
     .then(|| trimmed.to_owned())
+}
+
+fn format_css_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+
+    let mut formatted = value.to_string();
+
+    if formatted.contains('.') {
+        while formatted.ends_with('0') {
+            formatted.pop();
+        }
+        if formatted.ends_with('.') {
+            formatted.pop();
+        }
+    }
+
+    formatted
+}
+
+fn is_safe_css_property_value(value: &str) -> bool {
+    let normalized = value.to_ascii_lowercase();
+
+    !value.is_empty()
+        && value.len() <= 160
+        && !value
+            .chars()
+            .any(|character| matches!(character, ';' | '"' | '\'' | '<' | '>' | '{' | '}'))
+        && !normalized.contains("url(")
+        && !normalized.contains("expression(")
+        && !normalized.contains("@import")
+        && !normalized.contains("javascript:")
 }
 
 fn parse_css_physical_length_value(value: &str) -> Option<String> {
@@ -3894,7 +4122,7 @@ fn parse_kmark_position_value(value: &str) -> Option<String> {
 }
 
 fn parse_kmark_border_color_value(value: &str) -> Option<String> {
-    let trimmed = value.trim();
+    let trimmed = trim_kmark_quotes(value).trim();
 
     if let Some(hex) = trimmed.strip_prefix('#') {
         return (matches!(hex.len(), 3 | 4 | 6 | 8)
@@ -5044,6 +5272,65 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"text-align:right\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:300px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_visual_image_parameters() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:80mm h:40mm padding:4mm bg:#f5f5f5 border_size:0.5mm border_color:#999 radius:3mm opacity:0.5 rotate:-3 shadow:soft margin:5mm -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:80mm;height:40mm;border-width:0.5mm;border-style:solid;border-color:#999;border-radius:3mm;overflow:hidden;background:#f5f5f5;opacity:0.5;transform:rotate(-3deg);transform-origin:center center;box-shadow:0 2px 8px rgba(0,0,0,0.18);margin:5mm;padding:4mm;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn accepts_background_alias_and_box_spacing_shorthand_for_images() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark margin:4mm 0 padding:1mm 2mm 3mm 4mm bg:red background:blue -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"background:blue;margin:4mm 0px;padding:1mm 2mm 3mm 4mm;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_visual_image_parameters_from_scope_with_single_override() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { align:center w:80mm radius:3mm shadow:soft } -->\n\n<!-- kmark w:50mm opacity:1.2 -->\n![](image.png)\n\n<!-- kmark } -->",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;align-items:center;\"><p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:50mm;border-radius:3mm;overflow:hidden;opacity:1;box-shadow:0 2px 8px rgba(0,0,0,0.18);\" /></p></div>"
+        );
+    }
+
+    #[test]
+    fn applies_default_border_when_only_image_border_color_is_set() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark border_color:red -->\n![](image.png)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn ignores_unsafe_visual_image_values() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark bg:url(javascript:alert(1)) opacity:bad rotate:bad shadow:url(javascript:alert(1)) margin:1mm; padding:<x> radius:\"3mm;\" -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" /></p>"
         );
     }
 
