@@ -129,6 +129,8 @@ struct ParagraphContext {
     image_count: usize,
     contains_non_image_content: bool,
     soft_break_ranges: Vec<Range<usize>>,
+    block_decoration: KmarkRootDecoration,
+    image_paragraph_decoration: KmarkRootDecoration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +202,17 @@ struct KmarkLayoutParams {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkTextParams {
+    color: Option<String>,
+    font_size: Option<String>,
+    font_weight: Option<String>,
+    font_family: Option<String>,
+    font_style: Option<String>,
+    letter_spacing: Option<String>,
+    line_height: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkPageParams {
     valign: Option<KmarkPageValign>,
 }
@@ -208,6 +221,7 @@ struct KmarkPageParams {
 struct KmarkParams {
     image: KmarkImageParams,
     layout: KmarkLayoutParams,
+    text: KmarkTextParams,
     page: KmarkPageParams,
 }
 
@@ -215,6 +229,7 @@ struct KmarkParams {
 struct KmarkParamBundle {
     preset_use: Option<String>,
     params: KmarkParams,
+    page_directive: PartialPageDirective,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -246,6 +261,12 @@ struct ActiveKmarkSingleBlock {
 struct KmarkRootDecoration {
     style: Option<String>,
     page_valign: Option<KmarkPageValign>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkParagraphDecorations {
+    block: KmarkRootDecoration,
+    image_paragraph: KmarkRootDecoration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -410,6 +431,7 @@ struct HtmlEmitter<'a> {
     pending_kmark_params: Option<PendingKmarkParams>,
     active_kmark_single_block: Option<ActiveKmarkSingleBlock>,
     pending_kmark_block_style: Option<String>,
+    pending_kmark_image_paragraph_style: Option<String>,
     pending_kmark_page_valign: Option<KmarkPageValign>,
 }
 
@@ -1066,6 +1088,7 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_params: None,
             active_kmark_single_block: None,
             pending_kmark_block_style: None,
+            pending_kmark_image_paragraph_style: None,
             pending_kmark_page_valign: None,
         }
     }
@@ -1204,15 +1227,14 @@ impl<'a> HtmlEmitter<'a> {
                             image_count: 0,
                             contains_non_image_content: false,
                             soft_break_ranges: Vec::new(),
+                            block_decoration: KmarkRootDecoration::default(),
+                            image_paragraph_decoration: KmarkRootDecoration::default(),
                         });
                     }
                     return;
                 }
-                let paragraph_open_tag = format!(
-                    "<p{}{}>",
-                    self.source_line_attributes(range),
-                    self.take_pending_kmark_block_attributes(),
-                );
+                let kmark_decorations = self.take_pending_kmark_paragraph_decorations();
+                let paragraph_open_tag = format!("<p{}>", self.source_line_attributes(range),);
                 if self.delay_callout_marker_paragraph_if_needed(paragraph_open_tag.clone(), range)
                 {
                     return;
@@ -1225,6 +1247,8 @@ impl<'a> HtmlEmitter<'a> {
                     image_count: 0,
                     contains_non_image_content: false,
                     soft_break_ranges: Vec::new(),
+                    block_decoration: kmark_decorations.block,
+                    image_paragraph_decoration: kmark_decorations.image_paragraph,
                 });
             }
             Tag::Heading {
@@ -1860,6 +1884,8 @@ impl<'a> HtmlEmitter<'a> {
             image_count: 0,
             contains_non_image_content: false,
             soft_break_ranges: Vec::new(),
+            block_decoration: KmarkRootDecoration::default(),
+            image_paragraph_decoration: KmarkRootDecoration::default(),
         });
     }
 
@@ -1934,6 +1960,9 @@ impl<'a> HtmlEmitter<'a> {
             KmarkComment::ScopeStart(bundle) => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
+                if final_bundle.page_directive.has_page_directive() {
+                    final_bundle.params.text.font_size = None;
+                }
                 let layer = self.resolve_kmark_bundle_layer(&final_bundle);
                 let resolved_params = layer.resolved_params();
                 if !resolved_params.has_directives() {
@@ -2039,6 +2068,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_image_style(&self, single_layer: Option<&KmarkParamLayer>) -> Option<String> {
+        self.resolve_visual_params(single_layer).image.to_style()
+    }
+
+    fn resolve_visual_params(&self, single_layer: Option<&KmarkParamLayer>) -> KmarkParams {
         let mut final_params = KmarkParams::default();
 
         for scope in &self.kmark_scope_stack {
@@ -2065,7 +2098,7 @@ impl<'a> HtmlEmitter<'a> {
             final_params.merge(&single_layer.direct);
         }
 
-        final_params.image.to_style()
+        final_params
     }
 
     fn resolve_active_block_params(&self) -> KmarkParams {
@@ -2092,6 +2125,24 @@ impl<'a> HtmlEmitter<'a> {
         final_params
     }
 
+    fn resolve_active_scope_block_params(&self) -> KmarkParams {
+        let mut final_params = KmarkParams::default();
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.preset);
+            }
+        }
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.direct);
+            }
+        }
+
+        final_params
+    }
+
     fn take_callout_root_decoration(&mut self) -> KmarkRootDecoration {
         let params = self.resolve_active_block_params();
         let decoration = KmarkRootDecoration {
@@ -2107,6 +2158,7 @@ impl<'a> HtmlEmitter<'a> {
             });
 
         self.pending_kmark_block_style = None;
+        self.pending_kmark_image_paragraph_style = None;
         self.pending_kmark_page_valign = None;
         if should_consume_current_single_block {
             self.active_kmark_single_block = None;
@@ -2158,6 +2210,7 @@ impl<'a> HtmlEmitter<'a> {
 
         self.pending_kmark_params = None;
         self.pending_kmark_block_style = resolved_params.to_single_block_root_style();
+        self.pending_kmark_image_paragraph_style = resolved_params.to_image_paragraph_root_style();
         self.pending_kmark_page_valign = resolved_params.page.valign;
         self.active_kmark_single_block = Some(ActiveKmarkSingleBlock {
             layer,
@@ -2196,13 +2249,49 @@ impl<'a> HtmlEmitter<'a> {
     fn close_active_kmark_single_block(&mut self) {
         self.active_kmark_single_block = None;
         self.pending_kmark_block_style = None;
+        self.pending_kmark_image_paragraph_style = None;
         self.pending_kmark_page_valign = None;
     }
 
     fn take_pending_kmark_block_decoration(&mut self) -> KmarkRootDecoration {
-        KmarkRootDecoration {
+        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+            return self.active_scope_block_decoration();
+        }
+
+        let decoration = KmarkRootDecoration {
             style: self.pending_kmark_block_style.take(),
             page_valign: self.pending_kmark_page_valign.take(),
+        };
+        self.pending_kmark_image_paragraph_style = None;
+        decoration
+    }
+
+    fn take_pending_kmark_paragraph_decorations(&mut self) -> KmarkParagraphDecorations {
+        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+            return KmarkParagraphDecorations {
+                block: self.active_scope_block_decoration(),
+                image_paragraph: KmarkRootDecoration::default(),
+            };
+        }
+
+        KmarkParagraphDecorations {
+            block: KmarkRootDecoration {
+                style: self.pending_kmark_block_style.take(),
+                page_valign: self.pending_kmark_page_valign,
+            },
+            image_paragraph: KmarkRootDecoration {
+                style: self.pending_kmark_image_paragraph_style.take(),
+                page_valign: self.pending_kmark_page_valign.take(),
+            },
+        }
+    }
+
+    fn active_scope_block_decoration(&self) -> KmarkRootDecoration {
+        let params = self.resolve_active_scope_block_params();
+
+        KmarkRootDecoration {
+            style: params.to_scoped_block_root_style(),
+            page_valign: None,
         }
     }
 
@@ -2252,7 +2341,22 @@ impl<'a> HtmlEmitter<'a> {
             return;
         };
 
-        if self.should_flatten_kmark_scope_image_paragraph(&context) {
+        let should_flatten_image_paragraph =
+            self.should_flatten_kmark_scope_image_paragraph(&context);
+        let decoration = if context.image_count > 0 && !context.contains_non_image_content {
+            &context.image_paragraph_decoration
+        } else {
+            &context.block_decoration
+        };
+
+        if !decoration.is_empty() {
+            self.patch_tag_attributes(
+                context.open_tag_start,
+                &decoration.attributes_with_optional_class(),
+            );
+        }
+
+        if should_flatten_image_paragraph {
             self.remove_soft_breaks(&context.soft_break_ranges);
             self.patch_tag_style(context.open_tag_start, "display:contents");
         }
@@ -2335,6 +2439,18 @@ impl<'a> HtmlEmitter<'a> {
         );
     }
 
+    fn patch_tag_attributes(&mut self, open_tag_start: usize, attributes: &str) {
+        if attributes.is_empty() {
+            return;
+        }
+
+        let Some(relative_tag_end_offset) = self.html[open_tag_start..].find('>') else {
+            return;
+        };
+        let tag_end_offset = open_tag_start + relative_tag_end_offset;
+        self.html.insert_str(tag_end_offset, attributes);
+    }
+
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
         resolve_line_number(&self.line_starts, range.start) + self.line_offset
     }
@@ -2367,6 +2483,7 @@ impl KmarkParamBundle {
             self.preset_use = Some(preset_use.clone());
         }
         self.params.merge(&other.params);
+        self.page_directive.merge(&other.page_directive);
     }
 }
 
@@ -2382,12 +2499,14 @@ impl KmarkParams {
     fn merge(&mut self, other: &Self) {
         self.image.merge(&other.image);
         self.layout.merge(&other.layout);
+        self.text.merge(&other.text);
         self.page.merge(&other.page);
     }
 
     fn has_directives(&self) -> bool {
         self.image.has_image_directives()
             || self.layout.has_layout_directives()
+            || self.text.has_text_directives()
             || self.page.has_page_directives()
     }
 
@@ -2396,6 +2515,9 @@ impl KmarkParams {
 
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
         }
         if let Some(layout_style) = self.layout.to_single_block_style() {
             rules.push(layout_style);
@@ -2420,6 +2542,35 @@ impl KmarkParams {
     }
 
     fn to_single_block_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
+        }
+        if let Some(layout_style) = self.layout.to_single_block_style() {
+            rules.push(layout_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_scoped_block_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_image_paragraph_root_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
         if self.page.valign.is_some() {
@@ -2448,6 +2599,10 @@ impl KmarkPageParams {
 }
 
 impl KmarkRootDecoration {
+    fn is_empty(&self) -> bool {
+        self.style.is_none() && self.page_valign.is_none()
+    }
+
     fn class_suffix(&self) -> String {
         self.page_valign
             .map(|valign| format!(" kmark-page-valign kmark-page-valign--{}", valign.name()))
@@ -2580,6 +2735,74 @@ impl KmarkLayout {
         match self {
             Self::Row => "row",
             Self::Column => "column",
+        }
+    }
+}
+
+impl KmarkTextParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(color) = &other.color {
+            self.color = Some(color.clone());
+        }
+        if let Some(font_size) = &other.font_size {
+            self.font_size = Some(font_size.clone());
+        }
+        if let Some(font_weight) = &other.font_weight {
+            self.font_weight = Some(font_weight.clone());
+        }
+        if let Some(font_family) = &other.font_family {
+            self.font_family = Some(font_family.clone());
+        }
+        if let Some(font_style) = &other.font_style {
+            self.font_style = Some(font_style.clone());
+        }
+        if let Some(letter_spacing) = &other.letter_spacing {
+            self.letter_spacing = Some(letter_spacing.clone());
+        }
+        if let Some(line_height) = &other.line_height {
+            self.line_height = Some(line_height.clone());
+        }
+    }
+
+    fn has_text_directives(&self) -> bool {
+        self.color.is_some()
+            || self.font_size.is_some()
+            || self.font_weight.is_some()
+            || self.font_family.is_some()
+            || self.font_style.is_some()
+            || self.letter_spacing.is_some()
+            || self.line_height.is_some()
+    }
+
+    fn to_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        self.push_style_rules(&mut rules);
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+    }
+
+    fn push_style_rules(&self, rules: &mut Vec<String>) {
+        if let Some(color) = &self.color {
+            rules.push(format!("color:{color}"));
+        }
+        if let Some(font_size) = &self.font_size {
+            rules.push(format!("font-size:{font_size}"));
+        }
+        if let Some(font_weight) = &self.font_weight {
+            rules.push(format!("font-weight:{font_weight}"));
+        }
+        if let Some(font_family) = &self.font_family {
+            rules.push(format!("font-family:{font_family}"));
+        }
+        if let Some(font_style) = &self.font_style {
+            rules.push(format!("font-style:{font_style}"));
+        }
+        if let Some(letter_spacing) = &self.letter_spacing {
+            rules.push(format!("letter-spacing:{letter_spacing}"));
+        }
+        if let Some(line_height) = &self.line_height {
+            rules.push(format!("line-height:{line_height}"));
         }
     }
 }
@@ -3128,55 +3351,14 @@ impl KmarkImageParams {
     fn to_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
-        if let Some(width) = &self.width {
-            rules.push(format!("width:{width}"));
-        }
-        if let Some(height) = &self.height {
-            rules.push(format!("height:{height}"));
-        }
+        self.push_size_style_rules(&mut rules);
         if let Some(fit) = &self.fit {
             rules.push(format!("object-fit:{fit}"));
         }
         if let Some(position) = &self.position {
             rules.push(format!("object-position:{position}"));
         }
-        if self.border_color.is_some() && self.border_size.is_none() {
-            rules.push("border-width:1px".to_owned());
-        }
-        if let Some(border_size) = &self.border_size {
-            rules.push(format!("border-width:{border_size}"));
-        }
-        if let Some(border_style) = self.border_style.as_deref().or_else(|| {
-            (self.border_size.is_some() || self.border_color.is_some()).then_some("solid")
-        }) {
-            rules.push(format!("border-style:{border_style}"));
-        }
-        if let Some(border_color) = &self.border_color {
-            rules.push(format!("border-color:{border_color}"));
-        }
-        if let Some(radius) = &self.radius {
-            rules.push(format!("border-radius:{radius}"));
-            rules.push("overflow:hidden".to_owned());
-        }
-        if let Some(background) = &self.background {
-            rules.push(format!("background:{background}"));
-        }
-        if let Some(opacity) = &self.opacity {
-            rules.push(format!("opacity:{opacity}"));
-        }
-        if let Some(rotate) = &self.rotate {
-            rules.push(format!("transform:rotate({rotate})"));
-            rules.push("transform-origin:center center".to_owned());
-        }
-        if let Some(shadow) = &self.shadow {
-            rules.push(format!("box-shadow:{shadow}"));
-        }
-        if let Some(margin) = &self.margin {
-            rules.push(format!("margin:{margin}"));
-        }
-        if let Some(padding) = &self.padding {
-            rules.push(format!("padding:{padding}"));
-        }
+        self.push_decoration_style_rules(&mut rules);
 
         (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
@@ -3184,12 +3366,26 @@ impl KmarkImageParams {
     fn to_box_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
+        self.push_box_style_rules(&mut rules);
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+    }
+
+    fn push_box_style_rules(&self, rules: &mut Vec<String>) {
+        self.push_size_style_rules(rules);
+        self.push_decoration_style_rules(rules);
+    }
+
+    fn push_size_style_rules(&self, rules: &mut Vec<String>) {
         if let Some(width) = &self.width {
             rules.push(format!("width:{width}"));
         }
         if let Some(height) = &self.height {
             rules.push(format!("height:{height}"));
         }
+    }
+
+    fn push_decoration_style_rules(&self, rules: &mut Vec<String>) {
         if let Some(border_size) = &self.border_size {
             rules.push(format!("border-width:{border_size}"));
         }
@@ -3203,8 +3399,27 @@ impl KmarkImageParams {
         if let Some(border_color) = &self.border_color {
             rules.push(format!("border-color:{border_color}"));
         }
-
-        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+        if let Some(radius) = &self.radius {
+            rules.push(format!("border-radius:{radius}"));
+        }
+        if let Some(background) = &self.background {
+            rules.push(format!("background:{background}"));
+        }
+        if let Some(opacity) = &self.opacity {
+            rules.push(format!("opacity:{opacity}"));
+        }
+        if let Some(rotate) = &self.rotate {
+            rules.push(format!("transform:{rotate}"));
+        }
+        if let Some(shadow) = &self.shadow {
+            rules.push(format!("box-shadow:{shadow}"));
+        }
+        if let Some(margin) = &self.margin {
+            rules.push(format!("margin:{margin}"));
+        }
+        if let Some(padding) = &self.padding {
+            rules.push(format!("padding:{padding}"));
+        }
     }
 }
 
@@ -3704,6 +3919,30 @@ fn split_kmark_tokens(input: &str) -> Vec<String> {
     tokens
 }
 
+fn split_kmark_param_pairs(input: &str) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+
+    for token in split_kmark_tokens(input) {
+        if token.chars().all(|character| character == '}') {
+            continue;
+        }
+
+        if let Some((key, value)) = token.split_once(':') {
+            pairs.push((key.to_owned(), value.to_owned()));
+            continue;
+        }
+
+        if let Some((_, value)) = pairs.last_mut() {
+            if !value.is_empty() {
+                value.push(' ');
+            }
+            value.push_str(&token);
+        }
+    }
+
+    pairs
+}
+
 fn trim_kmark_quotes(value: &str) -> &str {
     let trimmed = value.trim();
 
@@ -3731,30 +3970,10 @@ fn parse_kmark_param_bundle(input: &str) -> KmarkParamBundle {
 fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBundle) {
     let mut define_name = None;
     let mut bundle = KmarkParamBundle::default();
-    let tokens = split_kmark_tokens(input);
-    let mut token_index = 0;
+    bundle.page_directive = parse_kmark_page_directive_tokens(input).unwrap_or_default();
 
-    while token_index < tokens.len() {
-        let token = &tokens[token_index];
-        let Some((key, value)) = token.split_once(':') else {
-            token_index += 1;
-            continue;
-        };
-        let mut value = value.to_owned();
-
-        if should_collect_kmark_value_continuation(key) {
-            while let Some(next_token) = tokens.get(token_index + 1) {
-                if next_token == "}" || next_token.contains(':') {
-                    break;
-                }
-
-                value.push(' ');
-                value.push_str(next_token);
-                token_index += 1;
-            }
-        }
-
-        match key {
+    for (key, value) in split_kmark_param_pairs(input) {
+        match key.as_str() {
             "define" => {
                 if let Some(preset_name) = normalize_kmark_preset_name(&value) {
                     define_name = Some(preset_name);
@@ -3826,13 +4045,48 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                 }
             }
             "margin" => {
-                if let Some(margin) = parse_kmark_box_spacing_value(&value, true) {
+                if let Some(margin) = parse_kmark_margin_value(&value) {
                     bundle.params.image.margin = Some(margin);
                 }
             }
             "padding" => {
-                if let Some(padding) = parse_kmark_box_spacing_value(&value, false) {
+                if let Some(padding) = parse_kmark_padding_value(&value) {
                     bundle.params.image.padding = Some(padding);
+                }
+            }
+            "color" => {
+                if let Some(color) = parse_kmark_color_value(&value) {
+                    bundle.params.text.color = Some(color);
+                }
+            }
+            "font_size" => {
+                if let Some(font_size) = parse_kmark_font_size_value(&value) {
+                    bundle.params.text.font_size = Some(font_size);
+                }
+            }
+            "font_weight" => {
+                if let Some(font_weight) = parse_kmark_font_weight_value(&value) {
+                    bundle.params.text.font_weight = Some(font_weight);
+                }
+            }
+            "font_family" => {
+                if let Some(font_family) = parse_kmark_font_family_value(&value) {
+                    bundle.params.text.font_family = Some(font_family);
+                }
+            }
+            "font_style" => {
+                if let Some(font_style) = parse_kmark_font_style_value(&value) {
+                    bundle.params.text.font_style = Some(font_style);
+                }
+            }
+            "letter_spacing" => {
+                if let Some(letter_spacing) = parse_kmark_letter_spacing_value(&value) {
+                    bundle.params.text.letter_spacing = Some(letter_spacing);
+                }
+            }
+            "line_height" => {
+                if let Some(line_height) = parse_kmark_line_height_value(&value) {
+                    bundle.params.text.line_height = Some(line_height);
                 }
             }
             "layout" => {
@@ -3867,15 +4121,9 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
             }
             _ => {}
         }
-
-        token_index += 1;
     }
 
     (define_name, bundle)
-}
-
-fn should_collect_kmark_value_continuation(key: &str) -> bool {
-    matches!(key, "margin" | "padding" | "shadow")
 }
 
 fn parse_kmark_layout_value(value: &str) -> Option<KmarkLayout> {
@@ -3939,70 +4187,114 @@ fn parse_kmark_radius_value(value: &str) -> Option<String> {
 }
 
 fn parse_kmark_background_value(value: &str) -> Option<String> {
-    parse_kmark_border_color_value(trim_kmark_quotes(value))
+    parse_kmark_color_value(value)
 }
 
 fn parse_kmark_opacity_value(value: &str) -> Option<String> {
-    let opacity = trim_kmark_quotes(value).trim().parse::<f64>().ok()?;
+    let trimmed = trim_kmark_quotes(value).trim();
+    let opacity = trimmed.parse::<f64>().ok()?;
 
-    if !opacity.is_finite() {
-        return None;
-    }
-
-    Some(format_css_number(opacity.clamp(0.0, 1.0)))
+    (0.0..=1.0).contains(&opacity).then(|| trimmed.to_owned())
 }
 
 fn parse_kmark_rotate_value(value: &str) -> Option<String> {
     let trimmed = trim_kmark_quotes(value).trim();
-    let numeric_value = if let Some(number) = trimmed.strip_suffix("deg") {
-        number.trim().parse::<f64>().ok()?
-    } else {
-        trimmed.parse::<f64>().ok()?
-    };
 
-    numeric_value
-        .is_finite()
-        .then(|| format!("{}deg", format_css_number(numeric_value)))
+    if trimmed.parse::<f64>().is_ok() {
+        return Some(format!("rotate({trimmed}deg)"));
+    }
+
+    for unit in ["deg", "rad", "turn"] {
+        if let Some(number) = trimmed.strip_suffix(unit) {
+            return number
+                .parse::<f64>()
+                .is_ok()
+                .then(|| format!("rotate({trimmed})"));
+        }
+    }
+
+    None
 }
 
 fn parse_kmark_shadow_value(value: &str) -> Option<String> {
     let trimmed = trim_kmark_quotes(value).trim();
-    let normalized = trimmed.to_ascii_lowercase();
 
-    match normalized.as_str() {
-        "none" => return Some("none".to_owned()),
-        "soft" => return Some("0 2px 8px rgba(0,0,0,0.18)".to_owned()),
-        "medium" => return Some("0 4px 14px rgba(0,0,0,0.24)".to_owned()),
-        "hard" => return Some("0 6px 0 rgba(0,0,0,0.28)".to_owned()),
+    match trimmed {
+        "true" | "md" => return Some("0 2px 8px #0003".to_owned()),
+        "sm" => return Some("0 1px 3px #0002".to_owned()),
+        "lg" => return Some("0 4px 16px #0004".to_owned()),
+        "false" | "none" => return Some("none".to_owned()),
         _ => {}
     }
 
-    is_safe_css_property_value(trimmed).then(|| trimmed.to_owned())
+    parse_css_box_shadow_value(trimmed)
 }
 
-fn parse_kmark_box_spacing_value(value: &str, allow_auto: bool) -> Option<String> {
+fn parse_kmark_margin_value(value: &str) -> Option<String> {
+    parse_css_box_spacing_value(value, true)
+}
+
+fn parse_kmark_padding_value(value: &str) -> Option<String> {
+    parse_css_box_spacing_value(value, false)
+}
+
+fn parse_kmark_font_size_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_font_weight_value(value: &str) -> Option<String> {
     let trimmed = trim_kmark_quotes(value).trim();
-    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
 
-    if parts.is_empty() || parts.len() > 4 {
-        return None;
+    if matches!(trimmed, "normal" | "bold" | "bolder" | "lighter") {
+        return Some(trimmed.to_owned());
     }
 
-    let mut values = Vec::with_capacity(parts.len());
+    let weight = trimmed.parse::<u16>().ok()?;
 
-    for part in parts {
-        values.push(parse_css_length_value(part, allow_auto)?);
+    (matches!(weight, 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900))
+        .then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_font_family_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    (!trimmed.is_empty()
+        && trimmed.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character.is_whitespace()
+                || matches!(character, '-' | '_' | ',' | '"' | '\'')
+        }))
+    .then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_font_style_value(value: &str) -> Option<String> {
+    matches!(
+        trim_kmark_quotes(value).trim(),
+        "normal" | "italic" | "oblique"
+    )
+    .then(|| trim_kmark_quotes(value).trim().to_owned())
+}
+
+fn parse_kmark_letter_spacing_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_line_height_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if trimmed == "normal" {
+        return Some(trimmed.to_owned());
     }
 
-    Some(values.join(" "))
+    if trimmed.parse::<f64>().is_ok() {
+        return Some(trimmed.to_owned());
+    }
+
+    parse_css_length_value(trimmed, false)
 }
 
 fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
     let trimmed = trim_kmark_quotes(value).trim();
-
-    if trimmed.is_empty() {
-        return None;
-    }
 
     if allow_auto && trimmed.eq_ignore_ascii_case("auto") {
         return Some("auto".to_owned());
@@ -4032,50 +4324,97 @@ fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
         "px" | "%"
             | "em"
             | "rem"
+            | "vw"
+            | "vh"
+            | "vmin"
+            | "vmax"
             | "mm"
             | "cm"
             | "in"
             | "pt"
             | "pc"
-            | "vw"
-            | "vh"
-            | "vmin"
-            | "vmax"
     )
     .then(|| trimmed.to_owned())
 }
 
-fn format_css_number(value: f64) -> String {
-    if value == 0.0 {
-        return "0".to_owned();
+fn parse_css_signed_length_value(value: &str, allow_unitless_zero: bool) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if allow_unitless_zero && trimmed == "0" {
+        return Some("0".to_owned());
     }
 
-    let mut formatted = value.to_string();
+    let numeric_end = trimmed
+        .find(|character: char| !character.is_ascii_digit() && character != '.' && character != '-')
+        .unwrap_or(trimmed.len());
 
-    if formatted.contains('.') {
-        while formatted.ends_with('0') {
-            formatted.pop();
-        }
-        if formatted.ends_with('.') {
-            formatted.pop();
-        }
+    if numeric_end == 0 || numeric_end == trimmed.len() {
+        return None;
     }
 
-    formatted
+    let number = &trimmed[..numeric_end];
+    let unit = &trimmed[numeric_end..];
+
+    if number.parse::<f64>().is_err() {
+        return None;
+    }
+
+    matches!(unit, "px" | "em" | "rem" | "mm" | "cm" | "in" | "pt" | "pc")
+        .then(|| trimmed.to_owned())
 }
 
-fn is_safe_css_property_value(value: &str) -> bool {
-    let normalized = value.to_ascii_lowercase();
+fn parse_css_box_spacing_value(value: &str, allow_auto: bool) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
 
-    !value.is_empty()
-        && value.len() <= 160
-        && !value
-            .chars()
-            .any(|character| matches!(character, ';' | '"' | '\'' | '<' | '>' | '{' | '}'))
-        && !normalized.contains("url(")
-        && !normalized.contains("expression(")
-        && !normalized.contains("@import")
-        && !normalized.contains("javascript:")
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+
+    let parsed = parts
+        .iter()
+        .map(|part| parse_css_length_value(part, allow_auto))
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(parsed.join(" "))
+}
+
+fn parse_css_box_shadow_value(value: &str) -> Option<String> {
+    let parts = value.split_whitespace().collect::<Vec<_>>();
+
+    if parts.len() < 2 || parts.len() > 6 {
+        return None;
+    }
+
+    let mut parsed = Vec::new();
+    let mut length_count = 0usize;
+    let mut color_count = 0usize;
+
+    for part in parts {
+        if part == "inset" && parsed.is_empty() {
+            parsed.push(part.to_owned());
+            continue;
+        }
+
+        if let Some(length) = parse_css_signed_length_value(part, true) {
+            length_count += 1;
+            parsed.push(length);
+            continue;
+        }
+
+        if let Some(color) = parse_kmark_color_value(part) {
+            color_count += 1;
+            if color_count > 1 {
+                return None;
+            }
+            parsed.push(color);
+            continue;
+        }
+
+        return None;
+    }
+
+    (length_count >= 2).then(|| parsed.join(" "))
 }
 
 fn parse_css_physical_length_value(value: &str) -> Option<String> {
@@ -4122,6 +4461,10 @@ fn parse_kmark_position_value(value: &str) -> Option<String> {
 }
 
 fn parse_kmark_border_color_value(value: &str) -> Option<String> {
+    parse_kmark_color_value(value)
+}
+
+fn parse_kmark_color_value(value: &str) -> Option<String> {
     let trimmed = trim_kmark_quotes(value).trim();
 
     if let Some(hex) = trimmed.strip_prefix('#') {
@@ -5171,6 +5514,137 @@ mod tests {
     }
 
     #[test]
+    fn applies_text_params_to_following_paragraph_block() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark color:#c00 font_size:14pt font_weight:700 -->\n重要",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:#c00;font-size:14pt;font-weight:700;\">重要</p>"
+        );
+    }
+
+    #[test]
+    fn applies_visual_and_text_params_to_following_heading_block() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:40mm h:12mm border_size:2px border_color:red radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right color:#c00 font_size:12pt font_weight:bold font_family:\"Yu Gothic\" letter_spacing:0.08em line_height:1.2 -->\n# 社外秘",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\""));
+        assert!(rendered_preview.html.contains("width:40mm"));
+        assert!(rendered_preview.html.contains("height:12mm"));
+        assert!(rendered_preview.html.contains("border-width:2px"));
+        assert!(rendered_preview.html.contains("border-color:red"));
+        assert!(rendered_preview.html.contains("border-radius:4px"));
+        assert!(rendered_preview.html.contains("background:#fff0f0"));
+        assert!(rendered_preview.html.contains("opacity:0.8"));
+        assert!(rendered_preview.html.contains("transform:rotate(-10deg)"));
+        assert!(rendered_preview.html.contains("box-shadow:0 2px 8px #0003"));
+        assert!(rendered_preview.html.contains("padding:2mm 4mm"));
+        assert!(rendered_preview.html.contains("margin:2mm"));
+        assert!(rendered_preview.html.contains("text-align:right"));
+        assert!(rendered_preview.html.contains("color:#c00"));
+        assert!(rendered_preview.html.contains("font-size:12pt"));
+        assert!(rendered_preview.html.contains("font-weight:bold"));
+        assert!(rendered_preview.html.contains("font-family:Yu Gothic"));
+        assert!(rendered_preview.html.contains("letter-spacing:0.08em"));
+        assert!(rendered_preview.html.contains("line-height:1.2"));
+        assert!(rendered_preview.html.contains(">社外秘</h1>"));
+    }
+
+    #[test]
+    fn keeps_block_text_decoration_from_leaking_to_following_block() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark color:red align:right -->\n# 見出し\n\n本文");
+
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;text-align:right\">見出し</h1>"
+        ));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"3\" data-source-line-end=\"3\">本文</p>"));
+    }
+
+    #[test]
+    fn applies_block_decoration_to_list_table_blockquote_and_code_roots() {
+        let list = render_markdown_preview("<!-- kmark color:red -->\n- A\n- B");
+        assert!(list.html.contains("<ul style=\"color:red;\">"));
+
+        let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
+        assert!(table.html.contains("<table style=\"color:red;\">"));
+
+        let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
+        assert!(blockquote
+            .html
+            .contains("<blockquote data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;\">"));
+
+        let code =
+            render_markdown_preview("<!-- kmark color:red bg:#eee -->\n```rust\nfn main() {}\n```");
+        assert!(code.html.contains(
+            "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;color:red;\"><code class=\"language-rust\">"
+        ));
+    }
+
+    #[test]
+    fn applies_scope_text_and_visual_params_to_each_block_root() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { color:red border_size:1px border_color:red radius:2px -->\n本文\n\n# 見出し\n<!-- kmark } -->",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\">"));
+        assert!(rendered_preview.html.contains(
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">本文</p>"
+        ));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">見出し</h1>"
+        ));
+    }
+
+    #[test]
+    fn ignores_block_decoration_when_blank_line_separates_comment_and_block() {
+        let rendered_preview = render_markdown_preview("<!-- kmark color:red -->\n\n本文");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\">本文</p>"
+        );
+    }
+
+    #[test]
+    fn treats_legacy_text_and_stamp_keys_as_non_rendering_unknown_params() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark text:社外秘 -->\n本文\n\n<!-- kmark stamp:社外秘 -->\n続き",
+        );
+
+        assert!(!rendered_preview.html.contains("社外秘"));
+        assert!(!rendered_preview.html.contains("kmark-text"));
+        assert!(!rendered_preview.html.contains("kmark-stamp"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"1\" data-source-line-end=\"1\">本文</p>"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"4\" data-source-line-end=\"4\">続き</p>"));
+    }
+
+    #[test]
+    fn applies_shared_visual_params_to_images() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:40mm h:12mm radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:0 2px 8px #0003 padding:2mm 4mm margin:2mm -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:40mm;height:12mm;border-radius:4px;background:#fff0f0;opacity:0.8;transform:rotate(-10deg);box-shadow:0 2px 8px #0003;margin:2mm;padding:2mm 4mm;\" /></p>"
+        );
+    }
+
+    #[test]
     fn merges_consecutive_kmark_comments_with_last_write_wins() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark w:200 -->\n<!-- kmark h:100 -->\n<!-- kmark w:300 -->\n![](image.png)",
@@ -5272,65 +5746,6 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"text-align:right\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:300px;\" /></p>"
-        );
-    }
-
-    #[test]
-    fn applies_kmark_visual_image_parameters() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:80mm h:40mm padding:4mm bg:#f5f5f5 border_size:0.5mm border_color:#999 radius:3mm opacity:0.5 rotate:-3 shadow:soft margin:5mm -->\n![](image.png)",
-        );
-
-        assert_eq!(
-            rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:80mm;height:40mm;border-width:0.5mm;border-style:solid;border-color:#999;border-radius:3mm;overflow:hidden;background:#f5f5f5;opacity:0.5;transform:rotate(-3deg);transform-origin:center center;box-shadow:0 2px 8px rgba(0,0,0,0.18);margin:5mm;padding:4mm;\" /></p>"
-        );
-    }
-
-    #[test]
-    fn accepts_background_alias_and_box_spacing_shorthand_for_images() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark margin:4mm 0 padding:1mm 2mm 3mm 4mm bg:red background:blue -->\n![](image.png)",
-        );
-
-        assert_eq!(
-            rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"background:blue;margin:4mm 0px;padding:1mm 2mm 3mm 4mm;\" /></p>"
-        );
-    }
-
-    #[test]
-    fn applies_visual_image_parameters_from_scope_with_single_override() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark { align:center w:80mm radius:3mm shadow:soft } -->\n\n<!-- kmark w:50mm opacity:1.2 -->\n![](image.png)\n\n<!-- kmark } -->",
-        );
-
-        assert_eq!(
-            rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;align-items:center;\"><p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:50mm;border-radius:3mm;overflow:hidden;opacity:1;box-shadow:0 2px 8px rgba(0,0,0,0.18);\" /></p></div>"
-        );
-    }
-
-    #[test]
-    fn applies_default_border_when_only_image_border_color_is_set() {
-        let rendered_preview =
-            render_markdown_preview("<!-- kmark border_color:red -->\n![](image.png)");
-
-        assert_eq!(
-            rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;\" /></p>"
-        );
-    }
-
-    #[test]
-    fn ignores_unsafe_visual_image_values() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark bg:url(javascript:alert(1)) opacity:bad rotate:bad shadow:url(javascript:alert(1)) margin:1mm; padding:<x> radius:\"3mm;\" -->\n![](image.png)",
-        );
-
-        assert_eq!(
-            rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" /></p>"
         );
     }
 

@@ -114,8 +114,8 @@
       "contexts": ["single", "image", "scope", "shape"],
       "insertText": "radius:",
       "description": "対象要素の角丸を指定する",
-      "examples": ["<!-- kmark radius:4mm -->"],
-      "priority": 78
+      "examples": ["<!-- kmark radius:4px -->"],
+      "priority": 76
     },
     {
       "name": "bg",
@@ -124,8 +124,18 @@
       "contexts": ["single", "image", "scope", "shape"],
       "insertText": "bg:",
       "description": "対象要素の背景色を指定する",
-      "examples": ["<!-- kmark bg:#f5f5f5 -->"],
-      "priority": 77
+      "examples": ["<!-- kmark bg:#fff0f0 -->"],
+      "priority": 74
+    },
+    {
+      "name": "background",
+      "aliases": ["bg"],
+      "type": "color",
+      "contexts": ["single", "image", "scope", "shape"],
+      "insertText": "background:",
+      "description": "対象要素の背景色を指定する",
+      "examples": ["<!-- kmark background:#fff0f0 -->"],
+      "priority": 73
     },
     {
       "name": "opacity",
@@ -134,29 +144,28 @@
       "contexts": ["single", "image", "scope", "shape"],
       "insertText": "opacity:",
       "description": "対象要素の透明度を0から1で指定する",
-      "examples": ["<!-- kmark opacity:0.5 -->"],
-      "priority": 76
+      "examples": ["<!-- kmark opacity:0.8 -->"],
+      "priority": 72
     },
     {
       "name": "rotate",
       "aliases": [],
-      "type": "angle",
+      "type": "number",
       "contexts": ["single", "image", "scope", "shape"],
       "insertText": "rotate:",
       "description": "対象要素の回転角度を指定する",
-      "examples": ["<!-- kmark rotate:-3deg -->"],
-      "priority": 76
+      "examples": ["<!-- kmark rotate:-10 -->"],
+      "priority": 72
     },
     {
       "name": "shadow",
       "aliases": [],
-      "type": "enum",
+      "type": "string",
       "contexts": ["single", "image", "scope", "shape"],
-      "values": ["none", "soft", "medium", "hard"],
       "insertText": "shadow:",
       "description": "対象要素の影を指定する",
-      "examples": ["<!-- kmark shadow:soft -->"],
-      "priority": 76
+      "examples": ["<!-- kmark shadow:true -->", "<!-- kmark shadow:sm -->"],
+      "priority": 71
     },
     {
       "name": "margin",
@@ -164,9 +173,9 @@
       "type": "length",
       "contexts": ["single", "image", "scope", "shape"],
       "insertText": "margin:",
-      "description": "対象要素の外余白を指定する",
-      "examples": ["<!-- kmark margin:5mm -->"],
-      "priority": 74
+      "description": "対象要素の外側余白を指定する",
+      "examples": ["<!-- kmark margin:2mm -->"],
+      "priority": 70
     },
     {
       "name": "padding",
@@ -174,9 +183,71 @@
       "type": "length",
       "contexts": ["single", "image", "scope", "shape"],
       "insertText": "padding:",
-      "description": "対象要素の内余白を指定する",
-      "examples": ["<!-- kmark padding:4mm -->"],
+      "description": "対象要素の内側余白を指定する",
+      "examples": ["<!-- kmark padding:2mm 4mm -->"],
+      "priority": 70
+    },
+    {
+      "name": "color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "color:",
+      "description": "文字色を指定する",
+      "examples": ["<!-- kmark color:red -->\n重要"],
+      "priority": 78
+    },
+    {
+      "name": "font_weight",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["single", "text", "scope"],
+      "values": ["normal", "bold", "bolder", "lighter", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
+      "insertText": "font_weight:",
+      "description": "文字の太さを指定する",
+      "examples": ["<!-- kmark font_weight:bold -->\n承認済"],
+      "priority": 77
+    },
+    {
+      "name": "font_family",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "font_family:",
+      "description": "文字のfont familyを指定する",
+      "examples": ["<!-- kmark font_family:\"Yu Gothic\" -->\n社外秘"],
+      "priority": 76
+    },
+    {
+      "name": "font_style",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "text", "scope"],
+      "values": ["normal", "italic", "oblique"],
+      "insertText": "font_style:",
+      "description": "文字styleを指定する",
+      "examples": ["<!-- kmark font_style:italic -->\nDRAFT"],
+      "priority": 75
+    },
+    {
+      "name": "letter_spacing",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "letter_spacing:",
+      "description": "文字間隔を指定する",
+      "examples": ["<!-- kmark letter_spacing:0.08em -->\nCONFIDENTIAL"],
       "priority": 74
+    },
+    {
+      "name": "line_height",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "line_height:",
+      "description": "行高を指定する",
+      "examples": ["<!-- kmark line_height:1.2 -->\n承認済"],
+      "priority": 73
     },
     {
       "name": "layout",
@@ -255,10 +326,10 @@
       "name": "font_size",
       "aliases": [],
       "type": "length",
-      "contexts": ["page", "scope"],
+      "contexts": ["single", "text", "page", "scope"],
       "insertText": "font_size:",
-      "description": "用紙表示の文字サイズを指定する",
-      "examples": ["<!-- kmark { font_size:12pt } -->"],
+      "description": "文字サイズまたは用紙表示の文字サイズを指定する",
+      "examples": ["<!-- kmark font_size:12pt -->\n重要", "<!-- kmark { font_size:12pt } -->"],
       "priority": 80
     },
     {
