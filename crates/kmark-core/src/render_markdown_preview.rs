@@ -1967,9 +1967,6 @@ impl<'a> HtmlEmitter<'a> {
             KmarkComment::ScopeStart(bundle) => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
-                if final_bundle.page_directive.has_page_directive() {
-                    final_bundle.params.text.font_size = None;
-                }
                 let layer = self.resolve_kmark_bundle_layer(&final_bundle);
                 let resolved_params = layer.resolved_params();
                 if !resolved_params.has_directives() {
@@ -2800,8 +2797,8 @@ impl KmarkTextParams {
         if let Some(color) = &other.color {
             self.color = Some(color.clone());
         }
-        if let Some(page_font_size) = &other.page_font_size {
-            self.page_font_size = Some(page_font_size.clone());
+        if let Some(font_size) = &other.font_size {
+            self.font_size = Some(font_size.clone());
         }
         if let Some(font_weight) = &other.font_weight {
             self.font_weight = Some(font_weight.clone());
@@ -2822,7 +2819,7 @@ impl KmarkTextParams {
 
     fn has_text_directives(&self) -> bool {
         self.color.is_some()
-            || self.page_font_size.is_some()
+            || self.font_size.is_some()
             || self.font_weight.is_some()
             || self.font_family.is_some()
             || self.font_style.is_some()
@@ -3171,8 +3168,8 @@ impl PartialPageDirective {
         if let Some(page_margin_left) = &other.page_margin_left {
             self.page_margin_left = Some(page_margin_left.clone());
         }
-        if let Some(font_size) = &other.font_size {
-            self.font_size = Some(font_size.clone());
+        if let Some(page_font_size) = &other.page_font_size {
+            self.page_font_size = Some(page_font_size.clone());
         }
         if let Some(page_number_position) = other.page_number_position {
             self.page_number_position = Some(page_number_position);
@@ -3237,7 +3234,7 @@ impl PartialPageDirective {
             || self.page_margin_right.is_some()
             || self.page_margin_bottom.is_some()
             || self.page_margin_left.is_some()
-            || self.font_size.is_some()
+            || self.page_font_size.is_some()
             || self.has_page_number_directive()
     }
 
@@ -3763,9 +3760,9 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_margin_left = Some(page_margin_left);
                 }
             }
-            "font_size" => {
-                if let Some(font_size) = parse_kmark_page_length_value(value) {
-                    directive.font_size = Some(font_size);
+            "page_font_size" => {
+                if let Some(page_font_size) = parse_kmark_page_length_value(value) {
+                    directive.page_font_size = Some(page_font_size);
                 }
             }
             "page_number" => {
@@ -4949,10 +4946,10 @@ mod tests {
     #[test]
     fn applies_unclosed_scope_page_settings_and_nested_overrides() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm page_font_size:11pt -->\n\
              # 1\n\
              <!-- --- -->\n\
-             <!-- kmark { page_orientation:landscape font_size:9pt page_margin:8mm -->\n\
+             <!-- kmark { page_orientation:landscape page_font_size:9pt page_margin:8mm -->\n\
              # 2\n\
              <!-- kmark } -->\n\
              # 3",
@@ -5005,7 +5002,7 @@ mod tests {
     #[test]
     fn keeps_scope_page_directives_out_of_block_decoration_route() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_width:297mm page_height:210mm page_margin:8mm font_size:10pt -->\n\
+            "<!-- kmark { page_width:297mm page_height:210mm page_margin:8mm page_font_size:10pt -->\n\
              ![](image.png)\n\
              <!-- kmark } -->",
         );
@@ -5049,6 +5046,22 @@ mod tests {
     }
 
     #[test]
+    fn keeps_scope_font_size_as_text_decoration_not_page_font_size() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { color:#c00000 font_size:16pt -->\n\
+             # Body\n\
+             <!-- kmark } -->",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 1);
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "10.5pt"
+        );
+        assert!(rendered_preview.html.contains("font-size:16pt"));
+    }
+
+    #[test]
     fn lets_individual_page_margins_override_common_page_margin() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark { page_margin:10mm page_margin_left:4mm page_margin_bottom:6mm -->\n\
@@ -5066,7 +5079,7 @@ mod tests {
     #[test]
     fn accepts_page_directives_used_by_completion() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 orientation:landscape page_margin:15mm font_size:12pt } -->\n\
+            "<!-- kmark { page_size:A4 orientation:landscape page_margin:15mm page_font_size:12pt } -->\n\
              # Alias",
         );
 
@@ -5083,6 +5096,22 @@ mod tests {
             rendered_preview.pages[0].text_style.font_size.as_str(),
             "12pt"
         );
+    }
+
+    #[test]
+    fn applies_standalone_page_font_size_to_following_pages() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_font_size:12pt -->\n\
+             \n\
+             # First\n\
+             <!-- --- -->\n\
+             # Second",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        for page in &rendered_preview.pages {
+            assert_eq!(page.text_style.font_size.as_str(), "12pt");
+        }
     }
 
     #[test]
@@ -5129,9 +5158,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_page_number_font_size_separate_from_body_font_size() {
+    fn keeps_page_number_font_size_separate_from_page_font_size() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_number:show font_size:16pt page_number_font_size:8pt -->\n\
+            "<!-- kmark { page_number:show page_font_size:16pt page_number_font_size:8pt -->\n\
              # Body",
         );
         let page = &rendered_preview.pages[0];
@@ -5223,7 +5252,7 @@ mod tests {
              <!-- kmark page_height:90mm -->\n\
              <!-- kmark page_margin:12mm -->\n\
              <!-- kmark page_margin_left:7mm -->\n\
-             <!-- kmark font_size:9pt -->\n\
+             <!-- kmark page_font_size:9pt -->\n\
              <!-- kmark page_number:bottom-center -->\n\
              <!-- kmark page_number_format:\"Page {page}\" -->\n\
              <!-- kmark page_number_reset:true -->\n\
@@ -5298,9 +5327,9 @@ mod tests {
     #[test]
     fn splits_pages_when_scope_page_style_starts_and_ends() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 page_orientation:portrait font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_orientation:portrait page_font_size:11pt -->\n\
              # Normal\n\
-             <!-- kmark { page_orientation:landscape font_size:9pt align:center -->\n\
+             <!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->\n\
              # Wide\n\
              <!-- kmark } -->\n\
              # Back",
@@ -5330,7 +5359,7 @@ mod tests {
     #[test]
     fn keeps_scope_page_style_and_block_decoration_across_explicit_page_break() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_orientation:landscape font_size:9pt align:center -->\n\
+            "<!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->\n\
              # Wide 1\n\
              <!-- --- -->\n\
              # Wide 2\n\

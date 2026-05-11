@@ -24,13 +24,13 @@ const PAGE_PARAM_NAMES = new Set([
   "page_number_count",
   "page_number_visible",
   "page_number_style",
+  "page_font_size",
   "page_number_font_size",
   "page_number_color",
   "page_number_margin_top",
   "page_number_margin_bottom",
   "page_number_margin_left",
   "page_number_margin_right",
-  "font_size",
 ]);
 
 export function parseKmarkDirectiveFragment(directiveText: string): ParsedKmarkDirectiveFragment {
