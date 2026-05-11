@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "params": [
     {
       "name": "align",
@@ -100,32 +100,21 @@
       "name": "w",
       "aliases": ["width"],
       "type": "length",
-      "contexts": ["single", "image", "shape"],
+      "contexts": ["single", "scope", "text", "image", "shape"],
       "insertText": "w:",
-      "description": "対象要素の幅を指定する",
-      "examples": ["<!-- kmark w:200 -->", "<!-- kmark w:50% -->"],
+      "description": "対象要素の幅を指定する。fitで内容幅、page_fitでページ本文幅に合わせる",
+      "examples": ["<!-- kmark w:200 -->", "<!-- kmark w:fit -->", "<!-- kmark w:page_fit -->"],
       "priority": 95
     },
     {
       "name": "h",
       "aliases": ["height"],
       "type": "length",
-      "contexts": ["single", "image", "shape"],
+      "contexts": ["single", "scope", "text", "image", "shape"],
       "insertText": "h:",
-      "description": "対象要素の高さを指定する",
-      "examples": ["<!-- kmark h:100 -->"],
+      "description": "対象要素の高さを指定する。fitで内容高、page_fitでページ本文高に合わせる",
+      "examples": ["<!-- kmark h:100 -->", "<!-- kmark h:fit -->", "<!-- kmark h:page_fit -->"],
       "priority": 95
-    },
-    {
-      "name": "fit",
-      "aliases": [],
-      "type": "enum",
-      "contexts": ["image", "single"],
-      "values": ["contain", "cover", "fill", "none", "scale-down"],
-      "insertText": "fit:",
-      "description": "画像や要素の収まり方を指定する",
-      "examples": ["<!-- kmark fit:contain -->"],
-      "priority": 90
     },
     {
       "name": "pos",

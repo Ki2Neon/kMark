@@ -803,6 +803,8 @@ input:focus-visible,
 }
 
 .preview-section__standard-content {
+  --kmark-page-fit-width: 100%;
+  --kmark-page-fit-height: auto;
   min-height: 100%;
   width: 100%;
   transform-origin: top left;
@@ -822,6 +824,16 @@ input:focus-visible,
 }
 
 .preview-section__page-frame {
+  --kmark-page-fit-width: calc(
+    var(--kmark-page-width, 210mm)
+    - var(--kmark-page-margin-left, 16mm)
+    - var(--kmark-page-margin-right, 16mm)
+  );
+  --kmark-page-fit-height: calc(
+    var(--kmark-page-height, 297mm)
+    - var(--kmark-page-margin-top, 16mm)
+    - var(--kmark-page-margin-bottom, 18mm)
+  );
   position: relative;
   flex: 0 0 auto;
   box-sizing: border-box;

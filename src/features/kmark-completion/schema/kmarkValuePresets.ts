@@ -10,6 +10,12 @@ export const KMARK_LENGTH_VALUE_PRESETS: readonly string[] = [
   "1rem",
 ] as const;
 
+export const KMARK_SIZE_VALUE_PRESETS: readonly string[] = [
+  "fit",
+  "page_fit",
+  ...KMARK_LENGTH_VALUE_PRESETS,
+] as const;
+
 export const KMARK_PAGE_LENGTH_VALUE_PRESETS: readonly string[] = [
   "10mm",
   "15mm",
