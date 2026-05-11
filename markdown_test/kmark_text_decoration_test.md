@@ -9,6 +9,20 @@
 
 通常本文。直前styleが漏れないこと。
 
+## text width fit
+
+<!-- kmark color:#900 bg:#fff3f3 border_size:2px border_color:#c00 radius:4px padding:2mm -->
+この枠線と背景は文字幅に合うこと。
+
+<!-- kmark color:#036 bg:#eef8ff border_size:2px border_color:#58a radius:4px padding:2mm align:right -->
+右寄せ時も文字幅に合うこと。
+
+<!-- kmark color:#650 bg:#fff8d8 border_size:2px border_color:#ca0 radius:4px padding:2mm align:center -->
+中央寄せ時も文字幅に合うこと。
+
+<!-- kmark w:45mm color:#333 bg:#f4f4f4 border_size:1px border_color:#999 padding:2mm align:center -->
+w指定時は明示幅を優先すること。
+
 ## heading visual
 
 <!-- kmark w:40mm h:12mm color:#c00 font_size:12pt font_weight:bold font_family:"Yu Gothic" font_style:normal letter_spacing:0.08em line_height:1.2 border_size:2px border_color:red border_style:solid radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right -->

@@ -2516,6 +2516,9 @@ impl KmarkParams {
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
         }
+        if let Some(width_style) = self.to_text_block_width_style(true) {
+            rules.push(width_style);
+        }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
         }
@@ -2547,6 +2550,9 @@ impl KmarkParams {
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
         }
+        if let Some(width_style) = self.to_text_block_width_style(true) {
+            rules.push(width_style);
+        }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
         }
@@ -2563,11 +2569,46 @@ impl KmarkParams {
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
         }
+        if let Some(width_style) = self.to_text_block_width_style(false) {
+            rules.push(width_style);
+        }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_text_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
+        let mut rules = Vec::new();
+        let should_fit_content = !self.image.has_explicit_width()
+            && (self.image.has_box_directives()
+                || self.text.has_text_directives()
+                || (fit_plain_align && self.layout.has_plain_text_align()));
+
+        if should_fit_content {
+            rules.push("display:table".to_owned());
+            rules.push("width:fit-content".to_owned());
+            rules.push("max-width:100%".to_owned());
+            rules.push("box-sizing:border-box".to_owned());
+        }
+
+        if self.layout.has_plain_text_align()
+            && (should_fit_content || self.image.has_explicit_width())
+        {
+            match self.layout.align {
+                Some(KmarkAlign::Center) => {
+                    rules.push("margin-left:auto".to_owned());
+                    rules.push("margin-right:auto".to_owned());
+                }
+                Some(KmarkAlign::Right) => {
+                    rules.push("margin-left:auto".to_owned());
+                }
+                Some(KmarkAlign::Left) | None => {}
+            }
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
 
     fn to_image_paragraph_root_style(&self) -> Option<String> {
@@ -2663,6 +2704,14 @@ impl KmarkLayoutParams {
             || self.valign.is_some()
             || self.gap.is_some()
             || self.wrap.is_some()
+    }
+
+    fn has_plain_text_align(&self) -> bool {
+        self.align.is_some()
+            && self.layout.is_none()
+            && self.valign.is_none()
+            && self.gap.is_none()
+            && self.wrap.is_none()
     }
 
     fn to_scope_style(&self) -> String {
@@ -3346,6 +3395,25 @@ impl KmarkImageParams {
             || self.shadow.is_some()
             || self.margin.is_some()
             || self.padding.is_some()
+    }
+
+    fn has_box_directives(&self) -> bool {
+        self.width.is_some()
+            || self.height.is_some()
+            || self.border_size.is_some()
+            || self.border_color.is_some()
+            || self.border_style.is_some()
+            || self.radius.is_some()
+            || self.background.is_some()
+            || self.opacity.is_some()
+            || self.rotate.is_some()
+            || self.shadow.is_some()
+            || self.margin.is_some()
+            || self.padding.is_some()
+    }
+
+    fn has_explicit_width(&self) -> bool {
+        self.width.is_some()
     }
 
     fn to_style(&self) -> Option<String> {
@@ -5311,7 +5379,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<div class=\"kmark-callout kmark-callout--important\" data-callout-type=\"important\" data-source-line-start=\"1\" data-source-line-end=\"2\" style=\"width:80%;text-align:center\">"
+            "<div class=\"kmark-callout kmark-callout--important\" data-callout-type=\"important\" data-source-line-start=\"1\" data-source-line-end=\"2\" style=\"width:80%;margin-left:auto;margin-right:auto;text-align:center\">"
         ));
         assert!(rendered_preview
             .html
@@ -5360,7 +5428,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" class=\"kmark-page-valign kmark-page-valign--bottom\" data-page-valign=\"bottom\" style=\"width:80%;text-align:right\">作成者: 山口</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" class=\"kmark-page-valign kmark-page-valign--bottom\" data-page-valign=\"bottom\" style=\"width:80%;margin-left:auto;text-align:right\">作成者: 山口</p>"
         ));
     }
 
@@ -5521,7 +5589,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:#c00;font-size:14pt;font-weight:700;\">重要</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:#c00;font-size:14pt;font-weight:700;\">重要</p>"
         );
     }
 
@@ -5553,6 +5621,7 @@ mod tests {
         assert!(rendered_preview.html.contains("letter-spacing:0.08em"));
         assert!(rendered_preview.html.contains("line-height:1.2"));
         assert!(rendered_preview.html.contains(">社外秘</h1>"));
+        assert!(!rendered_preview.html.contains("width:fit-content"));
     }
 
     #[test]
@@ -5561,7 +5630,7 @@ mod tests {
             render_markdown_preview("<!-- kmark color:red align:right -->\n# 見出し\n\n本文");
 
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;text-align:right\">見出し</h1>"
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;color:red;text-align:right\">見出し</h1>"
         ));
         assert!(rendered_preview
             .html
@@ -5571,20 +5640,24 @@ mod tests {
     #[test]
     fn applies_block_decoration_to_list_table_blockquote_and_code_roots() {
         let list = render_markdown_preview("<!-- kmark color:red -->\n- A\n- B");
-        assert!(list.html.contains("<ul style=\"color:red;\">"));
+        assert!(list
+            .html
+            .contains("<ul style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
 
         let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
-        assert!(table.html.contains("<table style=\"color:red;\">"));
+        assert!(table
+            .html
+            .contains("<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
 
         let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
-        assert!(blockquote
-            .html
-            .contains("<blockquote data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;\">"));
+        assert!(blockquote.html.contains(
+            "<blockquote data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"
+        ));
 
         let code =
             render_markdown_preview("<!-- kmark color:red bg:#eee -->\n```rust\nfn main() {}\n```");
         assert!(code.html.contains(
-            "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;color:red;\"><code class=\"language-rust\">"
+            "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\"><code class=\"language-rust\">"
         ));
     }
 
@@ -5598,11 +5671,22 @@ mod tests {
             .html
             .contains("<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\">"));
         assert!(rendered_preview.html.contains(
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">本文</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">本文</p>"
         ));
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">見出し</h1>"
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">見出し</h1>"
         ));
+    }
+
+    #[test]
+    fn does_not_shrink_text_block_when_width_is_explicit() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark w:40mm color:red align:center -->\n明示幅");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:40mm;margin-left:auto;margin-right:auto;color:red;text-align:center\">明示幅</p>"
+        );
     }
 
     #[test]
@@ -5757,7 +5841,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"4\" style=\"text-align:right\">text1<br />\ntext2<br />\ntext3<br />\ntext4</p><p data-source-line-start=\"6\" data-source-line-end=\"6\">text5</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"4\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;text-align:right\">text1<br />\ntext2<br />\ntext3<br />\ntext4</p><p data-source-line-start=\"6\" data-source-line-end=\"6\">text5</p>"
         );
     }
 
