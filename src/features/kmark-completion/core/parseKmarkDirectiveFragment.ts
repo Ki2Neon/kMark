@@ -16,7 +16,6 @@ const PAGE_PARAM_NAMES = new Set([
   "page_orientation",
   "page_width",
   "page_height",
-  "margin",
   "page_margin",
   "font_size",
 ]);

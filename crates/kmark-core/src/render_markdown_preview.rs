@@ -2895,7 +2895,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_height = Some(page_height);
                 }
             }
-            "page_margin" | "margin" => {
+            "page_margin" => {
                 if let Some(page_margin) = parse_kmark_page_length_value(value) {
                     directive.page_margin = Some(page_margin);
                 }
@@ -3708,9 +3708,9 @@ mod tests {
     }
 
     #[test]
-    fn accepts_page_directive_aliases_used_by_completion() {
+    fn accepts_page_directives_used_by_completion() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 orientation:landscape margin:15mm font_size:12pt } -->\n\
+            "<!-- kmark { page_size:A4 orientation:landscape page_margin:15mm font_size:12pt } -->\n\
              # Alias",
         );
 

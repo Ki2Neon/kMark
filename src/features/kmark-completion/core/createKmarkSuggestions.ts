@@ -37,7 +37,7 @@ const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["page_size", 500],
   ["orientation", 490],
   ["font_size", 480],
-  ["margin", 470],
+  ["page_margin", 470],
 ]);
 
 const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([

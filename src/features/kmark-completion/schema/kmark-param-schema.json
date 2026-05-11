@@ -191,13 +191,13 @@
       "priority": 80
     },
     {
-      "name": "margin",
-      "aliases": ["page_margin"],
+      "name": "page_margin",
+      "aliases": [],
       "type": "length",
       "contexts": ["page", "scope"],
-      "insertText": "margin:",
+      "insertText": "page_margin:",
       "description": "用紙表示の余白を指定する",
-      "examples": ["<!-- kmark { margin:10mm } -->"],
+      "examples": ["<!-- kmark { page_margin:10mm } -->"],
       "priority": 75
     },
     {

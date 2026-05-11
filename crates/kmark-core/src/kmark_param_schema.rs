@@ -227,14 +227,14 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         priority: 80,
     },
     KmarkParamSpec {
-        name: "margin",
-        aliases: &["page_margin"],
+        name: "page_margin",
+        aliases: &[],
         param_type: "length",
         contexts: &["page", "scope"],
         values: &[],
-        insert_text: "margin:",
+        insert_text: "page_margin:",
         description: "用紙表示の余白を指定する",
-        examples: &["<!-- kmark { margin:10mm } -->"],
+        examples: &["<!-- kmark { page_margin:10mm } -->"],
         priority: 75,
     },
     KmarkParamSpec {
