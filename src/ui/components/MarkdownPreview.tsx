@@ -623,7 +623,7 @@ function getA4PaginationNodeBottomOffset(container: HTMLElement, node: Node): nu
 
 function getA4PaginationContentHeight(body: HTMLElement): number {
   return Math.max(
-    body.scrollHeight,
+    0,
     ...Array.from(body.childNodes).map((node) => getA4PaginationNodeBottomOffset(body, node)),
   );
 }
