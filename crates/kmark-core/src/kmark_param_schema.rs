@@ -38,6 +38,17 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         priority: 70,
     },
     KmarkParamSpec {
+        name: "page_valign",
+        aliases: &[],
+        param_type: "enum",
+        contexts: &["single", "scope", "text", "image"],
+        values: &["top", "center", "bottom"],
+        insert_text: "page_valign:",
+        description: "対象ブロックを現在ページの本文エリア内で縦配置する",
+        examples: &["<!-- kmark page_valign:bottom -->"],
+        priority: 88,
+    },
+    KmarkParamSpec {
         name: "w",
         aliases: &["width"],
         param_type: "length",

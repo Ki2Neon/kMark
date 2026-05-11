@@ -210,6 +210,26 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     max-width: 100%;
   }
 
+  .markdown-body .kmark-page-valign {
+    box-sizing: border-box;
+    max-width: 100%;
+  }
+
+  .markdown-body .kmark-page-flex-spacer {
+    display: block;
+    flex: 0 0 auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .markdown-body:not(.markdown-body--a4) .kmark-page-flex-spacer {
+    display: none;
+  }
+
   .markdown-body code {
     padding: 0.08em 0.3em;
     font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;

@@ -28,6 +28,7 @@ const A4_PAGINATION_OVERFLOW_TOLERANCE_PX = 1;
 const A4_PAGINATION_SOURCE_SEPARATOR = "\x1f";
 const A4_PAGINATION_HEADING_TAG_NAMES = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 const A4_PAGINATION_INLINE_SPLIT_TAG_NAMES = new Set(["a", "abbr", "b", "cite", "del", "em", "i", "ins", "mark", "small", "span", "strong", "sub", "sup", "u"]);
+const A4_PAGE_VALIGN_VALUES = new Set(["top", "center", "bottom"]);
 const A4_PAGINATION_CJK_TEXT_PATTERN = /[\u3040-\u30ff\u3400-\u9fff]/u;
 const A4_PAGINATION_LONG_TEXT_TOKEN_LENGTH = 24;
 const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
@@ -76,6 +77,12 @@ type A4PaginationContext = {
   pageConfig: PreviewPageConfig;
   pages: RenderedPreviewPage[];
   readonly root: HTMLElement;
+};
+
+type A4PageValign = "top" | "center" | "bottom";
+
+type A4PageValignAppendOptions = {
+  readonly commitAfter: boolean;
 };
 
 type PreviewPageConfig = {
@@ -628,6 +635,34 @@ function isA4PaginationPageOverflowing(context: A4PaginationContext): boolean {
 
 function isIgnorableA4PaginationNode(node: Node): boolean {
   return node.nodeType === Node.TEXT_NODE && (node.textContent?.trim() ?? "") === "";
+}
+
+function getA4PageValign(element: HTMLElement): A4PageValign | null {
+  const value = element.dataset.pageValign;
+
+  return value !== undefined && A4_PAGE_VALIGN_VALUES.has(value)
+    ? value as A4PageValign
+    : null;
+}
+
+function getA4EffectivePageValign(node: Node | undefined): A4PageValign | null {
+  if (!(node instanceof HTMLElement)) {
+    return null;
+  }
+
+  const valign = getA4PageValign(node);
+
+  return valign === "center" || valign === "bottom"
+    ? valign
+    : null;
+}
+
+function createA4PageValignSpacer(height: number): HTMLElement {
+  const spacer = document.createElement("div");
+  spacer.className = "kmark-page-flex-spacer";
+  spacer.setAttribute("aria-hidden", "true");
+  spacer.style.height = `${Math.max(0, height).toFixed(2)}px`;
+  return spacer;
 }
 
 function getA4PaginationNodes(html: string): readonly Node[] {
@@ -2040,7 +2075,109 @@ function appendSplittableElementToA4Pages(context: A4PaginationContext, element:
   return false;
 }
 
-function appendNodeToA4Pages(context: A4PaginationContext, node: Node): void {
+function placePageValignElementOnActiveA4Page(
+  context: A4PaginationContext,
+  element: HTMLElement,
+  valign: A4PageValign,
+): boolean {
+  const beforeHeight = getA4PaginationContentHeight(context.body);
+  const nodeClone = element.cloneNode(true) as HTMLElement;
+  context.body.append(nodeClone);
+
+  if (isA4PaginationPageOverflowing(context)) {
+    context.body.removeChild(nodeClone);
+    return false;
+  }
+
+  const afterHeight = getA4PaginationContentHeight(context.body);
+  const targetHeight = Math.max(0, afterHeight - beforeHeight);
+  const remainingHeight = Math.max(0, context.maxContentHeight - beforeHeight - targetHeight);
+  const spacerHeight = valign === "center"
+    ? remainingHeight / 2
+    : remainingHeight;
+
+  if (spacerHeight <= A4_PAGINATION_OVERFLOW_TOLERANCE_PX) {
+    return true;
+  }
+
+  const spacer = createA4PageValignSpacer(spacerHeight);
+  context.body.insertBefore(spacer, nodeClone);
+
+  const overflowAmount = getA4PaginationContentHeight(context.body) - context.maxContentHeight;
+  if (overflowAmount > A4_PAGINATION_OVERFLOW_TOLERANCE_PX) {
+    const nextSpacerHeight = Math.max(0, spacerHeight - overflowAmount);
+    spacer.style.height = `${nextSpacerHeight.toFixed(2)}px`;
+  }
+
+  if (isA4PaginationPageOverflowing(context)) {
+    spacer.remove();
+  }
+
+  return true;
+}
+
+function appendOversizedPageValignElementToA4Pages(
+  context: A4PaginationContext,
+  element: HTMLElement,
+  options: A4PageValignAppendOptions,
+): void {
+  if (appendSplittableElementToA4Pages(context, element)) {
+    if (options.commitAfter) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+    }
+    return;
+  }
+
+  context.body.append(element.cloneNode(true));
+
+  if (options.commitAfter) {
+    commitA4PaginationPage(context);
+    startA4PaginationPage(context);
+  }
+}
+
+function appendPageValignElementToA4Pages(
+  context: A4PaginationContext,
+  element: HTMLElement,
+  options: A4PageValignAppendOptions,
+): boolean {
+  const valign = getA4EffectivePageValign(element);
+
+  if (valign === null) {
+    return false;
+  }
+
+  if (!placePageValignElementOnActiveA4Page(context, element, valign)) {
+    if (hasA4PaginationContent(context.body)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+    }
+
+    if (!placePageValignElementOnActiveA4Page(context, element, valign)) {
+      appendOversizedPageValignElementToA4Pages(context, element, options);
+      return true;
+    }
+  }
+
+  if (options.commitAfter) {
+    commitA4PaginationPage(context);
+    startA4PaginationPage(context);
+  }
+
+  return true;
+}
+
+function appendNodeToA4Pages(context: A4PaginationContext, node: Node, nextNode?: Node): void {
+  const nodeValign = getA4EffectivePageValign(node);
+  if (node instanceof HTMLElement && nodeValign !== null) {
+    const nextValign = getA4EffectivePageValign(nextNode);
+    appendPageValignElementToA4Pages(context, node, {
+      commitAfter: !(nodeValign === "center" && nextValign === "bottom"),
+    });
+    return;
+  }
+
   const nodeClone = node.cloneNode(true);
   context.body.append(nodeClone);
 
@@ -2090,7 +2227,7 @@ function paginateA4HtmlSegment(page: RenderedPreviewPage): readonly RenderedPrev
         startA4PaginationPage(context);
       }
 
-      appendNodeToA4Pages(context, node);
+      appendNodeToA4Pages(context, node, nextNode);
     }
 
     commitA4PaginationPage(context);
