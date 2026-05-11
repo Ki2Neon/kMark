@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 3;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 4;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -462,6 +462,28 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         description: "用紙表示全体の基準文字サイズを指定する",
         examples: &["<!-- kmark { page_font_size:12pt } -->"],
         priority: 79,
+    },
+    KmarkParamSpec {
+        name: "page_font_family",
+        aliases: &[],
+        param_type: "string",
+        contexts: &["page", "scope"],
+        values: &[],
+        insert_text: "page_font_family:",
+        description: "用紙表示全体の本文font familyを指定する",
+        examples: &["<!-- kmark { page_font_family:\"Yu Gothic\" } -->"],
+        priority: 78,
+    },
+    KmarkParamSpec {
+        name: "page_heading_font_family",
+        aliases: &[],
+        param_type: "string",
+        contexts: &["page", "scope"],
+        values: &[],
+        insert_text: "page_heading_font_family:",
+        description: "用紙表示全体の見出しfont familyを指定する",
+        examples: &["<!-- kmark { page_heading_font_family:\"Noto Serif JP\" } -->"],
+        priority: 77,
     },
     KmarkParamSpec {
         name: "page_margin",

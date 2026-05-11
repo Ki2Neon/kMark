@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "params": [
     {
       "name": "align",
@@ -403,6 +403,26 @@
       "description": "用紙表示全体の基準文字サイズを指定する",
       "examples": ["<!-- kmark { page_font_size:12pt } -->"],
       "priority": 79
+    },
+    {
+      "name": "page_font_family",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_font_family:",
+      "description": "用紙表示全体の本文font familyを指定する",
+      "examples": ["<!-- kmark { page_font_family:\"Yu Gothic\" } -->"],
+      "priority": 78
+    },
+    {
+      "name": "page_heading_font_family",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_heading_font_family:",
+      "description": "用紙表示全体の見出しfont familyを指定する",
+      "examples": ["<!-- kmark { page_heading_font_family:\"Noto Serif JP\" } -->"],
+      "priority": 77
     },
     {
       "name": "page_margin",

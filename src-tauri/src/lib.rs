@@ -414,6 +414,7 @@ pub fn run() {
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
             commands::file_open::save_markdown_document_as_dialog,
+            commands::system_fonts::list_system_font_families,
             commands::file_open::take_pending_markdown_open_requests,
             commands::file_open::write_markdown_document,
             commands::theme_preferences::get_theme_preferences,

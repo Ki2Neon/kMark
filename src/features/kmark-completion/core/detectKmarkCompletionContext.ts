@@ -1,5 +1,5 @@
 import { type KmarkCompletionContext, type KmarkParamContext } from "./types";
-import { parseKmarkDirectiveFragment } from "./parseKmarkDirectiveFragment";
+import { parseKmarkDirectiveFragment, splitKmarkDirectiveTokens } from "./parseKmarkDirectiveFragment";
 
 const INACTIVE_KMARK_COMPLETION_CONTEXT: KmarkCompletionContext = {
   active: false,
@@ -120,15 +120,83 @@ function findKmarkMarker(lineBeforeCursor: string): { readonly index: number; re
 }
 
 function resolveCurrentToken(directiveText: string): { readonly start: number; readonly text: string } {
-  const tokenStart = directiveText.search(/\S*$/u);
-  const rawStart = tokenStart === -1 ? directiveText.length : tokenStart;
-  const rawToken = directiveText.slice(rawStart);
-  const trimmedToken = rawToken.replace(/^[{}]+/u, "");
+  if (endsAtKmarkTokenBoundary(directiveText)) {
+    return {
+      start: directiveText.length,
+      text: "",
+    };
+  }
 
-  return {
-    start: rawStart + rawToken.length - trimmedToken.length,
-    text: trimmedToken,
+  const tokens = splitKmarkDirectiveTokensWithRanges(directiveText);
+  const token = tokens[tokens.length - 1];
+
+  return token ?? {
+    start: directiveText.length,
+    text: "",
   };
+}
+
+function endsAtKmarkTokenBoundary(directiveText: string): boolean {
+  if (directiveText.length === 0) {
+    return true;
+  }
+
+  let quote: string | null = null;
+  let escaped = false;
+
+  for (const character of directiveText) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (quote !== null && character === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (quote !== null && character === quote) {
+      quote = null;
+      continue;
+    }
+
+    if (quote === null && (character === "\"" || character === "'")) {
+      quote = character;
+    }
+  }
+
+  if (quote !== null) {
+    return false;
+  }
+
+  const lastCharacter = directiveText.charAt(directiveText.length - 1);
+  return lastCharacter === "{" || lastCharacter === "}" || /\s/u.test(lastCharacter ?? "");
+}
+
+function splitKmarkDirectiveTokensWithRanges(
+  directiveText: string,
+): readonly { readonly start: number; readonly text: string }[] {
+  const tokens = splitKmarkDirectiveTokens(directiveText);
+
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const ranges: { start: number; text: string }[] = [];
+  let searchStart = 0;
+
+  for (const token of tokens) {
+    const tokenStart = directiveText.indexOf(token, searchStart);
+
+    if (tokenStart === -1) {
+      continue;
+    }
+
+    ranges.push({ start: tokenStart, text: token });
+    searchStart = tokenStart + token.length;
+  }
+
+  return ranges;
 }
 
 function resolveCompletionContexts(input: {

@@ -26,6 +26,8 @@ const PAGE_PARAM_NAMES = new Set([
   "page_number_visible",
   "page_number_style",
   "page_font_size",
+  "page_font_family",
+  "page_heading_font_family",
   "page_number_font_size",
   "page_number_color",
   "page_number_margin_top",
@@ -44,11 +46,7 @@ const TOC_PARAM_NAMES = new Set([
 ]);
 
 export function parseKmarkDirectiveFragment(directiveText: string): ParsedKmarkDirectiveFragment {
-  const tokens = directiveText
-    .replace(/[{}]/gu, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter((token) => token.length > 0)
+  const tokens = splitKmarkDirectiveTokens(directiveText)
     .map((token): ParsedKmarkToken | null => {
       const separatorIndex = token.indexOf(":");
 
@@ -71,4 +69,53 @@ export function parseKmarkDirectiveFragment(directiveText: string): ParsedKmarkD
     hasPageParam: tokens.some((token) => PAGE_PARAM_NAMES.has(token.name)),
     hasTocParam: tokens.some((token) => TOC_PARAM_NAMES.has(token.name)),
   };
+}
+
+export function splitKmarkDirectiveTokens(directiveText: string): readonly string[] {
+  const tokens: string[] = [];
+  let token = "";
+  let quote: string | null = null;
+  let escaped = false;
+
+  for (const character of directiveText) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+
+    if (quote !== null && character === "\\") {
+      token += character;
+      escaped = true;
+      continue;
+    }
+
+    if (quote !== null && character === quote) {
+      token += character;
+      quote = null;
+      continue;
+    }
+
+    if (quote === null && (character === "\"" || character === "'")) {
+      token += character;
+      quote = character;
+      continue;
+    }
+
+    if (quote === null && (character === "{" || character === "}" || /\s/u.test(character))) {
+      if (token.length > 0) {
+        tokens.push(token);
+        token = "";
+      }
+      continue;
+    }
+
+    token += character;
+  }
+
+  if (token.length > 0) {
+    tokens.push(token);
+  }
+
+  return tokens;
 }

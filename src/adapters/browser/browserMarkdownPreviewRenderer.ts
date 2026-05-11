@@ -13,8 +13,9 @@ import {
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
-type RenderedPreviewPagePayload = Omit<RenderedPreviewPage, "pageNumberConfig"> & {
+type RenderedPreviewPagePayload = Omit<RenderedPreviewPage, "pageNumberConfig" | "textStyle"> & {
   readonly pageNumberConfig?: PageNumberConfig;
+  readonly textStyle?: Partial<PreviewTextStyle>;
 };
 
 type RenderedMarkdownPreviewPayload = {
@@ -78,11 +79,18 @@ function normalizePreviewHtmlImageSources(html: string): string {
   });
 }
 
+function normalizePreviewTextStyle(textStyle?: Partial<PreviewTextStyle>): PreviewTextStyle {
+  return {
+    ...DEFAULT_PREVIEW_TEXT_STYLE,
+    ...textStyle,
+  };
+}
+
 function normalizeRenderedMarkdownPreview(
   renderedPreview: RenderedMarkdownPreviewPayload,
 ): NormalizedRenderedMarkdownPreviewPayload {
   const defaultPageStyle = renderedPreview.defaultPageStyle ?? DEFAULT_PAGE_STYLE;
-  const defaultTextStyle = renderedPreview.defaultTextStyle ?? DEFAULT_PREVIEW_TEXT_STYLE;
+  const defaultTextStyle = normalizePreviewTextStyle(renderedPreview.defaultTextStyle);
   const pages = renderedPreview.pages !== undefined && renderedPreview.pages.length > 0
     ? renderedPreview.pages
     : renderedPreview.pageHtmls.map((pageHtml) => ({
@@ -98,6 +106,7 @@ function normalizeRenderedMarkdownPreview(
     pages: pages.map((page) => ({
       ...page,
       html: normalizePreviewHtmlImageSources(page.html),
+      textStyle: normalizePreviewTextStyle(page.textStyle),
       pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
     })),
     defaultPageStyle,

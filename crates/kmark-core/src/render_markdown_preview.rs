@@ -39,6 +39,8 @@ pub struct PageStyle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewTextStyle {
     pub font_size: CssLength,
+    pub font_family: String,
+    pub heading_font_family: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,6 +359,8 @@ struct PartialPageDirective {
     page_margin_bottom: Option<CssLength>,
     page_margin_left: Option<CssLength>,
     page_font_size: Option<CssLength>,
+    page_font_family: Option<String>,
+    page_heading_font_family: Option<String>,
     page_number_position: Option<PageNumberPosition>,
     page_number_display: Option<bool>,
     page_number_format: Option<String>,
@@ -506,6 +510,7 @@ const DEFAULT_PAGE_MARGIN_RIGHT: &str = "16mm";
 const DEFAULT_PAGE_MARGIN_BOTTOM: &str = "18mm";
 const DEFAULT_PAGE_MARGIN_LEFT: &str = "16mm";
 const DEFAULT_PREVIEW_FONT_SIZE: &str = "10.5pt";
+const DEFAULT_PREVIEW_FONT_FAMILY: &str = "BIZ UDPGothic";
 const DEFAULT_TOC_TITLE: &str = "目次";
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
@@ -3453,6 +3458,8 @@ impl PreviewTextStyle {
     fn default_preview() -> Self {
         Self {
             font_size: CssLength::new(DEFAULT_PREVIEW_FONT_SIZE),
+            font_family: DEFAULT_PREVIEW_FONT_FAMILY.to_owned(),
+            heading_font_family: String::new(),
         }
     }
 }
@@ -3642,6 +3649,12 @@ impl PartialPageDirective {
         if let Some(page_font_size) = &other.page_font_size {
             self.page_font_size = Some(page_font_size.clone());
         }
+        if let Some(page_font_family) = &other.page_font_family {
+            self.page_font_family = Some(page_font_family.clone());
+        }
+        if let Some(page_heading_font_family) = &other.page_heading_font_family {
+            self.page_heading_font_family = Some(page_heading_font_family.clone());
+        }
         if let Some(page_number_position) = other.page_number_position {
             self.page_number_position = Some(page_number_position);
         }
@@ -3706,6 +3719,8 @@ impl PartialPageDirective {
             || self.page_margin_bottom.is_some()
             || self.page_margin_left.is_some()
             || self.page_font_size.is_some()
+            || self.page_font_family.is_some()
+            || self.page_heading_font_family.is_some()
             || self.has_page_number_directive()
     }
 
@@ -3720,6 +3735,8 @@ impl PartialPageDirective {
             || self.page_margin_bottom.is_some()
             || self.page_margin_left.is_some()
             || self.page_font_size.is_some()
+            || self.page_font_family.is_some()
+            || self.page_heading_font_family.is_some()
             || self.has_page_number_directive()
     }
 
@@ -3751,6 +3768,8 @@ impl PartialPageDirective {
             || self.page_margin_bottom != other.page_margin_bottom
             || self.page_margin_left != other.page_margin_left
             || self.page_font_size != other.page_font_size
+            || self.page_font_family != other.page_font_family
+            || self.page_heading_font_family != other.page_heading_font_family
             || self.page_number_position != other.page_number_position
             || self.page_number_display != other.page_number_display
             || self.page_number_format != other.page_number_format
@@ -3809,6 +3828,12 @@ impl DocumentPageConfig {
         let mut text_style = self.default_text_style.clone();
         if let Some(page_font_size) = &page_directive.page_font_size {
             text_style.font_size = page_font_size.clone();
+        }
+        if let Some(page_font_family) = &page_directive.page_font_family {
+            text_style.font_family = page_font_family.clone();
+        }
+        if let Some(page_heading_font_family) = &page_directive.page_heading_font_family {
+            text_style.heading_font_family = page_heading_font_family.clone();
         }
 
         let mut page_number_config = self.page_number_config.clone();
@@ -4234,6 +4259,16 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
             "page_font_size" => {
                 if let Some(page_font_size) = parse_kmark_page_length_value(value) {
                     directive.page_font_size = Some(page_font_size);
+                }
+            }
+            "page_font_family" => {
+                if let Some(page_font_family) = parse_kmark_font_family_value(value) {
+                    directive.page_font_family = Some(page_font_family);
+                }
+            }
+            "page_heading_font_family" => {
+                if let Some(page_heading_font_family) = parse_kmark_font_family_value(value) {
+                    directive.page_heading_font_family = Some(page_heading_font_family);
                 }
             }
             "page_number" => {
@@ -4862,9 +4897,7 @@ fn parse_kmark_font_family_value(value: &str) -> Option<String> {
 
     (!trimmed.is_empty()
         && trimmed.chars().all(|character| {
-            character.is_ascii_alphanumeric()
-                || character.is_whitespace()
-                || matches!(character, '-' | '_' | ',' | '"' | '\'')
+            !character.is_control() && !matches!(character, '\\' | ';' | '{' | '}' | '<' | '>')
         }))
     .then(|| trimmed.to_owned())
 }
@@ -5731,6 +5764,62 @@ mod tests {
         for page in &rendered_preview.pages {
             assert_eq!(page.text_style.font_size.as_str(), "12pt");
         }
+    }
+
+    #[test]
+    fn applies_standalone_page_font_families_to_following_pages() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_font_family:\"游ゴシック\" page_heading_font_family:\"Noto Serif JP\" -->\n\
+             # First\n\
+             <!-- --- -->\n\
+             # Second",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        for page in &rendered_preview.pages {
+            assert_eq!(page.text_style.font_family.as_str(), "游ゴシック");
+            assert_eq!(
+                page.text_style.heading_font_family.as_str(),
+                "Noto Serif JP"
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_page_heading_font_family_empty_to_inherit_body_font() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark page_font_family:\"Yu Gothic\" -->\n# First");
+
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_family.as_str(),
+            "Yu Gothic"
+        );
+        assert_eq!(
+            rendered_preview.pages[0]
+                .text_style
+                .heading_font_family
+                .as_str(),
+            ""
+        );
+    }
+
+    #[test]
+    fn keeps_block_font_family_out_of_page_directives() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark font_family:\"Yu Gothic\" -->\nBody");
+
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_family.as_str(),
+            "BIZ UDPGothic"
+        );
+        assert_eq!(
+            rendered_preview.pages[0]
+                .text_style
+                .heading_font_family
+                .as_str(),
+            ""
+        );
+        assert!(rendered_preview.html.contains("font-family:Yu Gothic"));
     }
 
     #[test]

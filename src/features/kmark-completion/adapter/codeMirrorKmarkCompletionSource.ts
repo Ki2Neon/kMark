@@ -8,8 +8,9 @@ import {
   type CompletionSection,
   type CompletionSource,
 } from "@codemirror/autocomplete";
-import { createKmarkSuggestions } from "../core/createKmarkSuggestions";
+import { createKmarkSuggestions, isKmarkFontFamilyParamName } from "../core/createKmarkSuggestions";
 import { type KmarkCompletionItem, type KmarkCompletionSection } from "../core/types";
+import { loadLocalFontFamilies } from "./localFontFamilies";
 
 const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, CompletionSection> = {
   image: { name: "Image", rank: 10 },
@@ -23,11 +24,21 @@ const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, Completion
 };
 
 export function createCodeMirrorKmarkCompletionSource(): CompletionSource {
-  return (context: CompletionContext): CompletionResult | null => {
-    const result = createKmarkSuggestions({
+  return async (context: CompletionContext): Promise<CompletionResult | null> => {
+    const input = {
       markdown: context.state.doc.toString(),
       cursorOffset: context.pos,
-    });
+    };
+    const firstResult = createKmarkSuggestions(input);
+
+    const fontFamilies = firstResult.context.mode === "parameter-value"
+      && firstResult.context.currentParamName !== undefined
+      && isKmarkFontFamilyParamName(firstResult.context.currentParamName)
+      ? await loadLocalFontFamilies()
+      : [];
+    const result = fontFamilies.length > 0
+      ? createKmarkSuggestions({ ...input, fontFamilies })
+      : firstResult;
 
     if (!result.context.active || result.items.length === 0) {
       return null;
@@ -37,7 +48,11 @@ export function createCodeMirrorKmarkCompletionSource(): CompletionSource {
       from: result.context.replaceRange.start,
       options: result.items.map(toCodeMirrorCompletion),
       to: result.context.replaceRange.end,
-      validFor: /^[#%.\-\w]*$/u,
+      validFor: result.context.mode === "parameter-value"
+        && result.context.currentParamName !== undefined
+        && isKmarkFontFamilyParamName(result.context.currentParamName)
+        ? /^[#%.,\-\w\s"'\u3000-\u30ff\u3400-\u9fff]*$/u
+        : /^[#%.\-\w]*$/u,
     };
   };
 }

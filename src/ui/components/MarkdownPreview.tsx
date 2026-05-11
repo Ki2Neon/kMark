@@ -100,6 +100,8 @@ type NumberedRenderedPreviewPage = RenderedPreviewPage & {
   readonly tocPageNumberText: string;
 };
 
+type PreviewCssProperties = CSSProperties & Record<string, string | number | undefined>;
+
 type A4TocRowElements = {
   readonly label: HTMLElement;
   readonly page: HTMLElement;
@@ -132,7 +134,9 @@ function arePageStylesEqual(left: PageStyle, right: PageStyle): boolean {
 }
 
 function arePreviewTextStylesEqual(left: PreviewTextStyle, right: PreviewTextStyle): boolean {
-  return left.fontSize === right.fontSize;
+  return left.fontSize === right.fontSize
+    && left.fontFamily === right.fontFamily
+    && left.headingFontFamily === right.headingFontFamily;
 }
 
 function arePageNumberConfigsEqual(left: PageNumberConfig, right: PageNumberConfig): boolean {
@@ -163,7 +167,11 @@ function pageStyleKey(pageStyle: PageStyle): string {
 }
 
 function previewTextStyleKey(textStyle: PreviewTextStyle): string {
-  return textStyle.fontSize;
+  return [
+    textStyle.fontSize,
+    textStyle.fontFamily,
+    textStyle.headingFontFamily,
+  ].join("|");
 }
 
 function pageNumberConfigKey(config: PageNumberConfig): string {
@@ -202,7 +210,7 @@ function getPreviewPageConfig(page: RenderedPreviewPage): PreviewPageConfig {
 }
 
 function getPreviewPageStyle(pageConfig: PreviewPageConfig): CSSProperties {
-  return {
+  const style: PreviewCssProperties = {
     "--kmark-page-width": pageConfig.pageStyle.width,
     "--kmark-page-height": pageConfig.pageStyle.height,
     "--kmark-page-margin-top": pageConfig.pageStyle.marginTop,
@@ -210,7 +218,17 @@ function getPreviewPageStyle(pageConfig: PreviewPageConfig): CSSProperties {
     "--kmark-page-margin-bottom": pageConfig.pageStyle.marginBottom,
     "--kmark-page-margin-left": pageConfig.pageStyle.marginLeft,
     "--kmark-font-size": pageConfig.textStyle.fontSize,
-  } as CSSProperties;
+  };
+
+  if (pageConfig.textStyle.fontFamily.trim().length > 0) {
+    style["--kmark-font-family"] = pageConfig.textStyle.fontFamily;
+  }
+
+  if (pageConfig.textStyle.headingFontFamily.trim().length > 0) {
+    style["--kmark-heading-font-family"] = pageConfig.textStyle.headingFontFamily;
+  }
+
+  return style;
 }
 
 function applyPreviewPageStyle(element: HTMLElement, pageConfig: PreviewPageConfig): void {
@@ -221,6 +239,18 @@ function applyPreviewPageStyle(element: HTMLElement, pageConfig: PreviewPageConf
   element.style.setProperty("--kmark-page-margin-bottom", pageConfig.pageStyle.marginBottom);
   element.style.setProperty("--kmark-page-margin-left", pageConfig.pageStyle.marginLeft);
   element.style.setProperty("--kmark-font-size", pageConfig.textStyle.fontSize);
+
+  if (pageConfig.textStyle.fontFamily.trim().length > 0) {
+    element.style.setProperty("--kmark-font-family", pageConfig.textStyle.fontFamily);
+  } else {
+    element.style.removeProperty("--kmark-font-family");
+  }
+
+  if (pageConfig.textStyle.headingFontFamily.trim().length > 0) {
+    element.style.setProperty("--kmark-heading-font-family", pageConfig.textStyle.headingFontFamily);
+  } else {
+    element.style.removeProperty("--kmark-heading-font-family");
+  }
 }
 
 function getPreviewPageScaleStyle(page: RenderedPreviewPage, scale: number): CSSProperties {
@@ -2968,8 +2998,21 @@ function MarkdownPreviewComponent({
   );
 
   const standardPreviewContentStyle = useMemo(
-    () => ({ zoom: normalizedZoomScale } as CSSProperties),
-    [normalizedZoomScale],
+    () => {
+      const textStyle = normalizedPages[0]?.textStyle ?? defaultTextStyle;
+      const style: PreviewCssProperties = { zoom: normalizedZoomScale };
+
+      if (textStyle.fontFamily.trim().length > 0) {
+        style["--kmark-font-family"] = textStyle.fontFamily;
+      }
+
+      if (textStyle.headingFontFamily.trim().length > 0) {
+        style["--kmark-heading-font-family"] = textStyle.headingFontFamily;
+      }
+
+      return style;
+    },
+    [defaultTextStyle, normalizedPages, normalizedZoomScale],
   );
 
   useLayoutEffect(() => {

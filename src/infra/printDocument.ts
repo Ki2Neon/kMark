@@ -60,6 +60,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body {
     --markdown-body-font-size: var(--kmark-font-size, 1rem);
     max-width: none;
+    font-family: var(--kmark-font-family, inherit);
     font-size: var(--markdown-body-font-size);
     color: #111111;
   }
@@ -71,8 +72,11 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body h1,
   .markdown-body h2,
   .markdown-body h3,
-  .markdown-body h4 {
+  .markdown-body h4,
+  .markdown-body h5,
+  .markdown-body h6 {
     color: #111111;
+    font-family: var(--kmark-heading-font-family, inherit);
     line-height: 1.2;
   }
 

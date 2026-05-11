@@ -6,4 +6,5 @@ pub mod external_link;
 pub mod file_open;
 pub mod markdown_render;
 pub mod preview_preferences;
+pub mod system_fonts;
 pub mod theme_preferences;

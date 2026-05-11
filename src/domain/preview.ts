@@ -37,6 +37,8 @@ export type PageStyle = {
 
 export type PreviewTextStyle = {
   readonly fontSize: string;
+  readonly fontFamily: string;
+  readonly headingFontFamily: string;
 };
 
 export type PageNumberConfig = {
@@ -76,6 +78,7 @@ export const A4_MARGIN_RIGHT_MM = 16;
 export const A4_MARGIN_BOTTOM_MM = 18;
 export const A4_MARGIN_LEFT_MM = 16;
 export const DEFAULT_PREVIEW_FONT_SIZE = "10.5pt";
+export const DEFAULT_PREVIEW_FONT_FAMILY = "BIZ UDPGothic";
 
 export const DEFAULT_PAGE_STYLE: PageStyle = {
   width: `${A4_PAGE_WIDTH_MM}mm`,
@@ -88,6 +91,8 @@ export const DEFAULT_PAGE_STYLE: PageStyle = {
 
 export const DEFAULT_PREVIEW_TEXT_STYLE: PreviewTextStyle = {
   fontSize: DEFAULT_PREVIEW_FONT_SIZE,
+  fontFamily: DEFAULT_PREVIEW_FONT_FAMILY,
+  headingFontFamily: "",
 } as const;
 
 export const DEFAULT_PAGE_NUMBER_CONFIG: PageNumberConfig = {

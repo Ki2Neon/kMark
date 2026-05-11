@@ -36,7 +36,9 @@ const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
 const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["page_size", 500],
   ["orientation", 490],
-  ["font_size", 480],
+  ["page_font_size", 480],
+  ["page_font_family", 475],
+  ["page_heading_font_family", 472],
   ["page_margin", 470],
   ["page_number", 460],
   ["page_number_format", 450],
@@ -62,9 +64,16 @@ const TOC_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["toc_links", 450],
 ]);
 
+const FONT_FAMILY_PARAM_NAMES = new Set([
+  "font_family",
+  "page_font_family",
+  "page_heading_font_family",
+]);
+
 export function createKmarkSuggestions(input: {
   readonly markdown: string;
   readonly cursorOffset: number;
+  readonly fontFamilies?: readonly string[];
 }): KmarkCompletionResult {
   const context = detectKmarkCompletionContext(input);
 
@@ -82,7 +91,7 @@ export function createKmarkSuggestions(input: {
   if (context.mode === "parameter-value" || context.mode === "style-define") {
     return {
       context,
-      items: createValueSuggestions(context),
+      items: createValueSuggestions(context, input.fontFamilies ?? []),
     };
   }
 
@@ -118,12 +127,23 @@ function createParamNameSuggestions(context: KmarkCompletionContext): readonly K
     });
 }
 
-function createValueSuggestions(context: KmarkCompletionContext): readonly KmarkCompletionItem[] {
+export function isKmarkFontFamilyParamName(name: string): boolean {
+  return FONT_FAMILY_PARAM_NAMES.has(name);
+}
+
+function createValueSuggestions(
+  context: KmarkCompletionContext,
+  fontFamilies: readonly string[],
+): readonly KmarkCompletionItem[] {
   const paramName = context.currentParamName ?? "";
   const spec = findParamSpec(paramName);
 
   if (spec === null) {
     return [];
+  }
+
+  if (isKmarkFontFamilyParamName(spec.name)) {
+    return createFontFamilyValueSuggestions(context, spec, fontFamilies);
   }
 
   const prefix = (context.currentValuePrefix ?? "").toLocaleLowerCase("en-US");
@@ -141,6 +161,31 @@ function createValueSuggestions(context: KmarkCompletionContext): readonly Kmark
       priority: (spec.priority ?? 0) - index,
       sortText: `${String(index).padStart(3, "0")}-${value}`,
     }));
+}
+
+function createFontFamilyValueSuggestions(
+  context: KmarkCompletionContext,
+  spec: KmarkParamSpec,
+  fontFamilies: readonly string[],
+): readonly KmarkCompletionItem[] {
+  const prefix = normalizeFontFamilyPrefix(context.currentValuePrefix ?? "");
+
+  return fontFamilies
+    .filter((fontFamily) => fontFamily.toLocaleLowerCase("ja-JP").startsWith(prefix))
+    .map((fontFamily, index) => {
+      const insertText = quoteKmarkFontFamilyValue(fontFamily);
+
+      return {
+        label: fontFamily,
+        insertText: withOptionalTrailingSpace(insertText, context),
+        description: `${spec.description}: ${fontFamily}`,
+        detail: "PC font family",
+        kind: "value",
+        section: resolveCompletionSection(spec.contexts, context.contexts, "general"),
+        priority: (spec.priority ?? 0) - index,
+        sortText: `${String(index).padStart(3, "0")}-${fontFamily}`,
+      };
+    });
 }
 
 function createSnippetSuggestions(context: KmarkCompletionContext): readonly KmarkCompletionItem[] {
@@ -182,6 +227,17 @@ function createStyleUseSuggestions(context: KmarkCompletionContext, markdown: st
       priority: 100 - index,
       sortText: `${String(index).padStart(3, "0")}-${name}`,
     }));
+}
+
+function normalizeFontFamilyPrefix(value: string): string {
+  return value
+    .trim()
+    .replace(/^["']/u, "")
+    .toLocaleLowerCase("ja-JP");
+}
+
+function quoteKmarkFontFamilyValue(value: string): string {
+  return `"${value.replace(/["\\]/gu, "")}"`;
 }
 
 function valuesForParamSpec(spec: KmarkParamSpec): readonly string[] {

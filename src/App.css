@@ -23,7 +23,7 @@
   --app-font-size: 16px;
   --edit-font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
   --edit-font-size: 15px;
-  --preview-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --preview-font-family: "BIZ UDPGothic", "Yu Gothic UI", sans-serif;
   --scrollbar-size: 7px;
   --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 28%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--text-soft) 42%, transparent);
@@ -903,7 +903,7 @@ input:focus-visible,
   --markdown-body-font-size: var(--kmark-font-size, 1rem);
   max-width: none;
   padding: 16px;
-  font-family: var(--preview-font-family);
+  font-family: var(--kmark-font-family, var(--preview-font-family));
   font-size: var(--markdown-body-font-size);
   color: var(--preview-text);
 }
@@ -920,8 +920,11 @@ input:focus-visible,
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,
-.markdown-body h4 {
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
   color: var(--preview-text);
+  font-family: var(--kmark-heading-font-family, inherit);
   line-height: 1.2;
 }
 
