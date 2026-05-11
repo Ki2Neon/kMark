@@ -313,6 +313,7 @@ struct PartialPageDirective {
     page_margin_left: Option<CssLength>,
     font_size: Option<CssLength>,
     page_number_position: Option<PageNumberPosition>,
+    page_number_display: Option<bool>,
     page_number_format: Option<String>,
     page_number_start: Option<u32>,
     page_number_reset: Option<bool>,
@@ -329,9 +330,25 @@ struct PartialPageDirective {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActiveKmarkScopeLine {
-    line: String,
+    lines: Vec<String>,
     end_offset: usize,
     page_directive: PartialPageDirective,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveKmarkPageDirectiveLine {
+    end_offset: usize,
+    scope_depth: usize,
+    page_directive: PartialPageDirective,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingKmarkScopePrelude {
+    lines: Vec<String>,
+    page_directive: PartialPageDirective,
+    start_offset: usize,
+    end_offset: usize,
+    start_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -477,6 +494,8 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
     let mut active_fence = None;
     let mut is_inside_html_comment_block = false;
     let mut active_scope_lines: Vec<ActiveKmarkScopeLine> = Vec::new();
+    let mut active_page_directives: Vec<ActiveKmarkPageDirectiveLine> = Vec::new();
+    let mut pending_scope_prelude: Option<PendingKmarkScopePrelude> = None;
     let mut segment_has_rendered_content = false;
 
     for (line_index, line_span) in collect_markdown_line_spans(content).into_iter().enumerate() {
@@ -503,28 +522,50 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         }
 
         if let Some(scope_page_directive) = parse_kmark_scope_start_page_directive_line(line) {
-            let current_page_directive = resolve_active_page_directive(&active_scope_lines);
+            let current_page_directive =
+                resolve_active_page_directive(&active_scope_lines, &active_page_directives);
+            let pending_scope_prelude = pending_scope_prelude.take();
+            let mut combined_scope_page_directive = pending_scope_prelude
+                .as_ref()
+                .map(|pending| pending.page_directive.clone())
+                .unwrap_or_default();
+            combined_scope_page_directive.merge(&scope_page_directive);
+            let mut scope_lines = pending_scope_prelude
+                .as_ref()
+                .map(|pending| pending.lines.clone())
+                .unwrap_or_default();
+            scope_lines.push(line.to_owned());
             let mut next_scope_lines = active_scope_lines.clone();
             next_scope_lines.push(ActiveKmarkScopeLine {
-                line: line.to_owned(),
+                lines: scope_lines,
                 end_offset: line_span.end,
-                page_directive: scope_page_directive,
+                page_directive: combined_scope_page_directive,
             });
-            let next_page_directive = resolve_active_page_directive(&next_scope_lines);
+            let next_page_directive =
+                resolve_active_page_directive(&next_scope_lines, &active_page_directives);
 
             if segment_has_rendered_content
                 && current_page_directive.has_different_page_config_than(&next_page_directive)
             {
+                let split_start = pending_scope_prelude
+                    .as_ref()
+                    .map(|pending| pending.start_offset)
+                    .unwrap_or(line_span.start);
+                let split_line = pending_scope_prelude
+                    .as_ref()
+                    .map(|pending| pending.start_line)
+                    .unwrap_or(line_index);
                 push_markdown_page_segment(
                     &mut page_segments,
                     content,
                     last_index,
-                    line_span.start,
+                    split_start,
                     line_offset,
                     &active_scope_lines,
+                    &active_page_directives,
                 );
-                last_index = line_span.start;
-                line_offset = line_index;
+                last_index = split_start;
+                line_offset = split_line;
                 segment_has_rendered_content = false;
             }
 
@@ -533,13 +574,25 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         }
 
         if is_kmark_scope_end_line(line) {
-            let current_page_directive = resolve_active_page_directive(&active_scope_lines);
+            pending_scope_prelude = None;
+            let current_page_directive =
+                resolve_active_page_directive(&active_scope_lines, &active_page_directives);
             let mut next_scope_lines = active_scope_lines.clone();
+            let closing_scope_depth = next_scope_lines.len();
             next_scope_lines.pop();
-            let next_page_directive = resolve_active_page_directive(&next_scope_lines);
+            let mut next_page_directives = active_page_directives.clone();
+            next_page_directives
+                .retain(|directive_line| directive_line.scope_depth < closing_scope_depth);
+            let next_page_directive =
+                resolve_active_page_directive(&next_scope_lines, &next_page_directives);
+            let segment_uses_prefixed_scope = segment_has_rendered_content
+                && active_scope_lines
+                    .iter()
+                    .any(|scope_line| scope_line.end_offset <= last_index);
 
             if segment_has_rendered_content
-                && current_page_directive.has_different_page_config_than(&next_page_directive)
+                && (current_page_directive.has_different_page_config_than(&next_page_directive)
+                    || segment_uses_prefixed_scope)
             {
                 push_markdown_page_segment(
                     &mut page_segments,
@@ -548,18 +601,22 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
                     line_span.start,
                     line_offset,
                     &active_scope_lines,
+                    &active_page_directives,
                 );
                 last_index = line_span.end;
                 line_offset = line_index + 1;
                 segment_has_rendered_content = false;
                 active_scope_lines = next_scope_lines;
+                active_page_directives = next_page_directives;
                 continue;
             }
 
             active_scope_lines = next_scope_lines;
+            active_page_directives = next_page_directives;
         }
 
         if is_page_break_line(line) {
+            pending_scope_prelude = None;
             if segment_has_rendered_content {
                 push_markdown_page_segment(
                     &mut page_segments,
@@ -568,6 +625,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
                     line_span.start,
                     line_offset,
                     &active_scope_lines,
+                    &active_page_directives,
                 );
             }
 
@@ -581,10 +639,56 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
             is_inside_html_comment_block = true;
         }
 
-        if line.trim().is_empty() || is_kmark_comment_line(line) {
+        if let Some(comment) = parse_kmark_scope_prelude_comment(line) {
+            update_pending_kmark_scope_prelude(
+                &mut pending_scope_prelude,
+                comment,
+                line,
+                line_span.start,
+                line_span.end,
+                line_index,
+            );
             continue;
         }
 
+        if line.trim().is_empty() {
+            if pending_scope_prelude
+                .as_ref()
+                .is_some_and(|pending| pending.page_directive.has_page_directive())
+            {
+                if !segment_has_rendered_content {
+                    apply_pending_page_directive_before_content(
+                        &mut page_segments,
+                        content,
+                        &mut last_index,
+                        &mut line_offset,
+                        &active_scope_lines,
+                        &mut active_page_directives,
+                        &mut pending_scope_prelude,
+                        false,
+                    );
+                }
+            } else {
+                pending_scope_prelude = None;
+            }
+            continue;
+        }
+
+        if is_kmark_comment_line(line) {
+            pending_scope_prelude = None;
+            continue;
+        }
+
+        apply_pending_page_directive_before_content(
+            &mut page_segments,
+            content,
+            &mut last_index,
+            &mut line_offset,
+            &active_scope_lines,
+            &mut active_page_directives,
+            &mut pending_scope_prelude,
+            segment_has_rendered_content,
+        );
         segment_has_rendered_content = true;
     }
 
@@ -596,6 +700,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
             content.len(),
             line_offset,
             &active_scope_lines,
+            &active_page_directives,
         );
     }
 
@@ -619,11 +724,12 @@ fn push_markdown_page_segment(
     end_index: usize,
     line_offset: usize,
     active_scope_lines: &[ActiveKmarkScopeLine],
+    active_page_directives: &[ActiveKmarkPageDirectiveLine],
 ) {
     let prefix_lines = active_scope_lines
         .iter()
         .filter(|scope_line| scope_line.end_offset <= start_index)
-        .map(|scope_line| scope_line.line.as_str())
+        .flat_map(|scope_line| scope_line.lines.iter().map(String::as_str))
         .collect::<Vec<_>>();
     let mut segment_content = String::new();
 
@@ -636,17 +742,47 @@ fn push_markdown_page_segment(
     page_segments.push(MarkdownPageSegment {
         content: segment_content,
         line_offset: line_offset.saturating_sub(prefix_lines.len()),
-        page_directive: resolve_active_page_directive_for_segment(active_scope_lines, start_index),
+        page_directive: resolve_active_page_directive_for_segment(
+            active_scope_lines,
+            active_page_directives,
+            start_index,
+        ),
     });
 }
 
 fn resolve_active_page_directive(
     active_scope_lines: &[ActiveKmarkScopeLine],
+    active_page_directives: &[ActiveKmarkPageDirectiveLine],
+) -> PartialPageDirective {
+    resolve_active_page_directive_at(active_scope_lines, active_page_directives, None)
+}
+
+fn resolve_active_page_directive_at(
+    active_scope_lines: &[ActiveKmarkScopeLine],
+    active_page_directives: &[ActiveKmarkPageDirectiveLine],
+    segment_start: Option<usize>,
 ) -> PartialPageDirective {
     let mut page_directive = PartialPageDirective::default();
 
-    for scope_line in active_scope_lines {
-        page_directive.merge(&scope_line.page_directive);
+    merge_page_directives_for_scope_depth(
+        &mut page_directive,
+        active_page_directives,
+        0,
+        segment_start,
+    );
+
+    for (scope_index, scope_line) in active_scope_lines.iter().enumerate() {
+        let mut scope_directive = scope_line.page_directive.clone();
+        if segment_start.is_some_and(|start| scope_line.end_offset <= start) {
+            scope_directive.page_number_reset = None;
+        }
+        page_directive.merge(&scope_directive);
+        merge_page_directives_for_scope_depth(
+            &mut page_directive,
+            active_page_directives,
+            scope_index + 1,
+            segment_start,
+        );
     }
 
     page_directive
@@ -654,19 +790,80 @@ fn resolve_active_page_directive(
 
 fn resolve_active_page_directive_for_segment(
     active_scope_lines: &[ActiveKmarkScopeLine],
+    active_page_directives: &[ActiveKmarkPageDirectiveLine],
     segment_start: usize,
 ) -> PartialPageDirective {
-    let mut page_directive = PartialPageDirective::default();
+    resolve_active_page_directive_at(
+        active_scope_lines,
+        active_page_directives,
+        Some(segment_start),
+    )
+}
 
-    for scope_line in active_scope_lines {
-        let mut scope_directive = scope_line.page_directive.clone();
-        if scope_line.end_offset <= segment_start {
-            scope_directive.page_number_reset = None;
+fn merge_page_directives_for_scope_depth(
+    target: &mut PartialPageDirective,
+    active_page_directives: &[ActiveKmarkPageDirectiveLine],
+    scope_depth: usize,
+    segment_start: Option<usize>,
+) {
+    for directive_line in active_page_directives
+        .iter()
+        .filter(|directive_line| directive_line.scope_depth == scope_depth)
+    {
+        let mut directive = directive_line.page_directive.clone();
+        if segment_start.is_some_and(|start| directive_line.end_offset <= start) {
+            directive.page_number_reset = None;
         }
-        page_directive.merge(&scope_directive);
+        target.merge(&directive);
+    }
+}
+
+fn apply_pending_page_directive_before_content(
+    page_segments: &mut Vec<MarkdownPageSegment>,
+    content: &str,
+    last_index: &mut usize,
+    line_offset: &mut usize,
+    active_scope_lines: &[ActiveKmarkScopeLine],
+    active_page_directives: &mut Vec<ActiveKmarkPageDirectiveLine>,
+    pending_scope_prelude: &mut Option<PendingKmarkScopePrelude>,
+    segment_has_rendered_content: bool,
+) {
+    let Some(pending) = pending_scope_prelude.take() else {
+        return;
+    };
+
+    if !pending.page_directive.has_page_directive() {
+        return;
     }
 
-    page_directive
+    let current_page_directive =
+        resolve_active_page_directive(active_scope_lines, active_page_directives);
+    let mut next_page_directives = active_page_directives.clone();
+    next_page_directives.push(ActiveKmarkPageDirectiveLine {
+        end_offset: pending.end_offset,
+        scope_depth: active_scope_lines.len(),
+        page_directive: pending.page_directive,
+    });
+    let next_page_directive =
+        resolve_active_page_directive(active_scope_lines, &next_page_directives);
+
+    if segment_has_rendered_content
+        && current_page_directive.has_different_page_config_than(&next_page_directive)
+    {
+        push_markdown_page_segment(
+            page_segments,
+            content,
+            *last_index,
+            pending.start_offset,
+            *line_offset,
+            active_scope_lines,
+            active_page_directives,
+        );
+        *last_index = pending.start_offset;
+        *line_offset = pending.start_line;
+    }
+
+    *active_page_directives = next_page_directives;
 }
 
 fn collect_markdown_line_spans(content: &str) -> Vec<MarkdownLineSpan> {
@@ -795,6 +992,40 @@ fn parse_kmark_scope_start_page_directive_line(line: &str) -> Option<PartialPage
     let scope_body = remainder.strip_prefix('{')?.trim();
 
     Some(parse_kmark_page_directive_tokens(scope_body).unwrap_or_default())
+}
+
+fn parse_kmark_scope_prelude_comment(line: &str) -> Option<PartialPageDirective> {
+    let remainder = parse_kmark_comment_body(line)?;
+
+    if remainder == "}" || remainder.starts_with('{') {
+        return None;
+    }
+
+    Some(parse_kmark_page_directive_tokens(remainder).unwrap_or_default())
+}
+
+fn update_pending_kmark_scope_prelude(
+    pending_scope_prelude: &mut Option<PendingKmarkScopePrelude>,
+    page_directive: PartialPageDirective,
+    line: &str,
+    start_offset: usize,
+    end_offset: usize,
+    line_index: usize,
+) {
+    if let Some(pending) = pending_scope_prelude.as_mut() {
+        pending.lines.push(line.to_owned());
+        pending.page_directive.merge(&page_directive);
+        pending.end_offset = end_offset;
+        return;
+    }
+
+    *pending_scope_prelude = Some(PendingKmarkScopePrelude {
+        lines: vec![line.to_owned()],
+        page_directive,
+        start_offset,
+        end_offset,
+        start_line: line_index,
+    });
 }
 
 fn is_kmark_scope_end_line(line: &str) -> bool {
@@ -2495,6 +2726,12 @@ impl PageNumberConfig {
         if let Some(position) = directive.page_number_position {
             self.position = position;
         }
+        if let Some(display) = directive.page_number_display {
+            self.visible = display;
+            if display && matches!(self.position, PageNumberPosition::None) {
+                self.position = PageNumberPosition::BottomCenter;
+            }
+        }
         if let Some(format) = &directive.page_number_format {
             self.format = format.clone();
         }
@@ -2654,6 +2891,18 @@ impl PartialPageDirective {
         if let Some(page_number_position) = other.page_number_position {
             self.page_number_position = Some(page_number_position);
         }
+        if let Some(page_number_display) = other.page_number_display {
+            self.page_number_display = Some(page_number_display);
+            if page_number_display
+                && other.page_number_position.is_none()
+                && matches!(
+                    self.page_number_position,
+                    None | Some(PageNumberPosition::None)
+                )
+            {
+                self.page_number_position = Some(PageNumberPosition::BottomCenter);
+            }
+        }
         if let Some(page_number_format) = &other.page_number_format {
             self.page_number_format = Some(page_number_format.clone());
         }
@@ -2708,6 +2957,7 @@ impl PartialPageDirective {
 
     fn has_page_number_directive(&self) -> bool {
         self.page_number_position.is_some()
+            || self.page_number_display.is_some()
             || self.page_number_format.is_some()
             || self.page_number_start.is_some()
             || self.page_number_reset.is_some()
@@ -2734,6 +2984,7 @@ impl PartialPageDirective {
             || self.page_margin_left != other.page_margin_left
             || self.font_size != other.font_size
             || self.page_number_position != other.page_number_position
+            || self.page_number_display != other.page_number_display
             || self.page_number_format != other.page_number_format
             || self.page_number_start != other.page_number_start
             || self.page_number_reset != other.page_number_reset
@@ -3099,6 +3350,10 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
             continue;
         };
 
+        if key == "page_scope" {
+            return None;
+        }
+
         match key {
             "page_size" => {
                 if let Some(page_size) = parse_kmark_page_size_value(value) {
@@ -3151,8 +3406,9 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                 }
             }
             "page_number" => {
-                if let Some(position) = parse_kmark_page_number_position_value(value) {
-                    directive.page_number_position = Some(position);
+                if let Some((position, display)) = parse_kmark_page_number_value(value) {
+                    directive.page_number_position = position;
+                    directive.page_number_display = display;
                 }
             }
             "page_number_format" => {
@@ -3246,6 +3502,21 @@ fn parse_kmark_page_orientation_value(value: &str) -> Option<PageOrientation> {
 
 fn parse_kmark_page_length_value(value: &str) -> Option<CssLength> {
     parse_css_physical_length_value(trim_kmark_quotes(value)).map(CssLength::new)
+}
+
+fn parse_kmark_page_number_value(
+    value: &str,
+) -> Option<(Option<PageNumberPosition>, Option<bool>)> {
+    match trim_kmark_quotes(value) {
+        "show" => Some((None, Some(true))),
+        "hide" => Some((None, Some(false))),
+        value => parse_kmark_page_number_position_value(value).map(|position| {
+            (
+                Some(position),
+                Some(!matches!(position, PageNumberPosition::None)),
+            )
+        }),
+    }
 }
 
 fn parse_kmark_page_number_position_value(value: &str) -> Option<PageNumberPosition> {
@@ -4153,6 +4424,163 @@ mod tests {
     }
 
     #[test]
+    fn applies_standalone_page_number_font_size_to_following_pages() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_number:show page_number_format:\"{page}\" page_number_font_size:12pt -->\n\
+             \n\
+             # First\n\
+             <!-- --- -->\n\
+             # Second",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        for page in &rendered_preview.pages {
+            assert_eq!(
+                page.page_number_config.position,
+                PageNumberPosition::BottomCenter
+            );
+            assert!(page.page_number_config.visible);
+            assert_eq!(page.page_number_config.font_size.as_str(), "12pt");
+            assert_eq!(page.text_style.font_size.as_str(), "10.5pt");
+        }
+    }
+
+    #[test]
+    fn keeps_page_number_font_size_separate_from_body_font_size() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { page_number:show font_size:16pt page_number_font_size:8pt -->\n\
+             # Body",
+        );
+        let page = &rendered_preview.pages[0];
+
+        assert_eq!(page.text_style.font_size.as_str(), "16pt");
+        assert_eq!(page.page_number_config.font_size.as_str(), "8pt");
+    }
+
+    #[test]
+    fn keeps_page_number_font_size_across_hide_and_show() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_number:show page_number_font_size:10pt -->\n\
+             # First\n\
+             <!-- --- -->\n\
+             <!-- kmark page_number:hide -->\n\
+             # Second\n\
+             <!-- --- -->\n\
+             <!-- kmark page_number:show -->\n\
+             # Third",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 3);
+        assert!(rendered_preview.pages[0].page_number_config.visible);
+        assert_eq!(
+            rendered_preview.pages[0]
+                .page_number_config
+                .font_size
+                .as_str(),
+            "10pt"
+        );
+        assert!(!rendered_preview.pages[1].page_number_config.visible);
+        assert_eq!(
+            rendered_preview.pages[1]
+                .page_number_config
+                .font_size
+                .as_str(),
+            "10pt"
+        );
+        assert_eq!(
+            rendered_preview.pages[1].page_number_config.position,
+            PageNumberPosition::BottomCenter
+        );
+        assert!(rendered_preview.pages[2].page_number_config.visible);
+        assert_eq!(
+            rendered_preview.pages[2]
+                .page_number_config
+                .font_size
+                .as_str(),
+            "10pt"
+        );
+        assert_eq!(
+            rendered_preview.pages[2].page_number_config.position,
+            PageNumberPosition::BottomCenter
+        );
+    }
+
+    #[test]
+    fn falls_back_to_default_for_invalid_page_number_font_size() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_number:show page_number_font_size:large -->\n# Body",
+        );
+        let page_number = &rendered_preview.pages[0].page_number_config;
+
+        assert_eq!(page_number.position, PageNumberPosition::BottomCenter);
+        assert_eq!(page_number.font_size.as_str(), "10pt");
+    }
+
+    #[test]
+    fn ignores_kmark_keys_inside_multiline_html_comments() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark {\n\
+             page_number:show\n\
+             page_number_font_size:18pt\n\
+             } -->\n\
+             # Body",
+        );
+        let page_number = &rendered_preview.pages[0].page_number_config;
+
+        assert_eq!(page_number.position, PageNumberPosition::None);
+        assert_eq!(page_number.font_size.as_str(), "10pt");
+    }
+
+    #[test]
+    fn applies_separated_page_directives_to_following_scope() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_size:A5 -->\n\
+             <!-- kmark page_orientation:landscape -->\n\
+             <!-- kmark page_width:120mm -->\n\
+             <!-- kmark page_height:90mm -->\n\
+             <!-- kmark page_margin:12mm -->\n\
+             <!-- kmark page_margin_left:7mm -->\n\
+             <!-- kmark font_size:9pt -->\n\
+             <!-- kmark page_number:bottom-center -->\n\
+             <!-- kmark page_number_format:\"Page {page}\" -->\n\
+             <!-- kmark page_number_reset:true -->\n\
+             <!-- kmark page_number_start:4 -->\n\
+             <!-- kmark page_number_count:false -->\n\
+             <!-- kmark page_number_visible:false -->\n\
+             <!-- kmark page_number_style:upper-alpha -->\n\
+             <!-- kmark page_number_font_size:8pt -->\n\
+             <!-- kmark page_number_color:\"#777\" -->\n\
+             <!-- kmark page_number_margin_top:3mm -->\n\
+             <!-- kmark page_number_margin_bottom:4mm -->\n\
+             <!-- kmark page_number_margin_left:5mm -->\n\
+             <!-- kmark page_number_margin_right:6mm -->\n\
+             <!-- kmark { -->\n\
+             # Body",
+        );
+        let page = &rendered_preview.pages[0];
+        let page_number = &page.page_number_config;
+
+        assert_eq!(page.page_style.width.as_str(), "120mm");
+        assert_eq!(page.page_style.height.as_str(), "90mm");
+        assert_eq!(page.page_style.margin_top.as_str(), "12mm");
+        assert_eq!(page.page_style.margin_left.as_str(), "7mm");
+        assert_eq!(page.text_style.font_size.as_str(), "9pt");
+        assert_eq!(page_number.position, PageNumberPosition::BottomCenter);
+        assert_eq!(page_number.format, "Page {page}");
+        assert_eq!(page_number.start, 4);
+        assert!(page_number.reset);
+        assert!(!page_number.count);
+        assert!(!page_number.visible);
+        assert_eq!(page_number.style, PageNumberStyle::UpperAlpha);
+        assert_eq!(page_number.font_size.as_str(), "8pt");
+        assert_eq!(page_number.color, "#777");
+        assert_eq!(page_number.margin_top.as_str(), "3mm");
+        assert_eq!(page_number.margin_bottom.as_str(), "4mm");
+        assert_eq!(page_number.margin_left.as_str(), "5mm");
+        assert_eq!(page_number.margin_right.as_str(), "6mm");
+    }
+
+    #[test]
     fn keeps_page_number_reset_only_on_scope_start_segment() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark { page_number:bottom-center page_number_reset:true -->\n\
@@ -4163,6 +4591,25 @@ mod tests {
 
         assert!(rendered_preview.pages[0].page_number_config.reset);
         assert!(!rendered_preview.pages[1].page_number_config.reset);
+    }
+
+    #[test]
+    fn keeps_separated_scope_block_params_across_page_breaks() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 -->\n\
+             <!-- kmark align:right -->\n\
+             <!-- kmark { -->\n\
+             ![](a.png)\n\
+             <!-- --- -->\n\
+             ![](b.png)\n\
+             <!-- kmark } -->",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        for page in &rendered_preview.pages {
+            assert!(page.html.contains("align-items:flex-end"));
+            assert!(page.html.contains("width:200px;"));
+        }
     }
 
     #[test]

@@ -245,7 +245,7 @@
       "aliases": [],
       "type": "enum",
       "contexts": ["page", "scope"],
-      "values": ["none", "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
+      "values": ["show", "hide", "none", "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
       "insertText": "page_number:",
       "description": "ページ番号の表示位置を指定する",
       "examples": ["<!-- kmark { page_number:bottom-center } -->"],

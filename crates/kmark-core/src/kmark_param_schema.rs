@@ -287,6 +287,8 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         param_type: "enum",
         contexts: &["page", "scope"],
         values: &[
+            "show",
+            "hide",
             "none",
             "top-left",
             "top-center",
