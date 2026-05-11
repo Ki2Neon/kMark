@@ -100,6 +100,12 @@ type NumberedRenderedPreviewPage = RenderedPreviewPage & {
   readonly tocPageNumberText: string;
 };
 
+type A4TocRowElements = {
+  readonly label: HTMLElement;
+  readonly page: HTMLElement;
+  readonly row: HTMLElement;
+};
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
@@ -715,7 +721,7 @@ function createA4PageValignSpacer(height: number): HTMLElement {
 
 function getA4PaginationNodes(html: string): readonly Node[] {
   const template = document.createElement("template");
-  template.innerHTML = html;
+  template.innerHTML = prepareA4TocRowsHtml(html);
 
   return Array.from(template.content.childNodes).filter((node) => !isIgnorableA4PaginationNode(node));
 }
@@ -1191,6 +1197,11 @@ function appendNestedListToA4ListItemPages(
       startA4PaginationPage(context);
       nestedListAccess.resetAfterPageBreak();
       nestedListAccess.startContinuationList().append(nestedListItemClone);
+      if (isA4PaginationPageOverflowing(context)) {
+        commitA4PaginationPage(context);
+        startA4PaginationPage(context);
+        nestedListAccess.resetAfterPageBreak();
+      }
       continue;
     }
 
@@ -1201,6 +1212,11 @@ function appendNestedListToA4ListItemPages(
       startA4PaginationPage(context);
       nestedListAccess.resetAfterPageBreak();
       nestedListAccess.startContinuationList().append(nestedListItemClone);
+      if (isA4PaginationPageOverflowing(context)) {
+        commitA4PaginationPage(context);
+        startA4PaginationPage(context);
+        nestedListAccess.resetAfterPageBreak();
+      }
       continue;
     }
 
@@ -2105,7 +2121,7 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
     return false;
   }
 
-  const listItems = getA4PaginationListItems(listElement);
+  const listItems = Array.from(element.querySelectorAll<HTMLElement>(".kmark-toc__item"));
 
   if (listItems.length === 0) {
     return false;
@@ -2114,6 +2130,19 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
   let activeList: HTMLElement | null = null;
   let activeToc: HTMLElement | null = null;
   let hasStartedToc = false;
+
+  const createFlatTocListItem = (sourceListItem: HTMLElement): HTMLElement | null => {
+    const rowElements = ensureA4TocItemRow(sourceListItem);
+
+    if (rowElements === null) {
+      return null;
+    }
+
+    const listItem = cloneA4PaginationListItemShell(sourceListItem, false);
+    listItem.append(rowElements.row.cloneNode(true));
+
+    return listItem;
+  };
 
   const startToc = (isContinuation: boolean): HTMLElement => {
     const nextToc = cloneA4PaginationElementShell(element);
@@ -2145,25 +2174,21 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
     activeToc = null;
   };
 
-  const removeEmptyActiveList = (): void => {
-    if (activeList !== null && !hasA4PaginationDeepContent(activeList)) {
-      activeList.remove();
-      activeList = null;
-    }
-  };
+  const ensureCurrentList = (): HTMLElement => activeList ?? startList(false);
 
-  const listAccess: A4PaginationListAccess = {
-    ensureCurrentList: () => activeList ?? startList(false),
-    resetAfterPageBreak,
-    startContinuationList: () => {
-      activeList = null;
-      return startList(true);
-    },
+  const startContinuationList = (): HTMLElement => {
+    activeList = null;
+    return startList(true);
   };
 
   for (const listItem of listItems) {
-    const currentList = listAccess.ensureCurrentList();
-    const listItemClone = listItem.cloneNode(true);
+    const listItemClone = createFlatTocListItem(listItem);
+
+    if (listItemClone === null) {
+      continue;
+    }
+
+    const currentList = ensureCurrentList();
     currentList.append(listItemClone);
 
     if (!isA4PaginationPageOverflowing(context)) {
@@ -2172,29 +2197,31 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
 
     currentList.removeChild(listItemClone);
 
-    if (appendSplitListItemToA4Pages(context, listItem, listAccess)) {
-      continue;
-    }
-
     if (hasA4PaginationDeepContent(currentList)) {
       commitA4PaginationPage(context);
       startA4PaginationPage(context);
-      listAccess.resetAfterPageBreak();
-      listAccess.startContinuationList().append(listItemClone);
+      resetAfterPageBreak();
+      startContinuationList().append(listItemClone);
       continue;
     }
 
-    removeEmptyActiveList();
+    currentList.remove();
+    activeList = null;
 
     if (hasA4PaginationDeepContent(context.body)) {
       commitA4PaginationPage(context);
       startA4PaginationPage(context);
-      listAccess.resetAfterPageBreak();
-      listAccess.startContinuationList().append(listItemClone);
+      resetAfterPageBreak();
+      startContinuationList().append(listItemClone);
       continue;
     }
 
-    listAccess.ensureCurrentList().append(listItemClone);
+    ensureCurrentList().append(listItemClone);
+    if (isA4PaginationPageOverflowing(context)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      resetAfterPageBreak();
+    }
   }
 
   return true;
@@ -2565,6 +2592,116 @@ function collectA4HeadingPageNumbers(pages: readonly NumberedRenderedPreviewPage
   return pageNumbersByHeadingId;
 }
 
+function isA4TocLabelElement(element: Element): element is HTMLElement {
+  return element instanceof HTMLElement
+    && (element.classList.contains("kmark-toc__link") || element.classList.contains("kmark-toc__text"));
+}
+
+function getA4DirectTocLabelElement(element: HTMLElement): HTMLElement | null {
+  return Array.from(element.children).find(isA4TocLabelElement) ?? null;
+}
+
+function getA4DirectTocRowElement(item: HTMLElement): HTMLElement | null {
+  return Array.from(item.children).find((child): child is HTMLElement => (
+    child instanceof HTMLElement && child.classList.contains("kmark-toc__row")
+  )) ?? null;
+}
+
+function getA4DirectTocPageElement(row: HTMLElement): HTMLElement | null {
+  return Array.from(row.children).find((child): child is HTMLElement => (
+    child instanceof HTMLElement && child.classList.contains("kmark-toc__page")
+  )) ?? null;
+}
+
+function getA4TocItemNestDepth(item: HTMLElement): number {
+  let depth = 0;
+  let parent = item.parentElement;
+
+  while (parent !== null) {
+    if (parent.classList.contains("kmark-toc__list--nested")) {
+      depth += 1;
+    }
+
+    if (parent.classList.contains("kmark-toc")) {
+      break;
+    }
+
+    parent = parent.parentElement;
+  }
+
+  return depth;
+}
+
+function ensureA4TocItemRow(item: HTMLElement): A4TocRowElements | null {
+  const existingRow = getA4DirectTocRowElement(item);
+
+  if (existingRow !== null) {
+    const label = getA4DirectTocLabelElement(existingRow);
+
+    if (label === null) {
+      return null;
+    }
+
+    const existingPage = getA4DirectTocPageElement(existingRow);
+    if (existingPage !== null) {
+      return { label, page: existingPage, row: existingRow };
+    }
+
+    const page = document.createElement("span");
+    page.className = "kmark-toc__page";
+    existingRow.append(page);
+
+    return { label, page, row: existingRow };
+  }
+
+  const label = getA4DirectTocLabelElement(item);
+
+  if (label === null) {
+    return null;
+  }
+
+  const row = document.createElement("div");
+  row.className = "kmark-toc__row";
+  item.insertBefore(row, label);
+  row.append(label);
+
+  const page = document.createElement("span");
+  page.className = "kmark-toc__page";
+  row.append(page);
+
+  return { label, page, row };
+}
+
+function applyA4TocRowStripeClasses(root: ParentNode): void {
+  for (const toc of root.querySelectorAll<HTMLElement>(".kmark-toc")) {
+    Array.from(toc.querySelectorAll<HTMLElement>(".kmark-toc__row")).forEach((row, index) => {
+      const item = row.closest(".kmark-toc__item");
+      const nestDepth = item instanceof HTMLElement ? getA4TocItemNestDepth(item) : 0;
+
+      row.classList.remove("kmark-toc__row--odd", "kmark-toc__row--even");
+      row.classList.add(index % 2 === 0 ? "kmark-toc__row--odd" : "kmark-toc__row--even");
+      row.style.setProperty("--kmark-toc-row-indent", `${(nestDepth * 1.25).toFixed(2)}em`);
+    });
+  }
+}
+
+function prepareA4TocRowsHtml(html: string): string {
+  if (!html.includes("kmark-toc")) {
+    return html;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  for (const item of template.content.querySelectorAll<HTMLElement>(".kmark-toc__item")) {
+    ensureA4TocItemRow(item);
+  }
+
+  applyA4TocRowStripeClasses(template.content);
+
+  return template.innerHTML;
+}
+
 function normalizeA4TocTargetId(link: HTMLAnchorElement): string | null {
   const href = link.getAttribute("href");
 
@@ -2587,32 +2724,23 @@ function resolveA4TocPageNumberHtml(
   template.innerHTML = html;
 
   for (const item of template.content.querySelectorAll<HTMLElement>(".kmark-toc__item")) {
-    const label = Array.from(item.children).find((child): child is HTMLElement => (
-      child instanceof HTMLElement
-      && (child.classList.contains("kmark-toc__link") || child.classList.contains("kmark-toc__text"))
-    ));
+    const rowElements = ensureA4TocItemRow(item);
 
-    if (label === undefined) {
+    if (rowElements === null) {
       continue;
     }
 
-    const targetId = label instanceof HTMLAnchorElement ? normalizeA4TocTargetId(label) : null;
+    const targetId = rowElements.label instanceof HTMLAnchorElement ? normalizeA4TocTargetId(rowElements.label) : null;
     const pageNumber = targetId === null ? null : pageNumbersByHeadingId.get(targetId);
 
     if (pageNumber === undefined || pageNumber === null) {
       continue;
     }
 
-    const row = document.createElement("div");
-    row.className = "kmark-toc__row";
-    item.insertBefore(row, label);
-    row.append(label);
-
-    const page = document.createElement("span");
-    page.className = "kmark-toc__page";
-    page.textContent = pageNumber;
-    row.append(page);
+    rowElements.page.textContent = pageNumber;
   }
+
+  applyA4TocRowStripeClasses(template.content);
 
   return template.innerHTML;
 }

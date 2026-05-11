@@ -121,7 +121,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body .kmark-toc__list--nested {
     margin-top: 0;
-    padding-left: 1.25em;
+    padding-left: 0;
   }
 
   .markdown-body .kmark-toc__item {
@@ -138,17 +138,19 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     padding: 0.1em 0.35em;
   }
 
-  .markdown-body .kmark-toc__item:nth-child(odd) > .kmark-toc__row {
+  .markdown-body .kmark-toc__row--odd {
     background: rgb(0 0 0 / 3.5%);
   }
 
-  .markdown-body .kmark-toc__item:nth-child(even) > .kmark-toc__row {
+  .markdown-body .kmark-toc__row--even {
     background: rgb(0 0 0 / 1.4%);
   }
 
   .markdown-body .kmark-toc__link,
   .markdown-body .kmark-toc__text {
     min-width: 0;
+    padding-left: var(--kmark-toc-row-indent, 0);
+    box-sizing: border-box;
     overflow-wrap: anywhere;
   }
 
