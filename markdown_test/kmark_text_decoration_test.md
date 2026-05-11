@@ -1,63 +1,91 @@
 # kmark text decoration test
 
-通常本文の前後に自己完結型の装飾文字列を挿入する確認。
+裸paramが直下Markdown blockへ作用する確認。
 
-<!-- kmark text:社外秘 -->
+## paragraph
 
-続き本文。直前textのstyleが本文へ漏れないこと。
+<!-- kmark color:#c00 font_size:14pt font_weight:bold -->
+重要本文
 
-## literal values
+通常本文。直前styleが漏れないこと。
 
-<!-- kmark text:CONFIDENTIAL -->
+## heading visual
 
-<!-- kmark text:DRAFT -->
-
-<!-- kmark text:APPROVED -->
-
-<!-- kmark text:回覧 -->
-
-<!-- kmark text:external_secret -->
-
-## decorated
-
-<!-- kmark text:社外秘 w:40mm h:12mm color:#c00 font_size:12pt font_weight:bold font_family:"Yu Gothic" font_style:normal letter_spacing:0.08em line_height:1.2 border_size:2px border_color:red border_style:solid radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right -->
+<!-- kmark w:40mm h:12mm color:#c00 font_size:12pt font_weight:bold font_family:"Yu Gothic" font_style:normal letter_spacing:0.08em line_height:1.2 border_size:2px border_color:red border_style:solid radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right -->
+# 社外秘
 
 次の本文。右寄せが漏れないこと。
 
-## text params
+## list
 
-<!-- kmark text:重要 color:red font_size:14pt font_weight:700 -->
+<!-- kmark color:#064 font_weight:700 bg:#f0fff8 border_size:1px border_color:#8ac padding:2mm -->
+- 承認済
+- 回覧済
 
-<!-- kmark text:DRAFT font_style:italic letter_spacing:0.12em -->
+## blockquote
 
-<!-- kmark text:承認済 font_family:"Yu Gothic" line_height:1.4 -->
+<!-- kmark color:#805 bg:#fff0f8 border_size:2px border_color:#c7a radius:4px padding:2mm -->
+> 関係者外秘
+> 共有範囲を確認する。
+
+## table
+
+<!-- kmark color:#036 font_size:11pt border_size:1px border_color:#8ab bg:#f3fbff padding:1mm -->
+| 区分 | 状態 |
+| --- | --- |
+| CONFIDENTIAL | active |
+| DRAFT | pending |
+
+## code
+
+<!-- kmark color:#eee bg:#222 padding:2mm radius:4px -->
+```text
+CONFIDENTIAL=true
+DRAFT=false
+```
+
+## scope
+
+<!-- kmark { color:#900 border_size:1px border_color:#c88 radius:3px padding:1mm -->
+scope内本文。
+
+## scope内見出し
+
+<!-- kmark } -->
 
 ## align leak guard
 
-<!-- kmark text:社外秘 align:right -->
+<!-- kmark align:right color:red -->
+# 右寄せ見出し
 
-# 見出し
-
-見出しが右寄せされないこと。
+# 通常見出し
 
 ## background alias
 
-<!-- kmark text:CONFIDENTIAL background:#fff0f0 border_color:#c00 border_size:2px radius:3px -->
+<!-- kmark background:#fff0f0 border_color:#c00 border_size:2px radius:3px -->
+CONFIDENTIAL
 
-<!-- kmark text:bg優先確認 bg:#eef background:#fee border_size:1px border_color:#99f -->
+<!-- kmark bg:#eef background:#fee border_size:1px border_color:#99f -->
+bg/background優先確認
 
 ## shadow variants
 
-<!-- kmark text:DRAFT shadow:sm -->
+<!-- kmark shadow:sm border_size:1px border_color:#999 padding:2mm -->
+DRAFT
 
-<!-- kmark text:APPROVED shadow:0 2px 8px #0003 -->
+<!-- kmark shadow:0 2px 8px #0003 border_size:1px border_color:#999 padding:2mm -->
+APPROVED
 
-## html escape
+## blank line guard
 
-<!-- kmark text:<script>alert(1)</script> -->
+<!-- kmark color:red -->
 
-## empty text
+この本文は赤くならないこと。
 
-<!-- kmark text: -->
+## legacy ignored
 
-空textは何も出力されないこと。
+<!-- kmark text:社外秘 -->
+text keyは表示文字を生成しないこと。
+
+<!-- kmark stamp:社外秘 -->
+stamp keyは表示文字を生成しないこと。

@@ -49,20 +49,6 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         priority: 88,
     },
     KmarkParamSpec {
-        name: "text",
-        aliases: &[],
-        param_type: "string",
-        contexts: &["single", "text"],
-        values: &[],
-        insert_text: "text:",
-        description: "自己完結型の装飾文字列を挿入する",
-        examples: &[
-            "<!-- kmark text:社外秘 border_size:2px border_color:red -->",
-            "<!-- kmark text:\"CONFIDENTIAL\" color:red align:right -->",
-        ],
-        priority: 105,
-    },
-    KmarkParamSpec {
         name: "w",
         aliases: &["width"],
         param_type: "length",
@@ -248,7 +234,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         values: &[],
         insert_text: "color:",
         description: "文字色を指定する",
-        examples: &["<!-- kmark text:重要 color:red -->"],
+        examples: &["<!-- kmark color:red -->\n重要"],
         priority: 78,
     },
     KmarkParamSpec {
@@ -262,7 +248,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         ],
         insert_text: "font_weight:",
         description: "文字の太さを指定する",
-        examples: &["<!-- kmark text:承認済 font_weight:bold -->"],
+        examples: &["<!-- kmark font_weight:bold -->\n承認済"],
         priority: 77,
     },
     KmarkParamSpec {
@@ -273,7 +259,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         values: &[],
         insert_text: "font_family:",
         description: "文字のfont familyを指定する",
-        examples: &["<!-- kmark text:社外秘 font_family:\"Yu Gothic\" -->"],
+        examples: &["<!-- kmark font_family:\"Yu Gothic\" -->\n社外秘"],
         priority: 76,
     },
     KmarkParamSpec {
@@ -284,7 +270,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         values: &["normal", "italic", "oblique"],
         insert_text: "font_style:",
         description: "文字styleを指定する",
-        examples: &["<!-- kmark text:DRAFT font_style:italic -->"],
+        examples: &["<!-- kmark font_style:italic -->\nDRAFT"],
         priority: 75,
     },
     KmarkParamSpec {
@@ -295,7 +281,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         values: &[],
         insert_text: "letter_spacing:",
         description: "文字間隔を指定する",
-        examples: &["<!-- kmark text:CONFIDENTIAL letter_spacing:0.08em -->"],
+        examples: &["<!-- kmark letter_spacing:0.08em -->\nCONFIDENTIAL"],
         priority: 74,
     },
     KmarkParamSpec {
@@ -306,7 +292,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         values: &[],
         insert_text: "line_height:",
         description: "行高を指定する",
-        examples: &["<!-- kmark text:承認済 line_height:1.2 -->"],
+        examples: &["<!-- kmark line_height:1.2 -->\n承認済"],
         priority: 73,
     },
     KmarkParamSpec {
@@ -395,7 +381,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         insert_text: "font_size:",
         description: "文字サイズまたは用紙表示の文字サイズを指定する",
         examples: &[
-            "<!-- kmark text:重要 font_size:12pt -->",
+            "<!-- kmark font_size:12pt -->\n重要",
             "<!-- kmark { font_size:12pt } -->",
         ],
         priority: 80,

@@ -129,6 +129,8 @@ struct ParagraphContext {
     image_count: usize,
     contains_non_image_content: bool,
     soft_break_ranges: Vec<Range<usize>>,
+    block_decoration: KmarkRootDecoration,
+    image_paragraph_decoration: KmarkRootDecoration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,12 +229,7 @@ struct KmarkParams {
 struct KmarkParamBundle {
     preset_use: Option<String>,
     params: KmarkParams,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct KmarkTextDirective {
-    content: String,
-    bundle: KmarkParamBundle,
+    page_directive: PartialPageDirective,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -264,6 +261,12 @@ struct ActiveKmarkSingleBlock {
 struct KmarkRootDecoration {
     style: Option<String>,
     page_valign: Option<KmarkPageValign>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkParagraphDecorations {
+    block: KmarkRootDecoration,
+    image_paragraph: KmarkRootDecoration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,7 +398,6 @@ struct DocumentPageConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum KmarkComment {
     Params(KmarkParamBundle),
-    Text(KmarkTextDirective),
     Define {
         name: String,
         bundle: KmarkParamBundle,
@@ -429,6 +431,7 @@ struct HtmlEmitter<'a> {
     pending_kmark_params: Option<PendingKmarkParams>,
     active_kmark_single_block: Option<ActiveKmarkSingleBlock>,
     pending_kmark_block_style: Option<String>,
+    pending_kmark_image_paragraph_style: Option<String>,
     pending_kmark_page_valign: Option<KmarkPageValign>,
 }
 
@@ -663,12 +666,6 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
 
         if is_unclosed_html_comment_line(line) {
             is_inside_html_comment_block = true;
-        }
-
-        if is_kmark_text_comment_line(line) {
-            pending_scope_prelude = None;
-            segment_has_rendered_content = true;
-            continue;
         }
 
         if let Some(comment) = parse_kmark_scope_prelude_comment(line) {
@@ -1019,15 +1016,6 @@ fn parse_kmark_comment_body(line: &str) -> Option<&str> {
     body.strip_prefix("kmark").map(str::trim)
 }
 
-fn is_kmark_text_comment_line(line: &str) -> bool {
-    let Some(remainder) = parse_kmark_comment_body(line) else {
-        return false;
-    };
-
-    let (_, text_content, _) = parse_kmark_param_bundle_parts(remainder);
-    text_content.is_some()
-}
-
 fn parse_kmark_scope_start_page_directive_line(line: &str) -> Option<PartialPageDirective> {
     let remainder = parse_kmark_comment_body(line)?;
     let scope_body = remainder.strip_prefix('{')?.trim();
@@ -1100,6 +1088,7 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_params: None,
             active_kmark_single_block: None,
             pending_kmark_block_style: None,
+            pending_kmark_image_paragraph_style: None,
             pending_kmark_page_valign: None,
         }
     }
@@ -1238,15 +1227,14 @@ impl<'a> HtmlEmitter<'a> {
                             image_count: 0,
                             contains_non_image_content: false,
                             soft_break_ranges: Vec::new(),
+                            block_decoration: KmarkRootDecoration::default(),
+                            image_paragraph_decoration: KmarkRootDecoration::default(),
                         });
                     }
                     return;
                 }
-                let paragraph_open_tag = format!(
-                    "<p{}{}>",
-                    self.source_line_attributes(range),
-                    self.take_pending_kmark_block_attributes(),
-                );
+                let kmark_decorations = self.take_pending_kmark_paragraph_decorations();
+                let paragraph_open_tag = format!("<p{}>", self.source_line_attributes(range),);
                 if self.delay_callout_marker_paragraph_if_needed(paragraph_open_tag.clone(), range)
                 {
                     return;
@@ -1259,6 +1247,8 @@ impl<'a> HtmlEmitter<'a> {
                     image_count: 0,
                     contains_non_image_content: false,
                     soft_break_ranges: Vec::new(),
+                    block_decoration: kmark_decorations.block,
+                    image_paragraph_decoration: kmark_decorations.image_paragraph,
                 });
             }
             Tag::Heading {
@@ -1894,6 +1884,8 @@ impl<'a> HtmlEmitter<'a> {
             image_count: 0,
             contains_non_image_content: false,
             soft_break_ranges: Vec::new(),
+            block_decoration: KmarkRootDecoration::default(),
+            image_paragraph_decoration: KmarkRootDecoration::default(),
         });
     }
 
@@ -1959,10 +1951,6 @@ impl<'a> HtmlEmitter<'a> {
                     });
                 }
             }
-            KmarkComment::Text(directive) => {
-                self.pending_kmark_params = None;
-                self.push_kmark_text(directive, &range);
-            }
             KmarkComment::Define { name, bundle } => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
@@ -1972,6 +1960,9 @@ impl<'a> HtmlEmitter<'a> {
             KmarkComment::ScopeStart(bundle) => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
+                if final_bundle.page_directive.has_page_directive() {
+                    final_bundle.params.text.font_size = None;
+                }
                 let layer = self.resolve_kmark_bundle_layer(&final_bundle);
                 let resolved_params = layer.resolved_params();
                 if !resolved_params.has_directives() {
@@ -2110,40 +2101,6 @@ impl<'a> HtmlEmitter<'a> {
         final_params
     }
 
-    fn push_kmark_text(&mut self, directive: KmarkTextDirective, range: &Range<usize>) {
-        let content = resolve_kmark_text_content(&directive.content);
-
-        if content.is_empty() {
-            return;
-        }
-
-        let layer = self.resolve_kmark_bundle_layer(&directive.bundle);
-        let params = self.resolve_visual_params(Some(&layer));
-        let text_style = params.to_text_element_style();
-        let text_html = format!(
-            "<span class=\"kmark-text\" style=\"{}\">{}</span>",
-            escape_html(&text_style),
-            escape_html(&content),
-        );
-
-        if let Some(wrap_style) = params.to_text_wrap_style() {
-            self.push_raw(&format!(
-                "<div class=\"kmark-text-wrap\"{} style=\"{}\">{}</div>",
-                self.source_line_attributes(range),
-                escape_html(&wrap_style),
-                text_html,
-            ));
-            return;
-        }
-
-        self.push_raw(&format!(
-            "<span class=\"kmark-text\"{} style=\"{}\">{}</span>",
-            self.source_line_attributes(range),
-            escape_html(&text_style),
-            escape_html(&content),
-        ));
-    }
-
     fn resolve_active_block_params(&self) -> KmarkParams {
         let mut final_params = KmarkParams::default();
 
@@ -2168,6 +2125,24 @@ impl<'a> HtmlEmitter<'a> {
         final_params
     }
 
+    fn resolve_active_scope_block_params(&self) -> KmarkParams {
+        let mut final_params = KmarkParams::default();
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.preset);
+            }
+        }
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.direct);
+            }
+        }
+
+        final_params
+    }
+
     fn take_callout_root_decoration(&mut self) -> KmarkRootDecoration {
         let params = self.resolve_active_block_params();
         let decoration = KmarkRootDecoration {
@@ -2183,6 +2158,7 @@ impl<'a> HtmlEmitter<'a> {
             });
 
         self.pending_kmark_block_style = None;
+        self.pending_kmark_image_paragraph_style = None;
         self.pending_kmark_page_valign = None;
         if should_consume_current_single_block {
             self.active_kmark_single_block = None;
@@ -2234,6 +2210,7 @@ impl<'a> HtmlEmitter<'a> {
 
         self.pending_kmark_params = None;
         self.pending_kmark_block_style = resolved_params.to_single_block_root_style();
+        self.pending_kmark_image_paragraph_style = resolved_params.to_image_paragraph_root_style();
         self.pending_kmark_page_valign = resolved_params.page.valign;
         self.active_kmark_single_block = Some(ActiveKmarkSingleBlock {
             layer,
@@ -2272,13 +2249,49 @@ impl<'a> HtmlEmitter<'a> {
     fn close_active_kmark_single_block(&mut self) {
         self.active_kmark_single_block = None;
         self.pending_kmark_block_style = None;
+        self.pending_kmark_image_paragraph_style = None;
         self.pending_kmark_page_valign = None;
     }
 
     fn take_pending_kmark_block_decoration(&mut self) -> KmarkRootDecoration {
-        KmarkRootDecoration {
+        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+            return self.active_scope_block_decoration();
+        }
+
+        let decoration = KmarkRootDecoration {
             style: self.pending_kmark_block_style.take(),
             page_valign: self.pending_kmark_page_valign.take(),
+        };
+        self.pending_kmark_image_paragraph_style = None;
+        decoration
+    }
+
+    fn take_pending_kmark_paragraph_decorations(&mut self) -> KmarkParagraphDecorations {
+        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+            return KmarkParagraphDecorations {
+                block: self.active_scope_block_decoration(),
+                image_paragraph: KmarkRootDecoration::default(),
+            };
+        }
+
+        KmarkParagraphDecorations {
+            block: KmarkRootDecoration {
+                style: self.pending_kmark_block_style.take(),
+                page_valign: self.pending_kmark_page_valign,
+            },
+            image_paragraph: KmarkRootDecoration {
+                style: self.pending_kmark_image_paragraph_style.take(),
+                page_valign: self.pending_kmark_page_valign.take(),
+            },
+        }
+    }
+
+    fn active_scope_block_decoration(&self) -> KmarkRootDecoration {
+        let params = self.resolve_active_scope_block_params();
+
+        KmarkRootDecoration {
+            style: params.to_scoped_block_root_style(),
+            page_valign: None,
         }
     }
 
@@ -2328,7 +2341,22 @@ impl<'a> HtmlEmitter<'a> {
             return;
         };
 
-        if self.should_flatten_kmark_scope_image_paragraph(&context) {
+        let should_flatten_image_paragraph =
+            self.should_flatten_kmark_scope_image_paragraph(&context);
+        let decoration = if context.image_count > 0 && !context.contains_non_image_content {
+            &context.image_paragraph_decoration
+        } else {
+            &context.block_decoration
+        };
+
+        if !decoration.is_empty() {
+            self.patch_tag_attributes(
+                context.open_tag_start,
+                &decoration.attributes_with_optional_class(),
+            );
+        }
+
+        if should_flatten_image_paragraph {
             self.remove_soft_breaks(&context.soft_break_ranges);
             self.patch_tag_style(context.open_tag_start, "display:contents");
         }
@@ -2411,6 +2439,18 @@ impl<'a> HtmlEmitter<'a> {
         );
     }
 
+    fn patch_tag_attributes(&mut self, open_tag_start: usize, attributes: &str) {
+        if attributes.is_empty() {
+            return;
+        }
+
+        let Some(relative_tag_end_offset) = self.html[open_tag_start..].find('>') else {
+            return;
+        };
+        let tag_end_offset = open_tag_start + relative_tag_end_offset;
+        self.html.insert_str(tag_end_offset, attributes);
+    }
+
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
         resolve_line_number(&self.line_starts, range.start) + self.line_offset
     }
@@ -2443,6 +2483,7 @@ impl KmarkParamBundle {
             self.preset_use = Some(preset_use.clone());
         }
         self.params.merge(&other.params);
+        self.page_directive.merge(&other.page_directive);
     }
 }
 
@@ -2465,6 +2506,7 @@ impl KmarkParams {
     fn has_directives(&self) -> bool {
         self.image.has_image_directives()
             || self.layout.has_layout_directives()
+            || self.text.has_text_directives()
             || self.page.has_page_directives()
     }
 
@@ -2473,6 +2515,9 @@ impl KmarkParams {
 
         if let Some(image_style) = self.image.to_box_style() {
             rules.push(image_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
         }
         if let Some(layout_style) = self.layout.to_single_block_style() {
             rules.push(layout_style);
@@ -2499,6 +2544,35 @@ impl KmarkParams {
     fn to_single_block_root_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
+        }
+        if let Some(layout_style) = self.layout.to_single_block_style() {
+            rules.push(layout_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_scoped_block_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_image_paragraph_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
         if self.page.valign.is_some() {
             if let Some(image_style) = self.image.to_box_style() {
                 rules.push(image_style);
@@ -2509,27 +2583,6 @@ impl KmarkParams {
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
-    }
-
-    fn to_text_element_style(&self) -> String {
-        let mut rules = vec![
-            "display:inline-flex".to_owned(),
-            "align-items:center".to_owned(),
-            "justify-content:center".to_owned(),
-            "box-sizing:border-box".to_owned(),
-            "white-space:nowrap".to_owned(),
-        ];
-
-        self.text.push_style_rules(&mut rules);
-        self.image.push_box_style_rules(&mut rules);
-
-        format!("{};", rules.join(";"))
-    }
-
-    fn to_text_wrap_style(&self) -> Option<String> {
-        self.layout
-            .align
-            .map(|align| format!("text-align:{}", align.css_text_value()))
     }
 }
 
@@ -2546,6 +2599,10 @@ impl KmarkPageParams {
 }
 
 impl KmarkRootDecoration {
+    fn is_empty(&self) -> bool {
+        self.style.is_none() && self.page_valign.is_none()
+    }
+
     fn class_suffix(&self) -> String {
         self.page_valign
             .map(|valign| format!(" kmark-page-valign kmark-page-valign--{}", valign.name()))
@@ -2705,6 +2762,24 @@ impl KmarkTextParams {
         if let Some(line_height) = &other.line_height {
             self.line_height = Some(line_height.clone());
         }
+    }
+
+    fn has_text_directives(&self) -> bool {
+        self.color.is_some()
+            || self.font_size.is_some()
+            || self.font_weight.is_some()
+            || self.font_family.is_some()
+            || self.font_style.is_some()
+            || self.letter_spacing.is_some()
+            || self.line_height.is_some()
+    }
+
+    fn to_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        self.push_style_rules(&mut rules);
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
 
     fn push_style_rules(&self, rules: &mut Vec<String>) {
@@ -3777,21 +3852,13 @@ fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
         )));
     }
 
-    let (define_name, text_content, bundle) = parse_kmark_param_bundle_parts(remainder);
-
-    if let Some(content) = text_content {
-        return Some(KmarkComment::Text(KmarkTextDirective { content, bundle }));
-    }
+    let (define_name, bundle) = parse_kmark_param_bundle_parts(remainder);
 
     if let Some(name) = define_name {
         return Some(KmarkComment::Define { name, bundle });
     }
 
     Some(KmarkComment::Params(bundle))
-}
-
-fn resolve_kmark_text_content(value: &str) -> String {
-    trim_kmark_quotes(value).trim().to_owned()
 }
 
 fn normalize_kmark_preset_name(value: &str) -> Option<String> {
@@ -3897,21 +3964,16 @@ fn trim_kmark_quotes(value: &str) -> &str {
 }
 
 fn parse_kmark_param_bundle(input: &str) -> KmarkParamBundle {
-    parse_kmark_param_bundle_parts(input).2
+    parse_kmark_param_bundle_parts(input).1
 }
 
-fn parse_kmark_param_bundle_parts(
-    input: &str,
-) -> (Option<String>, Option<String>, KmarkParamBundle) {
+fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBundle) {
     let mut define_name = None;
-    let mut text_content = None;
     let mut bundle = KmarkParamBundle::default();
+    bundle.page_directive = parse_kmark_page_directive_tokens(input).unwrap_or_default();
 
     for (key, value) in split_kmark_param_pairs(input) {
         match key.as_str() {
-            "text" => {
-                text_content = Some(trim_kmark_quotes(&value).trim().to_owned());
-            }
             "define" => {
                 if let Some(preset_name) = normalize_kmark_preset_name(&value) {
                     define_name = Some(preset_name);
@@ -4061,7 +4123,7 @@ fn parse_kmark_param_bundle_parts(
         }
     }
 
-    (define_name, text_content, bundle)
+    (define_name, bundle)
 }
 
 fn parse_kmark_layout_value(value: &str) -> Option<KmarkLayout> {
@@ -5452,42 +5514,26 @@ mod tests {
     }
 
     #[test]
-    fn renders_kmark_text_as_self_contained_block() {
-        let rendered_preview =
-            render_markdown_preview("本文\n\n<!-- kmark text:社外秘 -->\n\n続き");
+    fn applies_text_params_to_following_paragraph_block() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark color:#c00 font_size:14pt font_weight:700 -->\n重要",
+        );
 
-        assert!(rendered_preview
-            .html
-            .contains("<p data-source-line-start=\"0\" data-source-line-end=\"0\">本文</p>"));
-        assert!(rendered_preview
-            .html
-            .contains("<span class=\"kmark-text\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\""));
-        assert!(rendered_preview.html.contains(">社外秘</span>"));
-        assert!(rendered_preview
-            .html
-            .contains("<p data-source-line-start=\"4\" data-source-line-end=\"4\">続き</p>"));
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:#c00;font-size:14pt;font-weight:700;\">重要</p>"
+        );
     }
 
     #[test]
-    fn renders_kmark_text_literal_values_without_presets() {
+    fn applies_visual_and_text_params_to_following_heading_block() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark text:CONFIDENTIAL -->\n<!-- kmark text:external_secret -->\n<!-- kmark text:回覧 -->",
+            "<!-- kmark w:40mm h:12mm border_size:2px border_color:red radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right color:#c00 font_size:12pt font_weight:bold font_family:\"Yu Gothic\" letter_spacing:0.08em line_height:1.2 -->\n# 社外秘",
         );
 
-        assert!(rendered_preview.html.contains(">CONFIDENTIAL</span>"));
-        assert!(rendered_preview.html.contains(">external_secret</span>"));
-        assert!(rendered_preview.html.contains(">回覧</span>"));
-    }
-
-    #[test]
-    fn applies_visual_and_text_params_to_kmark_text() {
-        let rendered_preview = render_markdown_preview(
-            "<!-- kmark text:社外秘 w:40mm h:12mm border_size:2px border_color:red radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right color:#c00 font_size:12pt font_weight:bold font_family:\"Yu Gothic\" letter_spacing:0.08em line_height:1.2 -->",
-        );
-
-        assert!(rendered_preview.html.contains(
-            "<div class=\"kmark-text-wrap\" data-source-line-start=\"0\" data-source-line-end=\"0\" style=\"text-align:right\">"
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\""));
         assert!(rendered_preview.html.contains("width:40mm"));
         assert!(rendered_preview.html.contains("height:12mm"));
         assert!(rendered_preview.html.contains("border-width:2px"));
@@ -5499,43 +5545,91 @@ mod tests {
         assert!(rendered_preview.html.contains("box-shadow:0 2px 8px #0003"));
         assert!(rendered_preview.html.contains("padding:2mm 4mm"));
         assert!(rendered_preview.html.contains("margin:2mm"));
+        assert!(rendered_preview.html.contains("text-align:right"));
         assert!(rendered_preview.html.contains("color:#c00"));
         assert!(rendered_preview.html.contains("font-size:12pt"));
         assert!(rendered_preview.html.contains("font-weight:bold"));
         assert!(rendered_preview.html.contains("font-family:Yu Gothic"));
         assert!(rendered_preview.html.contains("letter-spacing:0.08em"));
         assert!(rendered_preview.html.contains("line-height:1.2"));
+        assert!(rendered_preview.html.contains(">社外秘</h1>"));
     }
 
     #[test]
-    fn keeps_kmark_text_alignment_from_following_block() {
+    fn keeps_block_text_decoration_from_leaking_to_following_block() {
         let rendered_preview =
-            render_markdown_preview("<!-- kmark text:社外秘 align:right -->\n\n# 見出し");
+            render_markdown_preview("<!-- kmark color:red align:right -->\n# 見出し\n\n本文");
 
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;text-align:right\">見出し</h1>"
+        ));
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-text-wrap\" data-source-line-start=\"0\" data-source-line-end=\"0\" style=\"text-align:right\""));
-        assert!(rendered_preview
-            .html
-            .contains("<h1 data-source-line-start=\"2\" data-source-line-end=\"2\">見出し</h1>"));
+            .contains("<p data-source-line-start=\"3\" data-source-line-end=\"3\">本文</p>"));
     }
 
     #[test]
-    fn escapes_kmark_text_content() {
-        let rendered_preview =
-            render_markdown_preview("<!-- kmark text:<script>alert(1)</script> -->");
+    fn applies_block_decoration_to_list_table_blockquote_and_code_roots() {
+        let list = render_markdown_preview("<!-- kmark color:red -->\n- A\n- B");
+        assert!(list.html.contains("<ul style=\"color:red;\">"));
 
-        assert!(rendered_preview
+        let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
+        assert!(table.html.contains("<table style=\"color:red;\">"));
+
+        let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
+        assert!(blockquote
             .html
-            .contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-        assert!(!rendered_preview.html.contains("<script>"));
+            .contains("<blockquote data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"color:red;\">"));
+
+        let code =
+            render_markdown_preview("<!-- kmark color:red bg:#eee -->\n```rust\nfn main() {}\n```");
+        assert!(code.html.contains(
+            "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;color:red;\"><code class=\"language-rust\">"
+        ));
     }
 
     #[test]
-    fn ignores_empty_kmark_text() {
-        let rendered_preview = render_markdown_preview("<!-- kmark text: -->");
+    fn applies_scope_text_and_visual_params_to_each_block_root() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { color:red border_size:1px border_color:red radius:2px -->\n本文\n\n# 見出し\n<!-- kmark } -->",
+        );
 
-        assert_eq!(rendered_preview.html, "");
+        assert!(rendered_preview
+            .html
+            .contains("<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\">"));
+        assert!(rendered_preview.html.contains(
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">本文</p>"
+        ));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;color:red;\">見出し</h1>"
+        ));
+    }
+
+    #[test]
+    fn ignores_block_decoration_when_blank_line_separates_comment_and_block() {
+        let rendered_preview = render_markdown_preview("<!-- kmark color:red -->\n\n本文");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\">本文</p>"
+        );
+    }
+
+    #[test]
+    fn treats_legacy_text_and_stamp_keys_as_non_rendering_unknown_params() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark text:社外秘 -->\n本文\n\n<!-- kmark stamp:社外秘 -->\n続き",
+        );
+
+        assert!(!rendered_preview.html.contains("社外秘"));
+        assert!(!rendered_preview.html.contains("kmark-text"));
+        assert!(!rendered_preview.html.contains("kmark-stamp"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"1\" data-source-line-end=\"1\">本文</p>"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"4\" data-source-line-end=\"4\">続き</p>"));
     }
 
     #[test]
