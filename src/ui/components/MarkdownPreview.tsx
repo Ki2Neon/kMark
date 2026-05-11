@@ -97,6 +97,7 @@ type PreviewPageConfig = {
 
 type NumberedRenderedPreviewPage = RenderedPreviewPage & {
   readonly pageNumberText: string | null;
+  readonly tocPageNumberText: string;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -1613,6 +1614,10 @@ function isA4PaginationCalloutElement(element: HTMLElement): boolean {
   return element.classList.contains("kmark-callout");
 }
 
+function isA4PaginationTocElement(element: HTMLElement): boolean {
+  return element.classList.contains("kmark-toc");
+}
+
 function getA4DirectChildByClassName(element: HTMLElement, className: string): HTMLElement | null {
   return Array.from(element.children).find(
     (child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains(className),
@@ -2092,8 +2097,115 @@ function appendSplitContainerElementToA4Pages(context: A4PaginationContext, elem
   return true;
 }
 
+function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: HTMLElement): boolean {
+  const titleElement = getA4DirectChildByClassName(element, "kmark-toc__title");
+  const listElement = Array.from(element.children).find(isA4PaginationListElement);
+
+  if (listElement === undefined) {
+    return false;
+  }
+
+  const listItems = getA4PaginationListItems(listElement);
+
+  if (listItems.length === 0) {
+    return false;
+  }
+
+  let activeList: HTMLElement | null = null;
+  let activeToc: HTMLElement | null = null;
+  let hasStartedToc = false;
+
+  const startToc = (isContinuation: boolean): HTMLElement => {
+    const nextToc = cloneA4PaginationElementShell(element);
+
+    if (isContinuation) {
+      addA4PaginationClassName(nextToc, "kmark-toc--continuation");
+    } else if (titleElement !== null) {
+      nextToc.append(titleElement.cloneNode(true));
+    }
+
+    context.body.append(nextToc);
+    activeToc = nextToc;
+    hasStartedToc = true;
+
+    return nextToc;
+  };
+
+  const ensureCurrentToc = (): HTMLElement => activeToc ?? startToc(hasStartedToc);
+
+  const startList = (isContinuation: boolean): HTMLElement => {
+    const nextList = cloneA4PaginationListShell(listElement, isContinuation);
+    ensureCurrentToc().append(nextList);
+    activeList = nextList;
+    return nextList;
+  };
+
+  const resetAfterPageBreak = (): void => {
+    activeList = null;
+    activeToc = null;
+  };
+
+  const removeEmptyActiveList = (): void => {
+    if (activeList !== null && !hasA4PaginationDeepContent(activeList)) {
+      activeList.remove();
+      activeList = null;
+    }
+  };
+
+  const listAccess: A4PaginationListAccess = {
+    ensureCurrentList: () => activeList ?? startList(false),
+    resetAfterPageBreak,
+    startContinuationList: () => {
+      activeList = null;
+      return startList(true);
+    },
+  };
+
+  for (const listItem of listItems) {
+    const currentList = listAccess.ensureCurrentList();
+    const listItemClone = listItem.cloneNode(true);
+    currentList.append(listItemClone);
+
+    if (!isA4PaginationPageOverflowing(context)) {
+      continue;
+    }
+
+    currentList.removeChild(listItemClone);
+
+    if (appendSplitListItemToA4Pages(context, listItem, listAccess)) {
+      continue;
+    }
+
+    if (hasA4PaginationDeepContent(currentList)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      listAccess.resetAfterPageBreak();
+      listAccess.startContinuationList().append(listItemClone);
+      continue;
+    }
+
+    removeEmptyActiveList();
+
+    if (hasA4PaginationDeepContent(context.body)) {
+      commitA4PaginationPage(context);
+      startA4PaginationPage(context);
+      listAccess.resetAfterPageBreak();
+      listAccess.startContinuationList().append(listItemClone);
+      continue;
+    }
+
+    listAccess.ensureCurrentList().append(listItemClone);
+  }
+
+  return true;
+}
+
 function appendSplittableElementToA4Pages(context: A4PaginationContext, element: HTMLElement): boolean {
   const tagName = element.tagName.toLowerCase();
+
+  if (isA4PaginationTocElement(element)) {
+    return appendSplitTocElementToA4Pages(context, element);
+  }
 
   if (isA4PaginationCalloutElement(element)) {
     return appendSplitCalloutElementToA4Pages(context, element);
@@ -2418,11 +2530,13 @@ function resolveNumberedPreviewPages(pages: readonly RenderedPreviewPage[]): rea
       return {
         ...page,
         pageNumberText: null,
+        tocPageNumberText: formatPageNumberValue(pageValues[index] ?? config.start, config.style),
       };
     }
 
     return {
       ...page,
+      tocPageNumberText: formatPageNumberValue(pageValues[index] ?? config.start, config.style),
       pageNumberText: resolvePageNumberText({
         absPage: index + 1,
         absTotal: pages.length,
@@ -2432,6 +2546,90 @@ function resolveNumberedPreviewPages(pages: readonly RenderedPreviewPage[]): rea
       }),
     };
   });
+}
+
+function collectA4HeadingPageNumbers(pages: readonly NumberedRenderedPreviewPage[]): ReadonlyMap<string, string> {
+  const pageNumbersByHeadingId = new Map<string, string>();
+
+  pages.forEach((page) => {
+    const template = document.createElement("template");
+    template.innerHTML = page.html;
+
+    for (const heading of template.content.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]")) {
+      if (!pageNumbersByHeadingId.has(heading.id)) {
+        pageNumbersByHeadingId.set(heading.id, page.tocPageNumberText);
+      }
+    }
+  });
+
+  return pageNumbersByHeadingId;
+}
+
+function normalizeA4TocTargetId(link: HTMLAnchorElement): string | null {
+  const href = link.getAttribute("href");
+
+  if (href === null || !href.startsWith("#") || href.length <= 1) {
+    return null;
+  }
+
+  return href.slice(1);
+}
+
+function resolveA4TocPageNumberHtml(
+  html: string,
+  pageNumbersByHeadingId: ReadonlyMap<string, string>,
+): string {
+  if (!html.includes("kmark-toc")) {
+    return html;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  for (const item of template.content.querySelectorAll<HTMLElement>(".kmark-toc__item")) {
+    const label = Array.from(item.children).find((child): child is HTMLElement => (
+      child instanceof HTMLElement
+      && (child.classList.contains("kmark-toc__link") || child.classList.contains("kmark-toc__text"))
+    ));
+
+    if (label === undefined) {
+      continue;
+    }
+
+    const targetId = label instanceof HTMLAnchorElement ? normalizeA4TocTargetId(label) : null;
+    const pageNumber = targetId === null ? null : pageNumbersByHeadingId.get(targetId);
+
+    if (pageNumber === undefined || pageNumber === null) {
+      continue;
+    }
+
+    const row = document.createElement("div");
+    row.className = "kmark-toc__row";
+    item.insertBefore(row, label);
+    row.append(label);
+
+    const page = document.createElement("span");
+    page.className = "kmark-toc__page";
+    page.textContent = pageNumber;
+    row.append(page);
+  }
+
+  return template.innerHTML;
+}
+
+function resolveA4TocPageNumbers(
+  pages: readonly NumberedRenderedPreviewPage[],
+): readonly NumberedRenderedPreviewPage[] {
+  if (!pages.some((page) => page.html.includes("kmark-toc"))) {
+    return pages;
+  }
+
+  const pageNumbersByHeadingId = collectA4HeadingPageNumbers(pages);
+
+  return pages.map((page) => ({
+    ...page,
+    html: resolveA4TocPageNumberHtml(page.html, pageNumbersByHeadingId),
+  }));
 }
 
 function getPageNumberClassName(position: PageNumberPosition): string {
@@ -2515,7 +2713,7 @@ function MarkdownPreviewComponent({
     ? paginatedA4PageState.pages
     : normalizedPages;
   const numberedA4DisplayPages = useMemo(
-    () => resolveNumberedPreviewPages(a4DisplayPages),
+    () => resolveA4TocPageNumbers(resolveNumberedPreviewPages(a4DisplayPages)),
     [a4DisplayPages],
   );
   const currentPreviewPages = displayMode === "a4" ? numberedA4DisplayPages : normalizedPages;

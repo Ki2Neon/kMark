@@ -102,37 +102,61 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body .kmark-toc {
     max-width: 100%;
-    padding: 0.9em 1em;
-    border: 0.75pt solid #d7d7d7;
-    border-radius: 5pt;
-    background: #f7f7f7;
+    padding: 0;
     color: #111111;
     box-sizing: border-box;
   }
 
   .markdown-body .kmark-toc__title {
-    margin-bottom: 0.65em;
+    margin-bottom: 0.45em;
     font-weight: 750;
     line-height: 1.3;
   }
 
   .markdown-body .kmark-toc__list {
     margin: 0;
-    padding-left: 1.25em;
+    padding-left: 0;
+    list-style: none;
   }
 
   .markdown-body .kmark-toc__list--nested {
-    margin-top: 0.18em;
+    margin-top: 0;
+    padding-left: 1.25em;
   }
 
   .markdown-body .kmark-toc__item {
-    margin: 0.18em 0;
+    margin: 0;
     line-height: 1.38;
+  }
+
+  .markdown-body .kmark-toc__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(2.6em, 4.6em);
+    gap: 2.4em;
+    align-items: baseline;
+    min-height: 1.55em;
+    padding: 0.1em 0.35em;
+  }
+
+  .markdown-body .kmark-toc__item:nth-child(odd) > .kmark-toc__row {
+    background: rgb(0 0 0 / 3.5%);
+  }
+
+  .markdown-body .kmark-toc__item:nth-child(even) > .kmark-toc__row {
+    background: rgb(0 0 0 / 1.4%);
   }
 
   .markdown-body .kmark-toc__link,
   .markdown-body .kmark-toc__text {
+    min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .markdown-body .kmark-toc__page {
+    justify-self: start;
+    color: #555555;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .markdown-body blockquote {
