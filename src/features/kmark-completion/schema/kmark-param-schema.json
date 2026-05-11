@@ -24,6 +24,17 @@
       "priority": 70
     },
     {
+      "name": "page_valign",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "scope", "text", "image"],
+      "values": ["top", "center", "bottom"],
+      "insertText": "page_valign:",
+      "description": "対象ブロックを現在ページの本文エリア内で縦配置する",
+      "examples": ["<!-- kmark page_valign:bottom -->"],
+      "priority": 88
+    },
+    {
       "name": "w",
       "aliases": ["width"],
       "type": "length",
