@@ -339,7 +339,7 @@ struct PartialPageDirective {
     page_margin_right: Option<CssLength>,
     page_margin_bottom: Option<CssLength>,
     page_margin_left: Option<CssLength>,
-    font_size: Option<CssLength>,
+    page_font_size: Option<CssLength>,
     page_number_position: Option<PageNumberPosition>,
     page_number_display: Option<bool>,
     page_number_format: Option<String>,
@@ -683,7 +683,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         if line.trim().is_empty() {
             if pending_scope_prelude
                 .as_ref()
-                .is_some_and(|pending| pending.page_directive.has_page_directive())
+                .is_some_and(|pending| pending.page_directive.has_standalone_page_directive())
             {
                 if !segment_has_rendered_content {
                     apply_pending_page_directive_before_content(
@@ -708,16 +708,23 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
             continue;
         }
 
-        apply_pending_page_directive_before_content(
-            &mut page_segments,
-            content,
-            &mut last_index,
-            &mut line_offset,
-            &active_scope_lines,
-            &mut active_page_directives,
-            &mut pending_scope_prelude,
-            segment_has_rendered_content,
-        );
+        if pending_scope_prelude
+            .as_ref()
+            .is_some_and(|pending| pending.page_directive.has_standalone_page_directive())
+        {
+            apply_pending_page_directive_before_content(
+                &mut page_segments,
+                content,
+                &mut last_index,
+                &mut line_offset,
+                &active_scope_lines,
+                &mut active_page_directives,
+                &mut pending_scope_prelude,
+                segment_has_rendered_content,
+            );
+        } else {
+            pending_scope_prelude = None;
+        }
         segment_has_rendered_content = true;
     }
 
@@ -2793,8 +2800,8 @@ impl KmarkTextParams {
         if let Some(color) = &other.color {
             self.color = Some(color.clone());
         }
-        if let Some(font_size) = &other.font_size {
-            self.font_size = Some(font_size.clone());
+        if let Some(page_font_size) = &other.page_font_size {
+            self.page_font_size = Some(page_font_size.clone());
         }
         if let Some(font_weight) = &other.font_weight {
             self.font_weight = Some(font_weight.clone());
@@ -2815,7 +2822,7 @@ impl KmarkTextParams {
 
     fn has_text_directives(&self) -> bool {
         self.color.is_some()
-            || self.font_size.is_some()
+            || self.page_font_size.is_some()
             || self.font_weight.is_some()
             || self.font_family.is_some()
             || self.font_style.is_some()
@@ -3234,6 +3241,20 @@ impl PartialPageDirective {
             || self.has_page_number_directive()
     }
 
+    fn has_standalone_page_directive(&self) -> bool {
+        self.page_size.is_some()
+            || self.page_orientation.is_some()
+            || self.page_width.is_some()
+            || self.page_height.is_some()
+            || self.page_margin.is_some()
+            || self.page_margin_top.is_some()
+            || self.page_margin_right.is_some()
+            || self.page_margin_bottom.is_some()
+            || self.page_margin_left.is_some()
+            || self.page_font_size.is_some()
+            || self.has_page_number_directive()
+    }
+
     fn has_page_number_directive(&self) -> bool {
         self.page_number_position.is_some()
             || self.page_number_display.is_some()
@@ -3261,7 +3282,7 @@ impl PartialPageDirective {
             || self.page_margin_right != other.page_margin_right
             || self.page_margin_bottom != other.page_margin_bottom
             || self.page_margin_left != other.page_margin_left
-            || self.font_size != other.font_size
+            || self.page_font_size != other.page_font_size
             || self.page_number_position != other.page_number_position
             || self.page_number_display != other.page_number_display
             || self.page_number_format != other.page_number_format
@@ -3318,8 +3339,8 @@ impl DocumentPageConfig {
         }
 
         let mut text_style = self.default_text_style.clone();
-        if let Some(font_size) = &page_directive.font_size {
-            text_style.font_size = font_size.clone();
+        if let Some(page_font_size) = &page_directive.page_font_size {
+            text_style.font_size = page_font_size.clone();
         }
 
         let mut page_number_config = self.page_number_config.clone();
@@ -5002,6 +5023,29 @@ mod tests {
             rendered_preview.pages[0].text_style.font_size.as_str(),
             "10pt"
         );
+    }
+
+    #[test]
+    fn keeps_single_block_font_size_out_of_page_directives() {
+        let rendered_preview = render_markdown_preview(
+            "# Title\n\n\
+             <!-- kmark color:#c00000 font_size:14pt font_weight:bold -->\n\
+             社外秘 paragraph\n\n\
+             <!-- kmark color:#0b3d91 font_size:18pt align:center -->\n\
+             # CONFIDENTIAL heading",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 1);
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "10.5pt"
+        );
+        assert!(rendered_preview.html.contains(
+            "style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:#c00000;font-size:14pt;font-weight:bold;\""
+        ));
+        assert!(rendered_preview.html.contains(
+            "style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;margin-right:auto;color:#0b3d91;font-size:18pt;text-align:center\""
+        ));
     }
 
     #[test]
