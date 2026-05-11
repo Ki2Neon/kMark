@@ -416,6 +416,9 @@ mod tests {
         let frontend_schema =
             include_str!("../../../src/features/kmark-completion/schema/kmark-param-schema.json");
 
-        assert_eq!(frontend_schema, kmark_param_schema_json());
+        assert_eq!(
+            frontend_schema.replace("\r\n", "\n"),
+            kmark_param_schema_json()
+        );
     }
 }

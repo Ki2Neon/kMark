@@ -1,8 +1,7 @@
 use std::{collections::HashMap, ops::Range, path::Path};
 
 use pulldown_cmark::{
-    Alignment, BlockQuoteKind, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options, Parser,
-    Tag, TagEnd,
+    Alignment, CodeBlockKind, Event, LinkType, MetadataBlockKind, Options, Parser, Tag, TagEnd,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +91,45 @@ struct ParagraphContext {
     image_count: usize,
     contains_non_image_content: bool,
     soft_break_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CalloutKind {
+    Note,
+    Tip,
+    Important,
+    Warning,
+    Caution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CalloutStart {
+    kind: CalloutKind,
+    title: String,
+    marker_line_end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CalloutMarkerParagraphState {
+    Pending,
+    Delayed {
+        open_tag: String,
+        source_line_end: usize,
+    },
+    Open,
+    Done,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveCalloutContext {
+    marker_line_end: usize,
+    marker_paragraph: CalloutMarkerParagraphState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockQuoteRenderKind {
+    Normal,
+    Callout,
 }
 
 type OwnedEvent = (Event<'static>, Range<usize>);
@@ -258,6 +296,8 @@ struct HtmlEmitter<'a> {
     markdown_file_path: Option<&'a str>,
     line_starts: Vec<usize>,
     html: String,
+    blockquote_stack: Vec<BlockQuoteRenderKind>,
+    callout_stack: Vec<ActiveCalloutContext>,
     image_stack: Vec<ImageContext>,
     suppressed_link_depth: usize,
     suppressed_html_text_depth: usize,
@@ -686,6 +726,8 @@ impl<'a> HtmlEmitter<'a> {
             markdown_file_path,
             line_starts: collect_line_starts(content),
             html: String::new(),
+            blockquote_stack: Vec::new(),
+            callout_stack: Vec::new(),
             image_stack: Vec::new(),
             suppressed_link_depth: 0,
             suppressed_html_text_depth: 0,
@@ -744,10 +786,10 @@ impl<'a> HtmlEmitter<'a> {
         match event {
             Event::Start(tag) => self.start_tag(tag, &range),
             Event::End(tag_end) => self.end_tag(tag_end, &range),
-            Event::Text(text) => self.push_text(&text),
-            Event::Code(text) => self.push_code(&text),
-            Event::SoftBreak => self.push_soft_break(),
-            Event::HardBreak => self.push_hard_break(),
+            Event::Text(text) => self.push_text_event(&text, &range),
+            Event::Code(text) => self.push_code_event(&text, &range),
+            Event::SoftBreak => self.push_soft_break_event(&range),
+            Event::HardBreak => self.push_hard_break_event(&range),
             Event::Rule => {
                 self.push_raw(&format!("<hr{} />", self.source_line_attributes(&range),))
             }
@@ -784,6 +826,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.ensure_callout_marker_paragraph_open();
         self.mark_paragraph_non_image_content();
 
         let occurrence_index = {
@@ -848,6 +891,10 @@ impl<'a> HtmlEmitter<'a> {
                     self.source_line_attributes(range),
                     self.take_pending_kmark_block_style_attribute(),
                 );
+                if self.delay_callout_marker_paragraph_if_needed(paragraph_open_tag.clone(), range)
+                {
+                    return;
+                }
                 let open_tag_start = self.html.len();
                 self.push_raw(&paragraph_open_tag);
                 self.paragraph_context = Some(ParagraphContext {
@@ -893,17 +940,19 @@ impl<'a> HtmlEmitter<'a> {
                 html.push('>');
                 self.push_raw(&html);
             }
-            Tag::BlockQuote(kind) => {
-                let class_name = blockquote_class_name(kind);
-                let mut html = format!("<blockquote{}", self.source_line_attributes(range));
-                if let Some(class_name) = class_name {
-                    html.push_str(" class=\"");
-                    html.push_str(class_name);
-                    html.push('"');
+            Tag::BlockQuote(_) => {
+                if let Some(callout_start) =
+                    parse_callout_start(self.content, range, self.blockquote_stack.len())
+                {
+                    self.start_callout(callout_start, range);
+                    self.blockquote_stack.push(BlockQuoteRenderKind::Callout);
+                } else {
+                    let mut html = format!("<blockquote{}", self.source_line_attributes(range));
+                    html.push_str(&self.take_pending_kmark_block_style_attribute());
+                    html.push('>');
+                    self.push_raw(&html);
+                    self.blockquote_stack.push(BlockQuoteRenderKind::Normal);
                 }
-                html.push_str(&self.take_pending_kmark_block_style_attribute());
-                html.push('>');
-                self.push_raw(&html);
             }
             Tag::CodeBlock(kind) => {
                 let mut html = format!(
@@ -1040,6 +1089,7 @@ impl<'a> HtmlEmitter<'a> {
             Tag::Image {
                 dest_url, title, ..
             } => {
+                self.ensure_callout_marker_paragraph_open();
                 self.mark_paragraph_image();
                 let source_line_attributes = self.source_line_attributes(range);
                 let single_layer = self.take_pending_kmark_layer_for_image(range.start);
@@ -1078,6 +1128,9 @@ impl<'a> HtmlEmitter<'a> {
 
         match tag_end {
             TagEnd::Paragraph => {
+                if self.skip_unopened_callout_marker_paragraph() {
+                    return;
+                }
                 if self.is_inside_footnote_definition() {
                     if self.current_footnote_paragraph_count() > 1 {
                         self.finalize_paragraph_context();
@@ -1090,9 +1143,17 @@ impl<'a> HtmlEmitter<'a> {
                     self.finalize_paragraph_context();
                     self.push_raw("</p>");
                 }
+                self.finish_open_callout_marker_paragraph();
             }
             TagEnd::Heading(level) => self.push_raw(&format!("</{level}>")),
-            TagEnd::BlockQuote(_) => self.push_raw("</blockquote>"),
+            TagEnd::BlockQuote(_) => match self
+                .blockquote_stack
+                .pop()
+                .unwrap_or(BlockQuoteRenderKind::Normal)
+            {
+                BlockQuoteRenderKind::Normal => self.push_raw("</blockquote>"),
+                BlockQuoteRenderKind::Callout => self.finish_callout(),
+            },
             TagEnd::CodeBlock => self.push_raw("</code></pre>"),
             TagEnd::HtmlBlock => {
                 self.suppressed_html_text_depth = self.suppressed_html_text_depth.saturating_sub(1);
@@ -1230,12 +1291,49 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        self.ensure_callout_marker_paragraph_open();
         self.mark_paragraph_non_image_content();
 
         self.push_raw(&format!(
             "<span class=\"math {class_name}\">{}</span>",
             escape_html(text),
         ));
+    }
+
+    fn push_text_event(&mut self, text: &str, range: &Range<usize>) {
+        if self.should_suppress_callout_marker_event(range) {
+            return;
+        }
+
+        self.ensure_callout_marker_paragraph_open();
+        self.push_text(text);
+    }
+
+    fn push_code_event(&mut self, text: &str, range: &Range<usize>) {
+        if self.should_suppress_callout_marker_event(range) {
+            return;
+        }
+
+        self.ensure_callout_marker_paragraph_open();
+        self.push_code(text);
+    }
+
+    fn push_soft_break_event(&mut self, range: &Range<usize>) {
+        if self.should_suppress_callout_marker_soft_break(range) {
+            return;
+        }
+
+        self.ensure_callout_marker_paragraph_open();
+        self.push_soft_break();
+    }
+
+    fn push_hard_break_event(&mut self, range: &Range<usize>) {
+        if self.should_suppress_callout_marker_event(range) {
+            return;
+        }
+
+        self.ensure_callout_marker_paragraph_open();
+        self.push_hard_break();
     }
 
     fn push_text(&mut self, text: &str) {
@@ -1343,6 +1441,139 @@ impl<'a> HtmlEmitter<'a> {
             " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
             start_line, end_line,
         )
+    }
+
+    fn start_callout(&mut self, callout_start: CalloutStart, range: &Range<usize>) {
+        let kind_name = callout_start.kind.name();
+        let title = if callout_start.title.trim().is_empty() {
+            callout_start.kind.default_title()
+        } else {
+            callout_start.title.as_str()
+        };
+        let style_attribute = self.take_callout_style_attribute();
+
+        self.push_raw(&format!(
+            "<div class=\"kmark-callout kmark-callout--{}\" data-callout-type=\"{}\"{}{}><div class=\"kmark-callout__title\"><span class=\"kmark-callout__icon\" aria-hidden=\"true\"></span><span class=\"kmark-callout__title-text\">{}</span></div><div class=\"kmark-callout__body\">",
+            kind_name,
+            kind_name,
+            self.source_line_attributes(range),
+            style_attribute,
+            escape_html(title),
+        ));
+        self.callout_stack.push(ActiveCalloutContext {
+            marker_line_end: callout_start.marker_line_end,
+            marker_paragraph: CalloutMarkerParagraphState::Pending,
+        });
+    }
+
+    fn finish_callout(&mut self) {
+        self.callout_stack.pop();
+        self.push_raw("</div></div>");
+    }
+
+    fn delay_callout_marker_paragraph_if_needed(
+        &mut self,
+        open_tag: String,
+        range: &Range<usize>,
+    ) -> bool {
+        let source_line_end = self.resolve_range_end_line(range.clone());
+        let Some(context) = self.callout_stack.last_mut() else {
+            return false;
+        };
+
+        if !matches!(
+            context.marker_paragraph,
+            CalloutMarkerParagraphState::Pending
+        ) || range.start > context.marker_line_end
+        {
+            return false;
+        }
+
+        context.marker_paragraph = CalloutMarkerParagraphState::Delayed {
+            open_tag,
+            source_line_end,
+        };
+        true
+    }
+
+    fn ensure_callout_marker_paragraph_open(&mut self) {
+        let delayed_paragraph = {
+            let Some(context) = self.callout_stack.last_mut() else {
+                return;
+            };
+
+            match std::mem::replace(
+                &mut context.marker_paragraph,
+                CalloutMarkerParagraphState::Open,
+            ) {
+                CalloutMarkerParagraphState::Delayed {
+                    open_tag,
+                    source_line_end,
+                } => Some((open_tag, source_line_end)),
+                other_state => {
+                    context.marker_paragraph = other_state;
+                    None
+                }
+            }
+        };
+
+        let Some((open_tag, source_line_end)) = delayed_paragraph else {
+            return;
+        };
+
+        let open_tag_start = self.html.len();
+        self.push_raw(&open_tag);
+        self.paragraph_context = Some(ParagraphContext {
+            open_tag_start,
+            source_line_end,
+            image_count: 0,
+            contains_non_image_content: false,
+            soft_break_ranges: Vec::new(),
+        });
+    }
+
+    fn skip_unopened_callout_marker_paragraph(&mut self) -> bool {
+        let Some(context) = self.callout_stack.last_mut() else {
+            return false;
+        };
+
+        if matches!(
+            context.marker_paragraph,
+            CalloutMarkerParagraphState::Delayed { .. }
+        ) {
+            context.marker_paragraph = CalloutMarkerParagraphState::Done;
+            return true;
+        }
+
+        false
+    }
+
+    fn finish_open_callout_marker_paragraph(&mut self) {
+        let Some(context) = self.callout_stack.last_mut() else {
+            return;
+        };
+
+        if matches!(context.marker_paragraph, CalloutMarkerParagraphState::Open) {
+            context.marker_paragraph = CalloutMarkerParagraphState::Done;
+        }
+    }
+
+    fn should_suppress_callout_marker_event(&self, range: &Range<usize>) -> bool {
+        self.callout_stack.last().is_some_and(|context| {
+            matches!(
+                context.marker_paragraph,
+                CalloutMarkerParagraphState::Delayed { .. } | CalloutMarkerParagraphState::Open
+            ) && range.end <= context.marker_line_end
+        })
+    }
+
+    fn should_suppress_callout_marker_soft_break(&self, range: &Range<usize>) -> bool {
+        self.callout_stack.last().is_some_and(|context| {
+            matches!(
+                context.marker_paragraph,
+                CalloutMarkerParagraphState::Delayed { .. }
+            ) && range.start <= context.marker_line_end
+        })
     }
 
     fn apply_kmark_comment(&mut self, comment: KmarkComment, range: Range<usize>) {
@@ -1500,6 +1731,50 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         final_params.image.to_style()
+    }
+
+    fn resolve_active_block_params(&self) -> KmarkParams {
+        let mut final_params = KmarkParams::default();
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.preset);
+            }
+        }
+        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
+            final_params.merge(&active_single.layer.preset);
+        }
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.direct);
+            }
+        }
+        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
+            final_params.merge(&active_single.layer.direct);
+        }
+
+        final_params
+    }
+
+    fn take_callout_style_attribute(&mut self) -> String {
+        let style = self.resolve_active_block_params().to_callout_root_style();
+        let should_consume_current_single_block = self
+            .active_kmark_single_block
+            .as_ref()
+            .is_some_and(|active_single| {
+                active_single.end == KmarkBlockEnd::BlockQuote
+                    && active_single.nested_same_kind_count == 0
+            });
+
+        self.pending_kmark_block_style = None;
+        if should_consume_current_single_block {
+            self.active_kmark_single_block = None;
+        }
+
+        style
+            .map(|style| format!(" style=\"{}\"", escape_html(&style)))
+            .unwrap_or_default()
     }
 
     fn resolve_kmark_bundle_layer(&self, bundle: &KmarkParamBundle) -> KmarkParamLayer {
@@ -1764,6 +2039,19 @@ impl KmarkParams {
 
     fn has_directives(&self) -> bool {
         self.image.has_image_directives() || self.layout.has_layout_directives()
+    }
+
+    fn to_callout_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if let Some(layout_style) = self.layout.to_single_block_style() {
+            rules.push(layout_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
     }
 }
 
@@ -2220,6 +2508,32 @@ impl KmarkImageParams {
 
         (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
+
+    fn to_box_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(width) = &self.width {
+            rules.push(format!("width:{width}"));
+        }
+        if let Some(height) = &self.height {
+            rules.push(format!("height:{height}"));
+        }
+        if let Some(border_size) = &self.border_size {
+            rules.push(format!("border-width:{border_size}"));
+        }
+        if let Some(border_style) = self
+            .border_style
+            .as_deref()
+            .or_else(|| self.border_size.as_ref().map(|_| "solid"))
+        {
+            rules.push(format!("border-style:{border_style}"));
+        }
+        if let Some(border_color) = &self.border_color {
+            rules.push(format!("border-color:{border_color}"));
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+    }
 }
 
 fn footnote_definition_id(number: usize) -> String {
@@ -2230,22 +2544,123 @@ fn footnote_reference_id(number: usize, occurrence: usize) -> String {
     format!("fnref-{number}-{occurrence}")
 }
 
-fn blockquote_class_name(kind: Option<BlockQuoteKind>) -> Option<&'static str> {
-    match kind {
-        None => None,
-        Some(BlockQuoteKind::Note) => Some("markdown-alert-note"),
-        Some(BlockQuoteKind::Tip) => Some("markdown-alert-tip"),
-        Some(BlockQuoteKind::Important) => Some("markdown-alert-important"),
-        Some(BlockQuoteKind::Warning) => Some("markdown-alert-warning"),
-        Some(BlockQuoteKind::Caution) => Some("markdown-alert-caution"),
-    }
-}
-
 fn metadata_block_name(kind: MetadataBlockKind) -> &'static str {
     match kind {
         MetadataBlockKind::YamlStyle => "yaml",
         MetadataBlockKind::PlusesStyle => "pluses",
     }
+}
+
+impl CalloutKind {
+    fn from_marker(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "note" => Some(Self::Note),
+            "tip" => Some(Self::Tip),
+            "important" => Some(Self::Important),
+            "warning" => Some(Self::Warning),
+            "caution" => Some(Self::Caution),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Note => "note",
+            Self::Tip => "tip",
+            Self::Important => "important",
+            Self::Warning => "warning",
+            Self::Caution => "caution",
+        }
+    }
+
+    fn default_title(self) -> &'static str {
+        match self {
+            Self::Note => "Note",
+            Self::Tip => "Tip",
+            Self::Important => "Important",
+            Self::Warning => "Warning",
+            Self::Caution => "Caution",
+        }
+    }
+}
+
+fn parse_callout_start(
+    content: &str,
+    range: &Range<usize>,
+    blockquote_depth: usize,
+) -> Option<CalloutStart> {
+    let line_span = first_line_span_in_range(content, range.clone())?;
+    let line = &content[line_span.start..line_span.content_end];
+    let quote_content = strip_blockquote_markers(line, blockquote_depth + 1)?;
+    let (kind, title) = parse_callout_marker_line(quote_content.trim_start())?;
+
+    Some(CalloutStart {
+        kind,
+        title,
+        marker_line_end: line_span.content_end,
+    })
+}
+
+fn first_line_span_in_range(content: &str, range: Range<usize>) -> Option<MarkdownLineSpan> {
+    if range.start >= range.end || range.start >= content.len() {
+        return None;
+    }
+
+    let start = range.start;
+    let mut end = start;
+    let bounded_end = range.end.min(content.len());
+    let bytes = content.as_bytes();
+
+    while end < bounded_end && bytes[end] != b'\n' {
+        end += 1;
+    }
+
+    let mut content_end = end;
+    if content_end > start && bytes[content_end - 1] == b'\r' {
+        content_end -= 1;
+    }
+    let line_end = if end < bounded_end { end + 1 } else { end };
+
+    Some(MarkdownLineSpan {
+        start,
+        content_end,
+        end: line_end,
+    })
+}
+
+fn strip_blockquote_markers(line: &str, marker_count: usize) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let mut offset = 0usize;
+
+    for _ in 0..marker_count {
+        while matches!(bytes.get(offset), Some(b' ' | b'\t')) {
+            offset += 1;
+        }
+
+        if !matches!(bytes.get(offset), Some(b'>')) {
+            return None;
+        }
+        offset += 1;
+
+        if matches!(bytes.get(offset), Some(b' ' | b'\t')) {
+            offset += 1;
+        }
+    }
+
+    Some(&line[offset..])
+}
+
+fn parse_callout_marker_line(line: &str) -> Option<(CalloutKind, String)> {
+    let rest = line.strip_prefix("[!")?;
+    let type_end = rest.find(']')?;
+    let kind = CalloutKind::from_marker(&rest[..type_end])?;
+    let mut title = rest[type_end + 1..].trim_start();
+
+    if title.starts_with('+') || title.starts_with('-') {
+        title = title[1..].trim_start();
+    }
+
+    Some((kind, title.trim().to_owned()))
 }
 
 fn code_block_language(kind: CodeBlockKind<'_>) -> Option<String> {
@@ -3149,7 +3564,10 @@ mod tests {
         );
 
         assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "297mm");
-        assert_eq!(rendered_preview.pages[0].page_style.height.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.height.as_str(),
+            "210mm"
+        );
         assert_eq!(
             rendered_preview.pages[0].page_style.margin_top.as_str(),
             "15mm"
@@ -3248,6 +3666,86 @@ mod tests {
             rendered_preview.html,
             "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted<br />\n<em>value</em></p></blockquote>"
         );
+    }
+
+    #[test]
+    fn renders_callout_with_default_title() {
+        let rendered_preview = render_markdown_preview("> [!NOTE]\n> これは補足です。");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-callout kmark-callout--note\" data-callout-type=\"note\" data-source-line-start=\"0\" data-source-line-end=\"1\"><div class=\"kmark-callout__title\"><span class=\"kmark-callout__icon\" aria-hidden=\"true\"></span><span class=\"kmark-callout__title-text\">Note</span></div><div class=\"kmark-callout__body\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">これは補足です。</p></div></div>"
+        );
+    }
+
+    #[test]
+    fn renders_callout_with_custom_title_case_insensitive_type_and_fold_marker() {
+        let rendered_preview =
+            render_markdown_preview("> [!Warning]- 電源投入前の注意\n> 配線を確認してください。");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div class=\"kmark-callout kmark-callout--warning\" data-callout-type=\"warning\" data-source-line-start=\"0\" data-source-line-end=\"1\"><div class=\"kmark-callout__title\"><span class=\"kmark-callout__icon\" aria-hidden=\"true\"></span><span class=\"kmark-callout__title-text\">電源投入前の注意</span></div><div class=\"kmark-callout__body\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">配線を確認してください。</p></div></div>"
+        );
+    }
+
+    #[test]
+    fn leaves_unsupported_callout_type_as_normal_blockquote() {
+        let rendered_preview = render_markdown_preview("> [!CUSTOM]\n> 独自タイプです。");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">[!CUSTOM]<br />\n独自タイプです。</p></blockquote>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_single_comment_to_callout_root() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:80% align:center -->\n> [!IMPORTANT] 重要\n> この内容は重要です。",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<div class=\"kmark-callout kmark-callout--important\" data-callout-type=\"important\" data-source-line-start=\"1\" data-source-line-end=\"2\" style=\"width:80%;text-align:center\">"
+        ));
+        assert!(rendered_preview
+            .html
+            .contains("<span class=\"kmark-callout__title-text\">重要</span>"));
+        assert!(rendered_preview.html.contains(
+            "<p data-source-line-start=\"1\" data-source-line-end=\"2\">この内容は重要です。</p>"
+        ));
+    }
+
+    #[test]
+    fn keeps_block_markdown_inside_callout_body() {
+        let rendered_preview = render_markdown_preview(
+            "> [!TIP] 作業のコツ\n\
+             > 以下を確認してください。\n\
+             >\n\
+             > - 保存していること\n\
+             > - 印刷で崩れていないこと\n\
+             >\n\
+             > ```c\n\
+             > int main(void) {\n\
+             >     return 0;\n\
+             > }\n\
+             > ```\n\
+             >\n\
+             > | 項目 | 状態 |\n\
+             > | --- | --- |\n\
+             > | preview | ok |",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<div class=\"kmark-callout__body\"><p"));
+        assert!(rendered_preview
+            .html
+            .contains("<ul><li data-source-line-start=\"3\""));
+        assert!(rendered_preview
+            .html
+            .contains("<pre data-source-line-start=\"6\""));
+        assert!(rendered_preview.html.contains("<table>"));
     }
 
     #[test]

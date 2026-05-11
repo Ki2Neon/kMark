@@ -88,6 +88,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body ul,
   .markdown-body ol,
   .markdown-body blockquote,
+  .markdown-body .kmark-callout,
   .markdown-body pre,
   .markdown-body table {
     margin: 1em 0;
@@ -102,6 +103,111 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     padding-left: 9pt;
     border-left: 1.5pt solid #d7d7d7;
     color: #555555;
+  }
+
+  .markdown-body .kmark-callout {
+    --kmark-callout-bg: #f4f8ff;
+    --kmark-callout-border-color: #2f5fb3;
+    --kmark-callout-title-color: #1f4f9a;
+    --kmark-callout-text-color: #111111;
+    --kmark-callout-icon-color: var(--kmark-callout-title-color);
+    max-width: 100%;
+    padding: 0.85em 1em 0.95em;
+    border: 0.75pt solid #b9c9e8;
+    border-left: 3.5pt solid var(--kmark-callout-border-color);
+    border-radius: 5pt;
+    background: var(--kmark-callout-bg);
+    color: var(--kmark-callout-text-color);
+    overflow-wrap: anywhere;
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .markdown-body .kmark-callout--tip {
+    --kmark-callout-bg: #f1fbf8;
+    --kmark-callout-border-color: #0f766e;
+    --kmark-callout-title-color: #0f766e;
+  }
+
+  .markdown-body .kmark-callout--important {
+    --kmark-callout-bg: #f7f3ff;
+    --kmark-callout-border-color: #6d28d9;
+    --kmark-callout-title-color: #5b21b6;
+  }
+
+  .markdown-body .kmark-callout--warning {
+    --kmark-callout-bg: #fff8eb;
+    --kmark-callout-border-color: #b45309;
+    --kmark-callout-title-color: #92400e;
+  }
+
+  .markdown-body .kmark-callout--caution {
+    --kmark-callout-bg: #fff4f4;
+    --kmark-callout-border-color: #b91c1c;
+    --kmark-callout-title-color: #991b1b;
+  }
+
+  .markdown-body .kmark-callout__title {
+    display: flex;
+    align-items: center;
+    gap: 0.55em;
+    color: var(--kmark-callout-title-color);
+    font-weight: 750;
+    line-height: 1.3;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .markdown-body .kmark-callout__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.18em;
+    height: 1.18em;
+    border: 0.12em solid var(--kmark-callout-icon-color);
+    border-radius: 999px;
+    color: var(--kmark-callout-icon-color);
+    font-size: 0.92em;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .markdown-body .kmark-callout__icon::before {
+    content: "i";
+  }
+
+  .markdown-body .kmark-callout--tip .kmark-callout__icon::before {
+    content: "T";
+  }
+
+  .markdown-body .kmark-callout--important .kmark-callout__icon,
+  .markdown-body .kmark-callout--warning .kmark-callout__icon,
+  .markdown-body .kmark-callout--caution .kmark-callout__icon {
+    border-radius: 2pt;
+  }
+
+  .markdown-body .kmark-callout--important .kmark-callout__icon::before,
+  .markdown-body .kmark-callout--warning .kmark-callout__icon::before,
+  .markdown-body .kmark-callout--caution .kmark-callout__icon::before {
+    content: "!";
+  }
+
+  .markdown-body .kmark-callout__body {
+    min-width: 0;
+    margin-top: 0.55em;
+  }
+
+  .markdown-body .kmark-callout__body > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body .kmark-callout__body > :last-child {
+    margin-bottom: 0;
+  }
+
+  .markdown-body .kmark-callout__body :is(pre, table) {
+    max-width: 100%;
   }
 
   .markdown-body code {
@@ -220,6 +326,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
   }
 
   #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 blockquote,
+  #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 .kmark-callout__title,
   #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 figure,
   #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 pre,
   #${KMARK_PRINT_ROOT_ID} .markdown-body--a4 tr {
