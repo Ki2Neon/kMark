@@ -274,6 +274,7 @@ struct KmarkParamLayer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct KmarkScopeContext {
     layer: Option<KmarkParamLayer>,
+    renders_wrapper: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -863,8 +864,8 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
                 resolve_active_page_directive(&next_scope_lines, &next_page_directives);
             let segment_uses_prefixed_scope = segment_has_rendered_content
                 && active_scope_lines
-                    .iter()
-                    .any(|scope_line| scope_line.end_offset <= last_index);
+                    .last()
+                    .is_some_and(|scope_line| scope_line.end_offset <= last_index);
 
             if segment_has_rendered_content
                 && (current_page_directive.has_different_page_config_than(&next_page_directive)
@@ -2263,8 +2264,10 @@ impl<'a> HtmlEmitter<'a> {
                 let layer = self.resolve_kmark_bundle_layer(&final_bundle);
                 let resolved_params = layer.resolved_params();
                 if !resolved_params.has_directives() {
-                    self.kmark_scope_stack
-                        .push(KmarkScopeContext { layer: None });
+                    self.kmark_scope_stack.push(KmarkScopeContext {
+                        layer: None,
+                        renders_wrapper: false,
+                    });
                     return;
                 }
 
@@ -2272,13 +2275,18 @@ impl<'a> HtmlEmitter<'a> {
                     style: resolved_params.to_scope_root_style(),
                     page_valign: resolved_params.page.valign,
                 };
-                self.push_raw(&format!(
-                    "<div class=\"kmark-scope{}\"{}>",
-                    decoration.class_suffix(),
-                    decoration.data_and_style_attributes(),
-                ));
-                self.kmark_scope_stack
-                    .push(KmarkScopeContext { layer: Some(layer) });
+                let renders_wrapper = !decoration.is_empty();
+                if renders_wrapper {
+                    self.push_raw(&format!(
+                        "<div class=\"kmark-scope{}\"{}>",
+                        decoration.class_suffix(),
+                        decoration.data_and_style_attributes(),
+                    ));
+                }
+                self.kmark_scope_stack.push(KmarkScopeContext {
+                    layer: Some(layer),
+                    renders_wrapper,
+                });
             }
             KmarkComment::ScopeEnd => {
                 self.pending_kmark_params = None;
@@ -2726,7 +2734,7 @@ impl<'a> HtmlEmitter<'a> {
         if self
             .kmark_scope_stack
             .pop()
-            .is_some_and(|context| context.layer.is_some())
+            .is_some_and(|context| context.renders_wrapper)
         {
             self.push_raw("</div>");
         }
@@ -2734,7 +2742,7 @@ impl<'a> HtmlEmitter<'a> {
 
     fn close_unclosed_kmark_scopes(&mut self) {
         while let Some(context) = self.kmark_scope_stack.pop() {
-            if context.layer.is_some() {
+            if context.renders_wrapper {
                 self.push_raw("</div>");
             }
         }
@@ -2743,7 +2751,7 @@ impl<'a> HtmlEmitter<'a> {
     fn is_inside_kmark_scope(&self) -> bool {
         self.kmark_scope_stack
             .iter()
-            .any(|context| context.layer.is_some())
+            .any(|context| context.renders_wrapper)
     }
 
     fn mark_paragraph_image(&mut self) {
@@ -6339,6 +6347,47 @@ mod tests {
     }
 
     #[test]
+    fn does_not_split_nested_layout_scopes_when_document_header_scope_is_prefixed() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { -->\n\
+             # Previous\n\
+             <!-- --- -->\n\
+             <!-- kmark { layout:row -->\n\
+             <!-- kmark { layout:column margin:1px -->\n\
+             #### Synthetic section Alpha\n\
+             ![h:210](alpha.jpeg)\n\
+             <!-- kmark } -->\n\
+             <!-- kmark { layout:column margin:1px -->\n\
+             #### Synthetic section Beta\n\
+             ![h:210](beta.jpeg)\n\
+             <!-- kmark } -->\n\
+             <!-- kmark } -->",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert_eq!(
+            rendered_preview.pages[1]
+                .html
+                .matches("display:flex;flex-direction:row;")
+                .count(),
+            1
+        );
+        assert_eq!(
+            rendered_preview.pages[1]
+                .html
+                .matches("display:flex;flex-direction:column;")
+                .count(),
+            2
+        );
+        assert!(rendered_preview.pages[1]
+            .html
+            .contains("Synthetic section Alpha"));
+        assert!(rendered_preview.pages[1]
+            .html
+            .contains("Synthetic section Beta"));
+    }
+
+    #[test]
     fn splits_pages_when_scope_page_style_starts_and_ends() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark { page_size:A4 page_orientation:portrait page_font_size:11pt -->\n\
@@ -6593,8 +6642,39 @@ mod tests {
         assert!(rendered_preview.html.contains(
             "<table style=\"--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;\" data-kmark-table-fit=\"off\">"
         ));
+        assert!(!rendered_preview.html.contains("class=\"kmark-scope\""));
         assert!(!rendered_preview.html.contains("<td style=\"--kmark-table"));
         assert!(!rendered_preview.html.contains("<th style=\"--kmark-table"));
+    }
+
+    #[test]
+    fn keeps_table_only_scope_inherited_without_rendered_wrapper_or_image_flattening() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark table_cell_padding:1 -->\n\
+             <!-- kmark { -->\n\
+             # First\n\
+             <!-- --- -->\n\
+             ![](image.png)\n\
+             \n\
+             | A |\n\
+             | - |\n\
+             | B |",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert!(!rendered_preview.pages[0]
+            .html
+            .contains("class=\"kmark-scope\""));
+        assert!(!rendered_preview.pages[1]
+            .html
+            .contains("class=\"kmark-scope\""));
+        assert!(!rendered_preview.pages[1].html.contains("display:contents"));
+        assert!(rendered_preview.pages[1].html.contains(
+            "<p data-source-line-start=\"4\" data-source-line-end=\"4\"><img src=\"image.png\""
+        ));
+        assert!(rendered_preview.pages[1].html.contains(
+            "<table style=\"--kmark-table-cell-padding-x:1px;--kmark-table-cell-padding-y:1px;\">"
+        ));
     }
 
     #[test]
@@ -6790,9 +6870,7 @@ mod tests {
             .contains("<ul style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
 
         let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
-        assert!(table
-            .html
-            .contains("<table style=\"color:red;\">"));
+        assert!(table.html.contains("<table style=\"color:red;\">"));
 
         let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
         assert!(blockquote.html.contains(
@@ -6815,7 +6893,9 @@ mod tests {
              |  |  | 2 | MOSFETリレー 1 OUT |",
         );
 
-        assert!(rendered_preview.html.contains("<table style=\"color:#333;font-size:12pt;\">"));
+        assert!(rendered_preview
+            .html
+            .contains("<table style=\"color:#333;font-size:12pt;\">"));
         assert!(!rendered_preview.html.contains("width:fit-content"));
         assert!(!rendered_preview.html.contains("text-align:center\"><thead"));
     }
