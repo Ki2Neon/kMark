@@ -1,3 +1,4 @@
+pub mod asset_import;
 pub mod desktop_layout_preferences;
 pub mod editor_draft;
 pub mod editor_preferences;

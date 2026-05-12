@@ -2,6 +2,8 @@ import { autocompletion, completeFromList, completionKeymap, completionStatus, h
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorSelection, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
@@ -34,6 +36,7 @@ const EDITOR_CONTENT_ATTRIBUTES = EditorView.contentAttributes.of({
 });
 
 const setPreviewRequestedLineHighlightEffect = StateEffect.define<number>();
+const setAssetDropLineHighlightEffect = StateEffect.define<number | null>();
 
 const previewRequestedLineHighlightField = StateField.define<DecorationSet>({
   create() {
@@ -59,6 +62,40 @@ const previewRequestedLineHighlightField = StateField.define<DecorationSet>({
       const nextLine = transaction.state.doc.line(nextLineNumber);
       nextHighlights = Decoration.set([
         Decoration.line({ class: "cm-previewRequestedLine" }).range(nextLine.from),
+      ]);
+    }
+
+    return nextHighlights;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+const assetDropLineHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(highlights, transaction) {
+    let nextHighlights = transaction.docChanged
+      ? highlights.map(transaction.changes)
+      : highlights;
+
+    for (const effect of transaction.effects) {
+      if (!effect.is(setAssetDropLineHighlightEffect)) {
+        continue;
+      }
+
+      if (effect.value === null) {
+        nextHighlights = Decoration.none;
+        continue;
+      }
+
+      const nextLineNumber = Math.min(
+        transaction.state.doc.lines,
+        Math.max(1, effect.value),
+      );
+      const nextLine = transaction.state.doc.line(nextLineNumber);
+      nextHighlights = Decoration.set([
+        Decoration.line({ class: "cm-assetDropLine" }).range(nextLine.from),
       ]);
     }
 
@@ -177,6 +214,78 @@ function runMarkdownTab(view: EditorView, isOutdent: boolean): boolean {
   return true;
 }
 
+type TauriDragDropEvent = {
+  readonly payload: DragDropEvent;
+};
+
+type ClientPoint = {
+  readonly x: number;
+  readonly y: number;
+};
+
+function toClientPoint(position: { readonly x: number; readonly y: number }): ClientPoint {
+  const scale = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+
+  return {
+    x: position.x / scale,
+    y: position.y / scale,
+  };
+}
+
+function containsPoint(rect: DOMRect, point: ClientPoint): boolean {
+  return point.x >= rect.left
+    && point.x <= rect.right
+    && point.y >= rect.top
+    && point.y <= rect.bottom;
+}
+
+function resolveAssetDropLineNumber(
+  view: EditorView,
+  position: { readonly x: number; readonly y: number },
+): number | null {
+  const point = toClientPoint(position);
+
+  if (!containsPoint(view.dom.getBoundingClientRect(), point)) {
+    return null;
+  }
+
+  const offset = view.posAtCoords(point);
+
+  if (offset === null) {
+    return null;
+  }
+
+  return view.state.doc.lineAt(offset).number;
+}
+
+function setAssetDropLineHighlight(view: EditorView, lineNumber: number | null): void {
+  view.dispatch({
+    effects: setAssetDropLineHighlightEffect.of(lineNumber),
+  });
+}
+
+function insertDroppedAssetMarkdown(view: EditorView, lineNumber: number, markdownText: string): void {
+  const nextLineNumber = Math.min(view.state.doc.lines, Math.max(1, lineNumber));
+  const nextLine = view.state.doc.line(nextLineNumber);
+  const insertText = nextLine.length === 0
+    ? `${markdownText}\n`
+    : `${markdownText}\n\n`;
+  const nextSelection = EditorSelection.cursor(nextLine.from + insertText.length);
+
+  view.focus();
+  view.dispatch({
+    changes: {
+      from: nextLine.from,
+      insert: insertText,
+    },
+    effects: [
+      setAssetDropLineHighlightEffect.of(null),
+      EditorView.scrollIntoView(nextSelection, { y: "center" }),
+    ],
+    selection: nextSelection,
+  });
+}
+
 type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly blurOnEscapeWhenSelectionEmpty?: boolean;
@@ -184,6 +293,7 @@ type DesktopMarkdownInputProps = {
   readonly editFontId: EditFontId;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
+  readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
   readonly onContentChange: (content: string) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
@@ -200,6 +310,7 @@ function DesktopMarkdownInputComponent({
   editFontId,
   multiCursorModifier,
   showLineNumbers,
+  onAssetDrop,
   onContentChange,
   onCursorLineChange,
   onFocusChange,
@@ -278,6 +389,80 @@ function DesktopMarkdownInputComponent({
     }
   }, [emitCursorLine, onFocusChange]);
 
+  const handleTauriDragDropEvent = useCallback(async (event: TauriDragDropEvent) => {
+    const editor = editorRef.current;
+
+    if (editor === null) {
+      return;
+    }
+
+    if (event.payload.type === "leave") {
+      setAssetDropLineHighlight(editor, null);
+      return;
+    }
+
+    const lineNumber = resolveAssetDropLineNumber(editor, event.payload.position);
+
+    if (event.payload.type === "enter" || event.payload.type === "over") {
+      setAssetDropLineHighlight(editor, lineNumber);
+      return;
+    }
+
+    if (event.payload.type !== "drop") {
+      setAssetDropLineHighlight(editor, null);
+      return;
+    }
+
+    setAssetDropLineHighlight(editor, lineNumber);
+
+    if (lineNumber === null || event.payload.paths.length === 0 || onAssetDrop === undefined) {
+      setAssetDropLineHighlight(editor, null);
+      return;
+    }
+
+    const markdownText = await onAssetDrop(event.payload.paths);
+
+    const currentEditor = editorRef.current;
+
+    if (currentEditor === null) {
+      return;
+    }
+
+    if (markdownText === null || markdownText.length === 0) {
+      setAssetDropLineHighlight(currentEditor, null);
+      return;
+    }
+
+    insertDroppedAssetMarkdown(currentEditor, lineNumber, markdownText);
+  }, [onAssetDrop]);
+
+  useEffect(() => {
+    if (!isTauri() || onAssetDrop === undefined) {
+      return;
+    }
+
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void getCurrentWebview().onDragDropEvent((event) => {
+      void handleTauriDragDropEvent(event);
+    })
+      .then((nextUnlisten) => {
+        if (isDisposed) {
+          nextUnlisten();
+          return;
+        }
+
+        unlisten = nextUnlisten;
+      })
+      .catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      unlisten?.();
+    };
+  }, [handleTauriDragDropEvent, onAssetDrop]);
+
   const editorTheme = useMemo(() => EditorView.theme({
     "&": {
       backgroundColor: "transparent",
@@ -309,6 +494,10 @@ function DesktopMarkdownInputComponent({
     },
     ".cm-previewRequestedLine": {
       backgroundColor: "color-mix(in srgb, var(--focus) 15%, transparent)",
+    },
+    ".cm-assetDropLine": {
+      backgroundColor: "color-mix(in srgb, var(--focus) 24%, transparent)",
+      boxShadow: "inset 3px 0 0 var(--focus)",
     },
     ".cm-panels": {
       backgroundColor: "var(--surface-muted)",
@@ -381,6 +570,7 @@ function DesktopMarkdownInputComponent({
     return [
       markdown(),
       previewRequestedLineHighlightField,
+      assetDropLineHighlightField,
       KMARK_VALIDATION_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       EditorView.lineWrapping,

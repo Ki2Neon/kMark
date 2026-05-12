@@ -18,6 +18,7 @@ type MarkdownInputProps = {
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
+  readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
   readonly onContentChange: (content: string) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
@@ -34,6 +35,7 @@ function MarkdownInputComponent({
   layoutMode,
   multiCursorModifier,
   showLineNumbers,
+  onAssetDrop,
   onContentChange,
   onCursorLineChange,
   onFocusChange,
@@ -50,6 +52,7 @@ function MarkdownInputComponent({
             editFontId={editFontId}
             multiCursorModifier={multiCursorModifier}
             showLineNumbers={showLineNumbers}
+            onAssetDrop={onAssetDrop}
             onContentChange={onContentChange}
             onCursorLineChange={onCursorLineChange}
             onFocusChange={onFocusChange}

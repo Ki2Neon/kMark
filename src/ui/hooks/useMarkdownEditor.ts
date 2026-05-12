@@ -1,6 +1,7 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createBrowserDraftStore } from "../../adapters/browser/browserDraftStore";
 import { createBrowserEditorStateRules } from "../../adapters/browser/browserEditorStateRules";
+import { createBrowserMarkdownAssetImporter } from "../../adapters/browser/browserMarkdownAssetImporter";
 import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/browserMarkdownDocumentGateway";
 import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
 import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
@@ -27,6 +28,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
 
   if (controllerRef.current === null) {
     controllerRef.current = new EditorSessionController({
+      assetImporter: createBrowserMarkdownAssetImporter(),
       clock: {
         now: () => Date.now(),
       },
@@ -220,6 +222,15 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     });
   }, [controller, executeWithErrorHandling, store]);
 
+  const handleImportDroppedAssets = useCallback(async (droppedFilePaths: readonly string[]) => {
+    try {
+      return await controller.importDroppedAssets(droppedFilePaths);
+    } catch (error) {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+      return null;
+    }
+  }, [controller, store]);
+
   const handleResetDocument = useCallback(() => {
     controller.resetDocument(store);
   }, [controller, store]);
@@ -258,6 +269,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     handleContentChange,
     handleErrorClear,
     handleErrorRaise,
+    handleImportDroppedAssets,
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,

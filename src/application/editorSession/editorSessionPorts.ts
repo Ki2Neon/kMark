@@ -16,6 +16,19 @@ export type SavedMarkdownDocument = {
   readonly filePath: string | null;
 };
 
+export type ImportedMarkdownAsset = {
+  readonly originalPath: string;
+  readonly copiedPath: string;
+  readonly relativePath: string;
+  readonly markdownText: string;
+  readonly assetKind: "image";
+};
+
+export type ImportMarkdownAssetsRequest = {
+  readonly markdownFilePath: string;
+  readonly droppedFilePaths: readonly string[];
+};
+
 export type PrintMarkdownDocumentRequest =
   | {
     readonly displayMode: "standard";
@@ -64,6 +77,10 @@ export type MarkdownDocumentGateway = {
   clearPendingExternalDocuments(): Promise<void>;
   listenForExternalDocumentRequests(callback: () => void): Promise<() => void>;
   reset(): void;
+};
+
+export type MarkdownAssetImporter = {
+  importAssets(request: ImportMarkdownAssetsRequest): Promise<readonly ImportedMarkdownAsset[]>;
 };
 
 export type MarkdownDocumentPrinter = {
