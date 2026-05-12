@@ -4845,7 +4845,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_header.set_opacity(opacity);
                 }
             }
-            "page_header_margin_top" => {
+            "page_header_offset" => {
                 if let Some(offset) = parse_kmark_page_length_value(value) {
                     directive.page_header.set_offset(offset);
                 }
@@ -4875,7 +4875,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_footer.set_opacity(opacity);
                 }
             }
-            "page_footer_margin_bottom" => {
+            "page_footer_offset" => {
                 if let Some(offset) = parse_kmark_page_length_value(value) {
                     directive.page_footer.set_offset(offset);
                 }
@@ -6089,8 +6089,8 @@ mod tests {
     };
 
     use super::{
-        render_markdown_preview, render_markdown_preview_with_file_path, CssLength,
-        resolve_image_destination_url, PageNumberPosition, PageNumberStyle,
+        render_markdown_preview, render_markdown_preview_with_file_path,
+        resolve_image_destination_url, CssLength, PageNumberPosition, PageNumberStyle,
     };
 
     fn extract_toc_html(html: &str) -> &str {
@@ -6529,7 +6529,7 @@ mod tests {
     #[test]
     fn applies_page_chrome_opacity_and_margin_offsets() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_header_center:\"Header\" page_header_opacity:0.45 page_header_margin_top:5mm page_footer_right:\"Footer\" page_footer_opacity:0.7 page_footer_margin_bottom:6mm -->\n# Body",
+            "<!-- kmark page_header_center:\"Header\" page_header_opacity:0.45 page_header_offset:5mm page_footer_right:\"Footer\" page_footer_opacity:0.7 page_footer_offset:6mm -->\n# Body",
         );
         let chrome = &rendered_preview.pages[0].page_chrome_config;
 
@@ -6548,7 +6548,7 @@ mod tests {
     #[test]
     fn ignores_invalid_page_chrome_opacity_and_margin_offsets() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_header_center:\"Header\" page_header_opacity:2 page_header_margin_top:auto page_footer_right:\"Footer\" page_footer_opacity:-1 page_footer_margin_bottom:none -->\n# Body",
+            "<!-- kmark page_header_center:\"Header\" page_header_opacity:2 page_header_offset:auto page_footer_right:\"Footer\" page_footer_opacity:-1 page_footer_offset:none -->\n# Body",
         );
         let chrome = &rendered_preview.pages[0].page_chrome_config;
 
@@ -6573,10 +6573,7 @@ mod tests {
         );
 
         assert_eq!(rendered_preview.pages.len(), 3);
-        assert!(!rendered_preview.pages[0]
-            .page_chrome_config
-            .header
-            .enabled);
+        assert!(!rendered_preview.pages[0].page_chrome_config.header.enabled);
         assert_eq!(
             rendered_preview.pages[1]
                 .page_chrome_config
@@ -6593,14 +6590,8 @@ mod tests {
                 .as_deref(),
             Some("Internal")
         );
-        assert!(!rendered_preview.pages[2]
-            .page_chrome_config
-            .header
-            .enabled);
-        assert!(!rendered_preview.pages[2]
-            .page_chrome_config
-            .footer
-            .enabled);
+        assert!(!rendered_preview.pages[2].page_chrome_config.header.enabled);
+        assert!(!rendered_preview.pages[2].page_chrome_config.footer.enabled);
     }
 
     #[test]
@@ -6657,18 +6648,9 @@ mod tests {
         );
 
         assert_eq!(rendered_preview.pages.len(), 2);
-        assert!(rendered_preview.pages[0]
-            .page_chrome_config
-            .header
-            .enabled);
-        assert!(rendered_preview.pages[0]
-            .page_chrome_config
-            .footer
-            .enabled);
-        assert!(!rendered_preview.pages[1]
-            .page_chrome_config
-            .header
-            .enabled);
+        assert!(rendered_preview.pages[0].page_chrome_config.header.enabled);
+        assert!(rendered_preview.pages[0].page_chrome_config.footer.enabled);
+        assert!(!rendered_preview.pages[1].page_chrome_config.header.enabled);
         assert_eq!(
             rendered_preview.pages[1]
                 .page_chrome_config
@@ -6677,10 +6659,7 @@ mod tests {
                 .as_deref(),
             None
         );
-        assert!(!rendered_preview.pages[1]
-            .page_chrome_config
-            .footer
-            .enabled);
+        assert!(!rendered_preview.pages[1].page_chrome_config.footer.enabled);
         assert_eq!(
             rendered_preview.pages[1]
                 .page_chrome_config

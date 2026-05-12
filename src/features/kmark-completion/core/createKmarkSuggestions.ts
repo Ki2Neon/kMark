@@ -54,9 +54,9 @@ const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["page_footer_left", 411],
   ["page_footer_right", 410],
   ["page_header_opacity", 409],
-  ["page_header_margin_top", 408],
+  ["page_header_offset", 408],
   ["page_footer_opacity", 407],
-  ["page_footer_margin_bottom", 406],
+  ["page_footer_offset", 406],
   ["page_header", 405],
   ["page_footer", 404],
 ]);

@@ -566,13 +566,13 @@
       "priority": 86
     },
     {
-      "name": "page_header_margin_top",
+      "name": "page_header_offset",
       "aliases": [],
       "type": "length",
       "contexts": ["page", "scope"],
-      "insertText": "page_header_margin_top:",
+      "insertText": "page_header_offset:",
       "description": "ページ上端からヘッダーまでの距離を指定する",
-      "examples": ["<!-- kmark page_header_margin_top:6mm -->"],
+      "examples": ["<!-- kmark page_header_offset:6mm -->"],
       "priority": 86
     },
     {
@@ -626,13 +626,13 @@
       "priority": 85
     },
     {
-      "name": "page_footer_margin_bottom",
+      "name": "page_footer_offset",
       "aliases": [],
       "type": "length",
       "contexts": ["page", "scope"],
-      "insertText": "page_footer_margin_bottom:",
+      "insertText": "page_footer_offset:",
       "description": "ページ下端からフッターまでの距離を指定する",
-      "examples": ["<!-- kmark page_footer_margin_bottom:6mm -->"],
+      "examples": ["<!-- kmark page_footer_offset:6mm -->"],
       "priority": 85
     },
     {
