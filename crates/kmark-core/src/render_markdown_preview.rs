@@ -2501,6 +2501,26 @@ impl<'a> HtmlEmitter<'a> {
         final_params
     }
 
+    fn resolve_scoped_single_block_params(&self, single_layer: &KmarkParamLayer) -> KmarkParams {
+        let mut final_params = KmarkParams::default();
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.preset);
+            }
+        }
+        final_params.merge(&single_layer.preset);
+
+        for scope in &self.kmark_scope_stack {
+            if let Some(layer) = &scope.layer {
+                final_params.merge(&layer.direct);
+            }
+        }
+        final_params.merge(&single_layer.direct);
+
+        final_params
+    }
+
     fn take_callout_root_decoration(&mut self) -> KmarkRootDecoration {
         let params = self.resolve_active_block_params();
         let decoration = KmarkRootDecoration {
@@ -2565,7 +2585,7 @@ impl<'a> HtmlEmitter<'a> {
 
         let layer = self.resolve_kmark_bundle_layer(&bundle);
 
-        let resolved_params = layer.resolved_params();
+        let resolved_params = self.resolve_scoped_single_block_params(&layer);
 
         self.pending_kmark_params = None;
         if matches!(end, KmarkBlockEnd::Table) {
@@ -6560,6 +6580,28 @@ mod tests {
     }
 
     #[test]
+    fn preserves_scoped_table_params_when_table_has_single_params() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { table_cell_padding_x:1mm table_cell_padding_y:0.3mm table_fit:off -->\n<!-- kmark font_size:8.5pt line_height:1.05 -->\n| A |\n| - |\n| B |\n<!-- kmark } -->",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;font-size:8.5pt;line-height:1.05;--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;\" data-kmark-table-fit=\"off\">"
+        ));
+    }
+
+    #[test]
+    fn lets_table_single_params_override_only_their_scoped_axes() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { table_cell_padding_x:1mm table_cell_padding_y:0.3mm -->\n<!-- kmark table_cell_padding_x:2mm -->\n| A |\n| - |\n| B |\n<!-- kmark } -->",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<table style=\"--kmark-table-cell-padding-x:2mm;--kmark-table-cell-padding-y:0.3mm;\">"
+        ));
+    }
+
+    #[test]
     fn ignores_invalid_table_param_values() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark table_cell_padding:1mm 2mm 3mm table_fit:bad table_layout:grid -->\n| A |\n| - |\n| B |",
@@ -6760,6 +6802,17 @@ mod tests {
         ));
         assert!(rendered_preview.html.contains(
             "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">見出し</h1>"
+        ));
+    }
+
+    #[test]
+    fn preserves_scoped_text_and_visual_params_when_block_has_single_params() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { color:red border_size:1px border_color:red radius:2px -->\n<!-- kmark font_weight:700 -->\n# 見出し\n<!-- kmark } -->",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;font-weight:700;\">見出し</h1>"
         ));
     }
 
