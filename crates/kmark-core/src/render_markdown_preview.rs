@@ -203,6 +203,7 @@ enum KmarkSizeValue {
     Length(String),
     Fit,
     PageFit,
+    PageFitContain,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -4106,12 +4107,25 @@ impl KmarkImageParams {
                 .is_some_and(KmarkSizeValue::is_page_fit)
     }
 
+    fn has_page_fit_contain_dimension(&self) -> bool {
+        self.width
+            .as_ref()
+            .is_some_and(KmarkSizeValue::is_page_fit_contain)
+            || self
+                .height
+                .as_ref()
+                .is_some_and(KmarkSizeValue::is_page_fit_contain)
+    }
+
     fn to_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
         self.push_size_style_rules(&mut rules);
         if self.has_page_fit_dimension() {
             rules.push("display:block".to_owned());
+        }
+        if self.has_page_fit_contain_dimension() {
+            rules.push("object-fit:contain".to_owned());
         }
         if let Some(position) = &self.position {
             rules.push(format!("object-position:{position}"));
@@ -4205,11 +4219,15 @@ impl KmarkImageParams {
 
 impl KmarkSizeValue {
     fn is_page_fit(&self) -> bool {
-        matches!(self, Self::PageFit)
+        matches!(self, Self::PageFit | Self::PageFitContain)
+    }
+
+    fn is_page_fit_contain(&self) -> bool {
+        matches!(self, Self::PageFitContain)
     }
 
     fn needs_box_sizing(&self) -> bool {
-        matches!(self, Self::Fit | Self::PageFit)
+        matches!(self, Self::Fit | Self::PageFit | Self::PageFitContain)
     }
 
     fn push_width_style_rules(&self, rules: &mut Vec<String>) {
@@ -4222,6 +4240,10 @@ impl KmarkSizeValue {
             Self::PageFit => {
                 rules.push("width:var(--kmark-page-fit-width,100%)".to_owned());
             }
+            Self::PageFitContain => {
+                rules.push("max-width:var(--kmark-page-fit-width,100%)".to_owned());
+                rules.push("width:var(--kmark-page-fit-contain-width,auto)".to_owned());
+            }
         }
     }
 
@@ -4231,6 +4253,10 @@ impl KmarkSizeValue {
             Self::Fit => rules.push("height:fit-content".to_owned()),
             Self::PageFit => {
                 rules.push("height:var(--kmark-page-fit-height,auto)".to_owned());
+            }
+            Self::PageFitContain => {
+                rules.push("max-height:var(--kmark-page-fit-height,none)".to_owned());
+                rules.push("height:var(--kmark-page-fit-contain-height,auto)".to_owned());
             }
         }
     }
@@ -5069,6 +5095,7 @@ fn parse_kmark_size_value(value: &str) -> Option<KmarkSizeValue> {
     match trim_kmark_quotes(value).trim() {
         "fit" => Some(KmarkSizeValue::Fit),
         "page_fit" => Some(KmarkSizeValue::PageFit),
+        "page_fit_contain" => Some(KmarkSizeValue::PageFitContain),
         value => parse_css_length_value(value, true).map(KmarkSizeValue::Length),
     }
 }
@@ -6976,6 +7003,28 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_page_fit_size_values_to_non_image_blocks() {
+        let rendered_preview = render_markdown_preview("<!-- kmark w:page_fit h:page_fit -->\n本文");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);box-sizing:border-box;margin:0;\">本文</p>"
+        );
+    }
+
+    #[test]
+    fn applies_page_fit_contain_size_values_to_images() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:page_fit_contain h:page_fit_contain -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
         );
     }
 

@@ -35,6 +35,12 @@ const A4_PAGINATION_INLINE_SPLIT_TAG_NAMES = new Set(["a", "abbr", "b", "cite", 
 const A4_PAGE_VALIGN_VALUES = new Set(["top", "center", "bottom"]);
 const A4_PAGINATION_CJK_TEXT_PATTERN = /[\u3040-\u30ff\u3400-\u9fff]/u;
 const A4_PAGINATION_LONG_TEXT_TOKEN_LENGTH = 24;
+const A4_PAGE_FIT_STYLE_FRAGMENT = "--kmark-page-fit-";
+const A4_PAGE_FIT_WIDTH_VARIABLE = "--kmark-page-fit-width";
+const A4_PAGE_FIT_HEIGHT_VARIABLE = "--kmark-page-fit-height";
+const A4_PAGE_FIT_CONTAIN_STYLE_FRAGMENT = "--kmark-page-fit-contain-";
+const A4_PAGE_FIT_CONTAIN_WIDTH_VARIABLE = "--kmark-page-fit-contain-width";
+const A4_PAGE_FIT_CONTAIN_HEIGHT_VARIABLE = "--kmark-page-fit-contain-height";
 const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
 const A4_TOC_ITEM_HEADER_LABEL = "項目名";
 const A4_TOC_PAGE_HEADER_LABEL = "ページ番号";
@@ -83,6 +89,7 @@ type A4PaginationContext = {
   body: HTMLElement;
   frame: HTMLElement;
   maxContentHeight: number;
+  maxContentWidth: number;
   pageConfig: PreviewPageConfig;
   pages: RenderedPreviewPage[];
   readonly root: HTMLElement;
@@ -682,7 +689,7 @@ function createA4PaginationMeasureRoot(): HTMLElement {
 function createA4PaginationPage(
   root: HTMLElement,
   pageConfig: PreviewPageConfig,
-): Pick<A4PaginationContext, "body" | "frame" | "maxContentHeight"> {
+): Pick<A4PaginationContext, "body" | "frame" | "maxContentHeight" | "maxContentWidth"> {
   const frame = document.createElement("div");
   frame.className = "preview-section__page-frame";
   applyPreviewPageStyle(frame, pageConfig);
@@ -695,7 +702,15 @@ function createA4PaginationPage(
 
   const frameStyle = window.getComputedStyle(frame);
   const paddingTop = Number.parseFloat(frameStyle.paddingTop);
+  const paddingRight = Number.parseFloat(frameStyle.paddingRight);
   const paddingBottom = Number.parseFloat(frameStyle.paddingBottom);
+  const paddingLeft = Number.parseFloat(frameStyle.paddingLeft);
+  const maxContentWidth = Math.max(
+    0,
+    frame.clientWidth
+      - (Number.isFinite(paddingLeft) ? paddingLeft : 0)
+      - (Number.isFinite(paddingRight) ? paddingRight : 0),
+  );
   const maxContentHeight = Math.max(
     0,
     frame.clientHeight
@@ -703,7 +718,7 @@ function createA4PaginationPage(
       - (Number.isFinite(paddingBottom) ? paddingBottom : 0),
   );
 
-  return { body, frame, maxContentHeight };
+  return { body, frame, maxContentHeight, maxContentWidth };
 }
 
 function startA4PaginationPage(context: A4PaginationContext): void {
@@ -711,6 +726,7 @@ function startA4PaginationPage(context: A4PaginationContext): void {
   context.body = page.body;
   context.frame = page.frame;
   context.maxContentHeight = page.maxContentHeight;
+  context.maxContentWidth = page.maxContentWidth;
 }
 
 function hasA4PaginationContent(element: HTMLElement): boolean {
@@ -763,6 +779,129 @@ function getA4PaginationContentHeight(body: HTMLElement): number {
 function isA4PaginationPageOverflowing(context: A4PaginationContext): boolean {
   return getA4PaginationContentHeight(context.body)
     > context.maxContentHeight + A4_PAGINATION_OVERFLOW_TOLERANCE_PX;
+}
+
+function hasA4PageFitStyle(element: HTMLElement): boolean {
+  return (element.getAttribute("style") ?? "").includes(A4_PAGE_FIT_STYLE_FRAGMENT);
+}
+
+function hasA4PageFitContainStyle(element: HTMLElement): boolean {
+  return (element.getAttribute("style") ?? "").includes(A4_PAGE_FIT_CONTAIN_STYLE_FRAGMENT);
+}
+
+function collectA4PageFitElements(root: HTMLElement): readonly HTMLElement[] {
+  const pageFitElements = Array.from(
+    root.querySelectorAll<HTMLElement>(`[style*="${A4_PAGE_FIT_STYLE_FRAGMENT}"]`),
+  );
+
+  if (hasA4PageFitStyle(root)) {
+    pageFitElements.unshift(root);
+  }
+
+  return pageFitElements;
+}
+
+function setA4PageFitVariables(element: HTMLElement, width: number, height: number): void {
+  element.style.setProperty(A4_PAGE_FIT_WIDTH_VARIABLE, `${Math.max(0, width).toFixed(2)}px`);
+  element.style.setProperty(A4_PAGE_FIT_HEIGHT_VARIABLE, `${Math.max(0, height).toFixed(2)}px`);
+}
+
+function setA4PageFitContainVariables(element: HTMLElement, width: number, height: number): void {
+  element.style.setProperty(A4_PAGE_FIT_CONTAIN_WIDTH_VARIABLE, `${Math.max(0, width).toFixed(2)}px`);
+  element.style.setProperty(A4_PAGE_FIT_CONTAIN_HEIGHT_VARIABLE, `${Math.max(0, height).toFixed(2)}px`);
+}
+
+function getA4ElementAspectRatio(element: HTMLElement): number | null {
+  if (element instanceof HTMLImageElement && element.naturalWidth > 0 && element.naturalHeight > 0) {
+    return element.naturalWidth / element.naturalHeight;
+  }
+
+  const rect = element.getBoundingClientRect();
+
+  return rect.width > 0 && rect.height > 0
+    ? rect.width / rect.height
+    : null;
+}
+
+function resolveA4ContainSize(
+  element: HTMLElement,
+  maxWidth: number,
+  maxHeight: number,
+): { readonly width: number; readonly height: number } | null {
+  if (maxWidth <= 0 || maxHeight <= 0) {
+    return { width: 0, height: 0 };
+  }
+
+  const aspectRatio = getA4ElementAspectRatio(element);
+
+  if (aspectRatio === null || !Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return null;
+  }
+
+  const heightFromWidth = maxWidth / aspectRatio;
+
+  if (heightFromWidth <= maxHeight) {
+    return { width: maxWidth, height: heightFromWidth };
+  }
+
+  return { width: maxHeight * aspectRatio, height: maxHeight };
+}
+
+function seedA4PageFitVariables(context: A4PaginationContext, root: HTMLElement): boolean {
+  const pageFitElements = collectA4PageFitElements(root);
+
+  if (pageFitElements.length === 0) {
+    return false;
+  }
+
+  const remainingHeight = context.maxContentHeight - getA4PaginationContentHeight(context.body);
+  for (const element of pageFitElements) {
+    setA4PageFitVariables(element, context.maxContentWidth, remainingHeight);
+  }
+
+  return true;
+}
+
+function resolveA4PageFitVariables(context: A4PaginationContext, root: HTMLElement): void {
+  const pageFitElements = collectA4PageFitElements(root);
+
+  if (pageFitElements.length === 0) {
+    return;
+  }
+
+  const bodyRect = context.body.getBoundingClientRect();
+  const contentRight = bodyRect.left + context.maxContentWidth;
+  const contentBottom = bodyRect.top + context.maxContentHeight;
+
+  for (const element of pageFitElements) {
+    const elementRect = element.getBoundingClientRect();
+    const maxWidth = contentRight - elementRect.left;
+    const maxHeight = contentBottom - elementRect.top;
+    setA4PageFitVariables(
+      element,
+      maxWidth,
+      maxHeight,
+    );
+
+    if (hasA4PageFitContainStyle(element)) {
+      const containSize = resolveA4ContainSize(element, maxWidth, maxHeight);
+      if (containSize !== null) {
+        setA4PageFitContainVariables(element, containSize.width, containSize.height);
+      }
+    }
+  }
+}
+
+function appendA4PageFitAwareClone(context: A4PaginationContext, nodeClone: Node): void {
+  if (nodeClone instanceof HTMLElement) {
+    seedA4PageFitVariables(context, nodeClone);
+  }
+
+  context.body.append(nodeClone);
+
+  if (nodeClone instanceof HTMLElement) {
+    resolveA4PageFitVariables(context, nodeClone);
+  }
 }
 
 function isIgnorableA4PaginationNode(node: Node): boolean {
@@ -982,7 +1121,8 @@ function shouldMoveA4PaginationHeadingWithNext(
   const headingClone = heading.cloneNode(true);
   const nextNodeClone = cloneA4PaginationMinimumKeepNode(nextNode);
 
-  context.body.append(headingClone, nextNodeClone);
+  appendA4PageFitAwareClone(context, headingClone);
+  appendA4PageFitAwareClone(context, nextNodeClone);
   const shouldMove = isA4PaginationPageOverflowing(context);
   context.body.removeChild(nextNodeClone);
   context.body.removeChild(headingClone);
@@ -1001,7 +1141,7 @@ function appendSplitInlineElementToA4Pages(context: A4PaginationContext, element
 
   const startElement = (): HTMLElement => {
     const nextElement = cloneA4PaginationElementShell(element);
-    context.body.append(nextElement);
+    appendA4PageFitAwareClone(context, nextElement);
     activeElement = nextElement;
     return nextElement;
   };
@@ -1386,7 +1526,7 @@ function appendSplitListElementToA4Pages(context: A4PaginationContext, element: 
 
   const startList = (isContinuation: boolean): HTMLElement => {
     const nextList = cloneA4PaginationListShell(element, isContinuation);
-    context.body.append(nextList);
+    appendA4PageFitAwareClone(context, nextList);
     activeList = nextList;
     return nextList;
   };
@@ -1517,7 +1657,7 @@ function appendSplitTableElementToA4Pages(context: A4PaginationContext, element:
 
     const nextTableBody = document.createElement("tbody");
     nextTable.append(nextTableBody);
-    context.body.append(nextTable);
+    appendA4PageFitAwareClone(context, nextTable);
     activeTableState.table = nextTable;
     activeTableState.body = nextTableBody;
 
@@ -1587,7 +1727,7 @@ function appendSplitTableElementToA4Pages(context: A4PaginationContext, element:
       for (const footerNode of footerNodes) {
         footerOnlyTable.append(footerNode.cloneNode(true));
       }
-      context.body.append(footerOnlyTable);
+      appendA4PageFitAwareClone(context, footerOnlyTable);
     }
   }
 
@@ -1640,7 +1780,7 @@ function appendSplitPreElementToA4Pages(context: A4PaginationContext, element: H
     const nextPre = cloneA4PaginationElementShell(element);
     const nextCode = codeElement === null ? document.createElement("code") : cloneA4PaginationElementShell(codeElement);
     nextPre.append(nextCode);
-    context.body.append(nextPre);
+    appendA4PageFitAwareClone(context, nextPre);
     activePreState.pre = nextPre;
     activePreState.code = nextCode;
 
@@ -1757,7 +1897,7 @@ function appendSplitCalloutElementToA4Pages(context: A4PaginationContext, elemen
 
     const nextBody = cloneA4PaginationElementShell(bodyElement);
     nextCallout.append(nextBody);
-    context.body.append(nextCallout);
+    appendA4PageFitAwareClone(context, nextCallout);
     activeCalloutState.callout = nextCallout;
     activeCalloutState.body = nextBody;
 
@@ -2142,7 +2282,7 @@ function appendSplitContainerElementToA4Pages(context: A4PaginationContext, elem
 
   const startContainer = (): HTMLElement => {
     const nextContainer = cloneA4PaginationElementShell(element);
-    context.body.append(nextContainer);
+    appendA4PageFitAwareClone(context, nextContainer);
     activeContainer = nextContainer;
     return nextContainer;
   };
@@ -2236,7 +2376,7 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
       nextToc.append((headerElement ?? createA4TocHeaderElement()).cloneNode(true));
     }
 
-    context.body.append(nextToc);
+    appendA4PageFitAwareClone(context, nextToc);
     activeToc = nextToc;
     hasStartedToc = true;
 
@@ -2351,7 +2491,7 @@ function placePageValignElementOnActiveA4Page(
 ): boolean {
   const beforeHeight = getA4PaginationContentHeight(context.body);
   const nodeClone = element.cloneNode(true) as HTMLElement;
-  context.body.append(nodeClone);
+  appendA4PageFitAwareClone(context, nodeClone);
 
   if (isA4PaginationPageOverflowing(context)) {
     context.body.removeChild(nodeClone);
@@ -2371,6 +2511,7 @@ function placePageValignElementOnActiveA4Page(
 
   const spacer = createA4PageValignSpacer(spacerHeight);
   context.body.insertBefore(spacer, nodeClone);
+  resolveA4PageFitVariables(context, nodeClone);
 
   const overflowAmount = getA4PaginationContentHeight(context.body) - context.maxContentHeight;
   if (overflowAmount > A4_PAGINATION_OVERFLOW_TOLERANCE_PX) {
@@ -2398,7 +2539,7 @@ function appendOversizedPageValignElementToA4Pages(
     return;
   }
 
-  context.body.append(element.cloneNode(true));
+  appendA4PageFitAwareClone(context, element.cloneNode(true));
 
   if (options.commitAfter) {
     commitA4PaginationPage(context);
@@ -2448,7 +2589,7 @@ function appendNodeToA4Pages(context: A4PaginationContext, node: Node, nextNode?
   }
 
   const nodeClone = node.cloneNode(true);
-  context.body.append(nodeClone);
+  appendA4PageFitAwareClone(context, nodeClone);
 
   if (!isA4PaginationPageOverflowing(context)) {
     return;
@@ -2465,7 +2606,7 @@ function appendNodeToA4Pages(context: A4PaginationContext, node: Node, nextNode?
     startA4PaginationPage(context);
   }
 
-  context.body.append(node.cloneNode(true));
+  appendA4PageFitAwareClone(context, node.cloneNode(true));
 }
 
 function paginateA4HtmlSegment(page: RenderedPreviewPage): readonly RenderedPreviewPage[] {
@@ -2476,6 +2617,7 @@ function paginateA4HtmlSegment(page: RenderedPreviewPage): readonly RenderedPrev
     body: firstPage.body,
     frame: firstPage.frame,
     maxContentHeight: firstPage.maxContentHeight,
+    maxContentWidth: firstPage.maxContentWidth,
     pageConfig: firstPageConfig,
     pages: [],
     root,
