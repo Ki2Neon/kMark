@@ -319,6 +319,12 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .kmark-page-number {
     position: absolute;
     z-index: 1;
+    --kmark-page-number-content-top: var(--kmark-page-margin-top, ${A4_MARGIN_TOP_MM}mm);
+    --kmark-page-number-content-right: var(--kmark-page-margin-right, ${A4_MARGIN_RIGHT_MM}mm);
+    --kmark-page-number-content-bottom: var(--kmark-page-margin-bottom, ${A4_MARGIN_BOTTOM_MM}mm);
+    --kmark-page-number-content-left: var(--kmark-page-margin-left, ${A4_MARGIN_LEFT_MM}mm);
+    --kmark-page-number-top-row-bottom: calc(100% - var(--kmark-page-number-content-top));
+    --kmark-page-number-bottom-row-top: calc(100% - var(--kmark-page-number-content-bottom));
     color: var(--kmark-page-number-color, #666);
     font-size: var(--kmark-page-number-font-size, 10pt);
     line-height: 1;
@@ -329,34 +335,34 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .kmark-page-number--bottom-center {
     left: 50%;
-    bottom: var(--kmark-page-number-margin-bottom, 8mm);
+    top: var(--kmark-page-number-bottom-row-top);
     transform: translateX(-50%);
   }
 
   .kmark-page-number--bottom-right {
-    right: var(--kmark-page-number-margin-right, 12mm);
-    bottom: var(--kmark-page-number-margin-bottom, 8mm);
+    top: var(--kmark-page-number-bottom-row-top);
+    right: var(--kmark-page-number-content-right);
   }
 
   .kmark-page-number--bottom-left {
-    left: var(--kmark-page-number-margin-left, 12mm);
-    bottom: var(--kmark-page-number-margin-bottom, 8mm);
+    top: var(--kmark-page-number-bottom-row-top);
+    left: var(--kmark-page-number-content-left);
   }
 
   .kmark-page-number--top-center {
     left: 50%;
-    top: var(--kmark-page-number-margin-top, 8mm);
+    bottom: var(--kmark-page-number-top-row-bottom);
     transform: translateX(-50%);
   }
 
   .kmark-page-number--top-right {
-    right: var(--kmark-page-number-margin-right, 12mm);
-    top: var(--kmark-page-number-margin-top, 8mm);
+    right: var(--kmark-page-number-content-right);
+    bottom: var(--kmark-page-number-top-row-bottom);
   }
 
   .kmark-page-number--top-left {
-    left: var(--kmark-page-number-margin-left, 12mm);
-    top: var(--kmark-page-number-margin-top, 8mm);
+    left: var(--kmark-page-number-content-left);
+    bottom: var(--kmark-page-number-top-row-bottom);
   }
 
   .markdown-body code {
