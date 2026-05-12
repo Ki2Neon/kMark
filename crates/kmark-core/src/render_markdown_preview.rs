@@ -2438,78 +2438,35 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_visual_params(&self, single_layer: Option<&KmarkParamLayer>) -> KmarkParams {
-        let mut final_params = KmarkParams::default();
+        let active_layer = self
+            .active_kmark_single_block
+            .as_ref()
+            .map(|active_single| &active_single.layer);
 
-        for scope in &self.kmark_scope_stack {
-            if let Some(layer) = &scope.layer {
-                final_params.merge(&layer.preset);
-            }
-        }
-        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
-            final_params.merge(&active_single.layer.preset);
-        }
-        if let Some(single_layer) = single_layer {
-            final_params.merge(&single_layer.preset);
-        }
-
-        for scope in &self.kmark_scope_stack {
-            if let Some(layer) = &scope.layer {
-                final_params.merge(&layer.direct);
-            }
-        }
-        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
-            final_params.merge(&active_single.layer.direct);
-        }
-        if let Some(single_layer) = single_layer {
-            final_params.merge(&single_layer.direct);
-        }
-
-        final_params
+        self.resolve_params_with_layers(active_layer, single_layer)
     }
 
     fn resolve_active_block_params(&self) -> KmarkParams {
-        let mut final_params = KmarkParams::default();
-
-        for scope in &self.kmark_scope_stack {
-            if let Some(layer) = &scope.layer {
-                final_params.merge(&layer.preset);
-            }
-        }
         if let Some(active_single) = self.active_kmark_single_block.as_ref() {
-            final_params.merge(&active_single.layer.preset);
+            self.resolve_params_with_layers(Some(&active_single.layer), None)
+        } else {
+            self.resolve_active_scope_block_params()
         }
-
-        for scope in &self.kmark_scope_stack {
-            if let Some(layer) = &scope.layer {
-                final_params.merge(&layer.direct);
-            }
-        }
-        if let Some(active_single) = self.active_kmark_single_block.as_ref() {
-            final_params.merge(&active_single.layer.direct);
-        }
-
-        final_params
     }
 
     fn resolve_active_scope_block_params(&self) -> KmarkParams {
-        let mut final_params = KmarkParams::default();
-
-        for scope in &self.kmark_scope_stack {
-            if let Some(layer) = &scope.layer {
-                final_params.merge(&layer.preset);
-            }
-        }
-
-        for scope in &self.kmark_scope_stack {
-            if let Some(layer) = &scope.layer {
-                final_params.merge(&layer.direct);
-            }
-        }
-
-        final_params
+        self.resolve_params_with_layers(None, None)
     }
 
     fn resolve_scoped_single_block_params(&self, single_layer: &KmarkParamLayer) -> KmarkParams {
+        self.resolve_params_with_layers(Some(single_layer), None)
+    }
+
+    fn resolve_params_with_layers(
+        &self,
+        first_extra_layer: Option<&KmarkParamLayer>,
+        second_extra_layer: Option<&KmarkParamLayer>,
+    ) -> KmarkParams {
         let mut final_params = KmarkParams::default();
 
         for scope in &self.kmark_scope_stack {
@@ -2517,14 +2474,24 @@ impl<'a> HtmlEmitter<'a> {
                 final_params.merge(&layer.preset);
             }
         }
-        final_params.merge(&single_layer.preset);
+        for layer in [first_extra_layer, second_extra_layer]
+            .into_iter()
+            .flatten()
+        {
+            final_params.merge(&layer.preset);
+        }
 
         for scope in &self.kmark_scope_stack {
             if let Some(layer) = &scope.layer {
                 final_params.merge(&layer.direct);
             }
         }
-        final_params.merge(&single_layer.direct);
+        for layer in [first_extra_layer, second_extra_layer]
+            .into_iter()
+            .flatten()
+        {
+            final_params.merge(&layer.direct);
+        }
 
         final_params
     }
@@ -2543,10 +2510,7 @@ impl<'a> HtmlEmitter<'a> {
                     && active_single.nested_same_kind_count == 0
             });
 
-        self.pending_kmark_block_style = None;
-        self.pending_kmark_image_paragraph_style = None;
-        self.pending_kmark_page_valign = None;
-        self.pending_kmark_table_fit = None;
+        self.clear_pending_kmark_render_state();
         if should_consume_current_single_block {
             self.active_kmark_single_block = None;
         }
@@ -2641,14 +2605,11 @@ impl<'a> HtmlEmitter<'a> {
 
     fn close_active_kmark_single_block(&mut self) {
         self.active_kmark_single_block = None;
-        self.pending_kmark_block_style = None;
-        self.pending_kmark_image_paragraph_style = None;
-        self.pending_kmark_page_valign = None;
-        self.pending_kmark_table_fit = None;
+        self.clear_pending_kmark_render_state();
     }
 
     fn take_pending_kmark_block_decoration(&mut self) -> KmarkRootDecoration {
-        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+        if !self.has_pending_kmark_block_decoration() {
             return self.active_scope_block_decoration();
         }
 
@@ -2656,13 +2617,12 @@ impl<'a> HtmlEmitter<'a> {
             style: self.pending_kmark_block_style.take(),
             page_valign: self.pending_kmark_page_valign.take(),
         };
-        self.pending_kmark_image_paragraph_style = None;
-        self.pending_kmark_table_fit = None;
+        self.clear_pending_kmark_auxiliary_render_state();
         decoration
     }
 
     fn take_pending_kmark_paragraph_decorations(&mut self) -> KmarkParagraphDecorations {
-        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+        if !self.has_pending_kmark_block_decoration() {
             self.pending_kmark_table_fit = None;
             return KmarkParagraphDecorations {
                 block: self.active_scope_block_decoration(),
@@ -2699,9 +2659,7 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn take_pending_kmark_table_attributes(&mut self) -> String {
-        let (decoration, fit) = if self.pending_kmark_block_style.is_none()
-            && self.pending_kmark_page_valign.is_none()
-        {
+        let (decoration, fit) = if !self.has_pending_kmark_block_decoration() {
             let params = self.resolve_active_scope_block_params();
             (
                 KmarkRootDecoration {
@@ -2716,7 +2674,7 @@ impl<'a> HtmlEmitter<'a> {
                 page_valign: self.pending_kmark_page_valign.take(),
             };
             let fit = self.pending_kmark_table_fit.take();
-            self.pending_kmark_image_paragraph_style = None;
+            self.clear_pending_kmark_auxiliary_render_state();
             (decoration, fit)
         };
 
@@ -2728,6 +2686,22 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         attributes
+    }
+
+    fn has_pending_kmark_block_decoration(&self) -> bool {
+        self.pending_kmark_block_style.is_some() || self.pending_kmark_page_valign.is_some()
+    }
+
+    fn clear_pending_kmark_render_state(&mut self) {
+        self.pending_kmark_block_style = None;
+        self.pending_kmark_image_paragraph_style = None;
+        self.pending_kmark_page_valign = None;
+        self.pending_kmark_table_fit = None;
+    }
+
+    fn clear_pending_kmark_auxiliary_render_state(&mut self) {
+        self.pending_kmark_image_paragraph_style = None;
+        self.pending_kmark_table_fit = None;
     }
 
     fn close_kmark_scope(&mut self) {
