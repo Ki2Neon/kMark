@@ -36,6 +36,9 @@ const A4_PAGE_VALIGN_VALUES = new Set(["top", "center", "bottom"]);
 const A4_PAGINATION_CJK_TEXT_PATTERN = /[\u3040-\u30ff\u3400-\u9fff]/u;
 const A4_PAGINATION_LONG_TEXT_TOKEN_LENGTH = 24;
 const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
+const A4_TOC_ITEM_HEADER_LABEL = "項目名";
+const A4_TOC_PAGE_HEADER_LABEL = "ページ番号";
+const A4_TOC_INDENT_STEP_EM = 1.25;
 
 type MarkdownPreviewProps = {
   readonly activeSourceLine?: number | null;
@@ -2145,6 +2148,7 @@ function appendSplitContainerElementToA4Pages(context: A4PaginationContext, elem
 
 function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: HTMLElement): boolean {
   const titleElement = getA4DirectChildByClassName(element, "kmark-toc__title");
+  const headerElement = getA4DirectChildByClassName(element, "kmark-toc__header");
   const listElement = Array.from(element.children).find(isA4PaginationListElement);
 
   if (listElement === undefined) {
@@ -2182,6 +2186,8 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
     } else if (titleElement !== null) {
       nextToc.append(titleElement.cloneNode(true));
     }
+
+    nextToc.append((headerElement ?? createA4TocHeaderElement()).cloneNode(true));
 
     context.body.append(nextToc);
     activeToc = nextToc;
@@ -2643,7 +2649,60 @@ function getA4DirectTocPageElement(row: HTMLElement): HTMLElement | null {
   )) ?? null;
 }
 
+function createA4TocHeaderElement(): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "kmark-toc__header";
+
+  const item = document.createElement("span");
+  item.className = "kmark-toc__header-item";
+  item.textContent = A4_TOC_ITEM_HEADER_LABEL;
+  header.append(item);
+
+  const page = document.createElement("span");
+  page.className = "kmark-toc__header-page";
+  page.textContent = A4_TOC_PAGE_HEADER_LABEL;
+  header.append(page);
+
+  return header;
+}
+
+function ensureA4TocHeader(toc: HTMLElement): void {
+  if (getA4DirectChildByClassName(toc, "kmark-toc__header") !== null) {
+    return;
+  }
+
+  const header = createA4TocHeaderElement();
+  const title = getA4DirectChildByClassName(toc, "kmark-toc__title");
+  const list = Array.from(toc.children).find(isA4PaginationListElement);
+
+  if (title !== null) {
+    title.after(header);
+    return;
+  }
+
+  if (list !== undefined) {
+    toc.insertBefore(header, list);
+    return;
+  }
+
+  toc.prepend(header);
+}
+
+function parseA4TocNestDepth(value: string | undefined): number | null {
+  if (value === undefined || !/^\d+$/u.test(value)) {
+    return null;
+  }
+
+  return Number.parseInt(value, 10);
+}
+
 function getA4TocItemNestDepth(item: HTMLElement): number {
+  const savedDepth = parseA4TocNestDepth(item.dataset.tocNestDepth);
+
+  if (savedDepth !== null) {
+    return savedDepth;
+  }
+
   let depth = 0;
   let parent = item.parentElement;
 
@@ -2708,9 +2767,13 @@ function applyA4TocRowStripeClasses(root: ParentNode): void {
       const item = row.closest(".kmark-toc__item");
       const nestDepth = item instanceof HTMLElement ? getA4TocItemNestDepth(item) : 0;
 
+      if (item instanceof HTMLElement) {
+        item.dataset.tocNestDepth = `${nestDepth}`;
+      }
+
       row.classList.remove("kmark-toc__row--odd", "kmark-toc__row--even");
       row.classList.add(index % 2 === 0 ? "kmark-toc__row--odd" : "kmark-toc__row--even");
-      row.style.setProperty("--kmark-toc-row-indent", `${(nestDepth * 1.25).toFixed(2)}em`);
+      row.style.setProperty("--kmark-toc-row-indent", `${(nestDepth * A4_TOC_INDENT_STEP_EM).toFixed(2)}em`);
     });
   }
 }
@@ -2722,6 +2785,10 @@ function prepareA4TocRowsHtml(html: string): string {
 
   const template = document.createElement("template");
   template.innerHTML = html;
+
+  for (const toc of template.content.querySelectorAll<HTMLElement>(".kmark-toc")) {
+    ensureA4TocHeader(toc);
+  }
 
   for (const item of template.content.querySelectorAll<HTMLElement>(".kmark-toc__item")) {
     ensureA4TocItemRow(item);
@@ -2752,6 +2819,10 @@ function resolveA4TocPageNumberHtml(
 
   const template = document.createElement("template");
   template.innerHTML = html;
+
+  for (const toc of template.content.querySelectorAll<HTMLElement>(".kmark-toc")) {
+    ensureA4TocHeader(toc);
+  }
 
   for (const item of template.content.querySelectorAll<HTMLElement>(".kmark-toc__item")) {
     const rowElements = ensureA4TocItemRow(item);
