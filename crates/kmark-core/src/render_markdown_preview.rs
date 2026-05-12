@@ -2465,7 +2465,7 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_image_style(&self, single_layer: Option<&KmarkParamLayer>) -> Option<String> {
-        self.resolve_visual_params(single_layer).image.to_style()
+        self.resolve_visual_params(single_layer).to_image_style()
     }
 
     fn resolve_visual_params(&self, single_layer: Option<&KmarkParamLayer>) -> KmarkParams {
@@ -3197,6 +3197,10 @@ impl KmarkParams {
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_image_style(&self) -> Option<String> {
+        self.image.to_style(&self.layout)
     }
 
     fn to_text_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
@@ -4147,7 +4151,7 @@ impl KmarkImageParams {
                 .is_some_and(KmarkSizeValue::is_page_fit_contain)
     }
 
-    fn to_style(&self) -> Option<String> {
+    fn to_style(&self, layout: &KmarkLayoutParams) -> Option<String> {
         let mut rules = Vec::new();
 
         self.push_size_style_rules(&mut rules);
@@ -4162,6 +4166,7 @@ impl KmarkImageParams {
         }
         self.push_decoration_style_rules(&mut rules);
         self.push_fit_box_style_rules(&mut rules);
+        self.push_page_fit_align_style_rules(layout, &mut rules);
 
         (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
@@ -4243,6 +4248,24 @@ impl KmarkImageParams {
 
         if self.has_page_fit_dimension() {
             rules.push("margin:0".to_owned());
+        }
+    }
+
+    fn push_page_fit_align_style_rules(&self, layout: &KmarkLayoutParams, rules: &mut Vec<String>) {
+        if !self.has_page_fit_dimension() || !layout.has_plain_text_align() {
+            return;
+        }
+
+        match layout.align {
+            Some(KmarkAlign::Center) => {
+                rules.push("margin-left:auto".to_owned());
+                rules.push("margin-right:auto".to_owned());
+            }
+            Some(KmarkAlign::Right) => {
+                rules.push("margin-left:auto".to_owned());
+                rules.push("margin-right:0".to_owned());
+            }
+            Some(KmarkAlign::Left) | None => {}
         }
     }
 }
@@ -7113,7 +7136,8 @@ mod tests {
 
     #[test]
     fn applies_page_fit_size_values_to_non_image_blocks() {
-        let rendered_preview = render_markdown_preview("<!-- kmark w:page_fit h:page_fit -->\n本文");
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark w:page_fit h:page_fit -->\n本文");
 
         assert_eq!(
             rendered_preview.html,
@@ -7130,6 +7154,18 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_align_to_page_fit_contain_image() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark h:page_fit_contain align:center -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;text-align:center\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\" /></p>"
         );
     }
 
