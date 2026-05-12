@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "params": [
     {
       "name": "align",
@@ -95,6 +95,49 @@
       "description": "目次項目から見出しへのリンク有無を指定する",
       "examples": ["<!-- kmark toc:true toc_links:false -->"],
       "priority": 76
+    },
+    {
+      "name": "heading_number",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "scope"],
+      "insertText": "heading_number:true",
+      "description": "スコープ内の見出し番号表示を有効化する",
+      "examples": ["<!-- kmark heading_number:true -->"],
+      "priority": 109
+    },
+    {
+      "name": "heading_number_from",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope"],
+      "values": ["1", "2", "3", "4", "5", "6"],
+      "insertText": "heading_number_from:",
+      "description": "番号付けを開始するMarkdown見出しレベルを指定する",
+      "examples": ["<!-- kmark heading_number:true heading_number_from:2 -->"],
+      "priority": 98
+    },
+    {
+      "name": "heading_number_depth",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope"],
+      "values": ["1", "2", "3", "4", "5", "6"],
+      "insertText": "heading_number_depth:",
+      "description": "開始見出しレベルから番号表示する階層深度を指定する",
+      "examples": ["<!-- kmark heading_number:true heading_number_depth:3 -->"],
+      "priority": 97
+    },
+    {
+      "name": "heading_number_pattern",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "scope"],
+      "values": ["dot", "dot_trailing", "hyphen", "chapter"],
+      "insertText": "heading_number_pattern:",
+      "description": "見出し番号の表示形式を指定する",
+      "examples": ["<!-- kmark heading_number:true heading_number_pattern:dot -->"],
+      "priority": 96
     },
     {
       "name": "w",

@@ -72,6 +72,13 @@ export const KMARK_SNIPPET_SPECS: readonly KmarkSnippetSpec[] = [
     priority: 100,
   },
   {
+    label: "heading number",
+    description: "スコープ内の見出しへ階層番号を表示する",
+    contexts: ["scope", "single"],
+    insertText: "heading_number:true heading_number_from:${1:2} heading_number_depth:${2:3} heading_number_pattern:${3|dot,dot_trailing,hyphen,chapter|}",
+    priority: 98,
+  },
+  {
     label: "table compact",
     description: "表セル余白と文字詰めを指定する",
     contexts: ["table", "single"],

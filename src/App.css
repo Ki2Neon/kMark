@@ -955,6 +955,14 @@ input:focus-visible,
   font-size: 1.35em;
 }
 
+.markdown-body .kmark-heading-number {
+  margin-right: 0.4em;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
 .markdown-body p,
 .markdown-body ul,
 .markdown-body ol,

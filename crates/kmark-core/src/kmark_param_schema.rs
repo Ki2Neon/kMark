@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 5;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 6;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -113,6 +113,50 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         description: "目次項目から見出しへのリンク有無を指定する",
         examples: &["<!-- kmark toc:true toc_links:false -->"],
         priority: 76,
+    },
+    KmarkParamSpec {
+        name: "heading_number",
+        aliases: &[],
+        param_type: "boolean",
+        contexts: &["single", "scope"],
+        values: &[],
+        insert_text: "heading_number:true",
+        description: "スコープ内の見出し番号表示を有効化する",
+        examples: &["<!-- kmark heading_number:true -->"],
+        priority: 109,
+    },
+    KmarkParamSpec {
+        name: "heading_number_from",
+        aliases: &[],
+        param_type: "number",
+        contexts: &["single", "scope"],
+        values: &["1", "2", "3", "4", "5", "6"],
+        insert_text: "heading_number_from:",
+        description: "番号付けを開始するMarkdown見出しレベルを指定する",
+        examples: &["<!-- kmark heading_number:true heading_number_from:2 -->"],
+        priority: 98,
+    },
+    KmarkParamSpec {
+        name: "heading_number_depth",
+        aliases: &[],
+        param_type: "number",
+        contexts: &["single", "scope"],
+        values: &["1", "2", "3", "4", "5", "6"],
+        insert_text: "heading_number_depth:",
+        description: "開始見出しレベルから番号表示する階層深度を指定する",
+        examples: &["<!-- kmark heading_number:true heading_number_depth:3 -->"],
+        priority: 97,
+    },
+    KmarkParamSpec {
+        name: "heading_number_pattern",
+        aliases: &[],
+        param_type: "enum",
+        contexts: &["single", "scope"],
+        values: &["dot", "dot_trailing", "hyphen", "chapter"],
+        insert_text: "heading_number_pattern:",
+        description: "見出し番号の表示形式を指定する",
+        examples: &["<!-- kmark heading_number:true heading_number_pattern:dot -->"],
+        priority: 96,
     },
     KmarkParamSpec {
         name: "w",
