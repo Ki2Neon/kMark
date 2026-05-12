@@ -2667,25 +2667,25 @@ function createA4TocHeaderElement(): HTMLElement {
 }
 
 function ensureA4TocHeader(toc: HTMLElement): void {
+  const list = Array.from(toc.children).find(isA4PaginationListElement);
+
+  if (list === undefined) {
+    return;
+  }
+
   if (getA4DirectChildByClassName(toc, "kmark-toc__header") !== null) {
     return;
   }
 
   const header = createA4TocHeaderElement();
   const title = getA4DirectChildByClassName(toc, "kmark-toc__title");
-  const list = Array.from(toc.children).find(isA4PaginationListElement);
 
   if (title !== null) {
     title.after(header);
     return;
   }
 
-  if (list !== undefined) {
-    toc.insertBefore(header, list);
-    return;
-  }
-
-  toc.prepend(header);
+  toc.insertBefore(header, list);
 }
 
 function parseA4TocNestDepth(value: string | undefined): number | null {
