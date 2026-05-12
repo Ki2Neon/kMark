@@ -13,6 +13,7 @@ export const KMARK_LENGTH_VALUE_PRESETS: readonly string[] = [
 export const KMARK_SIZE_VALUE_PRESETS: readonly string[] = [
   "fit",
   "page_fit",
+  "page_fit_contain",
   ...KMARK_LENGTH_VALUE_PRESETS,
 ] as const;
 

@@ -102,8 +102,8 @@
       "type": "length",
       "contexts": ["single", "scope", "text", "image", "shape", "table"],
       "insertText": "w:",
-      "description": "対象要素の幅を指定する。fitで内容幅、page_fitでページ本文幅に合わせる",
-      "examples": ["<!-- kmark w:200 -->", "<!-- kmark w:fit -->", "<!-- kmark w:page_fit -->"],
+      "description": "対象要素の幅を指定する。fitで内容幅、page_fitで現在位置からページ本文右端までの残幅、page_fit_containで縦横比維持の最大収まり幅に合わせる",
+      "examples": ["<!-- kmark w:200 -->", "<!-- kmark w:fit -->", "<!-- kmark w:page_fit -->", "<!-- kmark w:page_fit_contain h:page_fit_contain -->"],
       "priority": 95
     },
     {
@@ -112,8 +112,8 @@
       "type": "length",
       "contexts": ["single", "scope", "text", "image", "shape"],
       "insertText": "h:",
-      "description": "対象要素の高さを指定する。fitで内容高、page_fitでページ本文高に合わせる",
-      "examples": ["<!-- kmark h:100 -->", "<!-- kmark h:fit -->", "<!-- kmark h:page_fit -->"],
+      "description": "対象要素の高さを指定する。fitで内容高、page_fitで現在位置からページ本文下端までの残高、page_fit_containで縦横比維持の最大収まり高に合わせる",
+      "examples": ["<!-- kmark h:100 -->", "<!-- kmark h:fit -->", "<!-- kmark h:page_fit -->", "<!-- kmark w:page_fit_contain h:page_fit_contain -->"],
       "priority": 95
     },
     {

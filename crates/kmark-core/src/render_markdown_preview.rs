@@ -203,6 +203,7 @@ enum KmarkSizeValue {
     Length(String),
     Fit,
     PageFit,
+    PageFitContain,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -649,10 +650,12 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
                     }
                 }
             }
-            Event::Text(text)
-            | Event::Code(text)
-            | Event::InlineMath(text)
-            | Event::DisplayMath(text) => {
+            Event::Text(text) => {
+                if let Some(pending) = pending_heading.as_mut() {
+                    push_text_as_toc_heading_text(&mut pending.text, text.as_ref());
+                }
+            }
+            Event::Code(text) | Event::InlineMath(text) | Event::DisplayMath(text) => {
                 if let Some(pending) = pending_heading.as_mut() {
                     pending.text.push_str(text.as_ref());
                 }
@@ -663,6 +666,13 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
                 }
             }
             Event::Html(html) | Event::InlineHtml(html) => {
+                if is_html_line_break(html.as_ref()) {
+                    if let Some(pending) = pending_heading.as_mut() {
+                        pending.text.push(' ');
+                    }
+                    continue;
+                }
+
                 if let Some(KmarkComment::Params(bundle)) = parse_kmark_comment(html.as_ref()) {
                     if bundle.toc.enabled == Some(true) {
                         let (_, end_line) =
@@ -1438,6 +1448,14 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        if self.suppressed_html_text_depth == 0 && is_html_line_break(html.as_ref()) {
+            self.flush_pending_kmark_toc();
+            self.pending_kmark_params = None;
+            self.ensure_callout_marker_paragraph_open();
+            self.push_hard_break();
+            return;
+        }
+
         self.flush_pending_kmark_toc();
         self.pending_kmark_params = None;
         self.update_html_text_suppression(html.as_ref());
@@ -1987,11 +2005,11 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        if !text.trim().is_empty() {
+        if has_visible_markdown_text(text) {
             self.mark_paragraph_non_image_content();
         }
 
-        self.html.push_str(&escape_html(text));
+        self.push_text_with_literal_line_breaks(text);
     }
 
     fn push_code(&mut self, text: &str) {
@@ -2034,6 +2052,19 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         self.push_raw("<br />\n");
+    }
+
+    fn push_text_with_literal_line_breaks(&mut self, text: &str) {
+        let mut remaining = text;
+
+        while let Some(line_break_index) = remaining.find("\\n") {
+            let (before_line_break, after_before) = remaining.split_at(line_break_index);
+            self.html.push_str(&escape_html(before_line_break));
+            self.push_hard_break();
+            remaining = &after_before["\\n".len()..];
+        }
+
+        self.html.push_str(&escape_html(remaining));
     }
 
     fn push_raw(&mut self, html: &str) {
@@ -2434,7 +2465,7 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_image_style(&self, single_layer: Option<&KmarkParamLayer>) -> Option<String> {
-        self.resolve_visual_params(single_layer).image.to_style()
+        self.resolve_visual_params(single_layer).to_image_style()
     }
 
     fn resolve_visual_params(&self, single_layer: Option<&KmarkParamLayer>) -> KmarkParams {
@@ -3166,6 +3197,10 @@ impl KmarkParams {
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_image_style(&self) -> Option<String> {
+        self.image.to_style(&self.layout)
     }
 
     fn to_text_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
@@ -4106,18 +4141,32 @@ impl KmarkImageParams {
                 .is_some_and(KmarkSizeValue::is_page_fit)
     }
 
-    fn to_style(&self) -> Option<String> {
+    fn has_page_fit_contain_dimension(&self) -> bool {
+        self.width
+            .as_ref()
+            .is_some_and(KmarkSizeValue::is_page_fit_contain)
+            || self
+                .height
+                .as_ref()
+                .is_some_and(KmarkSizeValue::is_page_fit_contain)
+    }
+
+    fn to_style(&self, layout: &KmarkLayoutParams) -> Option<String> {
         let mut rules = Vec::new();
 
         self.push_size_style_rules(&mut rules);
         if self.has_page_fit_dimension() {
             rules.push("display:block".to_owned());
         }
+        if self.has_page_fit_contain_dimension() {
+            rules.push("object-fit:contain".to_owned());
+        }
         if let Some(position) = &self.position {
             rules.push(format!("object-position:{position}"));
         }
         self.push_decoration_style_rules(&mut rules);
         self.push_fit_box_style_rules(&mut rules);
+        self.push_page_fit_align_style_rules(layout, &mut rules);
 
         (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
@@ -4201,15 +4250,37 @@ impl KmarkImageParams {
             rules.push("margin:0".to_owned());
         }
     }
+
+    fn push_page_fit_align_style_rules(&self, layout: &KmarkLayoutParams, rules: &mut Vec<String>) {
+        if !self.has_page_fit_dimension() || !layout.has_plain_text_align() {
+            return;
+        }
+
+        match layout.align {
+            Some(KmarkAlign::Center) => {
+                rules.push("margin-left:auto".to_owned());
+                rules.push("margin-right:auto".to_owned());
+            }
+            Some(KmarkAlign::Right) => {
+                rules.push("margin-left:auto".to_owned());
+                rules.push("margin-right:0".to_owned());
+            }
+            Some(KmarkAlign::Left) | None => {}
+        }
+    }
 }
 
 impl KmarkSizeValue {
     fn is_page_fit(&self) -> bool {
-        matches!(self, Self::PageFit)
+        matches!(self, Self::PageFit | Self::PageFitContain)
+    }
+
+    fn is_page_fit_contain(&self) -> bool {
+        matches!(self, Self::PageFitContain)
     }
 
     fn needs_box_sizing(&self) -> bool {
-        matches!(self, Self::Fit | Self::PageFit)
+        matches!(self, Self::Fit | Self::PageFit | Self::PageFitContain)
     }
 
     fn push_width_style_rules(&self, rules: &mut Vec<String>) {
@@ -4222,6 +4293,10 @@ impl KmarkSizeValue {
             Self::PageFit => {
                 rules.push("width:var(--kmark-page-fit-width,100%)".to_owned());
             }
+            Self::PageFitContain => {
+                rules.push("max-width:var(--kmark-page-fit-width,100%)".to_owned());
+                rules.push("width:var(--kmark-page-fit-contain-width,auto)".to_owned());
+            }
         }
     }
 
@@ -4231,6 +4306,10 @@ impl KmarkSizeValue {
             Self::Fit => rules.push("height:fit-content".to_owned()),
             Self::PageFit => {
                 rules.push("height:var(--kmark-page-fit-height,auto)".to_owned());
+            }
+            Self::PageFitContain => {
+                rules.push("max-height:var(--kmark-page-fit-height,none)".to_owned());
+                rules.push("height:var(--kmark-page-fit-contain-height,auto)".to_owned());
             }
         }
     }
@@ -5069,6 +5148,7 @@ fn parse_kmark_size_value(value: &str) -> Option<KmarkSizeValue> {
     match trim_kmark_quotes(value).trim() {
         "fit" => Some(KmarkSizeValue::Fit),
         "page_fit" => Some(KmarkSizeValue::PageFit),
+        "page_fit_contain" => Some(KmarkSizeValue::PageFitContain),
         value => parse_css_length_value(value, true).map(KmarkSizeValue::Length),
     }
 }
@@ -5691,6 +5771,51 @@ fn url_scheme(url: &str) -> Option<String> {
     let prefix_end = url.find(['/', '?', '#']).unwrap_or(url.len());
 
     (scheme_end < prefix_end).then(|| url[..scheme_end].to_ascii_lowercase())
+}
+
+fn push_text_as_toc_heading_text(output: &mut String, text: &str) {
+    let mut remaining = text;
+
+    while let Some(line_break_index) = remaining.find("\\n") {
+        let (before_line_break, after_before) = remaining.split_at(line_break_index);
+        output.push_str(before_line_break);
+        output.push(' ');
+        remaining = &after_before["\\n".len()..];
+    }
+
+    output.push_str(remaining);
+}
+
+fn has_visible_markdown_text(text: &str) -> bool {
+    let mut characters = text.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        if character.is_whitespace() {
+            continue;
+        }
+
+        if character == '\\' && characters.peek() == Some(&'n') {
+            characters.next();
+            continue;
+        }
+
+        return true;
+    }
+
+    false
+}
+
+fn is_html_line_break(html: &str) -> bool {
+    let trimmed = html.trim();
+
+    if !trimmed.starts_with('<') || !trimmed.ends_with('>') {
+        return false;
+    }
+
+    let tag_body = trimmed[1..trimmed.len() - 1].trim();
+    let tag_name = tag_body.strip_suffix('/').unwrap_or(tag_body).trim();
+
+    tag_name.eq_ignore_ascii_case("br")
 }
 
 fn escape_html(text: &str) -> String {
@@ -6452,6 +6577,36 @@ mod tests {
     }
 
     #[test]
+    fn renders_literal_line_break_escape_in_markdown_text() {
+        let rendered_preview = render_markdown_preview("first\\nsecond");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">first<br />\nsecond</p>"
+        );
+    }
+
+    #[test]
+    fn keeps_literal_line_break_escape_inside_code_text() {
+        let rendered_preview = render_markdown_preview("`first\\nsecond`");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><code>first\\nsecond</code></p>"
+        );
+    }
+
+    #[test]
+    fn renders_safe_html_line_breaks_without_enabling_other_html() {
+        let rendered_preview = render_markdown_preview("first<br>second<br />third<BR/>fourth");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">first<br />\nsecond<br />\nthird<br />\nfourth</p>"
+        );
+    }
+
+    #[test]
     fn renders_callout_with_default_title() {
         let rendered_preview = render_markdown_preview("> [!NOTE]\n> これは補足です。");
 
@@ -6976,6 +7131,41 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_page_fit_size_values_to_non_image_blocks() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark w:page_fit h:page_fit -->\n本文");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);box-sizing:border-box;margin:0;\">本文</p>"
+        );
+    }
+
+    #[test]
+    fn applies_page_fit_contain_size_values_to_images() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:page_fit_contain h:page_fit_contain -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_align_to_page_fit_contain_image() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark h:page_fit_contain align:center -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;text-align:center\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\" /></p>"
         );
     }
 
