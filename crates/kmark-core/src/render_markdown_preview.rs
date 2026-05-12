@@ -1631,7 +1631,7 @@ impl<'a> HtmlEmitter<'a> {
                 self.table_section = TableSection::Head;
                 self.table_cell_index = 0;
                 self.table_body_open = false;
-                let attributes = self.take_pending_kmark_block_attributes();
+                let attributes = self.take_pending_kmark_table_attributes();
                 self.push_raw(&format!("<table{}>", attributes));
             }
             Tag::TableHead => {
@@ -2543,7 +2543,11 @@ impl<'a> HtmlEmitter<'a> {
         let resolved_params = layer.resolved_params();
 
         self.pending_kmark_params = None;
-        self.pending_kmark_block_style = resolved_params.to_single_block_root_style();
+        self.pending_kmark_block_style = if matches!(tag, Tag::Table(_)) {
+            resolved_params.to_table_root_style()
+        } else {
+            resolved_params.to_single_block_root_style()
+        };
         self.pending_kmark_image_paragraph_style = resolved_params.to_image_paragraph_root_style();
         self.pending_kmark_page_valign = resolved_params.page.valign;
         self.active_kmark_single_block = Some(ActiveKmarkSingleBlock {
@@ -2629,9 +2633,33 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
+    fn active_scope_table_decoration(&self) -> KmarkRootDecoration {
+        let params = self.resolve_active_scope_block_params();
+
+        KmarkRootDecoration {
+            style: params.to_table_root_style(),
+            page_valign: None,
+        }
+    }
+
     fn take_pending_kmark_block_attributes(&mut self) -> String {
         self.take_pending_kmark_block_decoration()
             .attributes_with_optional_class()
+    }
+
+    fn take_pending_kmark_table_attributes(&mut self) -> String {
+        if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+            return self
+                .active_scope_table_decoration()
+                .attributes_with_optional_class();
+        }
+
+        let decoration = KmarkRootDecoration {
+            style: self.pending_kmark_block_style.take(),
+            page_valign: self.pending_kmark_page_valign.take(),
+        };
+        self.pending_kmark_image_paragraph_style = None;
+        decoration.attributes_with_optional_class()
     }
 
     fn close_kmark_scope(&mut self) {
@@ -3057,6 +3085,34 @@ impl KmarkParams {
         }
         if let Some(width_style) = self.to_text_block_width_style(false) {
             rules.push(width_style);
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_table_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if self.layout.has_plain_text_align()
+            && self.image.has_explicit_width()
+            && !self.image.has_page_fit_dimension()
+        {
+            match self.layout.align {
+                Some(KmarkAlign::Center) => {
+                    rules.push("margin-left:auto".to_owned());
+                    rules.push("margin-right:auto".to_owned());
+                }
+                Some(KmarkAlign::Right) => {
+                    rules.push("margin-left:auto".to_owned());
+                }
+                Some(KmarkAlign::Left) | None => {}
+            }
         }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
@@ -6488,7 +6544,7 @@ mod tests {
         let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
         assert!(table
             .html
-            .contains("<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
+            .contains("<table style=\"color:red;\">"));
 
         let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
         assert!(blockquote.html.contains(
@@ -6500,6 +6556,20 @@ mod tests {
         assert!(code.html.contains(
             "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\"><code class=\"language-rust\">"
         ));
+    }
+
+    #[test]
+    fn keeps_table_layout_when_text_decoration_is_applied() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark color:#333 font_size:12pt align:center -->\n\
+             | ピン番号 | 名称 | 1 | MOSFETリレー 1 COM |\n\
+             | --- | --- | ---: | --- |\n\
+             |  |  | 2 | MOSFETリレー 1 OUT |",
+        );
+
+        assert!(rendered_preview.html.contains("<table style=\"color:#333;font-size:12pt;\">"));
+        assert!(!rendered_preview.html.contains("width:fit-content"));
+        assert!(!rendered_preview.html.contains("text-align:center\"><thead"));
     }
 
     #[test]

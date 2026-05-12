@@ -2183,11 +2183,13 @@ function appendSplitTocElementToA4Pages(context: A4PaginationContext, element: H
 
     if (isContinuation) {
       addA4PaginationClassName(nextToc, "kmark-toc--continuation");
-    } else if (titleElement !== null) {
-      nextToc.append(titleElement.cloneNode(true));
-    }
+    } else {
+      if (titleElement !== null) {
+        nextToc.append(titleElement.cloneNode(true));
+      }
 
-    nextToc.append((headerElement ?? createA4TocHeaderElement()).cloneNode(true));
+      nextToc.append((headerElement ?? createA4TocHeaderElement()).cloneNode(true));
+    }
 
     context.body.append(nextToc);
     activeToc = nextToc;
@@ -2667,6 +2669,10 @@ function createA4TocHeaderElement(): HTMLElement {
 }
 
 function ensureA4TocHeader(toc: HTMLElement): void {
+  if (toc.classList.contains("kmark-toc--continuation")) {
+    return;
+  }
+
   const list = Array.from(toc.children).find(isA4PaginationListElement);
 
   if (list === undefined) {
