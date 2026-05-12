@@ -650,10 +650,12 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
                     }
                 }
             }
-            Event::Text(text)
-            | Event::Code(text)
-            | Event::InlineMath(text)
-            | Event::DisplayMath(text) => {
+            Event::Text(text) => {
+                if let Some(pending) = pending_heading.as_mut() {
+                    push_text_as_toc_heading_text(&mut pending.text, text.as_ref());
+                }
+            }
+            Event::Code(text) | Event::InlineMath(text) | Event::DisplayMath(text) => {
                 if let Some(pending) = pending_heading.as_mut() {
                     pending.text.push_str(text.as_ref());
                 }
@@ -664,6 +666,13 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
                 }
             }
             Event::Html(html) | Event::InlineHtml(html) => {
+                if is_html_line_break(html.as_ref()) {
+                    if let Some(pending) = pending_heading.as_mut() {
+                        pending.text.push(' ');
+                    }
+                    continue;
+                }
+
                 if let Some(KmarkComment::Params(bundle)) = parse_kmark_comment(html.as_ref()) {
                     if bundle.toc.enabled == Some(true) {
                         let (_, end_line) =
@@ -1439,6 +1448,14 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        if self.suppressed_html_text_depth == 0 && is_html_line_break(html.as_ref()) {
+            self.flush_pending_kmark_toc();
+            self.pending_kmark_params = None;
+            self.ensure_callout_marker_paragraph_open();
+            self.push_hard_break();
+            return;
+        }
+
         self.flush_pending_kmark_toc();
         self.pending_kmark_params = None;
         self.update_html_text_suppression(html.as_ref());
@@ -1988,11 +2005,11 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        if !text.trim().is_empty() {
+        if has_visible_markdown_text(text) {
             self.mark_paragraph_non_image_content();
         }
 
-        self.html.push_str(&escape_html(text));
+        self.push_text_with_literal_line_breaks(text);
     }
 
     fn push_code(&mut self, text: &str) {
@@ -2035,6 +2052,19 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         self.push_raw("<br />\n");
+    }
+
+    fn push_text_with_literal_line_breaks(&mut self, text: &str) {
+        let mut remaining = text;
+
+        while let Some(line_break_index) = remaining.find("\\n") {
+            let (before_line_break, after_before) = remaining.split_at(line_break_index);
+            self.html.push_str(&escape_html(before_line_break));
+            self.push_hard_break();
+            remaining = &after_before["\\n".len()..];
+        }
+
+        self.html.push_str(&escape_html(remaining));
     }
 
     fn push_raw(&mut self, html: &str) {
@@ -5720,6 +5750,51 @@ fn url_scheme(url: &str) -> Option<String> {
     (scheme_end < prefix_end).then(|| url[..scheme_end].to_ascii_lowercase())
 }
 
+fn push_text_as_toc_heading_text(output: &mut String, text: &str) {
+    let mut remaining = text;
+
+    while let Some(line_break_index) = remaining.find("\\n") {
+        let (before_line_break, after_before) = remaining.split_at(line_break_index);
+        output.push_str(before_line_break);
+        output.push(' ');
+        remaining = &after_before["\\n".len()..];
+    }
+
+    output.push_str(remaining);
+}
+
+fn has_visible_markdown_text(text: &str) -> bool {
+    let mut characters = text.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        if character.is_whitespace() {
+            continue;
+        }
+
+        if character == '\\' && characters.peek() == Some(&'n') {
+            characters.next();
+            continue;
+        }
+
+        return true;
+    }
+
+    false
+}
+
+fn is_html_line_break(html: &str) -> bool {
+    let trimmed = html.trim();
+
+    if !trimmed.starts_with('<') || !trimmed.ends_with('>') {
+        return false;
+    }
+
+    let tag_body = trimmed[1..trimmed.len() - 1].trim();
+    let tag_name = tag_body.strip_suffix('/').unwrap_or(tag_body).trim();
+
+    tag_name.eq_ignore_ascii_case("br")
+}
+
 fn escape_html(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
 
@@ -6475,6 +6550,36 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted<br />\n<em>value</em></p></blockquote>"
+        );
+    }
+
+    #[test]
+    fn renders_literal_line_break_escape_in_markdown_text() {
+        let rendered_preview = render_markdown_preview("first\\nsecond");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">first<br />\nsecond</p>"
+        );
+    }
+
+    #[test]
+    fn keeps_literal_line_break_escape_inside_code_text() {
+        let rendered_preview = render_markdown_preview("`first\\nsecond`");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><code>first\\nsecond</code></p>"
+        );
+    }
+
+    #[test]
+    fn renders_safe_html_line_breaks_without_enabling_other_html() {
+        let rendered_preview = render_markdown_preview("first<br>second<br />third<BR/>fourth");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">first<br />\nsecond<br />\nthird<br />\nfourth</p>"
         );
     }
 
