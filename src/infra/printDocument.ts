@@ -133,13 +133,28 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     line-height: 1.38;
   }
 
+  .markdown-body .kmark-toc__header,
   .markdown-body .kmark-toc__row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(2.6em, 4.6em);
     gap: 2.4em;
     align-items: baseline;
-    min-height: 1.55em;
     padding: 0.1em 0.35em;
+  }
+
+  .markdown-body .kmark-toc__header {
+    margin-bottom: 0.2em;
+    border-top: 1px solid #dddddd;
+    border-bottom: 1px solid #d2d2d2;
+    background: rgb(0 0 0 / 4%);
+    color: #555555;
+    font-size: 0.9em;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .markdown-body .kmark-toc__row {
+    min-height: 1.55em;
   }
 
   .markdown-body .kmark-toc__row--odd {
@@ -158,11 +173,15 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     overflow-wrap: anywhere;
   }
 
+  .markdown-body .kmark-toc__header-page,
   .markdown-body .kmark-toc__page {
     justify-self: start;
+    white-space: nowrap;
+  }
+
+  .markdown-body .kmark-toc__page {
     color: #555555;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
   }
 
   .markdown-body blockquote {

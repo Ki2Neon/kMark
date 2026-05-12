@@ -1004,13 +1004,28 @@ input:focus-visible,
   line-height: 1.38;
 }
 
+.markdown-body .kmark-toc__header,
 .markdown-body .kmark-toc__row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(2.6em, 4.6em);
   gap: 2.4em;
   align-items: baseline;
-  min-height: 1.55em;
   padding: 0.1em 0.35em;
+}
+
+.markdown-body .kmark-toc__header {
+  margin-bottom: 0.2em;
+  border-top: 1px solid color-mix(in srgb, var(--preview-text) 14%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--preview-text) 18%, transparent);
+  background: color-mix(in srgb, var(--preview-text) 5%, transparent);
+  color: var(--preview-text-soft);
+  font-size: 0.9em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.markdown-body .kmark-toc__row {
+  min-height: 1.55em;
 }
 
 .markdown-body .kmark-toc__row--odd {
@@ -1029,11 +1044,15 @@ input:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.markdown-body .kmark-toc__header-page,
 .markdown-body .kmark-toc__page {
   justify-self: start;
+  white-space: nowrap;
+}
+
+.markdown-body .kmark-toc__page {
   color: var(--preview-text-soft);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .markdown-body .markdown-task-checkbox {

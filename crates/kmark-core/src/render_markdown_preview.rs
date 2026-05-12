@@ -3139,19 +3139,6 @@ impl KmarkParams {
         (!rules.is_empty()).then(|| rules.join(""))
     }
 
-    fn to_table_root_style(&self) -> Option<String> {
-        let mut rules = Vec::new();
-
-        if let Some(block_style) = self.to_single_block_root_style() {
-            rules.push(block_style);
-        }
-        if let Some(table_style) = self.table.to_style() {
-            rules.push(table_style);
-        }
-
-        (!rules.is_empty()).then(|| rules.join(""))
-    }
-
     fn to_scoped_block_root_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
@@ -3163,6 +3150,37 @@ impl KmarkParams {
         }
         if let Some(text_style) = self.text.to_style() {
             rules.push(text_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_table_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(image_style) = self.image.to_box_style() {
+            rules.push(image_style);
+        }
+        if self.layout.has_plain_text_align()
+            && self.image.has_explicit_width()
+            && !self.image.has_page_fit_dimension()
+        {
+            match self.layout.align {
+                Some(KmarkAlign::Center) => {
+                    rules.push("margin-left:auto".to_owned());
+                    rules.push("margin-right:auto".to_owned());
+                }
+                Some(KmarkAlign::Right) => {
+                    rules.push("margin-left:auto".to_owned());
+                }
+                Some(KmarkAlign::Left) | None => {}
+            }
+        }
+        if let Some(text_style) = self.text.to_style() {
+            rules.push(text_style);
+        }
+        if let Some(table_style) = self.table.to_style() {
+            rules.push(table_style);
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
@@ -6562,7 +6580,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;font-size:8.5pt;line-height:1.05;--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;table-layout:fixed;\" data-kmark-table-fit=\"shrink\">"
+            "<table style=\"font-size:8.5pt;line-height:1.05;--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;table-layout:fixed;\" data-kmark-table-fit=\"shrink\">"
         ));
     }
 
@@ -6586,7 +6604,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;font-size:8.5pt;line-height:1.05;--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;\" data-kmark-table-fit=\"off\">"
+            "<table style=\"font-size:8.5pt;line-height:1.05;--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;\" data-kmark-table-fit=\"off\">"
         ));
     }
 
@@ -6774,7 +6792,7 @@ mod tests {
         let table = render_markdown_preview("<!-- kmark color:red -->\n| A |\n| - |\n| B |");
         assert!(table
             .html
-            .contains("<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">"));
+            .contains("<table style=\"color:red;\">"));
 
         let blockquote = render_markdown_preview("<!-- kmark color:red -->\n> 引用");
         assert!(blockquote.html.contains(
@@ -6786,6 +6804,20 @@ mod tests {
         assert!(code.html.contains(
             "<pre data-source-line-start=\"1\" data-source-line-end=\"3\" style=\"background:#eee;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\"><code class=\"language-rust\">"
         ));
+    }
+
+    #[test]
+    fn keeps_table_layout_when_text_decoration_is_applied() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark color:#333 font_size:12pt align:center -->\n\
+             | ピン番号 | 名称 | 1 | MOSFETリレー 1 COM |\n\
+             | --- | --- | ---: | --- |\n\
+             |  |  | 2 | MOSFETリレー 1 OUT |",
+        );
+
+        assert!(rendered_preview.html.contains("<table style=\"color:#333;font-size:12pt;\">"));
+        assert!(!rendered_preview.html.contains("width:fit-content"));
+        assert!(!rendered_preview.html.contains("text-align:center\"><thead"));
     }
 
     #[test]
