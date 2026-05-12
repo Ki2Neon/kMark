@@ -24,6 +24,7 @@ pub struct RenderedPage {
     pub page_style: PageStyle,
     pub text_style: PreviewTextStyle,
     pub page_number_config: PageNumberConfig,
+    pub page_chrome_config: PageChromeConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,22 @@ pub struct PageNumberConfig {
     pub margin_bottom: CssLength,
     pub margin_left: CssLength,
     pub margin_right: CssLength,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageChromeConfig {
+    pub header: PageChromeRegionConfig,
+    pub footer: PageChromeRegionConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageChromeRegionConfig {
+    pub enabled: bool,
+    pub left: Option<String>,
+    pub center: Option<String>,
+    pub right: Option<String>,
+    pub opacity: String,
+    pub offset: Option<CssLength>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,6 +422,18 @@ struct PartialPageDirective {
     page_number_margin_bottom: Option<CssLength>,
     page_number_margin_left: Option<CssLength>,
     page_number_margin_right: Option<CssLength>,
+    page_header: PartialPageChromeRegionDirective,
+    page_footer: PartialPageChromeRegionDirective,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PartialPageChromeRegionDirective {
+    enabled: Option<bool>,
+    left: Option<String>,
+    center: Option<String>,
+    right: Option<String>,
+    opacity: Option<String>,
+    offset: Option<CssLength>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -444,6 +473,7 @@ struct DocumentPageConfig {
     default_page_style: PageStyle,
     default_text_style: PreviewTextStyle,
     page_number_config: PageNumberConfig,
+    page_chrome_config: PageChromeConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,6 +602,7 @@ pub fn render_markdown_preview_with_file_path(
                 page_style: page_config.default_page_style,
                 text_style: page_config.default_text_style,
                 page_number_config: page_config.page_number_config,
+                page_chrome_config: page_config.page_chrome_config,
             }
         })
         .collect::<Vec<_>>();
@@ -3739,6 +3770,61 @@ impl PageNumberConfig {
     }
 }
 
+impl PageChromeConfig {
+    fn default_config() -> Self {
+        Self {
+            header: PageChromeRegionConfig::default_config(),
+            footer: PageChromeRegionConfig::default_config(),
+        }
+    }
+
+    fn apply(&mut self, directive: &PartialPageDirective) {
+        self.header.apply(&directive.page_header);
+        self.footer.apply(&directive.page_footer);
+    }
+}
+
+impl PageChromeRegionConfig {
+    fn default_config() -> Self {
+        Self {
+            enabled: false,
+            left: None,
+            center: None,
+            right: None,
+            opacity: "1".to_owned(),
+            offset: None,
+        }
+    }
+
+    fn apply(&mut self, directive: &PartialPageChromeRegionDirective) {
+        if directive.enabled == Some(false) {
+            self.enabled = false;
+            self.left = None;
+            self.center = None;
+            self.right = None;
+            return;
+        }
+
+        if let Some(left) = &directive.left {
+            self.left = Some(left.clone());
+        }
+        if let Some(center) = &directive.center {
+            self.center = Some(center.clone());
+        }
+        if let Some(right) = &directive.right {
+            self.right = Some(right.clone());
+        }
+        if let Some(opacity) = &directive.opacity {
+            self.opacity = opacity.clone();
+        }
+        if let Some(offset) = &directive.offset {
+            self.offset = Some(offset.clone());
+        }
+
+        self.enabled = self.left.is_some() || self.center.is_some() || self.right.is_some();
+    }
+}
+
 impl PageNumberPosition {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -3913,6 +3999,8 @@ impl PartialPageDirective {
         if let Some(page_number_margin_right) = &other.page_number_margin_right {
             self.page_number_margin_right = Some(page_number_margin_right.clone());
         }
+        self.page_header.merge(&other.page_header);
+        self.page_footer.merge(&other.page_footer);
     }
 
     fn has_page_directive(&self) -> bool {
@@ -3929,6 +4017,7 @@ impl PartialPageDirective {
             || self.page_font_family.is_some()
             || self.page_heading_font_family.is_some()
             || self.has_page_number_directive()
+            || self.has_page_chrome_directive()
     }
 
     fn has_standalone_page_directive(&self) -> bool {
@@ -3945,6 +4034,7 @@ impl PartialPageDirective {
             || self.page_font_family.is_some()
             || self.page_heading_font_family.is_some()
             || self.has_page_number_directive()
+            || self.has_page_chrome_directive()
     }
 
     fn has_page_number_directive(&self) -> bool {
@@ -3962,6 +4052,10 @@ impl PartialPageDirective {
             || self.page_number_margin_bottom.is_some()
             || self.page_number_margin_left.is_some()
             || self.page_number_margin_right.is_some()
+    }
+
+    fn has_page_chrome_directive(&self) -> bool {
+        self.page_header.has_directive() || self.page_footer.has_directive()
     }
 
     fn has_different_page_config_than(&self, other: &Self) -> bool {
@@ -3991,6 +4085,81 @@ impl PartialPageDirective {
             || self.page_number_margin_bottom != other.page_number_margin_bottom
             || self.page_number_margin_left != other.page_number_margin_left
             || self.page_number_margin_right != other.page_number_margin_right
+            || self.page_header != other.page_header
+            || self.page_footer != other.page_footer
+    }
+}
+
+impl PartialPageChromeRegionDirective {
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = Some(enabled);
+        if !enabled {
+            self.left = None;
+            self.center = None;
+            self.right = None;
+        }
+    }
+
+    fn set_left(&mut self, value: String) {
+        self.left = Some(value);
+        self.enabled = Some(true);
+    }
+
+    fn set_center(&mut self, value: String) {
+        self.center = Some(value);
+        self.enabled = Some(true);
+    }
+
+    fn set_right(&mut self, value: String) {
+        self.right = Some(value);
+        self.enabled = Some(true);
+    }
+
+    fn set_opacity(&mut self, value: String) {
+        self.opacity = Some(value);
+    }
+
+    fn set_offset(&mut self, value: CssLength) {
+        self.offset = Some(value);
+    }
+
+    fn merge(&mut self, other: &Self) {
+        if other.enabled == Some(false) {
+            self.set_enabled(false);
+            return;
+        }
+
+        if let Some(left) = &other.left {
+            self.left = Some(left.clone());
+        }
+        if let Some(center) = &other.center {
+            self.center = Some(center.clone());
+        }
+        if let Some(right) = &other.right {
+            self.right = Some(right.clone());
+        }
+        if let Some(opacity) = &other.opacity {
+            self.opacity = Some(opacity.clone());
+        }
+        if let Some(offset) = &other.offset {
+            self.offset = Some(offset.clone());
+        }
+        if other.enabled == Some(true)
+            || other.left.is_some()
+            || other.center.is_some()
+            || other.right.is_some()
+        {
+            self.enabled = Some(true);
+        }
+    }
+
+    fn has_directive(&self) -> bool {
+        self.enabled.is_some()
+            || self.left.is_some()
+            || self.center.is_some()
+            || self.right.is_some()
+            || self.opacity.is_some()
+            || self.offset.is_some()
     }
 }
 
@@ -4001,6 +4170,7 @@ impl DocumentPageConfig {
             default_page_style: PageStyle::default_a4(),
             default_text_style: PreviewTextStyle::default_preview(),
             page_number_config: PageNumberConfig::default_config(),
+            page_chrome_config: PageChromeConfig::default_config(),
         }
     }
 
@@ -4045,12 +4215,15 @@ impl DocumentPageConfig {
 
         let mut page_number_config = self.page_number_config.clone();
         page_number_config.apply(page_directive);
+        let mut page_chrome_config = self.page_chrome_config.clone();
+        page_chrome_config.apply(page_directive);
 
         Self {
             geometry,
             default_page_style: page_style,
             default_text_style: text_style,
             page_number_config,
+            page_chrome_config,
         }
     }
 }
@@ -4647,6 +4820,66 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_number_margin_right = Some(margin_right);
                 }
             }
+            "page_header" => {
+                if let Some(enabled) = parse_kmark_bool_value(value) {
+                    directive.page_header.set_enabled(enabled);
+                }
+            }
+            "page_header_left" => {
+                if let Some(text) = parse_kmark_page_chrome_text_value(value) {
+                    directive.page_header.set_left(text);
+                }
+            }
+            "page_header_center" => {
+                if let Some(text) = parse_kmark_page_chrome_text_value(value) {
+                    directive.page_header.set_center(text);
+                }
+            }
+            "page_header_right" => {
+                if let Some(text) = parse_kmark_page_chrome_text_value(value) {
+                    directive.page_header.set_right(text);
+                }
+            }
+            "page_header_opacity" => {
+                if let Some(opacity) = parse_kmark_opacity_value(value) {
+                    directive.page_header.set_opacity(opacity);
+                }
+            }
+            "page_header_margin_top" => {
+                if let Some(offset) = parse_kmark_page_length_value(value) {
+                    directive.page_header.set_offset(offset);
+                }
+            }
+            "page_footer" => {
+                if let Some(enabled) = parse_kmark_bool_value(value) {
+                    directive.page_footer.set_enabled(enabled);
+                }
+            }
+            "page_footer_left" => {
+                if let Some(text) = parse_kmark_page_chrome_text_value(value) {
+                    directive.page_footer.set_left(text);
+                }
+            }
+            "page_footer_center" => {
+                if let Some(text) = parse_kmark_page_chrome_text_value(value) {
+                    directive.page_footer.set_center(text);
+                }
+            }
+            "page_footer_right" => {
+                if let Some(text) = parse_kmark_page_chrome_text_value(value) {
+                    directive.page_footer.set_right(text);
+                }
+            }
+            "page_footer_opacity" => {
+                if let Some(opacity) = parse_kmark_opacity_value(value) {
+                    directive.page_footer.set_opacity(opacity);
+                }
+            }
+            "page_footer_margin_bottom" => {
+                if let Some(offset) = parse_kmark_page_length_value(value) {
+                    directive.page_footer.set_offset(offset);
+                }
+            }
             _ => {}
         }
     }
@@ -4712,6 +4945,14 @@ fn parse_kmark_page_number_format_value(value: &str) -> Option<String> {
     let format = trim_kmark_quotes(value);
 
     (!format.is_empty()).then(|| format.replace("\\\"", "\"").replace("\\'", "'"))
+}
+
+fn parse_kmark_page_chrome_text_value(value: &str) -> Option<String> {
+    let text = trim_kmark_quotes(value);
+
+    text.chars()
+        .all(|character| !character.is_control())
+        .then(|| text.replace("\\\"", "\"").replace("\\'", "'"))
 }
 
 fn parse_kmark_positive_u32_value(value: &str) -> Option<u32> {
@@ -5848,7 +6089,7 @@ mod tests {
     };
 
     use super::{
-        render_markdown_preview, render_markdown_preview_with_file_path,
+        render_markdown_preview, render_markdown_preview_with_file_path, CssLength,
         resolve_image_destination_url, PageNumberPosition, PageNumberStyle,
     };
 
@@ -6254,6 +6495,230 @@ mod tests {
         assert_eq!(page_number.color, "#666");
         assert_eq!(page_number.margin_bottom.as_str(), "6mm");
         assert_eq!(page_number.margin_right.as_str(), "10mm");
+    }
+
+    #[test]
+    fn enables_page_header_from_center_text_without_explicit_flag() {
+        let rendered_preview =
+            render_markdown_preview("<!-- kmark page_header_center:\"社外秘\" -->\n# Body");
+        let header = &rendered_preview.pages[0].page_chrome_config.header;
+
+        assert!(header.enabled);
+        assert_eq!(header.left.as_deref(), None);
+        assert_eq!(header.center.as_deref(), Some("社外秘"));
+        assert_eq!(header.right.as_deref(), None);
+    }
+
+    #[test]
+    fn applies_page_header_and_footer_slots() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_left:\"HL\" page_header_center:\"HC\" page_header_right:\"HR\" page_footer_left:\"FL\" page_footer_center:\"FC\" page_footer_right:\"FR\" -->\n# Body",
+        );
+        let chrome = &rendered_preview.pages[0].page_chrome_config;
+
+        assert!(chrome.header.enabled);
+        assert_eq!(chrome.header.left.as_deref(), Some("HL"));
+        assert_eq!(chrome.header.center.as_deref(), Some("HC"));
+        assert_eq!(chrome.header.right.as_deref(), Some("HR"));
+        assert!(chrome.footer.enabled);
+        assert_eq!(chrome.footer.left.as_deref(), Some("FL"));
+        assert_eq!(chrome.footer.center.as_deref(), Some("FC"));
+        assert_eq!(chrome.footer.right.as_deref(), Some("FR"));
+    }
+
+    #[test]
+    fn applies_page_chrome_opacity_and_margin_offsets() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_center:\"Header\" page_header_opacity:0.45 page_header_margin_top:5mm page_footer_right:\"Footer\" page_footer_opacity:0.7 page_footer_margin_bottom:6mm -->\n# Body",
+        );
+        let chrome = &rendered_preview.pages[0].page_chrome_config;
+
+        assert_eq!(chrome.header.opacity.as_str(), "0.45");
+        assert_eq!(
+            chrome.header.offset.as_ref().map(CssLength::as_str),
+            Some("5mm")
+        );
+        assert_eq!(chrome.footer.opacity.as_str(), "0.7");
+        assert_eq!(
+            chrome.footer.offset.as_ref().map(CssLength::as_str),
+            Some("6mm")
+        );
+    }
+
+    #[test]
+    fn ignores_invalid_page_chrome_opacity_and_margin_offsets() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_center:\"Header\" page_header_opacity:2 page_header_margin_top:auto page_footer_right:\"Footer\" page_footer_opacity:-1 page_footer_margin_bottom:none -->\n# Body",
+        );
+        let chrome = &rendered_preview.pages[0].page_chrome_config;
+
+        assert_eq!(chrome.header.opacity.as_str(), "1");
+        assert_eq!(chrome.header.offset.as_ref().map(CssLength::as_str), None);
+        assert_eq!(chrome.footer.opacity.as_str(), "1");
+        assert_eq!(chrome.footer.offset.as_ref().map(CssLength::as_str), None);
+    }
+
+    #[test]
+    fn limits_page_chrome_to_kmark_scope() {
+        let rendered_preview = render_markdown_preview(
+            "# Before\n\
+             <!-- --- -->\n\
+             <!-- kmark page_header_center:\"Scoped\" -->\n\
+             <!-- kmark page_footer_right:\"Internal\" -->\n\
+             <!-- kmark { -->\n\
+             # Inside\n\
+             <!-- kmark } -->\n\
+             <!-- --- -->\n\
+             # After",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 3);
+        assert!(!rendered_preview.pages[0]
+            .page_chrome_config
+            .header
+            .enabled);
+        assert_eq!(
+            rendered_preview.pages[1]
+                .page_chrome_config
+                .header
+                .center
+                .as_deref(),
+            Some("Scoped")
+        );
+        assert_eq!(
+            rendered_preview.pages[1]
+                .page_chrome_config
+                .footer
+                .right
+                .as_deref(),
+            Some("Internal")
+        );
+        assert!(!rendered_preview.pages[2]
+            .page_chrome_config
+            .header
+            .enabled);
+        assert!(!rendered_preview.pages[2]
+            .page_chrome_config
+            .footer
+            .enabled);
+    }
+
+    #[test]
+    fn restores_outer_page_header_after_nested_scope() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_center:\"共通\" -->\n\
+             <!-- kmark { -->\n\
+             # Outer\n\
+             <!-- --- -->\n\
+             <!-- kmark page_header_center:\"補足\" -->\n\
+             <!-- kmark { -->\n\
+             # Inner\n\
+             <!-- kmark } -->\n\
+             <!-- --- -->\n\
+             # Outer Again\n\
+             <!-- kmark } -->",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 3);
+        assert_eq!(
+            rendered_preview.pages[0]
+                .page_chrome_config
+                .header
+                .center
+                .as_deref(),
+            Some("共通")
+        );
+        assert_eq!(
+            rendered_preview.pages[1]
+                .page_chrome_config
+                .header
+                .center
+                .as_deref(),
+            Some("補足")
+        );
+        assert_eq!(
+            rendered_preview.pages[2]
+                .page_chrome_config
+                .header
+                .center
+                .as_deref(),
+            Some("共通")
+        );
+    }
+
+    #[test]
+    fn page_header_and_footer_false_clear_previous_slots() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_center:\"Secret\" page_footer_right:\"Hidden\" -->\n\
+             # First\n\
+             <!-- --- -->\n\
+             <!-- kmark page_header:false page_footer:false -->\n\
+             # Second",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert!(rendered_preview.pages[0]
+            .page_chrome_config
+            .header
+            .enabled);
+        assert!(rendered_preview.pages[0]
+            .page_chrome_config
+            .footer
+            .enabled);
+        assert!(!rendered_preview.pages[1]
+            .page_chrome_config
+            .header
+            .enabled);
+        assert_eq!(
+            rendered_preview.pages[1]
+                .page_chrome_config
+                .header
+                .center
+                .as_deref(),
+            None
+        );
+        assert!(!rendered_preview.pages[1]
+            .page_chrome_config
+            .footer
+            .enabled);
+        assert_eq!(
+            rendered_preview.pages[1]
+                .page_chrome_config
+                .footer
+                .right
+                .as_deref(),
+            None
+        );
+    }
+
+    #[test]
+    fn keeps_page_number_config_independent_from_page_chrome() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_number:bottom-center page_header_center:\"Secret\" -->\n# Body",
+        );
+        let page = &rendered_preview.pages[0];
+
+        assert_eq!(
+            page.page_number_config.position,
+            PageNumberPosition::BottomCenter
+        );
+        assert_eq!(
+            page.page_chrome_config.header.center.as_deref(),
+            Some("Secret")
+        );
+    }
+
+    #[test]
+    fn ignores_page_chrome_keys_inside_multiline_html_comments() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_center:\"Hidden\"\n\
+             -->\n\
+             # Body",
+        );
+        let header = &rendered_preview.pages[0].page_chrome_config.header;
+
+        assert!(!header.enabled);
+        assert_eq!(header.center.as_deref(), None);
     }
 
     #[test]

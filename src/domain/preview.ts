@@ -57,11 +57,26 @@ export type PageNumberConfig = {
   readonly marginRight: string;
 };
 
+export type PageChromeRegionConfig = {
+  readonly enabled: boolean;
+  readonly left?: string;
+  readonly center?: string;
+  readonly right?: string;
+  readonly opacity: string;
+  readonly offset?: string | null;
+};
+
+export type PageChromeConfig = {
+  readonly header: PageChromeRegionConfig;
+  readonly footer: PageChromeRegionConfig;
+};
+
 export type RenderedPreviewPage = {
   readonly html: string;
   readonly pageStyle: PageStyle;
   readonly textStyle: PreviewTextStyle;
   readonly pageNumberConfig: PageNumberConfig;
+  readonly pageChromeConfig: PageChromeConfig;
 };
 
 export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] = [
@@ -109,6 +124,19 @@ export const DEFAULT_PAGE_NUMBER_CONFIG: PageNumberConfig = {
   marginBottom: "8mm",
   marginLeft: "12mm",
   marginRight: "12mm",
+} as const;
+
+export const DEFAULT_PAGE_CHROME_CONFIG: PageChromeConfig = {
+  header: {
+    enabled: false,
+    opacity: "1",
+    offset: null,
+  },
+  footer: {
+    enabled: false,
+    opacity: "1",
+    offset: null,
+  },
 } as const;
 
 const PREVIEW_DISPLAY_MODE_SET = new Set<PreviewDisplayMode>(

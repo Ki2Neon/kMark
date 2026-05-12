@@ -47,6 +47,18 @@ const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["page_number_count", 430],
   ["page_number_visible", 425],
   ["page_number_style", 420],
+  ["page_header_center", 415],
+  ["page_header_left", 414],
+  ["page_header_right", 413],
+  ["page_footer_center", 412],
+  ["page_footer_left", 411],
+  ["page_footer_right", 410],
+  ["page_header_opacity", 409],
+  ["page_header_margin_top", 408],
+  ["page_footer_opacity", 407],
+  ["page_footer_margin_bottom", 406],
+  ["page_header", 405],
+  ["page_footer", 404],
 ]);
 
 const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([

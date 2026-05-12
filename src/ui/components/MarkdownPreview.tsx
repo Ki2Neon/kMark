@@ -1,10 +1,13 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import {
   A4_PAGE_WIDTH_MM,
   CSS_MM_TO_PX,
+  DEFAULT_PAGE_CHROME_CONFIG,
   DEFAULT_PAGE_NUMBER_CONFIG,
   DEFAULT_PAGE_STYLE,
   DEFAULT_PREVIEW_TEXT_STYLE,
+  type PageChromeConfig,
+  type PageChromeRegionConfig,
   type PageNumberConfig,
   type PageNumberPosition,
   type PageNumberStyle,
@@ -105,6 +108,7 @@ type PreviewPageConfig = {
   readonly pageStyle: PageStyle;
   readonly textStyle: PreviewTextStyle;
   readonly pageNumberConfig: PageNumberConfig;
+  readonly pageChromeConfig: PageChromeConfig;
 };
 
 type NumberedRenderedPreviewPage = RenderedPreviewPage & {
@@ -132,7 +136,8 @@ function arePreviewPagesEqual(left: readonly RenderedPreviewPage[], right: reado
       && leftPage.html === rightPage.html
       && arePageStylesEqual(leftPage.pageStyle, rightPage.pageStyle)
       && arePreviewTextStylesEqual(leftPage.textStyle, rightPage.textStyle)
-      && arePageNumberConfigsEqual(leftPage.pageNumberConfig, rightPage.pageNumberConfig);
+      && arePageNumberConfigsEqual(leftPage.pageNumberConfig, rightPage.pageNumberConfig)
+      && arePageChromeConfigsEqual(leftPage.pageChromeConfig, rightPage.pageChromeConfig);
   });
 }
 
@@ -165,6 +170,20 @@ function arePageNumberConfigsEqual(left: PageNumberConfig, right: PageNumberConf
     && left.marginBottom === right.marginBottom
     && left.marginLeft === right.marginLeft
     && left.marginRight === right.marginRight;
+}
+
+function arePageChromeRegionConfigsEqual(left: PageChromeRegionConfig, right: PageChromeRegionConfig): boolean {
+  return left.enabled === right.enabled
+    && left.left === right.left
+    && left.center === right.center
+    && left.right === right.right
+    && left.opacity === right.opacity
+    && left.offset === right.offset;
+}
+
+function arePageChromeConfigsEqual(left: PageChromeConfig, right: PageChromeConfig): boolean {
+  return arePageChromeRegionConfigsEqual(left.header, right.header)
+    && arePageChromeRegionConfigsEqual(left.footer, right.footer);
 }
 
 function pageStyleKey(pageStyle: PageStyle): string {
@@ -204,12 +223,31 @@ function pageNumberConfigKey(config: PageNumberConfig): string {
   ].join("|");
 }
 
+function pageChromeRegionConfigKey(config: PageChromeRegionConfig): string {
+  return [
+    config.enabled,
+    config.left ?? "",
+    config.center ?? "",
+    config.right ?? "",
+    config.opacity,
+    config.offset ?? "",
+  ].join("|");
+}
+
+function pageChromeConfigKey(config: PageChromeConfig): string {
+  return [
+    pageChromeRegionConfigKey(config.header),
+    pageChromeRegionConfigKey(config.footer),
+  ].join("|");
+}
+
 function previewPageKey(page: RenderedPreviewPage): string {
   return [
     page.html,
     pageStyleKey(page.pageStyle),
     previewTextStyleKey(page.textStyle),
     pageNumberConfigKey(page.pageNumberConfig),
+    pageChromeConfigKey(page.pageChromeConfig),
   ].join(A4_PAGINATION_SOURCE_SEPARATOR);
 }
 
@@ -218,6 +256,7 @@ function getPreviewPageConfig(page: RenderedPreviewPage): PreviewPageConfig {
     pageStyle: page.pageStyle,
     textStyle: page.textStyle,
     pageNumberConfig: page.pageNumberConfig,
+    pageChromeConfig: page.pageChromeConfig,
   };
 }
 
@@ -694,8 +733,8 @@ function createA4PaginationPage(
   frame.className = "preview-section__page-frame";
   applyPreviewPageStyle(frame, pageConfig);
 
-  const body = document.createElement("article");
-  body.className = "preview-section__page markdown-body markdown-body--a4";
+  const body = document.createElement("main");
+  body.className = "preview-section__page kmark-page-body markdown-body markdown-body--a4";
 
   frame.append(body);
   root.append(frame);
@@ -743,6 +782,7 @@ function commitA4PaginationPage(context: A4PaginationContext): void {
     pageStyle: context.pageConfig.pageStyle,
     textStyle: context.pageConfig.textStyle,
     pageNumberConfig: context.pageConfig.pageNumberConfig,
+    pageChromeConfig: context.pageConfig.pageChromeConfig,
   });
 }
 
@@ -3069,6 +3109,44 @@ function getPageNumberStyle(config: PageNumberConfig): CSSProperties {
   } as CSSProperties;
 }
 
+function getPageChromeRegionStyle(
+  region: "header" | "footer",
+  config: PageChromeRegionConfig,
+): CSSProperties {
+  const style: CSSProperties = {
+    opacity: config.opacity,
+  };
+
+  if (config.offset !== undefined && config.offset !== null) {
+    if (region === "header") {
+      style.top = config.offset;
+    } else {
+      style.bottom = config.offset;
+    }
+  }
+
+  return style;
+}
+
+function renderPageChromeRegion(
+  region: "header" | "footer",
+  config: PageChromeRegionConfig,
+): ReactNode {
+  if (!config.enabled) {
+    return null;
+  }
+
+  const baseClassName = `kmark-page-${region}`;
+
+  return (
+    <div className={baseClassName} style={getPageChromeRegionStyle(region, config)}>
+      <div className={`${baseClassName}__left`}>{config.left ?? ""}</div>
+      <div className={`${baseClassName}__center`}>{config.center ?? ""}</div>
+      <div className={`${baseClassName}__right`}>{config.right ?? ""}</div>
+    </div>
+  );
+}
+
 function MarkdownPreviewComponent({
   activeSourceLine = null,
   defaultPageStyle = DEFAULT_PAGE_STYLE,
@@ -3118,6 +3196,7 @@ function MarkdownPreviewComponent({
       pageStyle: defaultPageStyle,
       textStyle: defaultTextStyle,
       pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
+      pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
     }));
   }, [defaultPageStyle, defaultTextStyle, html, pageHtmls, pages]);
   const a4PaginationSourceKey = useMemo(
@@ -3664,15 +3743,17 @@ function MarkdownPreviewComponent({
           <div className="preview-section__page-stack">
             {numberedA4DisplayPages.map((page, index) => (
               <div
-                key={`${index}-${page.html.length}-${pageStyleKey(page.pageStyle)}-${previewTextStyleKey(page.textStyle)}-${pageNumberConfigKey(page.pageNumberConfig)}-${page.pageNumberText ?? ""}`}
+                key={`${index}-${page.html.length}-${pageStyleKey(page.pageStyle)}-${previewTextStyleKey(page.textStyle)}-${pageNumberConfigKey(page.pageNumberConfig)}-${pageChromeConfigKey(page.pageChromeConfig)}-${page.pageNumberText ?? ""}`}
                 className="preview-section__page-scale"
                 style={getPreviewPageScaleStyle(page, effectiveA4Scale)}
               >
                 <div className="preview-section__page-frame" style={getPreviewPageStyle(getPreviewPageConfig(page))}>
-                  <article
-                    className="preview-section__page markdown-body markdown-body--a4"
+                  {renderPageChromeRegion("header", page.pageChromeConfig.header)}
+                  <main
+                    className="preview-section__page kmark-page-body markdown-body markdown-body--a4"
                     dangerouslySetInnerHTML={{ __html: page.html }}
                   />
+                  {renderPageChromeRegion("footer", page.pageChromeConfig.footer)}
                   {page.pageNumberText === null ? null : (
                     <div
                       className={getPageNumberClassName(page.pageNumberConfig.position)}

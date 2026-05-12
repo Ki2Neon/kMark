@@ -2,9 +2,12 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { invokeTauriCommand } from "../../infra/tauriCommand";
 import { renderMarkdownPreviewWithWasm } from "../../wasm/kmarkWeb";
 import {
+  DEFAULT_PAGE_CHROME_CONFIG,
   DEFAULT_PAGE_NUMBER_CONFIG,
   DEFAULT_PAGE_STYLE,
   DEFAULT_PREVIEW_TEXT_STYLE,
+  type PageChromeConfig,
+  type PageChromeRegionConfig,
   type PageStyle,
   type PageNumberConfig,
   type PreviewTextStyle,
@@ -13,7 +16,8 @@ import {
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
-type RenderedPreviewPagePayload = Omit<RenderedPreviewPage, "pageNumberConfig" | "textStyle"> & {
+type RenderedPreviewPagePayload = Omit<RenderedPreviewPage, "pageChromeConfig" | "pageNumberConfig" | "textStyle"> & {
+  readonly pageChromeConfig?: Partial<PageChromeConfig>;
   readonly pageNumberConfig?: PageNumberConfig;
   readonly textStyle?: Partial<PreviewTextStyle>;
 };
@@ -86,6 +90,23 @@ function normalizePreviewTextStyle(textStyle?: Partial<PreviewTextStyle>): Previ
   };
 }
 
+function normalizePageChromeRegionConfig(
+  regionConfig: Partial<PageChromeRegionConfig> | undefined,
+  defaultRegionConfig: PageChromeRegionConfig,
+): PageChromeRegionConfig {
+  return {
+    ...defaultRegionConfig,
+    ...regionConfig,
+  };
+}
+
+function normalizePageChromeConfig(config?: Partial<PageChromeConfig>): PageChromeConfig {
+  return {
+    header: normalizePageChromeRegionConfig(config?.header, DEFAULT_PAGE_CHROME_CONFIG.header),
+    footer: normalizePageChromeRegionConfig(config?.footer, DEFAULT_PAGE_CHROME_CONFIG.footer),
+  };
+}
+
 function normalizeRenderedMarkdownPreview(
   renderedPreview: RenderedMarkdownPreviewPayload,
 ): NormalizedRenderedMarkdownPreviewPayload {
@@ -98,6 +119,7 @@ function normalizeRenderedMarkdownPreview(
       pageStyle: defaultPageStyle,
       textStyle: defaultTextStyle,
       pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
+      pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
     }));
 
   return {
@@ -108,6 +130,7 @@ function normalizeRenderedMarkdownPreview(
       html: normalizePreviewHtmlImageSources(page.html),
       textStyle: normalizePreviewTextStyle(page.textStyle),
       pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
+      pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
     })),
     defaultPageStyle,
     defaultTextStyle,
