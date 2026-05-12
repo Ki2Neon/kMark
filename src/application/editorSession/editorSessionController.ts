@@ -7,6 +7,7 @@ import {
   type Clock,
   type DraftStore,
   type EditorStateRules,
+  type MarkdownAssetImporter,
   type MarkdownDocumentGateway,
   type MarkdownDocumentPrinter,
   type MarkdownRenderer,
@@ -31,6 +32,7 @@ export type RenderedPreview = {
 };
 
 type EditorSessionControllerDependencies = {
+  readonly assetImporter: MarkdownAssetImporter;
   readonly clock: Clock;
   readonly draftStore: DraftStore;
   readonly documentGateway: MarkdownDocumentGateway;
@@ -48,6 +50,7 @@ export function toEditorSessionErrorMessage(error: unknown): string {
 }
 
 export class EditorSessionController {
+  readonly #assetImporter: MarkdownAssetImporter;
   readonly #clock: Clock;
   readonly #draftStore: DraftStore;
   readonly #documentGateway: MarkdownDocumentGateway;
@@ -57,6 +60,7 @@ export class EditorSessionController {
   #currentDocumentFilePath: string | null;
 
   constructor(dependencies: EditorSessionControllerDependencies) {
+    this.#assetImporter = dependencies.assetImporter;
     this.#clock = dependencies.clock;
     this.#draftStore = dependencies.draftStore;
     this.#documentGateway = dependencies.documentGateway;
@@ -151,6 +155,21 @@ export class EditorSessionController {
     }
 
     await this.#documentGateway.openDocumentFolder(this.#currentDocumentFilePath);
+  }
+
+  async importDroppedAssets(droppedFilePaths: readonly string[]): Promise<string> {
+    if (this.#currentDocumentFilePath === null) {
+      throw new Error("アセットを取り込むには、先にMarkdownファイルを保存してください。");
+    }
+
+    const importedAssets = await this.#assetImporter.importAssets({
+      markdownFilePath: this.#currentDocumentFilePath,
+      droppedFilePaths,
+    });
+
+    return importedAssets
+      .map((asset) => asset.markdownText)
+      .join("\n\n");
   }
 
   loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): void {

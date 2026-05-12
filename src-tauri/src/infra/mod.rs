@@ -1,6 +1,7 @@
 mod desktop_layout_preferences_store;
 mod editor_draft_store;
 mod editor_preferences_store;
+mod file_system_asset_repository;
 mod file_system_markdown_document_repository;
 mod in_memory_open_request_queue;
 mod json_state_store;
@@ -14,6 +15,7 @@ pub(crate) use desktop_layout_preferences_store::{
 };
 pub(crate) use editor_draft_store::{load_editor_draft, persist_editor_draft};
 pub(crate) use editor_preferences_store::{load_editor_preferences, persist_editor_preferences};
+pub(crate) use file_system_asset_repository::FileSystemAssetRepository;
 pub(crate) use file_system_markdown_document_repository::FileSystemMarkdownDocumentRepository;
 pub(crate) use in_memory_open_request_queue::InMemoryOpenRequestQueue;
 pub(crate) use json_state_store::JsonStateStoreError;

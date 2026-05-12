@@ -23,8 +23,8 @@ use tauri::{
 use infra::{
     broadcast_command, load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_theme_preferences, persist_window_state, restore_window_state,
-    FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue, TrayCommandKind,
-    TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
+    FileSystemAssetRepository, FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue,
+    TrayCommandKind, TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
 };
 use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, StoredEdit, ThemePreferences,
@@ -47,6 +47,7 @@ enum TrayRuntimeError {
 
 #[derive(Default)]
 pub(crate) struct AppState {
+    pub(crate) asset_repository: FileSystemAssetRepository,
     pub(crate) markdown_document_repository: FileSystemMarkdownDocumentRepository,
     pub(crate) open_request_queue: InMemoryOpenRequestQueue,
     pub(crate) theme_preferences: Mutex<ThemePreferences>,
@@ -400,6 +401,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::asset_import::import_markdown_asset_files,
             commands::desktop_layout_preferences::get_desktop_layout_preferences,
             commands::desktop_layout_preferences::set_desktop_layout_preferences,
             commands::editor_draft::get_editor_draft,
