@@ -55,6 +55,17 @@ const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["wrap", 480],
 ]);
 
+const TABLE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["table_cell_padding", 500],
+  ["table_cell_padding_x", 490],
+  ["table_cell_padding_y", 480],
+  ["table_fit", 470],
+  ["table_layout", 460],
+  ["font_size", 430],
+  ["line_height", 420],
+  ["w", 410],
+]);
+
 const TOC_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["toc", 520],
   ["toc_depth", 500],
@@ -314,6 +325,10 @@ function scoreParamSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, p
     return 8_000 + (PAGE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
 
+  if (context.contexts.includes("table") && spec.contexts.includes("table")) {
+    return 6_500 + (TABLE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
   if (context.contexts.includes("scope") && spec.contexts.includes("scope")) {
     return 6_000 + (SCOPE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
@@ -344,6 +359,10 @@ function scoreSnippetSpec(
 
   if (context.contexts.includes("page") && snippetContexts.includes("page")) {
     return 8_000 + basePriority + prefixBoost;
+  }
+
+  if (context.contexts.includes("table") && snippetContexts.includes("table")) {
+    return 6_500 + basePriority + prefixBoost;
   }
 
   if (context.contexts.includes("scope") && snippetContexts.includes("scope")) {
@@ -404,6 +423,10 @@ function resolveCompletionSection(
     return "page";
   }
 
+  if (activeContexts.includes("table") && candidateContexts.includes("table")) {
+    return "table";
+  }
+
   if (activeContexts.includes("scope") && candidateContexts.includes("scope")) {
     return "scope";
   }
@@ -427,6 +450,8 @@ function detailForSection(section: KmarkCompletionSection): string {
       return "kmark page";
     case "scope":
       return "kmark scope";
+    case "table":
+      return "kmark table";
     case "text":
       return "kmark text";
     case "style":

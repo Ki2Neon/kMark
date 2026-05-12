@@ -80,6 +80,7 @@ export type KmarkCompletionSection =
   | "image"
   | "page"
   | "scope"
+  | "table"
   | "text"
   | "style"
   | "toc"

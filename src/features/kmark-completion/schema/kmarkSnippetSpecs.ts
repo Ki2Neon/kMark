@@ -72,6 +72,13 @@ export const KMARK_SNIPPET_SPECS: readonly KmarkSnippetSpec[] = [
     priority: 100,
   },
   {
+    label: "table compact",
+    description: "表セル余白と文字詰めを指定する",
+    contexts: ["table", "single"],
+    insertText: "table_cell_padding_x:${1:1mm} table_cell_padding_y:${2:0.3mm} line_height:${3:1.05} font_size:${4:8.5pt} table_fit:${5:auto}",
+    priority: 100,
+  },
+  {
     label: "use style",
     description: "定義済みスタイルを使用する",
     contexts: ["single", "scope", "page"],

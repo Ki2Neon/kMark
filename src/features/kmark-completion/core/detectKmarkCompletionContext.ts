@@ -224,6 +224,10 @@ function resolveCompletionContexts(input: {
     addContext(contexts, "image");
   }
 
+  if (nextBlockKind === "table") {
+    addContext(contexts, "table");
+  }
+
   if (isPageCandidate) {
     addContext(contexts, "page");
   }
@@ -251,20 +255,49 @@ function isDocumentStart(markdown: string, lineStart: number): boolean {
   return markdown.slice(0, lineStart).split(/\r?\n/u).length <= 5;
 }
 
-function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "text" | "none" {
+function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "table" | "text" | "none" {
   const followingLines = markdown.slice(lineEnd).split(/\r?\n/u).slice(1);
 
-  for (const line of followingLines) {
+  for (let lineIndex = 0; lineIndex < followingLines.length; lineIndex += 1) {
+    const line = followingLines[lineIndex] ?? "";
     const trimmedLine = line.trim();
 
     if (trimmedLine.length === 0) {
       continue;
     }
 
-    return /^!\[[^\]]*\]\([^)]+?\)/u.test(trimmedLine) ? "image" : "text";
+    if (/^!\[[^\]]*\]\([^)]+?\)/u.test(trimmedLine)) {
+      return "image";
+    }
+
+    if (isMarkdownTableStart(trimmedLine, followingLines.slice(lineIndex + 1))) {
+      return "table";
+    }
+
+    return "text";
   }
 
   return "none";
+}
+
+function isMarkdownTableStart(headerLine: string, followingLines: readonly string[]): boolean {
+  if (!headerLine.includes("|")) {
+    return false;
+  }
+
+  const delimiterLine = followingLines.find((line) => line.trim().length > 0)?.trim() ?? "";
+  if (!delimiterLine.includes("|") || !delimiterLine.includes("-")) {
+    return false;
+  }
+
+  const cells = delimiterLine
+    .replace(/^\|/u, "")
+    .replace(/\|$/u, "")
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter((cell) => cell.length > 0);
+
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/u.test(cell));
 }
 
 function isInsideInlineCode(lineBeforeCursor: string): boolean {

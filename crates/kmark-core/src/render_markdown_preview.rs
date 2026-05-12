@@ -220,6 +220,14 @@ struct KmarkTextParams {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkTableParams {
+    cell_padding_x: Option<String>,
+    cell_padding_y: Option<String>,
+    fit: Option<KmarkTableFit>,
+    layout: Option<KmarkTableLayout>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkPageParams {
     valign: Option<KmarkPageValign>,
 }
@@ -239,6 +247,7 @@ struct KmarkParams {
     image: KmarkImageParams,
     layout: KmarkLayoutParams,
     text: KmarkTextParams,
+    table: KmarkTableParams,
     page: KmarkPageParams,
 }
 
@@ -314,6 +323,19 @@ enum KmarkPageValign {
     Top,
     Center,
     Bottom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KmarkTableFit {
+    Auto,
+    Off,
+    Shrink,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KmarkTableLayout {
+    Auto,
+    Fixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -498,6 +520,7 @@ struct HtmlEmitter<'a> {
     pending_kmark_block_style: Option<String>,
     pending_kmark_image_paragraph_style: Option<String>,
     pending_kmark_page_valign: Option<KmarkPageValign>,
+    pending_kmark_table_fit: Option<KmarkTableFit>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -1338,6 +1361,7 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_block_style: None,
             pending_kmark_image_paragraph_style: None,
             pending_kmark_page_valign: None,
+            pending_kmark_table_fit: None,
         }
     }
 
@@ -1625,7 +1649,7 @@ impl<'a> HtmlEmitter<'a> {
                 self.table_section = TableSection::Head;
                 self.table_cell_index = 0;
                 self.table_body_open = false;
-                let attributes = self.take_pending_kmark_block_attributes();
+                let attributes = self.take_pending_kmark_table_attributes();
                 self.push_raw(&format!("<table{}>", attributes));
             }
             Tag::TableHead => {
@@ -2488,6 +2512,7 @@ impl<'a> HtmlEmitter<'a> {
         self.pending_kmark_block_style = None;
         self.pending_kmark_image_paragraph_style = None;
         self.pending_kmark_page_valign = None;
+        self.pending_kmark_table_fit = None;
         if should_consume_current_single_block {
             self.active_kmark_single_block = None;
         }
@@ -2537,7 +2562,13 @@ impl<'a> HtmlEmitter<'a> {
         let resolved_params = layer.resolved_params();
 
         self.pending_kmark_params = None;
-        self.pending_kmark_block_style = resolved_params.to_single_block_root_style();
+        if matches!(end, KmarkBlockEnd::Table) {
+            self.pending_kmark_block_style = resolved_params.to_table_root_style();
+            self.pending_kmark_table_fit = resolved_params.table.fit;
+        } else {
+            self.pending_kmark_block_style = resolved_params.to_single_block_root_style();
+            self.pending_kmark_table_fit = None;
+        }
         self.pending_kmark_image_paragraph_style = resolved_params.to_image_paragraph_root_style();
         self.pending_kmark_page_valign = resolved_params.page.valign;
         self.active_kmark_single_block = Some(ActiveKmarkSingleBlock {
@@ -2579,6 +2610,7 @@ impl<'a> HtmlEmitter<'a> {
         self.pending_kmark_block_style = None;
         self.pending_kmark_image_paragraph_style = None;
         self.pending_kmark_page_valign = None;
+        self.pending_kmark_table_fit = None;
     }
 
     fn take_pending_kmark_block_decoration(&mut self) -> KmarkRootDecoration {
@@ -2591,16 +2623,20 @@ impl<'a> HtmlEmitter<'a> {
             page_valign: self.pending_kmark_page_valign.take(),
         };
         self.pending_kmark_image_paragraph_style = None;
+        self.pending_kmark_table_fit = None;
         decoration
     }
 
     fn take_pending_kmark_paragraph_decorations(&mut self) -> KmarkParagraphDecorations {
         if self.pending_kmark_block_style.is_none() && self.pending_kmark_page_valign.is_none() {
+            self.pending_kmark_table_fit = None;
             return KmarkParagraphDecorations {
                 block: self.active_scope_block_decoration(),
                 image_paragraph: KmarkRootDecoration::default(),
             };
         }
+
+        self.pending_kmark_table_fit = None;
 
         KmarkParagraphDecorations {
             block: KmarkRootDecoration {
@@ -2626,6 +2662,38 @@ impl<'a> HtmlEmitter<'a> {
     fn take_pending_kmark_block_attributes(&mut self) -> String {
         self.take_pending_kmark_block_decoration()
             .attributes_with_optional_class()
+    }
+
+    fn take_pending_kmark_table_attributes(&mut self) -> String {
+        let (decoration, fit) = if self.pending_kmark_block_style.is_none()
+            && self.pending_kmark_page_valign.is_none()
+        {
+            let params = self.resolve_active_scope_block_params();
+            (
+                KmarkRootDecoration {
+                    style: params.to_table_root_style(),
+                    page_valign: None,
+                },
+                params.table.fit,
+            )
+        } else {
+            let decoration = KmarkRootDecoration {
+                style: self.pending_kmark_block_style.take(),
+                page_valign: self.pending_kmark_page_valign.take(),
+            };
+            let fit = self.pending_kmark_table_fit.take();
+            self.pending_kmark_image_paragraph_style = None;
+            (decoration, fit)
+        };
+
+        let mut attributes = decoration.attributes_with_optional_class();
+        if let Some(fit) = fit {
+            attributes.push_str(" data-kmark-table-fit=\"");
+            attributes.push_str(fit.name());
+            attributes.push('"');
+        }
+
+        attributes
     }
 
     fn close_kmark_scope(&mut self) {
@@ -2980,6 +3048,7 @@ impl KmarkParams {
         self.image.merge(&other.image);
         self.layout.merge(&other.layout);
         self.text.merge(&other.text);
+        self.table.merge(&other.table);
         self.page.merge(&other.page);
     }
 
@@ -2987,6 +3056,7 @@ impl KmarkParams {
         self.image.has_image_directives()
             || self.layout.has_layout_directives()
             || self.text.has_text_directives()
+            || self.table.has_table_directives()
             || self.page.has_page_directives()
     }
 
@@ -3038,6 +3108,19 @@ impl KmarkParams {
         }
         if let Some(layout_style) = self.layout.to_single_block_style() {
             rules.push(layout_style);
+        }
+
+        (!rules.is_empty()).then(|| rules.join(""))
+    }
+
+    fn to_table_root_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(block_style) = self.to_single_block_root_style() {
+            rules.push(block_style);
+        }
+        if let Some(table_style) = self.table.to_style() {
+            rules.push(table_style);
         }
 
         (!rules.is_empty()).then(|| rules.join(""))
@@ -3336,6 +3419,46 @@ impl KmarkTextParams {
     }
 }
 
+impl KmarkTableParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(cell_padding_x) = &other.cell_padding_x {
+            self.cell_padding_x = Some(cell_padding_x.clone());
+        }
+        if let Some(cell_padding_y) = &other.cell_padding_y {
+            self.cell_padding_y = Some(cell_padding_y.clone());
+        }
+        if let Some(fit) = other.fit {
+            self.fit = Some(fit);
+        }
+        if let Some(layout) = other.layout {
+            self.layout = Some(layout);
+        }
+    }
+
+    fn has_table_directives(&self) -> bool {
+        self.cell_padding_x.is_some()
+            || self.cell_padding_y.is_some()
+            || self.fit.is_some()
+            || self.layout.is_some()
+    }
+
+    fn to_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        if let Some(cell_padding_x) = &self.cell_padding_x {
+            rules.push(format!("--kmark-table-cell-padding-x:{cell_padding_x}"));
+        }
+        if let Some(cell_padding_y) = &self.cell_padding_y {
+            rules.push(format!("--kmark-table-cell-padding-y:{cell_padding_y}"));
+        }
+        if let Some(layout) = self.layout {
+            rules.push(format!("table-layout:{}", layout.css_value()));
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+    }
+}
+
 impl KmarkAlign {
     fn css_flex_value(self) -> &'static str {
         match self {
@@ -3380,6 +3503,25 @@ impl KmarkPageValign {
             Self::Top => "top",
             Self::Center => "center",
             Self::Bottom => "bottom",
+        }
+    }
+}
+
+impl KmarkTableFit {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Off => "off",
+            Self::Shrink => "shrink",
+        }
+    }
+}
+
+impl KmarkTableLayout {
+    fn css_value(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Fixed => "fixed",
         }
     }
 }
@@ -4711,6 +4853,34 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.text.line_height = Some(line_height);
                 }
             }
+            "table_cell_padding" => {
+                if let Some((cell_padding_y, cell_padding_x)) =
+                    parse_kmark_table_cell_padding_value(&value)
+                {
+                    bundle.params.table.cell_padding_y = Some(cell_padding_y);
+                    bundle.params.table.cell_padding_x = Some(cell_padding_x);
+                }
+            }
+            "table_cell_padding_x" => {
+                if let Some(cell_padding_x) = parse_kmark_table_cell_padding_axis_value(&value) {
+                    bundle.params.table.cell_padding_x = Some(cell_padding_x);
+                }
+            }
+            "table_cell_padding_y" => {
+                if let Some(cell_padding_y) = parse_kmark_table_cell_padding_axis_value(&value) {
+                    bundle.params.table.cell_padding_y = Some(cell_padding_y);
+                }
+            }
+            "table_fit" => {
+                if let Some(fit) = parse_kmark_table_fit_value(&value) {
+                    bundle.params.table.fit = Some(fit);
+                }
+            }
+            "table_layout" => {
+                if let Some(layout) = parse_kmark_table_layout_value(&value) {
+                    bundle.params.table.layout = Some(layout);
+                }
+            }
             "layout" => {
                 if let Some(layout) = parse_kmark_layout_value(&value) {
                     bundle.params.layout.layout = Some(layout);
@@ -4926,6 +5096,44 @@ fn parse_kmark_line_height_value(value: &str) -> Option<String> {
     }
 
     parse_css_length_value(trimmed, false)
+}
+
+fn parse_kmark_table_cell_padding_value(value: &str) -> Option<(String, String)> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+
+    match parts.as_slice() {
+        [padding] => {
+            let padding = parse_kmark_table_cell_padding_axis_value(padding)?;
+            Some((padding.clone(), padding))
+        }
+        [padding_y, padding_x] => Some((
+            parse_kmark_table_cell_padding_axis_value(padding_y)?,
+            parse_kmark_table_cell_padding_axis_value(padding_x)?,
+        )),
+        _ => None,
+    }
+}
+
+fn parse_kmark_table_cell_padding_axis_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_table_fit_value(value: &str) -> Option<KmarkTableFit> {
+    match trim_kmark_quotes(value).trim() {
+        "auto" => Some(KmarkTableFit::Auto),
+        "off" => Some(KmarkTableFit::Off),
+        "shrink" => Some(KmarkTableFit::Shrink),
+        _ => None,
+    }
+}
+
+fn parse_kmark_table_layout_value(value: &str) -> Option<KmarkTableLayout> {
+    match trim_kmark_quotes(value).trim() {
+        "auto" => Some(KmarkTableLayout::Auto),
+        "fixed" => Some(KmarkTableLayout::Fixed),
+        _ => None,
+    }
 }
 
 fn parse_css_length_value(value: &str, allow_auto: bool) -> Option<String> {
@@ -6264,6 +6472,42 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<table><thead><tr data-source-line-start=\"0\" data-source-line-end=\"0\"><th style=\"text-align: left\">Left</th><th style=\"text-align: center\">Center</th><th style=\"text-align: right\">Right</th></tr></thead><tbody><tr data-source-line-start=\"2\" data-source-line-end=\"2\"><td style=\"text-align: left\"><em>a</em></td><td style=\"text-align: center\"><strong>b</strong></td><td style=\"text-align: right\"><del>c</del></td></tr></tbody></table>"
+        );
+    }
+
+    #[test]
+    fn applies_table_params_to_following_table_root() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark table_cell_padding:0.3mm 1mm line_height:1.05 font_size:8.5pt table_fit:shrink table_layout:fixed -->\n| A | B |\n| - | - |\n| 1 | 2 |",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<table style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;font-size:8.5pt;line-height:1.05;--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;table-layout:fixed;\" data-kmark-table-fit=\"shrink\">"
+        ));
+    }
+
+    #[test]
+    fn applies_scoped_table_params_to_tables_without_cell_specific_markup() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { table_cell_padding_x:1mm table_cell_padding_y:0.3mm table_fit:off -->\n| A |\n| - |\n| B |\n<!-- kmark } -->",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<table style=\"--kmark-table-cell-padding-x:1mm;--kmark-table-cell-padding-y:0.3mm;\" data-kmark-table-fit=\"off\">"
+        ));
+        assert!(!rendered_preview.html.contains("<td style=\"--kmark-table"));
+        assert!(!rendered_preview.html.contains("<th style=\"--kmark-table"));
+    }
+
+    #[test]
+    fn ignores_invalid_table_param_values() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark table_cell_padding:1mm 2mm 3mm table_fit:bad table_layout:grid -->\n| A |\n| - |\n| B |",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<table><thead><tr data-source-line-start=\"1\" data-source-line-end=\"1\"><th>A</th></tr></thead><tbody><tr data-source-line-start=\"3\" data-source-line-end=\"3\"><td>B</td></tr></tbody></table>"
         );
     }
 

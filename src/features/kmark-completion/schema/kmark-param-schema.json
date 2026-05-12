@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "params": [
     {
       "name": "align",
@@ -100,7 +100,7 @@
       "name": "w",
       "aliases": ["width"],
       "type": "length",
-      "contexts": ["single", "image", "shape"],
+      "contexts": ["single", "image", "shape", "table"],
       "insertText": "w:",
       "description": "対象要素の幅を指定する",
       "examples": ["<!-- kmark w:200 -->", "<!-- kmark w:50% -->"],
@@ -233,7 +233,7 @@
       "name": "margin",
       "aliases": [],
       "type": "length",
-      "contexts": ["single", "image", "scope", "shape"],
+      "contexts": ["single", "image", "scope", "shape", "table"],
       "insertText": "margin:",
       "description": "対象要素の外側余白を指定する",
       "examples": ["<!-- kmark margin:2mm -->"],
@@ -305,11 +305,63 @@
       "name": "line_height",
       "aliases": [],
       "type": "string",
-      "contexts": ["single", "text", "scope"],
+      "contexts": ["single", "text", "scope", "table"],
       "insertText": "line_height:",
       "description": "行高を指定する",
       "examples": ["<!-- kmark line_height:1.2 -->\n承認済"],
       "priority": 73
+    },
+    {
+      "name": "table_cell_padding",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "scope", "table"],
+      "insertText": "table_cell_padding:",
+      "description": "表セルの内側余白を縦横まとめて指定する",
+      "examples": ["<!-- kmark table_cell_padding:0.3mm 1mm -->"],
+      "priority": 88
+    },
+    {
+      "name": "table_cell_padding_x",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "scope", "table"],
+      "insertText": "table_cell_padding_x:",
+      "description": "表セルの左右内側余白を指定する",
+      "examples": ["<!-- kmark table_cell_padding_x:1mm -->"],
+      "priority": 87
+    },
+    {
+      "name": "table_cell_padding_y",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "scope", "table"],
+      "insertText": "table_cell_padding_y:",
+      "description": "表セルの上下内側余白を指定する",
+      "examples": ["<!-- kmark table_cell_padding_y:0.3mm -->"],
+      "priority": 86
+    },
+    {
+      "name": "table_fit",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "scope", "table"],
+      "values": ["auto", "off", "shrink"],
+      "insertText": "table_fit:",
+      "description": "表の用紙幅超過時の自動縮小方法を指定する",
+      "examples": ["<!-- kmark table_fit:shrink -->"],
+      "priority": 85
+    },
+    {
+      "name": "table_layout",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "scope", "table"],
+      "values": ["auto", "fixed"],
+      "insertText": "table_layout:",
+      "description": "表の列幅計算方法を指定する",
+      "examples": ["<!-- kmark table_layout:fixed -->"],
+      "priority": 84
     },
     {
       "name": "layout",
@@ -388,7 +440,7 @@
       "name": "font_size",
       "aliases": [],
       "type": "length",
-      "contexts": ["single", "text", "scope"],
+      "contexts": ["single", "text", "scope", "table"],
       "insertText": "font_size:",
       "description": "文字装飾の文字サイズを指定する",
       "examples": ["<!-- kmark font_size:12pt -->\n重要", "<!-- kmark { font_size:12pt } -->"],

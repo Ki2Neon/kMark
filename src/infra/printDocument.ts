@@ -363,13 +363,19 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body table {
+    --kmark-table-cell-padding-x: 0.75em;
+    --kmark-table-cell-padding-y: 0.65em;
+    --preview-table-cell-padding-x: var(--kmark-table-cell-padding-x);
+    --preview-table-cell-padding-y: var(--kmark-table-cell-padding-y);
+    --preview-table-font-scale: 1;
     width: 100%;
     border-collapse: collapse;
+    font-size: calc(1em * var(--preview-table-font-scale));
   }
 
   .markdown-body th,
   .markdown-body td {
-    padding: 0.65em 0.75em;
+    padding: var(--preview-table-cell-padding-y) var(--preview-table-cell-padding-x);
     border: 0.75pt solid #d7d7d7;
     text-align: left;
   }

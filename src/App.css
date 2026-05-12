@@ -1230,8 +1230,10 @@ input:focus-visible,
 
 .markdown-body table {
   --preview-table-font-scale: 1;
-  --preview-table-cell-padding-x: 0.75em;
-  --preview-table-cell-padding-y: 0.65em;
+  --kmark-table-cell-padding-x: 0.75em;
+  --kmark-table-cell-padding-y: 0.65em;
+  --preview-table-cell-padding-x: var(--kmark-table-cell-padding-x);
+  --preview-table-cell-padding-y: var(--kmark-table-cell-padding-y);
   width: 100%;
   border-collapse: collapse;
   font-size: calc(1em * var(--preview-table-font-scale));

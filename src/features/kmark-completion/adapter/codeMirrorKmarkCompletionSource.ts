@@ -16,11 +16,12 @@ const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, Completion
   image: { name: "Image", rank: 10 },
   page: { name: "Page", rank: 20 },
   scope: { name: "Scope", rank: 30 },
-  text: { name: "Text", rank: 40 },
-  toc: { name: "TOC", rank: 50 },
-  style: { name: "Style", rank: 60 },
-  snippet: { name: "Snippet", rank: 70 },
-  general: { name: "General", rank: 80 },
+  table: { name: "Table", rank: 40 },
+  text: { name: "Text", rank: 50 },
+  toc: { name: "TOC", rank: 60 },
+  style: { name: "Style", rank: 70 },
+  snippet: { name: "Snippet", rank: 80 },
+  general: { name: "General", rank: 90 },
 };
 
 export function createCodeMirrorKmarkCompletionSource(): CompletionSource {

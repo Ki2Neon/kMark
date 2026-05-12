@@ -37,6 +37,8 @@ const A4_PAGINATION_CJK_TEXT_PATTERN = /[\u3040-\u30ff\u3400-\u9fff]/u;
 const A4_PAGINATION_LONG_TEXT_TOKEN_LENGTH = 24;
 const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
 
+type PreviewTableFitMode = "auto" | "off" | "shrink";
+
 type MarkdownPreviewProps = {
   readonly activeSourceLine?: number | null;
   readonly defaultPageStyle?: PageStyle;
@@ -514,6 +516,12 @@ function getTableAvailableWidth(table: HTMLTableElement): number {
   return table.parentElement?.clientWidth ?? table.clientWidth;
 }
 
+function resolvePreviewTableFitMode(table: HTMLTableElement): PreviewTableFitMode {
+  const value = table.dataset.kmarkTableFit?.trim();
+
+  return value === "off" || value === "shrink" ? value : "auto";
+}
+
 function isPreviewTableOverflowing(table: HTMLTableElement): boolean {
   const availableWidth = getTableAvailableWidth(table);
 
@@ -568,25 +576,62 @@ function setPreviewTableFontScale(table: HTMLTableElement, fontScale: number): v
 function fitPreviewTable(table: HTMLTableElement): void {
   resetPreviewTableFit(table);
 
-  if (!isPreviewTableOverflowing(table)) {
+  const fitMode = resolvePreviewTableFitMode(table);
+
+  if (fitMode === "off") {
     return;
   }
 
   const defaultPadding = getPreviewTableCellPadding(table);
+  const minimumHorizontalPadding = Math.min(
+    defaultPadding.horizontal,
+    MIN_TABLE_CELL_HORIZONTAL_PADDING_PX,
+  );
+  const minimumVerticalPadding = Math.min(
+    defaultPadding.vertical,
+    MIN_TABLE_CELL_VERTICAL_PADDING_PX,
+  );
+
+  if (fitMode === "shrink") {
+    setPreviewTablePadding(
+      table,
+      minimumHorizontalPadding,
+      minimumVerticalPadding,
+    );
+
+    if (!isPreviewTableOverflowing(table)) {
+      return;
+    }
+
+    for (let fontScale = 1 - TABLE_FONT_SCALE_STEP; fontScale >= MIN_TABLE_FONT_SCALE; fontScale -= TABLE_FONT_SCALE_STEP) {
+      setPreviewTableFontScale(table, fontScale);
+
+      if (!isPreviewTableOverflowing(table)) {
+        return;
+      }
+    }
+
+    setPreviewTableFontScale(table, MIN_TABLE_FONT_SCALE);
+    return;
+  }
+
+  if (!isPreviewTableOverflowing(table)) {
+    return;
+  }
 
   for (
     let nextHorizontalPadding = defaultPadding.horizontal - 1;
-    nextHorizontalPadding >= MIN_TABLE_CELL_HORIZONTAL_PADDING_PX;
+    nextHorizontalPadding >= minimumHorizontalPadding;
     nextHorizontalPadding -= 1
   ) {
-    const paddingReductionRatio = defaultPadding.horizontal <= MIN_TABLE_CELL_HORIZONTAL_PADDING_PX
+    const paddingReductionRatio = defaultPadding.horizontal <= minimumHorizontalPadding
       ? 1
-      : (nextHorizontalPadding - MIN_TABLE_CELL_HORIZONTAL_PADDING_PX)
-        / (defaultPadding.horizontal - MIN_TABLE_CELL_HORIZONTAL_PADDING_PX);
+      : (nextHorizontalPadding - minimumHorizontalPadding)
+        / (defaultPadding.horizontal - minimumHorizontalPadding);
     const nextVerticalPadding = Math.max(
-      MIN_TABLE_CELL_VERTICAL_PADDING_PX,
-      MIN_TABLE_CELL_VERTICAL_PADDING_PX
-        + ((defaultPadding.vertical - MIN_TABLE_CELL_VERTICAL_PADDING_PX) * paddingReductionRatio),
+      minimumVerticalPadding,
+      minimumVerticalPadding
+        + ((defaultPadding.vertical - minimumVerticalPadding) * paddingReductionRatio),
     );
 
     setPreviewTablePadding(table, nextHorizontalPadding, nextVerticalPadding);
@@ -598,8 +643,8 @@ function fitPreviewTable(table: HTMLTableElement): void {
 
   setPreviewTablePadding(
     table,
-    MIN_TABLE_CELL_HORIZONTAL_PADDING_PX,
-    MIN_TABLE_CELL_VERTICAL_PADDING_PX,
+    minimumHorizontalPadding,
+    minimumVerticalPadding,
   );
 
   if (!isPreviewTableOverflowing(table)) {
