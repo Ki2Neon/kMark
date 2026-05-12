@@ -183,9 +183,8 @@ type OwnedEvent = (Event<'static>, Range<usize>);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkImageParams {
-    width: Option<String>,
-    height: Option<String>,
-    fit: Option<String>,
+    width: Option<KmarkSizeValue>,
+    height: Option<KmarkSizeValue>,
     position: Option<String>,
     border_size: Option<String>,
     border_color: Option<String>,
@@ -197,6 +196,13 @@ struct KmarkImageParams {
     shadow: Option<String>,
     margin: Option<String>,
     padding: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KmarkSizeValue {
+    Length(String),
+    Fit,
+    PageFit,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3157,6 +3163,7 @@ impl KmarkParams {
         }
 
         if self.layout.has_plain_text_align()
+            && !self.image.has_page_fit_dimension()
             && (should_fit_content || self.image.has_explicit_width())
         {
             match self.layout.align {
@@ -3177,6 +3184,9 @@ impl KmarkParams {
     fn to_image_paragraph_root_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
+        if self.image.has_page_fit_dimension() {
+            rules.push("margin:0;".to_owned());
+        }
         if self.page.valign.is_some() {
             if let Some(image_style) = self.image.to_box_style() {
                 rules.push(image_style);
@@ -3998,9 +4008,6 @@ impl KmarkImageParams {
         if let Some(height) = &other.height {
             self.height = Some(height.clone());
         }
-        if let Some(fit) = &other.fit {
-            self.fit = Some(fit.clone());
-        }
         if let Some(position) = &other.position {
             self.position = Some(position.clone());
         }
@@ -4039,7 +4046,6 @@ impl KmarkImageParams {
     fn has_image_directives(&self) -> bool {
         self.width.is_some()
             || self.height.is_some()
-            || self.fit.is_some()
             || self.position.is_some()
             || self.border_size.is_some()
             || self.border_color.is_some()
@@ -4072,17 +4078,26 @@ impl KmarkImageParams {
         self.width.is_some()
     }
 
+    fn has_page_fit_dimension(&self) -> bool {
+        self.width.as_ref().is_some_and(KmarkSizeValue::is_page_fit)
+            || self
+                .height
+                .as_ref()
+                .is_some_and(KmarkSizeValue::is_page_fit)
+    }
+
     fn to_style(&self) -> Option<String> {
         let mut rules = Vec::new();
 
         self.push_size_style_rules(&mut rules);
-        if let Some(fit) = &self.fit {
-            rules.push(format!("object-fit:{fit}"));
+        if self.has_page_fit_dimension() {
+            rules.push("display:block".to_owned());
         }
         if let Some(position) = &self.position {
             rules.push(format!("object-position:{position}"));
         }
         self.push_decoration_style_rules(&mut rules);
+        self.push_fit_box_style_rules(&mut rules);
 
         (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
     }
@@ -4098,14 +4113,15 @@ impl KmarkImageParams {
     fn push_box_style_rules(&self, rules: &mut Vec<String>) {
         self.push_size_style_rules(rules);
         self.push_decoration_style_rules(rules);
+        self.push_fit_box_style_rules(rules);
     }
 
     fn push_size_style_rules(&self, rules: &mut Vec<String>) {
         if let Some(width) = &self.width {
-            rules.push(format!("width:{width}"));
+            width.push_width_style_rules(rules);
         }
         if let Some(height) = &self.height {
-            rules.push(format!("height:{height}"));
+            height.push_height_style_rules(rules);
         }
     }
 
@@ -4139,10 +4155,63 @@ impl KmarkImageParams {
             rules.push(format!("box-shadow:{shadow}"));
         }
         if let Some(margin) = &self.margin {
-            rules.push(format!("margin:{margin}"));
+            if !self.has_page_fit_dimension() {
+                rules.push(format!("margin:{margin}"));
+            }
         }
         if let Some(padding) = &self.padding {
             rules.push(format!("padding:{padding}"));
+        }
+    }
+
+    fn push_fit_box_style_rules(&self, rules: &mut Vec<String>) {
+        if self
+            .width
+            .as_ref()
+            .is_some_and(KmarkSizeValue::needs_box_sizing)
+            || self
+                .height
+                .as_ref()
+                .is_some_and(KmarkSizeValue::needs_box_sizing)
+        {
+            rules.push("box-sizing:border-box".to_owned());
+        }
+
+        if self.has_page_fit_dimension() {
+            rules.push("margin:0".to_owned());
+        }
+    }
+}
+
+impl KmarkSizeValue {
+    fn is_page_fit(&self) -> bool {
+        matches!(self, Self::PageFit)
+    }
+
+    fn needs_box_sizing(&self) -> bool {
+        matches!(self, Self::Fit | Self::PageFit)
+    }
+
+    fn push_width_style_rules(&self, rules: &mut Vec<String>) {
+        match self {
+            Self::Length(width) => rules.push(format!("width:{width}")),
+            Self::Fit => {
+                rules.push("width:fit-content".to_owned());
+                rules.push("max-width:100%".to_owned());
+            }
+            Self::PageFit => {
+                rules.push("width:var(--kmark-page-fit-width,100%)".to_owned());
+            }
+        }
+    }
+
+    fn push_height_style_rules(&self, rules: &mut Vec<String>) {
+        match self {
+            Self::Length(height) => rules.push(format!("height:{height}")),
+            Self::Fit => rules.push("height:fit-content".to_owned()),
+            Self::PageFit => {
+                rules.push("height:var(--kmark-page-fit-height,auto)".to_owned());
+            }
         }
     }
 }
@@ -4758,11 +4827,6 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.image.height = Some(height);
                 }
             }
-            "fit" => {
-                if let Some(fit) = parse_kmark_fit_value(&value) {
-                    bundle.params.image.fit = Some(fit);
-                }
-            }
             "pos" => {
                 if let Some(position) = parse_kmark_position_value(&value) {
                     bundle.params.image.position = Some(position);
@@ -4981,8 +5045,12 @@ fn parse_kmark_toc_title_value(value: &str) -> Option<String> {
         .then(|| title.replace("\\\"", "\"").replace("\\'", "'"))
 }
 
-fn parse_kmark_size_value(value: &str) -> Option<String> {
-    parse_css_length_value(value, true)
+fn parse_kmark_size_value(value: &str) -> Option<KmarkSizeValue> {
+    match trim_kmark_quotes(value).trim() {
+        "fit" => Some(KmarkSizeValue::Fit),
+        "page_fit" => Some(KmarkSizeValue::PageFit),
+        value => parse_css_length_value(value, true).map(KmarkSizeValue::Length),
+    }
 }
 
 fn parse_kmark_border_size_value(value: &str) -> Option<String> {
@@ -5279,14 +5347,6 @@ fn parse_css_physical_length_value(value: &str) -> Option<String> {
     }
 
     matches!(unit, "px" | "mm" | "cm" | "in" | "pt" | "pc").then(|| trimmed.to_owned())
-}
-
-fn parse_kmark_fit_value(value: &str) -> Option<String> {
-    matches!(
-        value.trim(),
-        "contain" | "cover" | "fill" | "none" | "scale-down"
-    )
-    .then(|| value.trim().to_owned())
 }
 
 fn parse_kmark_position_value(value: &str) -> Option<String> {
@@ -6754,6 +6814,48 @@ mod tests {
     }
 
     #[test]
+    fn applies_fit_size_values_to_images_and_blocks() {
+        let image = render_markdown_preview("<!-- kmark w:fit h:fit -->\n![](image.png)");
+        assert_eq!(
+            image.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:fit-content;max-width:100%;height:fit-content;box-sizing:border-box;\" /></p>"
+        );
+
+        let block = render_markdown_preview("<!-- kmark w:fit -->\n# 見出し");
+        assert_eq!(
+            block.html,
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:fit-content;max-width:100%;box-sizing:border-box;\">見出し</h1>"
+        );
+    }
+
+    #[test]
+    fn applies_page_fit_size_values_to_images_and_image_paragraphs() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:page_fit h:page_fit margin:2mm -->\n![](image.png)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_one_axis_page_fit_without_forcing_the_other_axis() {
+        let width_fit = render_markdown_preview("<!-- kmark w:page_fit -->\n![](image.png)");
+        assert_eq!(
+            width_fit.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);display:block;box-sizing:border-box;margin:0;\" /></p>"
+        );
+
+        let height_fit = render_markdown_preview("<!-- kmark h:page_fit -->\n![](image.png)");
+        assert_eq!(
+            height_fit.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+        );
+    }
+
+    #[test]
     fn merges_consecutive_kmark_comments_with_last_write_wins() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark w:200 -->\n<!-- kmark h:100 -->\n<!-- kmark w:300 -->\n![](image.png)",
@@ -6802,36 +6904,36 @@ mod tests {
     #[test]
     fn applies_defined_kmark_preset_to_image_use_comment() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark define:thumb w:200 h:100 fit:cover -->\n\n<!-- kmark use:thumb -->\n![](image.png)",
+            "<!-- kmark define:thumb w:200 h:100 -->\n\n<!-- kmark use:thumb -->\n![](image.png)",
         );
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:200px;height:100px;object-fit:cover;\" /></p>"
+            "<p data-source-line-start=\"3\" data-source-line-end=\"3\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:200px;height:100px;\" /></p>"
         );
     }
 
     #[test]
     fn supports_separated_kmark_preset_definition_and_scope_usage() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:200 -->\n<!-- kmark h:100 -->\n<!-- kmark fit:cover -->\n<!-- kmark define:thumb -->\n\n<!-- kmark { use:thumb w:300 -->\n![](a.png)\n<!-- kmark h:240 -->\n![](b.png)\n<!-- kmark } -->",
+            "<!-- kmark w:200 -->\n<!-- kmark h:100 -->\n<!-- kmark define:thumb -->\n\n<!-- kmark { use:thumb w:300 -->\n![](a.png)\n<!-- kmark h:240 -->\n![](b.png)\n<!-- kmark } -->",
         );
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"6\" data-source-line-end=\"6\" style=\"width:300px;height:100px;object-fit:cover;\" /></p><p data-source-line-start=\"8\" data-source-line-end=\"8\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"8\" data-source-line-end=\"8\" style=\"width:300px;height:240px;object-fit:cover;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:300px;height:100px;\" /></p><p data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"width:300px;height:240px;\" /></p></div>"
         );
     }
 
     #[test]
     fn renders_kmark_scope_layout_styles() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { layout:row gap:16 align:center valign:top wrap:true w:200 fit:cover -->\n\n![](a.png)\n![](b.png)\n\n<!-- kmark } -->",
+            "<!-- kmark { layout:row gap:16 align:center valign:top wrap:true w:200 -->\n\n![](a.png)\n![](b.png)\n\n<!-- kmark } -->",
         );
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;justify-content:center;align-items:flex-start;flex-wrap:wrap;gap:16px;\"><p data-source-line-start=\"2\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;object-fit:cover;\" /><img src=\"b.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:200px;object-fit:cover;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:row;justify-content:center;align-items:flex-start;flex-wrap:wrap;gap:16px;\"><p data-source-line-start=\"2\" data-source-line-end=\"3\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;\" /><img src=\"b.png\" alt=\"\" data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"width:200px;\" /></p></div>"
         );
     }
 
@@ -6911,7 +7013,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;object-fit:cover;border-width:2px;border-style:solid;\" /></p>"
+            "<p data-source-line-start=\"2\" data-source-line-end=\"2\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"width:200px;border-width:2px;border-style:solid;\" /></p>"
         );
     }
 

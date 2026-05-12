@@ -17,9 +17,9 @@ export const KMARK_SNIPPET_SPECS: readonly KmarkSnippetSpec[] = [
   },
   {
     label: "image size",
-    description: "画像の幅・高さ・収まり方を指定する",
+    description: "画像の幅・高さを指定する",
     contexts: ["image", "single"],
-    insertText: "w:${1:200} h:${2:100} fit:${3:contain}",
+    insertText: "w:${1:200} h:${2:100}",
     priority: 100,
   },
   {

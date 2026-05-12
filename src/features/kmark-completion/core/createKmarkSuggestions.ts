@@ -5,6 +5,7 @@ import {
   KMARK_COLOR_VALUE_PRESETS,
   KMARK_LENGTH_VALUE_PRESETS,
   KMARK_PAGE_LENGTH_VALUE_PRESETS,
+  KMARK_SIZE_VALUE_PRESETS,
 } from "../schema/kmarkValuePresets";
 import { collectKmarkDefinitions } from "./collectKmarkDefinitions";
 import { detectKmarkCompletionContext } from "./detectKmarkCompletionContext";
@@ -20,7 +21,6 @@ import {
 const IMAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["w", 500],
   ["h", 490],
-  ["fit", 480],
   ["border_size", 430],
   ["border_color", 420],
   ["border_style", 415],
@@ -265,6 +265,10 @@ function valuesForParamSpec(spec: KmarkParamSpec): readonly string[] {
   }
 
   if (spec.type === "length") {
+    if (spec.name === "w" || spec.name === "h") {
+      return KMARK_SIZE_VALUE_PRESETS;
+    }
+
     return spec.contexts.includes("page") ? KMARK_PAGE_LENGTH_VALUE_PRESETS : KMARK_LENGTH_VALUE_PRESETS;
   }
 
