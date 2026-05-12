@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 8,
   "params": [
     {
       "name": "align",
@@ -557,6 +557,126 @@
       "description": "用紙表示の左余白を指定する",
       "examples": ["<!-- kmark { page_margin_left:10mm } -->"],
       "priority": 55
+    },
+    {
+      "name": "page_header",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header:false",
+      "description": "ページヘッダーの表示を無効化する",
+      "examples": ["<!-- kmark page_header:false -->"],
+      "priority": 89
+    },
+    {
+      "name": "page_header_left",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_left:\"\"",
+      "description": "ページヘッダー左端の文字列を指定する",
+      "examples": ["<!-- kmark page_header_left:\"左ヘッダー\" -->"],
+      "priority": 88
+    },
+    {
+      "name": "page_header_center",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_center:\"\"",
+      "description": "ページヘッダー中央の文字列を指定する",
+      "examples": ["<!-- kmark page_header_center:\"社外秘\" -->"],
+      "priority": 88
+    },
+    {
+      "name": "page_header_right",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_right:\"\"",
+      "description": "ページヘッダー右端の文字列を指定する",
+      "examples": ["<!-- kmark page_header_right:\"右ヘッダー\" -->"],
+      "priority": 88
+    },
+    {
+      "name": "page_header_opacity",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_opacity:",
+      "description": "ページヘッダーの透明度を0から1で指定する",
+      "examples": ["<!-- kmark page_header_opacity:0.6 -->"],
+      "priority": 86
+    },
+    {
+      "name": "page_header_offset",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_offset:",
+      "description": "ページ上端からヘッダーまでの距離を指定する",
+      "examples": ["<!-- kmark page_header_offset:6mm -->"],
+      "priority": 86
+    },
+    {
+      "name": "page_footer",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer:false",
+      "description": "ページフッターの表示を無効化する",
+      "examples": ["<!-- kmark page_footer:false -->"],
+      "priority": 89
+    },
+    {
+      "name": "page_footer_left",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_left:\"\"",
+      "description": "ページフッター左端の文字列を指定する",
+      "examples": ["<!-- kmark page_footer_left:\"左フッター\" -->"],
+      "priority": 87
+    },
+    {
+      "name": "page_footer_center",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_center:\"\"",
+      "description": "ページフッター中央の文字列を指定する",
+      "examples": ["<!-- kmark page_footer_center:\"中央フッター\" -->"],
+      "priority": 87
+    },
+    {
+      "name": "page_footer_right",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_right:\"\"",
+      "description": "ページフッター右端の文字列を指定する",
+      "examples": ["<!-- kmark page_footer_right:\"関係者外秘\" -->"],
+      "priority": 87
+    },
+    {
+      "name": "page_footer_opacity",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_opacity:",
+      "description": "ページフッターの透明度を0から1で指定する",
+      "examples": ["<!-- kmark page_footer_opacity:0.6 -->"],
+      "priority": 85
+    },
+    {
+      "name": "page_footer_offset",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_offset:",
+      "description": "ページ下端からフッターまでの距離を指定する",
+      "examples": ["<!-- kmark page_footer_offset:6mm -->"],
+      "priority": 85
     },
     {
       "name": "page_number",

@@ -22,6 +22,7 @@ type A4PrintMarkdownDocumentOptions = {
 type A4PrintPreviewPage = {
   readonly frameStyle: string;
   readonly html: string;
+  readonly pageChromeHtml: string;
   readonly pageNumberHtml: string;
   readonly pageName: string;
   readonly pageHeight: string;
@@ -316,6 +317,59 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     display: none;
   }
 
+  .kmark-page-header,
+  .kmark-page-footer {
+    position: absolute;
+    left: var(--kmark-page-margin-left, ${A4_MARGIN_LEFT_MM}mm);
+    right: var(--kmark-page-margin-right, ${A4_MARGIN_RIGHT_MM}mm);
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+    align-items: center;
+    gap: 4mm;
+    color: #111111;
+    font-family: var(--kmark-font-family, inherit);
+    font-size: var(--kmark-page-chrome-font-size, 10pt);
+    line-height: 1.2;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .kmark-page-header {
+    top: var(--kmark-page-header-margin-top, calc(var(--kmark-page-margin-top, ${A4_MARGIN_TOP_MM}mm) - 1.2em));
+  }
+
+  .kmark-page-footer {
+    bottom: var(--kmark-page-footer-margin-bottom, calc(var(--kmark-page-margin-bottom, ${A4_MARGIN_BOTTOM_MM}mm) - 1.2em));
+  }
+
+  .kmark-page-header__left,
+  .kmark-page-header__center,
+  .kmark-page-header__right,
+  .kmark-page-footer__left,
+  .kmark-page-footer__center,
+  .kmark-page-footer__right {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .kmark-page-header__left,
+  .kmark-page-footer__left {
+    text-align: left;
+  }
+
+  .kmark-page-header__center,
+  .kmark-page-footer__center {
+    text-align: center;
+  }
+
+  .kmark-page-header__right,
+  .kmark-page-footer__right {
+    text-align: right;
+  }
+
   .kmark-page-number {
     position: absolute;
     z-index: 1;
@@ -568,11 +622,22 @@ function getPageFrameCssLength(pageFrame: HTMLElement, propertyName: string, fal
   return computedValue.length > 0 ? computedValue : fallback;
 }
 
+function getDirectPageChromeHtml(pageFrame: HTMLElement): string {
+  return Array.from(pageFrame.children)
+    .filter((child): child is HTMLElement => (
+      child instanceof HTMLElement
+      && (child.classList.contains("kmark-page-header") || child.classList.contains("kmark-page-footer"))
+    ))
+    .map((child) => child.outerHTML)
+    .join("");
+}
+
 function getDisplayedPreviewA4Pages(): readonly A4PrintPreviewPage[] {
   return getDisplayedPreviewA4PageFrameElements()
     .map((pageFrame, index) => ({
       frameStyle: pageFrame.getAttribute("style") ?? "",
       html: pageFrame.querySelector<HTMLElement>(".markdown-body--a4")?.innerHTML ?? pageFrame.innerHTML,
+      pageChromeHtml: getDirectPageChromeHtml(pageFrame),
       pageNumberHtml: pageFrame.querySelector<HTMLElement>(".kmark-page-number")?.outerHTML ?? "",
       pageName: `kmark-print-page-${index + 1}`,
       pageHeight: getPageFrameCssLength(pageFrame, "--kmark-page-height", `${A4_PAGE_HEIGHT_MM}mm`),
@@ -585,7 +650,8 @@ function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pa
   const pageMarkup = pages
     .map((page) => `
       <div class="preview-section__page-frame kmark-print-page" data-kmark-print-page="${page.pageName}" style="${escapeHtml(page.frameStyle)}">
-        <article class="markdown-body markdown-body--a4 print-page">${page.html}</article>
+        ${page.pageChromeHtml}
+        <main class="kmark-page-body markdown-body markdown-body--a4 print-page">${page.html}</main>
         ${page.pageNumberHtml}
       </div>
     `)

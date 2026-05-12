@@ -1,6 +1,7 @@
 use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, PageNumberConfig, PageStyle, PreviewPreferences,
-    PreviewTextStyle, RenderedMarkdownPreview, RenderedPage, StoredEdit, ThemePreferences,
+    DesktopLayoutPreferences, EditorPreferences, PageChromeConfig, PageChromeRegionConfig,
+    PageNumberConfig, PageStyle, PreviewPreferences, PreviewTextStyle, RenderedMarkdownPreview,
+    RenderedPage, StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +22,7 @@ pub struct RenderedPagePayload {
     pub page_style: PageStylePayload,
     pub text_style: PreviewTextStylePayload,
     pub page_number_config: PageNumberConfigPayload,
+    pub page_chrome_config: PageChromeConfigPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +62,24 @@ pub struct PageNumberConfigPayload {
     pub margin_right: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageChromeConfigPayload {
+    pub header: PageChromeRegionConfigPayload,
+    pub footer: PageChromeRegionConfigPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageChromeRegionConfigPayload {
+    pub enabled: bool,
+    pub left: Option<String>,
+    pub center: Option<String>,
+    pub right: Option<String>,
+    pub opacity: String,
+    pub offset: Option<String>,
+}
+
 impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
     fn from(rendered_preview: RenderedMarkdownPreview) -> Self {
         Self {
@@ -83,6 +103,7 @@ impl From<RenderedPage> for RenderedPagePayload {
             page_style: PageStylePayload::from(page.page_style),
             text_style: PreviewTextStylePayload::from(page.text_style),
             page_number_config: PageNumberConfigPayload::from(page.page_number_config),
+            page_chrome_config: PageChromeConfigPayload::from(page.page_chrome_config),
         }
     }
 }
@@ -126,6 +147,28 @@ impl From<PageNumberConfig> for PageNumberConfigPayload {
             margin_bottom: config.margin_bottom.as_str().to_owned(),
             margin_left: config.margin_left.as_str().to_owned(),
             margin_right: config.margin_right.as_str().to_owned(),
+        }
+    }
+}
+
+impl From<PageChromeConfig> for PageChromeConfigPayload {
+    fn from(config: PageChromeConfig) -> Self {
+        Self {
+            header: PageChromeRegionConfigPayload::from(config.header),
+            footer: PageChromeRegionConfigPayload::from(config.footer),
+        }
+    }
+}
+
+impl From<PageChromeRegionConfig> for PageChromeRegionConfigPayload {
+    fn from(config: PageChromeRegionConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            left: config.left,
+            center: config.center,
+            right: config.right,
+            opacity: config.opacity,
+            offset: config.offset.map(|offset| offset.as_str().to_owned()),
         }
     }
 }
