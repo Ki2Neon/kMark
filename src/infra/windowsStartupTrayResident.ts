@@ -1,4 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "../runtime/runtime";
 
 type NavigatorWithUserAgentData = Navigator & {
   readonly userAgentData?: {

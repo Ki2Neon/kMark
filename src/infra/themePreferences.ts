@@ -1,5 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
 import { type ThemePreferences } from "../domain/theme";
+import { isTauri } from "../runtime/runtime";
 import { createWebJsonStateStore } from "./webStateStore";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 import { normalizeThemePreferencesState } from "./webStateNormalization";

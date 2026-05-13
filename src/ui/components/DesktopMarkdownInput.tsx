@@ -2,8 +2,6 @@ import { autocompletion, completeFromList, completionKeymap, completionStatus, h
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorSelection, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
-import { isTauri } from "@tauri-apps/api/core";
-import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
@@ -14,6 +12,7 @@ import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-comp
 import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
 import { createCodeMirrorMarkdownTableAutoFormatExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableAutoFormatExtension";
 import { createCodeMirrorMarkdownTableEditExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableEditExtension";
+import { isTauri, listenRuntimeDragDropEvent, type RuntimeDragDropEvent } from "../../runtime/runtime";
 
 const DESKTOP_EDITOR_BASIC_SETUP = {
   autocompletion: false,
@@ -218,9 +217,7 @@ function runMarkdownTab(view: EditorView, isOutdent: boolean): boolean {
   return true;
 }
 
-type TauriDragDropEvent = {
-  readonly payload: DragDropEvent;
-};
+type TauriDragDropEvent = RuntimeDragDropEvent;
 
 type ClientPoint = {
   readonly x: number;
@@ -457,7 +454,7 @@ function DesktopMarkdownInputComponent({
     let isDisposed = false;
     let unlisten: (() => void) | null = null;
 
-    void getCurrentWebview().onDragDropEvent((event) => {
+    void listenRuntimeDragDropEvent((event) => {
       void handleTauriDragDropEvent(event);
     })
       .then((nextUnlisten) => {

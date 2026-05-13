@@ -1,5 +1,5 @@
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { invokeTauriCommand } from "../../infra/tauriCommand";
+import { convertRuntimeFileSrc, isTauri } from "../../runtime/runtime";
 import { renderMarkdownPreviewWithWasm } from "../../wasm/kmarkWeb";
 import {
   type BrowserMarkdownPreviewWorkerRequest,
@@ -84,16 +84,41 @@ function fileUrlToPath(fileUrl: string): string | null {
   }
 }
 
-function normalizePreviewHtmlImageSources(html: string): string {
-  return html.replace(FILE_IMAGE_SOURCE_PATTERN, (match, prefix, source, suffix) => {
-    const filePath = fileUrlToPath(source);
+async function normalizePreviewHtmlImageSources(html: string): Promise<string> {
+  if (!isTauri()) {
+    return html;
+  }
 
-    if (filePath === null) {
-      return match;
-    }
+  const replacements = await Promise.all(
+    Array.from(html.matchAll(FILE_IMAGE_SOURCE_PATTERN), async (match) => {
+      const [raw, prefix, source, suffix] = match;
+      const filePath = fileUrlToPath(source);
 
-    return `${prefix}${convertFileSrc(filePath)}${suffix}`;
-  });
+      if (filePath === null) {
+        return {
+          index: match.index ?? 0,
+          rawLength: raw.length,
+          replacement: raw,
+        };
+      }
+
+      return {
+        index: match.index ?? 0,
+        rawLength: raw.length,
+        replacement: `${prefix}${await convertRuntimeFileSrc(filePath)}${suffix}`,
+      };
+    }),
+  );
+
+  let normalizedHtml = "";
+  let cursor = 0;
+
+  for (const { index, rawLength, replacement } of replacements) {
+    normalizedHtml += `${html.slice(cursor, index)}${replacement}`;
+    cursor = index + rawLength;
+  }
+
+  return `${normalizedHtml}${html.slice(cursor)}`;
 }
 
 function normalizePreviewTextStyle(textStyle?: Partial<PreviewTextStyle>): PreviewTextStyle {
@@ -120,9 +145,9 @@ function normalizePageChromeConfig(config?: Partial<PageChromeConfig>): PageChro
   };
 }
 
-function normalizeRenderedMarkdownPreview(
+async function normalizeRenderedMarkdownPreview(
   renderedPreview: RenderedMarkdownPreviewPayload,
-): NormalizedRenderedMarkdownPreviewPayload {
+): Promise<NormalizedRenderedMarkdownPreviewPayload> {
   const defaultPageStyle = renderedPreview.defaultPageStyle ?? DEFAULT_PAGE_STYLE;
   const defaultTextStyle = normalizePreviewTextStyle(renderedPreview.defaultTextStyle);
   const pages = renderedPreview.pages !== undefined && renderedPreview.pages.length > 0
@@ -136,15 +161,15 @@ function normalizeRenderedMarkdownPreview(
     }));
 
   return {
-    html: normalizePreviewHtmlImageSources(renderedPreview.html),
-    pageHtmls: renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources),
-    pages: pages.map((page) => ({
+    html: await normalizePreviewHtmlImageSources(renderedPreview.html),
+    pageHtmls: await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources)),
+    pages: await Promise.all(pages.map(async (page) => ({
       ...page,
-      html: normalizePreviewHtmlImageSources(page.html),
+      html: await normalizePreviewHtmlImageSources(page.html),
       textStyle: normalizePreviewTextStyle(page.textStyle),
       pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
       pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
-    })),
+    }))),
     defaultPageStyle,
     defaultTextStyle,
   };

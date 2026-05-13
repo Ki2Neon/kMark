@@ -1,4 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "../runtime/runtime";
 import { createWebJsonStateStore } from "./webStateStore";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 import {

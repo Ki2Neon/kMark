@@ -1,5 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
 import { type EditorPreferences } from "../domain/editorPreferences";
+import { isTauri } from "../runtime/runtime";
 import { createWebJsonStateStore } from "./webStateStore";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 import { normalizeEditorPreferencesState } from "./webStateNormalization";

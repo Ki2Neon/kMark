@@ -1,16 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
-
-let pendingNativeWindowModule: Promise<typeof import("@tauri-apps/api/window")> | null = null;
-
-function loadWindowModule() {
-  if (pendingNativeWindowModule !== null) {
-    return pendingNativeWindowModule;
-  }
-
-  pendingNativeWindowModule = import("@tauri-apps/api/window");
-
-  return pendingNativeWindowModule;
-}
+import { isTauri, setRuntimeWindowTitle } from "../runtime/runtime";
 
 export function syncWindowTitle(title: string) {
   document.title = title;
@@ -19,8 +7,7 @@ export function syncWindowTitle(title: string) {
     return;
   }
 
-  void loadWindowModule()
-    .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
+  void setRuntimeWindowTitle(title)
     .catch(() => {
       // Ignore title-sync failures and keep the document title updated.
     });

@@ -1,4 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand } from "./tauriCommand";
 
 const IMPORT_MARKDOWN_ASSET_FILES_COMMAND = "import_markdown_asset_files";

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>kMark</title>
+  </head>
+  <body>
+    <script>
+      (() => {
+        const baseSegment = "/kmark";
+        const base = `${baseSegment}/`;
+        const path = location.pathname === baseSegment
+          ? ""
+          : location.pathname.startsWith(base)
+            ? location.pathname.slice(base.length)
+            : location.pathname.replace(/^\/+/u, "");
+        const route = path.length > 0 ? `/${path}` : "/";
+
+        location.replace(`${base}${location.search}#${route}${location.hash}`);
+      })();
+    </script>
+  </body>
+</html>

@@ -1,5 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
 import { type PreviewPreferences } from "../domain/preview";
+import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 import { createWebJsonStateStore } from "./webStateStore";
 import { normalizePreviewPreferencesState } from "./webStateNormalization";

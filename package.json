@@ -11,6 +11,7 @@
     "dev:vite": "vite",
     "dev": "pnpm run build:wasm && pnpm run dev:vite",
     "build:vite": "tsc && vite build",
+    "build:web": "pnpm run build:wasm && pnpm run build:vite",
     "build": "pnpm run build:wasm && pnpm run build:vite",
     "check:boundaries": "node tools/architecture/check-boundaries.mjs",
     "check:cycles": "node tools/architecture/check-cycles.mjs",

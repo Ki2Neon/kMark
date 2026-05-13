@@ -1,8 +1,7 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { normalizeMarkdownFileName } from "../adapters/browser/browserRustCore";
 import { type ExternalMarkdownDocument } from "../domain/externalMarkdownDocument";
-import { invokeTauriCommand } from "./tauriCommand";
+import { isTauri } from "../runtime/runtime";
+import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 
 type MarkdownPickerType = {
   readonly description: string;
@@ -194,7 +193,7 @@ export async function listenForTauriMarkdownOpenRequests(callback: () => void): 
     return () => {};
   }
 
-  return listen(MARKDOWN_OPEN_REQUESTED_EVENT, () => {
+  return listenTauriEvent<unknown>(MARKDOWN_OPEN_REQUESTED_EVENT, () => {
     callback();
   });
 }

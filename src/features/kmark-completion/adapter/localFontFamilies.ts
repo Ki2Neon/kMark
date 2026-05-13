@@ -1,6 +1,6 @@
 import { APP_FONT_OPTIONS, EDIT_FONT_OPTIONS } from "../../../domain/editorPreferences";
 import { invokeTauriCommand } from "../../../infra/tauriCommand";
-import { isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "../../../runtime/runtime";
 
 type LocalFontMetadata = {
   readonly family: string;

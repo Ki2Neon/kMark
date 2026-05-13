@@ -1,5 +1,4 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { isTauri, invokeRuntimeCommand, listenRuntimeEvent } from "../runtime/runtime";
 
 export type CommandErrorPayload = {
   readonly code: string;
@@ -84,7 +83,7 @@ export async function invokeTauriCommand<T>(
   }
 
   try {
-    return await invoke<T>(command, args);
+    return await invokeRuntimeCommand<T>(command, args);
   } catch (error) {
     throw createCommandError(error, fallbackMessage);
   }
@@ -98,7 +97,5 @@ export async function listenTauriEvent<T>(
     throw new Error("Tauri 環境が必要です。");
   }
 
-  return listen<T>(eventName, (event) => {
-    callback(event.payload);
-  });
+  return listenRuntimeEvent<T>(eventName, callback);
 }

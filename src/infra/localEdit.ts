@@ -1,7 +1,7 @@
 import { type StoredEdit } from "../domain/editor";
+import { isTauri } from "../runtime/runtime";
 import { createWebJsonStateStore } from "./webStateStore";
 import { invokeTauriCommand } from "./tauriCommand";
-import { isTauri } from "@tauri-apps/api/core";
 import { normalizeEditorDraftState } from "./webStateNormalization";
 
 const GET_EDITOR_DRAFT_COMMAND = "get_editor_draft";
