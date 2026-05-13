@@ -62,8 +62,24 @@ type MenuSectionProps = {
 const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
 const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 
+type NumberDraftField = "edit-font-size" | "system-font-size";
+
 function normalizeMenuSearchValue(value: string): string {
   return value.trim().toLocaleLowerCase("ja-JP");
+}
+
+function parseIntegerDraft(value: string): number | null {
+  const trimmedValue = value.trim();
+
+  if (!/^\d+$/u.test(trimmedValue)) {
+    return null;
+  }
+
+  return Number.parseInt(trimmedValue, 10);
+}
+
+function clampInteger(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function MenuSectionComponent({
@@ -104,8 +120,12 @@ function MenuSectionComponent({
   const [menuSearchText, setMenuSearchText] = useState("");
   const [appFontDraft, setAppFontDraft] = useState(appFontId);
   const [editFontDraft, setEditFontDraft] = useState(editFontId);
+  const [editFontSizeDraft, setEditFontSizeDraft] = useState(() => String(editFontSizePx));
+  const [systemFontSizeDraft, setSystemFontSizeDraft] = useState(() => String(systemFontSizePx));
   const [focusedFontField, setFocusedFontField] = useState<"app" | "edit" | null>(null);
+  const [focusedNumberField, setFocusedNumberField] = useState<NumberDraftField | null>(null);
   const discardNextFontBlurRef = useRef(false);
+  const discardNextNumberBlurRef = useRef(false);
   const normalizedMenuSearchText = normalizeMenuSearchValue(menuSearchText);
   const matchesMenuSearch = (...values: string[]) => {
     if (normalizedMenuSearchText.length === 0) {
@@ -171,6 +191,18 @@ function MenuSectionComponent({
       setEditFontDraft(editFontId);
     }
   }, [editFontId, focusedFontField]);
+
+  useEffect(() => {
+    if (focusedNumberField !== "edit-font-size") {
+      setEditFontSizeDraft(String(editFontSizePx));
+    }
+  }, [editFontSizePx, focusedNumberField]);
+
+  useEffect(() => {
+    if (focusedNumberField !== "system-font-size") {
+      setSystemFontSizeDraft(String(systemFontSizePx));
+    }
+  }, [focusedNumberField, systemFontSizePx]);
 
   const handleMenuSearchInput = (event: ChangeEvent<HTMLInputElement>) => {
     setMenuSearchText(event.currentTarget.value);
@@ -281,23 +313,89 @@ function MenuSectionComponent({
   };
 
   const handleEditFontSizeInput = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextEditFontSizePx = Number.parseInt(event.currentTarget.value, 10);
+    setEditFontSizeDraft(event.currentTarget.value);
+  };
 
-    if (Number.isNaN(nextEditFontSizePx)) {
+  const commitEditFontSizeDraft = () => {
+    const parsedEditFontSizePx = parseIntegerDraft(editFontSizeDraft);
+
+    if (parsedEditFontSizePx === null) {
+      setEditFontSizeDraft(String(editFontSizePx));
       return;
     }
 
+    const nextEditFontSizePx = clampInteger(parsedEditFontSizePx, MIN_EDIT_FONT_SIZE_PX, MAX_EDIT_FONT_SIZE_PX);
+    setEditFontSizeDraft(String(nextEditFontSizePx));
     onEditFontSizeChange(nextEditFontSizePx);
   };
 
   const handleSystemFontSizeInput = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextSystemFontSizePx = Number.parseInt(event.currentTarget.value, 10);
+    setSystemFontSizeDraft(event.currentTarget.value);
+  };
 
-    if (Number.isNaN(nextSystemFontSizePx)) {
+  const commitSystemFontSizeDraft = () => {
+    const parsedSystemFontSizePx = parseIntegerDraft(systemFontSizeDraft);
+
+    if (parsedSystemFontSizePx === null) {
+      setSystemFontSizeDraft(String(systemFontSizePx));
       return;
     }
 
+    const nextSystemFontSizePx = clampInteger(parsedSystemFontSizePx, MIN_SYSTEM_FONT_SIZE_PX, MAX_SYSTEM_FONT_SIZE_PX);
+    setSystemFontSizeDraft(String(nextSystemFontSizePx));
     onSystemFontSizeChange(nextSystemFontSizePx);
+  };
+
+  const handleEditFontSizeFocus = () => {
+    setFocusedNumberField("edit-font-size");
+  };
+
+  const handleSystemFontSizeFocus = () => {
+    setFocusedNumberField("system-font-size");
+  };
+
+  const handleEditFontSizeBlur = () => {
+    setFocusedNumberField(null);
+    if (discardNextNumberBlurRef.current) {
+      discardNextNumberBlurRef.current = false;
+      return;
+    }
+    commitEditFontSizeDraft();
+  };
+
+  const handleSystemFontSizeBlur = () => {
+    setFocusedNumberField(null);
+    if (discardNextNumberBlurRef.current) {
+      discardNextNumberBlurRef.current = false;
+      return;
+    }
+    commitSystemFontSizeDraft();
+  };
+
+  const handleEditFontSizeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      discardNextNumberBlurRef.current = true;
+      setEditFontSizeDraft(String(editFontSizePx));
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleSystemFontSizeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      discardNextNumberBlurRef.current = true;
+      setSystemFontSizeDraft(String(systemFontSizePx));
+      event.currentTarget.blur();
+    }
   };
 
   const handleShowLineNumbersSwitch = (event: ChangeEvent<HTMLInputElement>) => {
@@ -494,12 +592,14 @@ function MenuSectionComponent({
             <label className="menu-section__label">
               <span className="menu-section__field-label">エディタフォントサイズ</span>
               <input
-                type="number"
-                value={editFontSizePx}
-                min={MIN_EDIT_FONT_SIZE_PX}
-                max={MAX_EDIT_FONT_SIZE_PX}
-                step={1}
+                type="text"
+                value={editFontSizeDraft}
+                inputMode="numeric"
+                pattern="[0-9]*"
                 onChange={handleEditFontSizeInput}
+                onBlur={handleEditFontSizeBlur}
+                onFocus={handleEditFontSizeFocus}
+                onKeyDown={handleEditFontSizeKeyDown}
                 aria-label="Edit のフォントサイズ"
                 className="menu-section__select"
               />
@@ -572,12 +672,14 @@ function MenuSectionComponent({
             <label className="menu-section__label">
               <span className="menu-section__field-label">システムフォントサイズ</span>
               <input
-                type="number"
-                value={systemFontSizePx}
-                min={MIN_SYSTEM_FONT_SIZE_PX}
-                max={MAX_SYSTEM_FONT_SIZE_PX}
-                step={1}
+                type="text"
+                value={systemFontSizeDraft}
+                inputMode="numeric"
+                pattern="[0-9]*"
                 onChange={handleSystemFontSizeInput}
+                onBlur={handleSystemFontSizeBlur}
+                onFocus={handleSystemFontSizeFocus}
+                onKeyDown={handleSystemFontSizeKeyDown}
                 aria-label="システムフォントサイズ"
                 className="menu-section__select"
               />
