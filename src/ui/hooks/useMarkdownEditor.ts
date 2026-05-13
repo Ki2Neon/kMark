@@ -16,7 +16,17 @@ import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocu
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { DEFAULT_PAGE_STYLE, DEFAULT_PREVIEW_TEXT_STYLE, type PreviewDisplayMode } from "../../domain/preview";
 
-export function useMarkdownEditor(startupEditMode: StartupEditMode) {
+export type InitialEditorDocumentMode = "stored" | "new-untitled";
+
+type UseMarkdownEditorOptions = {
+  readonly initialDocumentMode?: InitialEditorDocumentMode;
+};
+
+export function useMarkdownEditor(
+  startupEditMode: StartupEditMode,
+  options: UseMarkdownEditorOptions = {},
+) {
+  const { initialDocumentMode = "stored" } = options;
   const renderRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
   const rulesRef = useRef<ReturnType<typeof createBrowserEditorStateRules> | null>(null);
@@ -68,8 +78,11 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
 
   useEffect(() => {
     let isDisposed = false;
+    const bootstrapPromise = initialDocumentMode === "new-untitled"
+      ? controller.bootstrapNewUntitled(startupEditMode)
+      : controller.bootstrap(startupEditMode);
 
-    void controller.bootstrap(startupEditMode).then((bootstrap) => {
+    void bootstrapPromise.then((bootstrap) => {
       if (isDisposed) {
         return;
       }
@@ -92,7 +105,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     return () => {
       isDisposed = true;
     };
-  }, [controller, startupEditMode, store]);
+  }, [controller, initialDocumentMode, startupEditMode, store]);
 
   useEffect(() => {
     if (!isReady) {

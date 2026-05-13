@@ -23,7 +23,7 @@ import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
 import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
 import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
-import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { type InitialEditorDocumentMode, useMarkdownEditor } from "../hooks/useMarkdownEditor";
 import { useMarkdownEditorShortcuts } from "../hooks/useMarkdownEditorShortcuts";
 import { type MobileSectionId, useMobileSectionNavigation } from "../hooks/useMobileSectionNavigation";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
@@ -42,6 +42,7 @@ type MarkdownEditorScreenProps = {
   readonly canControlWindowsStartupTrayResident: boolean;
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
+  readonly initialDocumentMode: InitialEditorDocumentMode;
   readonly systemFontSizePx: SystemFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
@@ -88,6 +89,7 @@ export function MarkdownEditorScreen({
   canControlWindowsStartupTrayResident,
   editFontId,
   editFontSizePx,
+  initialDocumentMode,
   systemFontSizePx,
   multiCursorModifier,
   showLineNumbers,
@@ -139,7 +141,7 @@ export function MarkdownEditorScreen({
     handleErrorClear,
     handleErrorRaise,
     handleImportDroppedAssets,
-  } = useMarkdownEditor(startupEditMode);
+  } = useMarkdownEditor(startupEditMode, { initialDocumentMode });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editSelectionRequestIdRef = useRef(0);
