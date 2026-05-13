@@ -70,6 +70,7 @@ export type PageChromeRegionConfig = {
   readonly fontSize?: string | null;
   readonly fontFamily?: string | null;
   readonly fontColor?: string | null;
+  readonly padding?: string | null;
 };
 
 export type PageChromeConfig = {

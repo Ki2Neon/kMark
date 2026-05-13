@@ -83,6 +83,7 @@ pub struct PageChromeRegionConfig {
     pub font_size: Option<String>,
     pub font_family: Option<String>,
     pub font_color: Option<String>,
+    pub padding: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,6 +466,7 @@ struct PartialPageChromeRegionDirective {
     font_size: Option<String>,
     font_family: Option<String>,
     font_color: Option<String>,
+    padding: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4174,6 +4176,7 @@ impl PageChromeRegionConfig {
             font_size: None,
             font_family: None,
             font_color: None,
+            padding: None,
         }
     }
 
@@ -4218,6 +4221,9 @@ impl PageChromeRegionConfig {
         }
         if let Some(font_color) = &directive.font_color {
             self.font_color = Some(font_color.clone());
+        }
+        if let Some(padding) = &directive.padding {
+            self.padding = Some(padding.clone());
         }
 
         self.enabled = self.left.is_some() || self.center.is_some() || self.right.is_some();
@@ -4546,6 +4552,10 @@ impl PartialPageChromeRegionDirective {
         self.font_color = Some(value);
     }
 
+    fn set_padding(&mut self, value: String) {
+        self.padding = Some(value);
+    }
+
     fn merge(&mut self, other: &Self) {
         if other.enabled == Some(false) {
             self.set_enabled(false);
@@ -4585,6 +4595,9 @@ impl PartialPageChromeRegionDirective {
         if let Some(font_color) = &other.font_color {
             self.font_color = Some(font_color.clone());
         }
+        if let Some(padding) = &other.padding {
+            self.padding = Some(padding.clone());
+        }
         if other.enabled == Some(true)
             || other.left.is_some()
             || other.center.is_some()
@@ -4607,6 +4620,7 @@ impl PartialPageChromeRegionDirective {
             || self.font_size.is_some()
             || self.font_family.is_some()
             || self.font_color.is_some()
+            || self.padding.is_some()
     }
 }
 
@@ -5327,6 +5341,11 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_header.set_font_color(font_color);
                 }
             }
+            "page_header_padding" => {
+                if let Some(padding) = parse_kmark_padding_value(value) {
+                    directive.page_header.set_padding(padding);
+                }
+            }
             "page_footer" => {
                 if let Some(enabled) = parse_kmark_bool_value(value) {
                     directive.page_footer.set_enabled(enabled);
@@ -5385,6 +5404,11 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
             "page_footer_font_color" => {
                 if let Some(font_color) = parse_kmark_color_value(value) {
                     directive.page_footer.set_font_color(font_color);
+                }
+            }
+            "page_footer_padding" => {
+                if let Some(padding) = parse_kmark_padding_value(value) {
+                    directive.page_footer.set_padding(padding);
                 }
             }
             _ => {}
@@ -7420,7 +7444,7 @@ mod tests {
     #[test]
     fn applies_page_chrome_border_and_font_styles() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark page_header_center:\"Header\" page_header_border_size:1px page_header_border_color:#999 page_header_border_style:dashed page_header_font_size:9pt page_header_font_family:\"Yu Gothic\" page_header_font_color:#333 page_footer_right:\"Footer\" page_footer_border_size:2px page_footer_border_color:red page_footer_border_style:double page_footer_font_size:8pt page_footer_font_family:\"Noto Sans\" page_footer_font_color:blue -->\n# Body",
+            "<!-- kmark page_header_center:\"Header\" page_header_border_size:1px page_header_border_color:#999 page_header_border_style:dashed page_header_font_size:9pt page_header_font_family:\"Yu Gothic\" page_header_font_color:#333 page_header_padding:1mm 2mm page_footer_right:\"Footer\" page_footer_border_size:2px page_footer_border_color:red page_footer_border_style:double page_footer_font_size:8pt page_footer_font_family:\"Noto Sans\" page_footer_font_color:blue page_footer_padding:0.2em 0.6em -->\n# Body",
         );
         let chrome = &rendered_preview.pages[0].page_chrome_config;
 
@@ -7430,12 +7454,14 @@ mod tests {
         assert_eq!(chrome.header.font_size.as_deref(), Some("9pt"));
         assert_eq!(chrome.header.font_family.as_deref(), Some("Yu Gothic"));
         assert_eq!(chrome.header.font_color.as_deref(), Some("#333"));
+        assert_eq!(chrome.header.padding.as_deref(), Some("1mm 2mm"));
         assert_eq!(chrome.footer.border_size.as_deref(), Some("2px"));
         assert_eq!(chrome.footer.border_color.as_deref(), Some("red"));
         assert_eq!(chrome.footer.border_style.as_deref(), Some("double"));
         assert_eq!(chrome.footer.font_size.as_deref(), Some("8pt"));
         assert_eq!(chrome.footer.font_family.as_deref(), Some("Noto Sans"));
         assert_eq!(chrome.footer.font_color.as_deref(), Some("blue"));
+        assert_eq!(chrome.footer.padding.as_deref(), Some("0.2em 0.6em"));
     }
 
     #[test]

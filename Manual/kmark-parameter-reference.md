@@ -2,8 +2,8 @@
 
 ## 結論
 
-- Schema version: `9`
-- Parameter総数: `93`
+- Schema version: `10`
+- Parameter総数: `95`
 - renderer未知key: 無視
 - renderer不正値: 無視
 - editor validation: unknown duplicate missing enum undefined-use unclosed-scope を警告
@@ -133,6 +133,7 @@
 | `page_header_font_size` |  | length | page scope |  |
 | `page_header_font_family` |  | string | page scope |  |
 | `page_header_font_color` |  | color | page scope |  |
+| `page_header_padding` |  | length | page scope | 1-4値 |
 | `page_footer` |  | boolean | page scope |  |
 | `page_footer_left` |  | string | page scope |  |
 | `page_footer_center` |  | string | page scope |  |
@@ -145,6 +146,7 @@
 | `page_footer_font_size` |  | length | page scope |  |
 | `page_footer_font_family` |  | string | page scope |  |
 | `page_footer_font_color` |  | color | page scope |  |
+| `page_footer_padding` |  | length | page scope | 1-4値 |
 | `page_number` |  | enum | page scope | `show` `hide` `none` `top-left` `top-center` `top-right` `bottom-left` `bottom-center` `bottom-right` |
 | `page_number_format` |  | string | page scope | placeholders |
 | `page_number_start` |  | number | page scope | positive integer |
@@ -311,6 +313,7 @@
 | `page_header_font_size` | header文字size | length | `page_header_font_size:9pt` |  |
 | `page_header_font_family` | header font | string | `page_header_font_family:"Yu Gothic"` |  |
 | `page_header_font_color` | header文字色 | color | `page_header_font_color:#333` |  |
+| `page_header_padding` | header文字枠内側余白 | 1-4 length | `page_header_padding:0.2em 0.6em` | 未指定時 border指定ならdefault padding |
 | `page_footer` | footer表示ON/OFF | boolean | `page_footer:false` | falseでslot消去 |
 | `page_footer_left` | footer左 | string | `page_footer_left:"左"` | 指定時footer有効 |
 | `page_footer_center` | footer中央 | string | `page_footer_center:"中央"` | 指定時footer有効 |
@@ -323,6 +326,7 @@
 | `page_footer_font_size` | footer文字size | length | `page_footer_font_size:9pt` |  |
 | `page_footer_font_family` | footer font | string | `page_footer_font_family:"Yu Gothic"` |  |
 | `page_footer_font_color` | footer文字色 | color | `page_footer_font_color:#333` |  |
+| `page_footer_padding` | footer文字枠内側余白 | 1-4 length | `page_footer_padding:0.2em 0.6em` | 未指定時 border指定ならdefault padding |
 
 ## Page Number Parameters
 

@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 9;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 10;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -771,6 +771,17 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         priority: 84,
     },
     KmarkParamSpec {
+        name: "page_header_padding",
+        aliases: &[],
+        param_type: "length",
+        contexts: &["page", "scope"],
+        values: &[],
+        insert_text: "page_header_padding:",
+        description: "ページヘッダー文字枠の内側余白を指定する",
+        examples: &["<!-- kmark page_header_padding:0.2em 0.6em -->"],
+        priority: 84,
+    },
+    KmarkParamSpec {
         name: "page_footer",
         aliases: &[],
         param_type: "boolean",
@@ -900,6 +911,17 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         insert_text: "page_footer_font_color:",
         description: "ページフッターの文字色を指定する",
         examples: &["<!-- kmark page_footer_font_color:#333 -->"],
+        priority: 83,
+    },
+    KmarkParamSpec {
+        name: "page_footer_padding",
+        aliases: &[],
+        param_type: "length",
+        contexts: &["page", "scope"],
+        values: &[],
+        insert_text: "page_footer_padding:",
+        description: "ページフッター文字枠の内側余白を指定する",
+        examples: &["<!-- kmark page_footer_padding:0.2em 0.6em -->"],
         priority: 83,
     },
     KmarkParamSpec {
