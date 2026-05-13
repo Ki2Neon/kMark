@@ -26,6 +26,7 @@ type MarkdownInputProps = {
     readonly lineNumber: number;
     readonly requestId: number;
   } | null;
+  readonly showMobileInputHelperBar?: boolean;
 };
 
 function MarkdownInputComponent({
@@ -40,6 +41,7 @@ function MarkdownInputComponent({
   onCursorLineChange,
   onFocusChange,
   requestedLineSelection,
+  showMobileInputHelperBar = false,
 }: MarkdownInputProps) {
   return (
     <section className="section section--edit" aria-label="Edit">
@@ -57,6 +59,7 @@ function MarkdownInputComponent({
             onCursorLineChange={onCursorLineChange}
             onFocusChange={onFocusChange}
             requestedLineSelection={requestedLineSelection}
+            showMobileInputHelperBar={showMobileInputHelperBar}
           />
         </Suspense>
       </div>

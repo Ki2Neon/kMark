@@ -13,6 +13,7 @@ import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-c
 import { createCodeMirrorMarkdownTableAutoFormatExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableAutoFormatExtension";
 import { createCodeMirrorMarkdownTableEditExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableEditExtension";
 import { isTauri, listenRuntimeDragDropEvent, type RuntimeDragDropEvent } from "../../runtime/runtime";
+import { MobileInputHelperBar, type MobileEditorInsertAdapter } from "./MobileInputHelperBar";
 
 const DESKTOP_EDITOR_BASIC_SETUP = {
   autocompletion: false,
@@ -134,6 +135,29 @@ function usesMetaKeyForCtrlCmd(): boolean {
 
 function getCursorLineNumber(view: EditorView): number {
   return view.state.doc.lineAt(view.state.selection.main.head).number;
+}
+
+function clampEditorPosition(position: number, maximumPosition: number): number {
+  return Math.min(maximumPosition, Math.max(0, position));
+}
+
+function createBoundedEditorSelection(view: EditorView, selection: EditorSelection): EditorSelection {
+  const maximumPosition = view.state.doc.length;
+  const ranges = selection.ranges.map((range) => (
+    EditorSelection.range(
+      clampEditorPosition(range.anchor, maximumPosition),
+      clampEditorPosition(range.head, maximumPosition),
+    )
+  ));
+
+  if (ranges.length === 0) {
+    return EditorSelection.create([EditorSelection.cursor(0)]);
+  }
+
+  return EditorSelection.create(
+    ranges,
+    Math.min(selection.mainIndex, Math.max(0, ranges.length - 1)),
+  );
 }
 
 function isCompletionOrSnippetActive(view: EditorView): boolean {
@@ -302,6 +326,7 @@ type DesktopMarkdownInputProps = {
     readonly lineNumber: number;
     readonly requestId: number;
   } | null;
+  readonly showMobileInputHelperBar?: boolean;
 };
 
 function DesktopMarkdownInputComponent({
@@ -316,8 +341,10 @@ function DesktopMarkdownInputComponent({
   onCursorLineChange,
   onFocusChange,
   requestedLineSelection,
+  showMobileInputHelperBar = false,
 }: DesktopMarkdownInputProps) {
   const editorRef = useRef<EditorView | null>(null);
+  const lastSelectionRef = useRef<EditorSelection | null>(null);
   const lastHandledLineSelectionRequestIdRef = useRef<number | null>(null);
   const lastEmittedCursorLineRef = useRef<number | null>(null);
 
@@ -331,6 +358,62 @@ function DesktopMarkdownInputComponent({
     lastEmittedCursorLineRef.current = nextCursorLine;
     onCursorLineChange?.(nextCursorLine);
   }, [onCursorLineChange]);
+
+  const saveEditorSelection = useCallback(() => {
+    const editor = editorRef.current;
+
+    if (editor === null) {
+      return;
+    }
+
+    lastSelectionRef.current = editor.state.selection;
+  }, []);
+
+  const restoreEditorSelection = useCallback(() => {
+    const editor = editorRef.current;
+
+    if (editor === null || lastSelectionRef.current === null) {
+      return;
+    }
+
+    editor.dispatch({
+      selection: createBoundedEditorSelection(editor, lastSelectionRef.current),
+    });
+    lastSelectionRef.current = editor.state.selection;
+  }, []);
+
+  const focusEditor = useCallback(() => {
+    editorRef.current?.focus();
+  }, []);
+
+  const insertEditorText = useCallback((text: string) => {
+    const editor = editorRef.current;
+
+    if (editor === null) {
+      return;
+    }
+
+    if (lastSelectionRef.current !== null) {
+      editor.dispatch({
+        selection: createBoundedEditorSelection(editor, lastSelectionRef.current),
+      });
+    }
+
+    editor.dispatch({
+      ...editor.state.replaceSelection(text),
+      scrollIntoView: true,
+    });
+    editor.focus();
+    lastSelectionRef.current = editor.state.selection;
+    emitCursorLine(editor);
+  }, [emitCursorLine]);
+
+  const mobileInsertAdapter = useMemo<MobileEditorInsertAdapter>(() => ({
+    focusEditor,
+    insertText: insertEditorText,
+    restoreSelection: restoreEditorSelection,
+    saveSelection: saveEditorSelection,
+  }), [focusEditor, insertEditorText, restoreEditorSelection, saveEditorSelection]);
 
   const applyRequestedLineSelection = useCallback((view: EditorView, request: NonNullable<DesktopMarkdownInputProps["requestedLineSelection"]>) => {
     const maximumLineNumber = view.state.doc.lines;
@@ -380,6 +463,7 @@ function DesktopMarkdownInputComponent({
 
   const handleEditorCreate = useCallback((view: EditorView) => {
     editorRef.current = view;
+    lastSelectionRef.current = view.state.selection;
 
     if (requestedLineSelection !== null && requestedLineSelection !== undefined) {
       applyRequestedLineSelection(view, requestedLineSelection);
@@ -395,6 +479,7 @@ function DesktopMarkdownInputComponent({
     }
 
     if (viewUpdate.docChanged || viewUpdate.selectionSet || viewUpdate.focusChanged) {
+      lastSelectionRef.current = viewUpdate.view.state.selection;
       emitCursorLine(viewUpdate.view);
     }
   }, [emitCursorLine, onFocusChange]);
@@ -518,7 +603,9 @@ function DesktopMarkdownInputComponent({
       fontFamily: "inherit",
       lineHeight: "1.7",
       overflow: "auto",
-      padding: "16px 0",
+      padding: showMobileInputHelperBar
+        ? "16px 0 calc(16px + var(--mobile-input-helper-height) + env(safe-area-inset-bottom))"
+        : "16px 0",
     },
     ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection": {
       backgroundColor: "color-mix(in srgb, var(--focus) 35%, transparent)",
@@ -537,7 +624,7 @@ function DesktopMarkdownInputComponent({
     },
   }, {
     dark: isDarkEditorTheme(appThemeId),
-  }), [appThemeId, editFontId]);
+  }), [appThemeId, editFontId, showMobileInputHelperBar]);
 
   const extensions = useMemo<Extension[]>(() => {
     const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();
@@ -605,18 +692,21 @@ function DesktopMarkdownInputComponent({
   }, [blurOnEscapeWhenSelectionEmpty, editorTheme, multiCursorModifier, showLineNumbers]);
 
   return (
-    <CodeMirror
-      basicSetup={DESKTOP_EDITOR_BASIC_SETUP}
-      height="100%"
-      indentWithTab={false}
-      onChange={handleEditorChange}
-      onCreateEditor={handleEditorCreate}
-      onUpdate={handleEditorUpdate}
-      placeholder="ここに Markdown を書きます"
-      theme={isDarkEditorTheme(appThemeId) ? "dark" : "light"}
-      value={content}
-      extensions={extensions}
-    />
+    <>
+      <CodeMirror
+        basicSetup={DESKTOP_EDITOR_BASIC_SETUP}
+        height="100%"
+        indentWithTab={false}
+        onChange={handleEditorChange}
+        onCreateEditor={handleEditorCreate}
+        onUpdate={handleEditorUpdate}
+        placeholder="ここに Markdown を書きます"
+        theme={isDarkEditorTheme(appThemeId) ? "dark" : "light"}
+        value={content}
+        extensions={extensions}
+      />
+      {showMobileInputHelperBar ? <MobileInputHelperBar insertAdapter={mobileInsertAdapter} /> : null}
+    </>
   );
 }
 

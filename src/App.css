@@ -28,6 +28,7 @@
   --scrollbar-thumb: color-mix(in srgb, var(--text-soft) 28%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--text-soft) 42%, transparent);
   --mobile-nav-height: 32px;
+  --mobile-input-helper-height: 45px;
   font-family: var(--app-font-family);
   line-height: 1.5;
   font-weight: 400;
@@ -743,6 +744,47 @@ input:focus-visible,
 
 .edit-section__editor .cm-focused {
   outline: none;
+}
+
+.mobile-input-helper-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  min-height: var(--mobile-input-helper-height);
+  padding: 6px 8px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
+
+.mobile-input-helper-bar button {
+  flex: 0 0 auto;
+  min-width: 36px;
+  min-height: 32px;
+  padding: 0.3rem 0.7rem;
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--surface-muted) 48%, var(--surface));
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mobile-input-helper-bar button:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    color-mix(in srgb, var(--surface-muted) 48%, var(--surface));
+}
+
+@media (min-width: 769px) {
+  .mobile-input-helper-bar {
+    display: none;
+  }
 }
 
 .edit-section__textarea:focus,

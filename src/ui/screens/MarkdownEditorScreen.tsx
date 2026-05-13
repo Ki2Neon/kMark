@@ -641,6 +641,7 @@ export function MarkdownEditorScreen({
                       onCursorLineChange={handleEditCursorLineChange}
                       onFocusChange={handleEditFocusChange}
                       requestedLineSelection={editSelectionRequest}
+                      showMobileInputHelperBar={mobileSection === "edit"}
                     />
                   ) : (
                     <MarkdownPreview
