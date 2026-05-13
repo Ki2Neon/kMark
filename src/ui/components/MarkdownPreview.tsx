@@ -73,12 +73,10 @@ type PreviewBlockInfo = {
 };
 
 type PreviewTargetCandidate = {
-  readonly area: number;
   readonly element: HTMLElement;
   readonly sourceLineEnd: number;
   readonly sourceLineStart: number;
   readonly span: number;
-  readonly visibilityScore: number;
 };
 
 type NearestPreviewTargetCandidate = PreviewTargetCandidate & {
@@ -350,14 +348,7 @@ function getPreviewBlockInfo(
   };
 }
 
-function getRectArea(rect: DOMRect): number {
-  return Math.max(0, rect.width) * Math.max(0, rect.height);
-}
-
-function getPreviewTargetCandidate(
-  previewViewport: HTMLElement,
-  previewBlock: HTMLElement,
-): PreviewTargetCandidate | null {
+function getPreviewTargetCandidate(previewBlock: HTMLElement): PreviewTargetCandidate | null {
   const sourceLineStart = Number.parseInt(previewBlock.dataset.sourceLineStart ?? "", 10);
   const sourceLineEnd = Number.parseInt(previewBlock.dataset.sourceLineEnd ?? "", 10);
 
@@ -365,15 +356,11 @@ function getPreviewTargetCandidate(
     return null;
   }
 
-  const previewBlockInfo = getPreviewBlockInfo(previewViewport, previewBlock);
-
   return {
-    area: previewBlockInfo === null ? 0 : getRectArea(previewBlockInfo.rect),
     element: previewBlock,
     sourceLineEnd,
     sourceLineStart,
     span: Math.max(0, sourceLineEnd - sourceLineStart),
-    visibilityScore: previewBlockInfo?.visibilityScore ?? 0,
   };
 }
 
@@ -389,11 +376,7 @@ function isMoreSpecificPreviewTarget(
     return false;
   }
 
-  if (candidate.area > 0 && current.area > 0 && Math.abs(candidate.area - current.area) > 1) {
-    return candidate.area < current.area;
-  }
-
-  return candidate.visibilityScore > current.visibilityScore;
+  return false;
 }
 
 function getSourceLineProgress(
@@ -423,7 +406,7 @@ function findPreviewCursorTarget(
   let nearestBlock: NearestPreviewTargetCandidate | null = null;
 
   for (const previewBlock of previewBlocks) {
-    const candidate = getPreviewTargetCandidate(previewViewport, previewBlock);
+    const candidate = getPreviewTargetCandidate(previewBlock);
 
     if (candidate === null) {
       continue;

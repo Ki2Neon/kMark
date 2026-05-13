@@ -24,6 +24,9 @@ export default defineConfig(async () => ({
       },
     },
   },
+  worker: {
+    format: "es",
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

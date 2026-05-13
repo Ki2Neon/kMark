@@ -9,7 +9,7 @@ type KmarkWebModule = typeof import("./pkg/kmark_web");
 let loadedModule: KmarkWebModule | null = null;
 let pendingModule: Promise<KmarkWebModule> | null = null;
 
-type RenderedMarkdownPreviewPayload = {
+export type RenderedMarkdownPreviewPayload = {
   readonly html: string;
   readonly pageHtmls: readonly string[];
   readonly pages: readonly RenderedPreviewPage[];

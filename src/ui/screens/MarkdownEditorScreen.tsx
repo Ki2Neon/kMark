@@ -1,4 +1,5 @@
 import {
+  startTransition,
   useCallback,
   useEffect,
   useRef,
@@ -33,6 +34,7 @@ import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpen
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
+const PREVIEW_CURSOR_FOLLOW_THROTTLE_MS = 80;
 
 type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
@@ -140,6 +142,9 @@ export function MarkdownEditorScreen({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editSelectionRequestIdRef = useRef(0);
+  const lastPreviewCursorFollowAtRef = useRef(0);
+  const pendingPreviewCursorLineRef = useRef<number | null>(null);
+  const previewCursorFollowTimeoutRef = useRef<number | null>(null);
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
   const [isEditFocused, setIsEditFocused] = useState(false);
@@ -305,21 +310,74 @@ export function MarkdownEditorScreen({
     setIsEditFocused(nextIsFocused);
   }, []);
 
-  const handleEditCursorLineChange = useCallback((nextCursorLine: number) => {
-    setActiveEditCursorLine(nextCursorLine);
+  const clearPendingPreviewCursorFollow = useCallback(() => {
+    if (previewCursorFollowTimeoutRef.current !== null) {
+      window.clearTimeout(previewCursorFollowTimeoutRef.current);
+      previewCursorFollowTimeoutRef.current = null;
+    }
+
+    pendingPreviewCursorLineRef.current = null;
   }, []);
+
+  const commitPreviewCursorLine = useCallback((nextCursorLine: number) => {
+    lastPreviewCursorFollowAtRef.current = window.performance.now();
+    pendingPreviewCursorLineRef.current = null;
+
+    startTransition(() => {
+      setActiveEditCursorLine((currentCursorLine) => (
+        currentCursorLine === nextCursorLine ? currentCursorLine : nextCursorLine
+      ));
+    });
+  }, []);
+
+  const flushPendingPreviewCursorLine = useCallback(() => {
+    previewCursorFollowTimeoutRef.current = null;
+
+    if (pendingPreviewCursorLineRef.current === null) {
+      return;
+    }
+
+    commitPreviewCursorLine(pendingPreviewCursorLineRef.current);
+  }, [commitPreviewCursorLine]);
+
+  const handleEditCursorLineChange = useCallback((nextCursorLine: number) => {
+    const elapsedMs = window.performance.now() - lastPreviewCursorFollowAtRef.current;
+
+    if (elapsedMs >= PREVIEW_CURSOR_FOLLOW_THROTTLE_MS && previewCursorFollowTimeoutRef.current === null) {
+      commitPreviewCursorLine(nextCursorLine);
+      return;
+    }
+
+    pendingPreviewCursorLineRef.current = nextCursorLine;
+
+    if (previewCursorFollowTimeoutRef.current !== null) {
+      return;
+    }
+
+    previewCursorFollowTimeoutRef.current = window.setTimeout(
+      flushPendingPreviewCursorLine,
+      Math.max(0, PREVIEW_CURSOR_FOLLOW_THROTTLE_MS - elapsedMs),
+    );
+  }, [commitPreviewCursorLine, flushPendingPreviewCursorLine]);
 
   const handlePreviewSourceLineDoubleClick = useCallback((lineNumber: number) => {
     const nextRequestId = editSelectionRequestIdRef.current + 1;
     editSelectionRequestIdRef.current = nextRequestId;
 
+    clearPendingPreviewCursorFollow();
     setActiveEditCursorLine(lineNumber);
     setEditSelectionRequest({ lineNumber, requestId: nextRequestId });
 
     if (layoutMode === "mobile") {
       requestMobileSection("edit");
     }
-  }, [layoutMode, requestMobileSection]);
+  }, [clearPendingPreviewCursorFollow, layoutMode, requestMobileSection]);
+
+  useEffect(() => (
+    () => {
+      clearPendingPreviewCursorFollow();
+    }
+  ), [clearPendingPreviewCursorFollow]);
 
   const handlePreviewExternalLinkOpen = useCallback((url: string) => {
     void openExternalLink(url).catch((error) => {

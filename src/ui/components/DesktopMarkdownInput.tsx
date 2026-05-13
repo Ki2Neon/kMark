@@ -209,9 +209,17 @@ function DesktopMarkdownInputComponent({
 }: DesktopMarkdownInputProps) {
   const editorRef = useRef<EditorView | null>(null);
   const lastHandledLineSelectionRequestIdRef = useRef<number | null>(null);
+  const lastEmittedCursorLineRef = useRef<number | null>(null);
 
   const emitCursorLine = useCallback((view: EditorView) => {
-    onCursorLineChange?.(getCursorLineNumber(view));
+    const nextCursorLine = getCursorLineNumber(view);
+
+    if (lastEmittedCursorLineRef.current === nextCursorLine) {
+      return;
+    }
+
+    lastEmittedCursorLineRef.current = nextCursorLine;
+    onCursorLineChange?.(nextCursorLine);
   }, [onCursorLineChange]);
 
   const applyRequestedLineSelection = useCallback((view: EditorView, request: NonNullable<DesktopMarkdownInputProps["requestedLineSelection"]>) => {
@@ -220,6 +228,7 @@ function DesktopMarkdownInputComponent({
     const nextCursorOffset = view.state.doc.line(nextLineNumber).from;
 
     lastHandledLineSelectionRequestIdRef.current = request.requestId;
+    lastEmittedCursorLineRef.current = nextLineNumber;
     view.focus();
     view.dispatch({
       effects: [
