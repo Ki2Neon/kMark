@@ -63,6 +63,7 @@ type TableContextMenuItem = {
 };
 
 let activeTableContextMenu: TableContextMenuState | null = null;
+const INSERTED_MARKDOWN_TABLE = "| 列1 | 列2 |\n| --- | --- |\n|  |  |";
 
 export function createCodeMirrorMarkdownTableEditExtension(): Extension {
   return [
@@ -70,7 +71,7 @@ export function createCodeMirrorMarkdownTableEditExtension(): Extension {
     ViewPlugin.fromClass(MarkdownTableContextMenuCleanupPlugin),
     EditorView.domEventHandlers({
       contextmenu(event, view) {
-        return openTableContextMenu(event, view);
+        return openEditorContextMenu(event, view);
       },
       copy(event, view) {
         return copySelectedTableCells(event, view);
@@ -121,7 +122,7 @@ class MarkdownTableContextMenuCleanupPlugin {
   }
 }
 
-function openTableContextMenu(event: MouseEvent, view: EditorView): boolean {
+function openEditorContextMenu(event: MouseEvent, view: EditorView): boolean {
   const position = view.posAtCoords({
     x: event.clientX,
     y: event.clientY,
@@ -133,24 +134,26 @@ function openTableContextMenu(event: MouseEvent, view: EditorView): boolean {
 
   const clickedCell = getTableCellAtPosition(view.state, position);
 
-  if (clickedCell === null) {
-    return false;
-  }
-
   event.preventDefault();
   event.stopPropagation();
   view.focus();
 
-  if (!isCellInsideSelectedTableRange(view.state, clickedCell)) {
+  if (clickedCell === null) {
+    view.dispatch({
+      selection: EditorSelection.cursor(position),
+    });
+  } else if (!isCellInsideSelectedTableRange(view.state, clickedCell)) {
     view.dispatch({
       selection: EditorSelection.single(clickedCell.cell.contentFrom, clickedCell.cell.contentTo),
     });
   }
 
-  const activeCell = getTableCellAtPosition(view.state, clickedCell.cell.contentFrom) ?? clickedCell;
+  const activeCell = clickedCell === null
+    ? null
+    : getTableCellAtPosition(view.state, clickedCell.cell.contentFrom) ?? clickedCell;
   closeActiveTableContextMenu();
 
-  const menu = createTableContextMenu(view, activeCell);
+  const menu = createEditorContextMenu(view, activeCell);
   view.dom.append(menu);
   positionTableContextMenu(menu, event.clientX, event.clientY);
 
@@ -193,14 +196,20 @@ function openTableContextMenu(event: MouseEvent, view: EditorView): boolean {
   return true;
 }
 
-function createTableContextMenu(view: EditorView, activeCell: ActiveTableCell): HTMLDivElement {
+function createEditorContextMenu(view: EditorView, activeCell: ActiveTableCell | null): HTMLDivElement {
   const ownerDocument = view.dom.ownerDocument;
   const menu = ownerDocument.createElement("div");
   menu.className = "cm-markdownTableContextMenu";
   menu.role = "menu";
 
-  const groups: readonly (readonly TableContextMenuItem[])[] = [
-    [
+  const groups: (readonly TableContextMenuItem[])[] = [];
+
+  if (activeCell === null) {
+    groups.push([{ label: "表を追加", run: insertMarkdownTable }]);
+  }
+
+  if (activeCell !== null) {
+    groups.push([
       { label: "上に行を追加", run: (targetView) => insertTableRow(targetView, "above") },
       { label: "下に行を追加", run: (targetView) => insertTableRow(targetView, "below") },
       { label: "行を削除", run: deleteTableRow, disabled: activeCell.row.kind === "header" },
@@ -214,8 +223,8 @@ function createTableContextMenu(view: EditorView, activeCell: ActiveTableCell): 
         label: "行を下へ移動",
         run: (targetView) => moveTableRow(targetView, "down"),
       },
-    ],
-    [
+    ]);
+    groups.push([
       { label: "左に列を追加", run: (targetView) => insertTableColumn(targetView, "left") },
       { label: "右に列を追加", run: (targetView) => insertTableColumn(targetView, "right") },
       {
@@ -233,13 +242,13 @@ function createTableContextMenu(view: EditorView, activeCell: ActiveTableCell): 
         label: "列を右へ移動",
         run: (targetView) => moveTableColumn(targetView, "right"),
       },
-    ],
-    [
+    ]);
+    groups.push([
       { label: "左寄せ", run: (targetView) => setTableColumnAlignment(targetView, "left") },
       { label: "中央寄せ", run: (targetView) => setTableColumnAlignment(targetView, "center") },
       { label: "右寄せ", run: (targetView) => setTableColumnAlignment(targetView, "right") },
-    ],
-    [
+    ]);
+    groups.push([
       {
         disabled: !canMergeSelectedTableCells(view.state),
         label: "セル結合",
@@ -251,8 +260,8 @@ function createTableContextMenu(view: EditorView, activeCell: ActiveTableCell): 
         label: "結合解除",
         run: splitMergedTableCell,
       },
-    ],
-  ];
+    ]);
+  }
 
   for (const group of groups) {
     const groupElement = ownerDocument.createElement("div");
@@ -705,6 +714,29 @@ function selectTableCell(view: EditorView, sourceLineNumber: number, columnIndex
     effects: EditorView.scrollIntoView(cell.contentFrom, { y: "center" }),
     selection,
   });
+}
+
+function insertMarkdownTable(view: EditorView): boolean {
+  const position = view.state.selection.main.head;
+  const line = view.state.doc.lineAt(position);
+  const insertsInsideBlankLine = line.text.trim().length === 0;
+  const from = insertsInsideBlankLine ? line.from : line.to;
+  const to = insertsInsideBlankLine ? line.to : line.to;
+  const insert = insertsInsideBlankLine
+    ? INSERTED_MARKDOWN_TABLE
+    : `\n\n${INSERTED_MARKDOWN_TABLE}${line.to < view.state.doc.length ? "\n" : ""}`;
+  const tableStartLineNumber = insertsInsideBlankLine ? line.number : line.number + 2;
+
+  view.dispatch({
+    changes: {
+      from,
+      insert,
+      to,
+    },
+  });
+  selectTableCell(view, tableStartLineNumber + 2, 0);
+
+  return true;
 }
 
 function moveActiveTableCell(view: EditorView, direction: "left" | "right" | "down"): boolean {
