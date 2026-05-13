@@ -46,6 +46,7 @@ const PAGE_PARAM_NAMES = new Set([
   "page_header_font_size",
   "page_header_font_family",
   "page_header_font_color",
+  "page_header_padding",
   "page_footer",
   "page_footer_left",
   "page_footer_center",
@@ -58,6 +59,7 @@ const PAGE_PARAM_NAMES = new Set([
   "page_footer_font_size",
   "page_footer_font_family",
   "page_footer_font_color",
+  "page_footer_padding",
 ]);
 
 const TOC_PARAM_NAMES = new Set([

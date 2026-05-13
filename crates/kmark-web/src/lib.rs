@@ -89,6 +89,7 @@ struct PageChromeRegionConfigPayload {
     font_size: Option<String>,
     font_family: Option<String>,
     font_color: Option<String>,
+    padding: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -552,6 +553,7 @@ impl From<PageChromeRegionConfig> for PageChromeRegionConfigPayload {
             font_size: config.font_size,
             font_family: config.font_family,
             font_color: config.font_color,
+            padding: config.padding,
         }
     }
 }

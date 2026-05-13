@@ -84,6 +84,7 @@ pub struct PageChromeRegionConfigPayload {
     pub font_size: Option<String>,
     pub font_family: Option<String>,
     pub font_color: Option<String>,
+    pub padding: Option<String>,
 }
 
 impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
@@ -181,6 +182,7 @@ impl From<PageChromeRegionConfig> for PageChromeRegionConfigPayload {
             font_size: config.font_size,
             font_family: config.font_family,
             font_color: config.font_color,
+            padding: config.padding,
         }
     }
 }

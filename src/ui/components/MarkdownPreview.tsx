@@ -182,7 +182,8 @@ function arePageChromeRegionConfigsEqual(left: PageChromeRegionConfig, right: Pa
     && left.borderStyle === right.borderStyle
     && left.fontSize === right.fontSize
     && left.fontFamily === right.fontFamily
-    && left.fontColor === right.fontColor;
+    && left.fontColor === right.fontColor
+    && left.padding === right.padding;
 }
 
 function arePageChromeConfigsEqual(left: PageChromeConfig, right: PageChromeConfig): boolean {
@@ -241,6 +242,7 @@ function pageChromeRegionConfigKey(config: PageChromeRegionConfig): string {
     config.fontSize ?? "",
     config.fontFamily ?? "",
     config.fontColor ?? "",
+    config.padding ?? "",
   ].join("|");
 }
 
@@ -3135,15 +3137,22 @@ function getPageChromeRegionStyle(
 
 function getPageChromeRegionTextStyle(config: PageChromeRegionConfig): CSSProperties | undefined {
   const style: CSSProperties = {};
+  const hasBorderSize = config.borderSize !== undefined && config.borderSize !== null;
+  const hasBorderStyle = config.borderStyle !== undefined && config.borderStyle !== null;
 
-  if (config.borderSize !== undefined && config.borderSize !== null) {
+  if (hasBorderSize) {
     style.borderWidth = config.borderSize;
     style.borderStyle = config.borderStyle ?? "solid";
-  } else if (config.borderStyle !== undefined && config.borderStyle !== null) {
+  } else if (hasBorderStyle) {
     style.borderStyle = config.borderStyle;
   }
   if (config.borderColor !== undefined && config.borderColor !== null) {
     style.borderColor = config.borderColor;
+  }
+  if (config.padding !== undefined && config.padding !== null) {
+    style.padding = config.padding;
+  } else if (hasBorderSize || hasBorderStyle) {
+    style.padding = "0.15em 0.45em";
   }
 
   return Object.keys(style).length > 0 ? style : undefined;

@@ -65,12 +65,14 @@ const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["page_header_font_size", 400],
   ["page_header_font_family", 399],
   ["page_header_font_color", 398],
-  ["page_footer_border_size", 397],
-  ["page_footer_border_color", 396],
-  ["page_footer_border_style", 395],
-  ["page_footer_font_size", 394],
-  ["page_footer_font_family", 393],
-  ["page_footer_font_color", 392],
+  ["page_header_padding", 397],
+  ["page_footer_border_size", 396],
+  ["page_footer_border_color", 395],
+  ["page_footer_border_style", 394],
+  ["page_footer_font_size", 393],
+  ["page_footer_font_family", 392],
+  ["page_footer_font_color", 391],
+  ["page_footer_padding", 390],
 ]);
 
 const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([

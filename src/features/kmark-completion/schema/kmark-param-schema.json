@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "params": [
     {
       "name": "align",
@@ -680,6 +680,16 @@
       "priority": 84
     },
     {
+      "name": "page_header_padding",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_padding:",
+      "description": "ページヘッダー文字枠の内側余白を指定する",
+      "examples": ["<!-- kmark page_header_padding:0.2em 0.6em -->"],
+      "priority": 84
+    },
+    {
       "name": "page_footer",
       "aliases": [],
       "type": "boolean",
@@ -798,6 +808,16 @@
       "insertText": "page_footer_font_color:",
       "description": "ページフッターの文字色を指定する",
       "examples": ["<!-- kmark page_footer_font_color:#333 -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_footer_padding",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_padding:",
+      "description": "ページフッター文字枠の内側余白を指定する",
+      "examples": ["<!-- kmark page_footer_padding:0.2em 0.6em -->"],
       "priority": 83
     },
     {
