@@ -1221,6 +1221,7 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
 
         if is_unclosed_html_comment_line(line) {
             is_inside_html_comment_block = true;
+            continue;
         }
 
         if is_kmark_toc_directive_line(line) {
@@ -1266,6 +1267,10 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
 
         if is_kmark_comment_line(line) {
             pending_scope_prelude = None;
+            continue;
+        }
+
+        if is_standalone_html_comment_line(line) {
             continue;
         }
 
@@ -1559,7 +1564,20 @@ fn is_page_break_line(line: &str) -> bool {
 }
 
 fn is_unclosed_html_comment_line(line: &str) -> bool {
-    line.starts_with(PAGE_BREAK_TOKEN_OPEN) && !line.contains(PAGE_BREAK_TOKEN_CLOSE)
+    let Some(rest) = strip_markdown_fence_indent(line) else {
+        return false;
+    };
+
+    rest.starts_with(PAGE_BREAK_TOKEN_OPEN) && !rest.contains(PAGE_BREAK_TOKEN_CLOSE)
+}
+
+fn is_standalone_html_comment_line(line: &str) -> bool {
+    let Some(rest) = strip_markdown_fence_indent(line) else {
+        return false;
+    };
+    let trimmed = rest.trim_end();
+
+    trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && trimmed.ends_with(PAGE_BREAK_TOKEN_CLOSE)
 }
 
 fn is_kmark_comment_line(line: &str) -> bool {
@@ -7235,6 +7253,33 @@ mod tests {
         assert_eq!(header.left.as_deref(), None);
         assert_eq!(header.center.as_deref(), Some("社外秘"));
         assert_eq!(header.right.as_deref(), None);
+    }
+
+    #[test]
+    fn ignores_regular_html_comments_before_page_directives_when_splitting_pages() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- header -->\n\
+             <!-- kmark page_header_right:\"Secret\" page_font_size:9pt -->\n\
+             # Body",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 1);
+        assert_eq!(
+            rendered_preview.pages[0].html,
+            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\">Body</h1>"
+        );
+        assert_eq!(
+            rendered_preview.pages[0]
+                .page_chrome_config
+                .header
+                .right
+                .as_deref(),
+            Some("Secret")
+        );
+        assert_eq!(
+            rendered_preview.pages[0].text_style.font_size.as_str(),
+            "9pt"
+        );
     }
 
     #[test]
