@@ -1,5 +1,6 @@
 import { EditorSelection, Prec, type EditorState, type Extension, type Text } from "@codemirror/state";
-import { EditorView, keymap, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { EditorView, keymap, ViewPlugin } from "@codemirror/view";
+import { formatMarkdownTablesInLineRanges } from "../../../adapters/browser/browserRustCore";
 
 type TableAlignment = "default" | "left" | "center" | "right";
 
@@ -43,13 +44,34 @@ type TableCellSelection = {
   readonly table: MarkdownTable;
 };
 
-const TABLE_TOOLBAR_CLASS = "cm-markdownTableToolbar";
+type MinimalTextChange = {
+  readonly from: number;
+  readonly insert: string;
+  readonly to: number;
+};
+
+type TableContextMenuState = {
+  readonly cleanup: () => void;
+  readonly element: HTMLDivElement;
+  readonly view: EditorView;
+};
+
+type TableContextMenuItem = {
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly run: (view: EditorView) => boolean;
+};
+
+let activeTableContextMenu: TableContextMenuState | null = null;
 
 export function createCodeMirrorMarkdownTableEditExtension(): Extension {
   return [
-    markdownTableEditTheme,
-    ViewPlugin.fromClass(MarkdownTableEditToolbarPlugin),
+    markdownTableContextMenuTheme,
+    ViewPlugin.fromClass(MarkdownTableContextMenuCleanupPlugin),
     EditorView.domEventHandlers({
+      contextmenu(event, view) {
+        return openTableContextMenu(event, view);
+      },
       copy(event, view) {
         return copySelectedTableCells(event, view);
       },
@@ -68,106 +90,238 @@ export function createCodeMirrorMarkdownTableEditExtension(): Extension {
       { key: "Ctrl-ArrowUp", run: (view) => moveActiveTableCellToEdge(view, "up") },
       { key: "Ctrl-ArrowDown", run: (view) => moveActiveTableCellToEdge(view, "down") },
       { key: "Delete", run: clearSelectedTableCells },
+      { key: "Mod-Alt-Enter", run: (view) => deleteTableRow(view) },
+      { key: "Mod-Alt-ArrowUp", run: (view) => moveTableRow(view, "up") },
+      { key: "Mod-Alt-ArrowDown", run: (view) => moveTableRow(view, "down") },
+      { key: "Mod-Alt-ArrowLeft", run: (view) => insertTableColumn(view, "left") },
+      { key: "Mod-Alt-ArrowRight", run: (view) => insertTableColumn(view, "right") },
+      { key: "Mod-Alt-Backspace", run: deleteTableColumn },
+      { key: "Shift-Mod-Alt-ArrowLeft", run: (view) => moveTableColumn(view, "left") },
+      { key: "Shift-Mod-Alt-ArrowRight", run: (view) => moveTableColumn(view, "right") },
+      { key: "Mod-Alt-l", run: (view) => setTableColumnAlignment(view, "left") },
+      { key: "Mod-Alt-e", run: (view) => setTableColumnAlignment(view, "center") },
+      { key: "Mod-Alt-r", run: (view) => setTableColumnAlignment(view, "right") },
+      { key: "Mod-Alt-m", run: mergeSelectedTableCells },
+      { key: "Mod-Alt-u", run: splitMergedTableCell },
     ])),
   ];
 }
 
-class MarkdownTableEditToolbarPlugin {
+class MarkdownTableContextMenuCleanupPlugin {
   readonly #view: EditorView;
-  readonly #toolbar: HTMLDivElement;
 
   constructor(view: EditorView) {
     this.#view = view;
-    this.#toolbar = createTableToolbar(view);
-    this.#view.dom.append(this.#toolbar);
-    this.updateToolbar();
-  }
-
-  update(update: ViewUpdate): void {
-    if (update.docChanged || update.selectionSet || update.focusChanged || update.viewportChanged || update.geometryChanged) {
-      this.updateToolbar();
-    }
   }
 
   destroy(): void {
-    this.#toolbar.remove();
-  }
-
-  updateToolbar(): void {
-    const activeCell = getActiveTableCell(this.#view.state);
-
-    if (activeCell === null || !this.#view.hasFocus) {
-      this.#toolbar.dataset.visible = "false";
-      return;
+    if (activeTableContextMenu?.view === this.#view) {
+      closeActiveTableContextMenu();
     }
-
-    const coordinates = this.#view.coordsAtPos(activeCell.cell.contentFrom);
-
-    if (coordinates === null) {
-      this.#toolbar.dataset.visible = "false";
-      return;
-    }
-
-    const editorCoordinates = this.#view.dom.getBoundingClientRect();
-    this.#toolbar.dataset.visible = "true";
-    this.#toolbar.style.left = `${Math.max(8, coordinates.left - editorCoordinates.left)}px`;
-    this.#toolbar.style.top = `${Math.max(8, coordinates.top - editorCoordinates.top - this.#toolbar.offsetHeight - 6)}px`;
   }
 }
 
-function createTableToolbar(view: EditorView): HTMLDivElement {
-  const toolbar = document.createElement("div");
-  toolbar.className = TABLE_TOOLBAR_CLASS;
-  toolbar.dataset.visible = "false";
+function openTableContextMenu(event: MouseEvent, view: EditorView): boolean {
+  const position = view.posAtCoords({
+    x: event.clientX,
+    y: event.clientY,
+  });
 
-  const groups: readonly (readonly (readonly [string, string, () => boolean])[])[] = [
+  if (position === null) {
+    return false;
+  }
+
+  const clickedCell = getTableCellAtPosition(view.state, position);
+
+  if (clickedCell === null) {
+    return false;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  view.focus();
+
+  if (!isCellInsideSelectedTableRange(view.state, clickedCell)) {
+    view.dispatch({
+      selection: EditorSelection.single(clickedCell.cell.contentFrom, clickedCell.cell.contentTo),
+    });
+  }
+
+  const activeCell = getTableCellAtPosition(view.state, clickedCell.cell.contentFrom) ?? clickedCell;
+  closeActiveTableContextMenu();
+
+  const menu = createTableContextMenu(view, activeCell);
+  view.dom.append(menu);
+  positionTableContextMenu(menu, event.clientX, event.clientY);
+
+  const ownerDocument = view.dom.ownerDocument;
+  const ownerWindow = ownerDocument.defaultView;
+  const closeOnOutsidePointer = (pointerEvent: PointerEvent) => {
+    if (pointerEvent.target instanceof Node && menu.contains(pointerEvent.target)) {
+      return;
+    }
+
+    closeActiveTableContextMenu();
+  };
+  const closeOnKeyDown = (keyboardEvent: KeyboardEvent) => {
+    if (keyboardEvent.key === "Escape") {
+      keyboardEvent.preventDefault();
+      closeActiveTableContextMenu();
+      view.focus();
+    }
+  };
+  const closeOnLayoutChange = () => {
+    closeActiveTableContextMenu();
+  };
+
+  ownerDocument.addEventListener("pointerdown", closeOnOutsidePointer, true);
+  ownerDocument.addEventListener("keydown", closeOnKeyDown, true);
+  view.scrollDOM.addEventListener("scroll", closeOnLayoutChange, true);
+  ownerWindow?.addEventListener("resize", closeOnLayoutChange);
+
+  activeTableContextMenu = {
+    cleanup: () => {
+      ownerDocument.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      ownerDocument.removeEventListener("keydown", closeOnKeyDown, true);
+      view.scrollDOM.removeEventListener("scroll", closeOnLayoutChange, true);
+      ownerWindow?.removeEventListener("resize", closeOnLayoutChange);
+    },
+    element: menu,
+    view,
+  };
+
+  return true;
+}
+
+function createTableContextMenu(view: EditorView, activeCell: ActiveTableCell): HTMLDivElement {
+  const ownerDocument = view.dom.ownerDocument;
+  const menu = ownerDocument.createElement("div");
+  menu.className = "cm-markdownTableContextMenu";
+  menu.role = "menu";
+
+  const groups: readonly (readonly TableContextMenuItem[])[] = [
     [
-      ["R+", "Insert row above", () => insertTableRow(view, "above")],
-      ["+R", "Insert row below", () => insertTableRow(view, "below")],
-      ["R-", "Delete row", () => deleteTableRow(view)],
-      ["RU", "Move row up", () => moveTableRow(view, "up")],
-      ["RD", "Move row down", () => moveTableRow(view, "down")],
+      { label: "上に行を追加", run: (targetView) => insertTableRow(targetView, "above") },
+      { label: "下に行を追加", run: (targetView) => insertTableRow(targetView, "below") },
+      { label: "行を削除", run: deleteTableRow, disabled: activeCell.row.kind === "header" },
+      {
+        disabled: activeCell.row.kind === "header" || activeCell.rowIndex <= 1,
+        label: "行を上へ移動",
+        run: (targetView) => moveTableRow(targetView, "up"),
+      },
+      {
+        disabled: activeCell.row.kind === "header" || activeCell.rowIndex >= activeCell.table.rows.length - 1,
+        label: "行を下へ移動",
+        run: (targetView) => moveTableRow(targetView, "down"),
+      },
     ],
     [
-      ["C+", "Insert column left", () => insertTableColumn(view, "left")],
-      ["+C", "Insert column right", () => insertTableColumn(view, "right")],
-      ["C-", "Delete column", () => deleteTableColumn(view)],
-      ["CL", "Move column left", () => moveTableColumn(view, "left")],
-      ["CR", "Move column right", () => moveTableColumn(view, "right")],
+      { label: "左に列を追加", run: (targetView) => insertTableColumn(targetView, "left") },
+      { label: "右に列を追加", run: (targetView) => insertTableColumn(targetView, "right") },
+      {
+        disabled: activeCell.table.columnCount <= 1,
+        label: "列を削除",
+        run: deleteTableColumn,
+      },
+      {
+        disabled: activeCell.columnIndex <= 0,
+        label: "列を左へ移動",
+        run: (targetView) => moveTableColumn(targetView, "left"),
+      },
+      {
+        disabled: activeCell.columnIndex >= activeCell.table.columnCount - 1,
+        label: "列を右へ移動",
+        run: (targetView) => moveTableColumn(targetView, "right"),
+      },
     ],
     [
-      ["L", "Align left", () => setTableColumnAlignment(view, "left")],
-      ["C", "Align center", () => setTableColumnAlignment(view, "center")],
-      ["R", "Align right", () => setTableColumnAlignment(view, "right")],
-      ["M", "Merge selected cells", () => mergeSelectedTableCells(view)],
-      ["S", "Split merged cell", () => splitMergedTableCell(view)],
+      { label: "左寄せ", run: (targetView) => setTableColumnAlignment(targetView, "left") },
+      { label: "中央寄せ", run: (targetView) => setTableColumnAlignment(targetView, "center") },
+      { label: "右寄せ", run: (targetView) => setTableColumnAlignment(targetView, "right") },
+    ],
+    [
+      {
+        disabled: !canMergeSelectedTableCells(view.state),
+        label: "セル結合",
+        run: mergeSelectedTableCells,
+      },
+      {
+        disabled: activeCell.row.kind === "header"
+          || findMergeRegionContainingCell(activeCell.table, activeCell.rowIndex, activeCell.columnIndex) === null,
+        label: "結合解除",
+        run: splitMergedTableCell,
+      },
     ],
   ];
 
   for (const group of groups) {
-    const groupElement = document.createElement("div");
-    groupElement.className = `${TABLE_TOOLBAR_CLASS}__group`;
+    const groupElement = ownerDocument.createElement("div");
+    groupElement.className = "cm-markdownTableContextMenu__group";
 
-    for (const [label, title, run] of group) {
-      const button = document.createElement("button");
+    for (const item of group) {
+      const button = ownerDocument.createElement("button");
       button.type = "button";
-      button.textContent = label;
-      button.title = title;
-      button.addEventListener("mousedown", (event) => {
-        event.preventDefault();
+      button.className = "cm-markdownTableContextMenu__item";
+      button.disabled = item.disabled === true;
+      button.role = "menuitem";
+      button.textContent = item.label;
+      button.addEventListener("mousedown", (mouseEvent) => {
+        mouseEvent.preventDefault();
       });
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
+      button.addEventListener("click", (mouseEvent) => {
+        mouseEvent.preventDefault();
+        if (button.disabled) {
+          return;
+        }
+
+        closeActiveTableContextMenu();
         view.focus();
-        run();
+        item.run(view);
       });
       groupElement.append(button);
     }
 
-    toolbar.append(groupElement);
+    menu.append(groupElement);
   }
 
-  return toolbar;
+  return menu;
+}
+
+function positionTableContextMenu(menu: HTMLElement, clientX: number, clientY: number): void {
+  const margin = 8;
+  const ownerWindow = menu.ownerDocument.defaultView ?? window;
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  const left = Math.min(clientX, ownerWindow.innerWidth - width - margin);
+  const top = Math.min(clientY, ownerWindow.innerHeight - height - margin);
+
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+}
+
+function closeActiveTableContextMenu(): void {
+  const menu = activeTableContextMenu;
+
+  if (menu === null) {
+    return;
+  }
+
+  activeTableContextMenu = null;
+  menu.cleanup();
+  menu.element.remove();
+}
+
+function isCellInsideSelectedTableRange(state: EditorState, activeCell: ActiveTableCell): boolean {
+  const selection = getSelectedTableCells(state);
+
+  if (selection === null || selection.table.startLineNumber !== activeCell.table.startLineNumber) {
+    return false;
+  }
+
+  return activeCell.rowIndex >= selection.startRowIndex
+    && activeCell.rowIndex <= selection.endRowIndex
+    && activeCell.columnIndex >= selection.startColumnIndex
+    && activeCell.columnIndex <= selection.endColumnIndex;
 }
 
 function getActiveTableCell(state: EditorState): ActiveTableCell | null {
@@ -388,10 +542,14 @@ function createTableCell(
     contentEnd -= 1;
   }
 
+  const isEmptyCell = contentStart >= contentEnd;
+  const resolvedContentStart = isEmptyCell ? rawStart : contentStart;
+  const resolvedContentEnd = isEmptyCell ? rawStart : contentEnd;
+
   return {
     columnIndex,
-    contentFrom: lineFrom + contentStart,
-    contentTo: lineFrom + contentEnd,
+    contentFrom: lineFrom + resolvedContentStart,
+    contentTo: lineFrom + resolvedContentEnd,
     rawFrom: lineFrom + rawStart,
     rawTo: lineFrom + rawEnd,
     text: lineText.slice(contentStart, contentEnd),
@@ -575,18 +733,7 @@ function moveActiveTableCell(view: EditorView, direction: "left" | "right" | "do
     rowIndex = Math.min(activeCell.table.rows.length - 1, rowIndex + 1);
   }
 
-  const targetRow = activeCell.table.rows[rowIndex];
-  const targetCell = targetRow.cells[Math.min(columnIndex, targetRow.cells.length - 1)];
-
-  if (targetCell === undefined) {
-    return false;
-  }
-
-  view.dispatch({
-    effects: EditorView.scrollIntoView(targetCell.contentFrom, { y: "center" }),
-    selection: EditorSelection.single(targetCell.contentFrom, targetCell.contentTo),
-  });
-  return true;
+  return formatTableAndSelectCell(view, activeCell.table, rowIndex, columnIndex);
 }
 
 function moveActiveTableCellToEdge(view: EditorView, direction: "left" | "right" | "up" | "down"): boolean {
@@ -618,6 +765,38 @@ function moveActiveTableCellToEdge(view: EditorView, direction: "left" | "right"
     selection: EditorSelection.single(targetCell.contentFrom, targetCell.contentTo),
   });
   return true;
+}
+
+function formatTableAndSelectCell(
+  view: EditorView,
+  table: MarkdownTable,
+  rowIndex: number,
+  columnIndex: number,
+): boolean {
+  const source = view.state.doc.toString();
+  const result = formatMarkdownTablesInLineRanges(source, [{
+    endLine: table.endLineNumber,
+    startLine: table.startLineNumber,
+  }]);
+
+  if (result.text !== source) {
+    const change = resolveMinimalTextChange(source, result.text);
+
+    view.dispatch({
+      changes: {
+        from: change.from,
+        insert: change.insert,
+        to: change.to,
+      },
+    });
+  }
+
+  selectTableCell(view, tableRowIndexToLineNumber(table.startLineNumber, rowIndex), columnIndex);
+  return true;
+}
+
+function tableRowIndexToLineNumber(tableStartLineNumber: number, rowIndex: number): number {
+  return tableStartLineNumber + rowIndex + (rowIndex === 0 ? 0 : 1);
 }
 
 function insertTableRow(view: EditorView, position: "above" | "below"): boolean {
@@ -773,7 +952,40 @@ function clearSelectedTableCells(view: EditorView): boolean {
 function mergeSelectedTableCells(view: EditorView): boolean {
   const selection = getSelectedTableCells(view.state);
 
-  if (selection === null || selection.startRowIndex === 0) {
+  if (selection === null || !canMergeTableCellSelection(selection)) {
+    return false;
+  }
+
+  const cells = matrixFromTable(selection.table);
+
+  for (let rowIndex = selection.startRowIndex; rowIndex <= selection.endRowIndex; rowIndex += 1) {
+    for (let columnIndex = selection.startColumnIndex; columnIndex <= selection.endColumnIndex; columnIndex += 1) {
+      if (rowIndex === selection.startRowIndex && columnIndex === selection.startColumnIndex) {
+        continue;
+      }
+
+      cells[rowIndex][columnIndex] = columnIndex === selection.startColumnIndex ? "^" : "<";
+    }
+  }
+
+  return replaceTable(
+    view,
+    selection.table,
+    cells,
+    selection.table.alignments,
+    selection.startRowIndex,
+    selection.startColumnIndex,
+  );
+}
+
+function canMergeSelectedTableCells(state: EditorState): boolean {
+  const selection = getSelectedTableCells(state);
+
+  return selection !== null && canMergeTableCellSelection(selection);
+}
+
+function canMergeTableCellSelection(selection: TableCellSelection): boolean {
+  if (selection.startRowIndex === 0) {
     return false;
   }
 
@@ -796,24 +1008,7 @@ function mergeSelectedTableCells(view: EditorView): boolean {
     }
   }
 
-  for (let rowIndex = selection.startRowIndex; rowIndex <= selection.endRowIndex; rowIndex += 1) {
-    for (let columnIndex = selection.startColumnIndex; columnIndex <= selection.endColumnIndex; columnIndex += 1) {
-      if (rowIndex === selection.startRowIndex && columnIndex === selection.startColumnIndex) {
-        continue;
-      }
-
-      cells[rowIndex][columnIndex] = columnIndex === selection.startColumnIndex ? "^" : "<";
-    }
-  }
-
-  return replaceTable(
-    view,
-    selection.table,
-    cells,
-    selection.table.alignments,
-    selection.startRowIndex,
-    selection.startColumnIndex,
-  );
+  return true;
 }
 
 function splitMergedTableCell(view: EditorView): boolean {
@@ -1128,55 +1323,107 @@ function readCodePoint(text: string, offset: number): string {
   return String.fromCodePoint(codePoint);
 }
 
+function readPreviousCodePoint(text: string, offset: number): string {
+  const lastCodeUnitOffset = offset - 1;
+  const lastCodeUnit = text.charCodeAt(lastCodeUnitOffset);
+
+  if (
+    lastCodeUnit >= 0xdc00
+    && lastCodeUnit <= 0xdfff
+    && lastCodeUnitOffset > 0
+  ) {
+    const previousCodeUnit = text.charCodeAt(lastCodeUnitOffset - 1);
+
+    if (previousCodeUnit >= 0xd800 && previousCodeUnit <= 0xdbff) {
+      return text.slice(lastCodeUnitOffset - 1, offset);
+    }
+  }
+
+  return text[lastCodeUnitOffset];
+}
+
+function resolveMinimalTextChange(before: string, after: string): MinimalTextChange {
+  let prefix = 0;
+  const maximumPrefix = Math.min(before.length, after.length);
+
+  while (prefix < maximumPrefix) {
+    const beforeCharacter = readCodePoint(before, prefix);
+    const afterCharacter = readCodePoint(after, prefix);
+
+    if (beforeCharacter !== afterCharacter) {
+      break;
+    }
+
+    prefix += beforeCharacter.length;
+  }
+
+  let beforeSuffix = before.length;
+  let afterSuffix = after.length;
+
+  while (beforeSuffix > prefix && afterSuffix > prefix) {
+    const beforeCharacter = readPreviousCodePoint(before, beforeSuffix);
+    const afterCharacter = readPreviousCodePoint(after, afterSuffix);
+
+    if (beforeCharacter !== afterCharacter) {
+      break;
+    }
+
+    beforeSuffix -= beforeCharacter.length;
+    afterSuffix -= afterCharacter.length;
+  }
+
+  return {
+    from: prefix,
+    insert: after.slice(prefix, afterSuffix),
+    to: beforeSuffix,
+  };
+}
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-const markdownTableEditTheme = EditorView.theme({
-  "&": {
-    position: "relative",
-  },
-  ".cm-markdownTableToolbar": {
-    alignItems: "center",
+const markdownTableContextMenuTheme = EditorView.theme({
+  ".cm-markdownTableContextMenu": {
     backgroundColor: "var(--surface-muted)",
     border: "1px solid var(--border)",
     borderRadius: "6px",
-    boxShadow: "0 8px 24px rgb(0 0 0 / 18%)",
-    display: "none",
-    gap: "4px",
+    boxShadow: "0 10px 28px rgb(0 0 0 / 22%)",
+    color: "var(--text)",
+    minWidth: "176px",
     padding: "4px",
-    position: "absolute",
-    zIndex: "20",
+    position: "fixed",
+    zIndex: "60",
   },
-  ".cm-markdownTableToolbar[data-visible=\"true\"]": {
-    display: "flex",
+  ".cm-markdownTableContextMenu__group": {
+    borderBottom: "1px solid var(--border)",
+    padding: "3px 0",
   },
-  ".cm-markdownTableToolbar__group": {
-    borderRight: "1px solid var(--border)",
-    display: "flex",
-    gap: "2px",
-    paddingRight: "4px",
+  ".cm-markdownTableContextMenu__group:last-child": {
+    borderBottom: "none",
   },
-  ".cm-markdownTableToolbar__group:last-child": {
-    borderRight: "none",
-    paddingRight: "0",
-  },
-  ".cm-markdownTableToolbar button": {
-    alignItems: "center",
+  ".cm-markdownTableContextMenu__item": {
     backgroundColor: "transparent",
-    border: "1px solid transparent",
+    border: "none",
     borderRadius: "4px",
     color: "var(--text)",
     cursor: "pointer",
-    display: "inline-flex",
-    font: "600 10px/1 var(--app-font-family)",
-    height: "24px",
-    justifyContent: "center",
-    minWidth: "24px",
-    padding: "0 5px",
+    display: "block",
+    font: "inherit",
+    padding: "6px 10px",
+    textAlign: "left",
+    width: "100%",
   },
-  ".cm-markdownTableToolbar button:hover": {
+  ".cm-markdownTableContextMenu__item:hover, .cm-markdownTableContextMenu__item:focus-visible": {
     backgroundColor: "color-mix(in srgb, var(--focus) 16%, transparent)",
-    borderColor: "var(--border)",
+    outline: "none",
+  },
+  ".cm-markdownTableContextMenu__item:disabled": {
+    color: "var(--text-soft)",
+    cursor: "default",
+    opacity: "0.55",
+  },
+  ".cm-markdownTableContextMenu__item:disabled:hover": {
+    backgroundColor: "transparent",
   },
 });
