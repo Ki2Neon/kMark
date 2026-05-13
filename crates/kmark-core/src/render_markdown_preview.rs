@@ -825,8 +825,7 @@ fn collect_kmark_heading_number_document(content: &str) -> KmarkHeadingNumberDoc
             let source_line = resolve_line_number(&line_starts, range.start);
             let level = heading_level_number(level);
 
-            if let Some(text) = next_kmark_heading_number_text(&scope_stack, &mut counters, level)
-            {
+            if let Some(text) = next_kmark_heading_number_text(&scope_stack, &mut counters, level) {
                 text_by_source_line.insert(source_line, text);
             }
         } else if is_pending_heading_number_break_event(&event) {
@@ -856,8 +855,7 @@ fn apply_kmark_heading_number_comment(
 
     match comment {
         KmarkComment::Params(bundle) => {
-            let (start_line, end_line) =
-                resolve_source_line_range(content, line_starts, 0, &range);
+            let (start_line, end_line) = resolve_source_line_range(content, line_starts, 0, &range);
 
             if let Some(pending) = pending_kmark_params.as_mut() {
                 pending.bundle.merge(&bundle);
@@ -981,10 +979,7 @@ fn resolve_active_heading_number_config(
     config
 }
 
-fn format_kmark_heading_number(
-    counters: &[u32],
-    pattern: KmarkHeadingNumberPattern,
-) -> String {
+fn format_kmark_heading_number(counters: &[u32], pattern: KmarkHeadingNumberPattern) -> String {
     match pattern {
         KmarkHeadingNumberPattern::Dot => {
             let number = join_heading_number_components(counters, ".");
@@ -1930,8 +1925,9 @@ impl<'a> HtmlEmitter<'a> {
                 }
                 html.push('>');
                 self.push_raw(&html);
-                if let Some(number_text) =
-                    self.heading_number_document.heading_number_text(source_line)
+                if let Some(number_text) = self
+                    .heading_number_document
+                    .heading_number_text(source_line)
                 {
                     self.push_raw("<span class=\"kmark-heading-number\">");
                     self.push_raw(&escape_html(number_text));
@@ -2822,7 +2818,14 @@ impl<'a> HtmlEmitter<'a> {
 
         if !headings.is_empty() {
             let tree = build_kmark_toc_tree(&headings);
-            push_kmark_toc_node_list(&mut html, &tree, config.ordered, config.links, false);
+            push_kmark_toc_node_list(
+                &mut html,
+                &tree,
+                config.ordered,
+                config.links,
+                self.heading_number_document,
+                false,
+            );
         }
 
         html.push_str("</nav>");
@@ -3394,6 +3397,7 @@ fn push_kmark_toc_node_list(
     nodes: &[KmarkTocRenderNode<'_>],
     ordered: bool,
     links: bool,
+    heading_number_document: &KmarkHeadingNumberDocument,
     nested: bool,
 ) {
     let tag_name = if ordered { "ol" } else { "ul" };
@@ -3410,9 +3414,16 @@ fn push_kmark_toc_node_list(
             "<li class=\"kmark-toc__item kmark-toc__item--depth-{}\" data-toc-depth=\"{}\">",
             node.heading.level, node.heading.level,
         ));
-        push_kmark_toc_node_label(html, node.heading, links);
+        push_kmark_toc_node_label(html, node.heading, links, heading_number_document);
         if !node.children.is_empty() {
-            push_kmark_toc_node_list(html, &node.children, ordered, links, true);
+            push_kmark_toc_node_list(
+                html,
+                &node.children,
+                ordered,
+                links,
+                heading_number_document,
+                true,
+            );
         }
         html.push_str("</li>");
     }
@@ -3420,21 +3431,40 @@ fn push_kmark_toc_node_list(
     html.push_str(&format!("</{tag_name}>"));
 }
 
-fn push_kmark_toc_node_label(html: &mut String, heading: &KmarkTocHeading, links: bool) {
+fn push_kmark_toc_node_label(
+    html: &mut String,
+    heading: &KmarkTocHeading,
+    links: bool,
+    heading_number_document: &KmarkHeadingNumberDocument,
+) {
     if links {
         if let Some(id) = heading.link_id() {
             html.push_str("<a class=\"kmark-toc__link\" href=\"#");
             html.push_str(&escape_html(id));
             html.push_str("\">");
-            html.push_str(&escape_html(&heading.text));
+            push_kmark_toc_node_label_content(html, heading, heading_number_document);
             html.push_str("</a>");
             return;
         }
     }
 
     html.push_str("<span class=\"kmark-toc__text\">");
-    html.push_str(&escape_html(&heading.text));
+    push_kmark_toc_node_label_content(html, heading, heading_number_document);
     html.push_str("</span>");
+}
+
+fn push_kmark_toc_node_label_content(
+    html: &mut String,
+    heading: &KmarkTocHeading,
+    heading_number_document: &KmarkHeadingNumberDocument,
+) {
+    if let Some(number_text) = heading_number_document.heading_number_text(heading.source_line) {
+        html.push_str("<span class=\"kmark-heading-number\">");
+        html.push_str(&escape_html(number_text));
+        html.push_str("</span>");
+    }
+
+    html.push_str(&escape_html(&heading.text));
 }
 
 impl KmarkParamBundle {
@@ -7162,6 +7192,24 @@ mod tests {
     }
 
     #[test]
+    fn renders_heading_numbers_in_kmark_toc_labels() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark toc:true toc_min_depth:2 toc_depth:3 -->\n\
+             <!-- kmark heading_number:true heading_number_from:2 heading_number_depth:3 heading_number_pattern:dot -->\n\
+             <!-- kmark { -->\n\n\
+             # Title\n\
+             ## Overview\n\
+             ### Detail\n\
+             <!-- kmark } -->",
+        );
+        let toc_html = extract_toc_html(&rendered_preview.html);
+
+        assert!(toc_html.contains("><span class=\"kmark-heading-number\">1.</span>Overview</a>"));
+        assert!(toc_html.contains("><span class=\"kmark-heading-number\">1.1</span>Detail</a>"));
+        assert!(!toc_html.contains("Title"));
+    }
+
+    #[test]
     fn applies_unclosed_scope_page_settings_and_nested_overrides() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm page_font_size:11pt -->\n\
@@ -8837,9 +8885,9 @@ mod tests {
         let markdown = "<!-- kmark heading_number:true heading_number_from:2 heading_number_depth:3 heading_number_pattern:dot -->\n<!-- kmark { -->\n\n# ドキュメントタイトル\n\n## 概要\n### 背景\n\n## 仕様\n### 詳細";
         let rendered_preview = render_markdown_preview(markdown);
 
-        assert!(rendered_preview
-            .html
-            .contains("<h1 data-source-line-start=\"3\" data-source-line-end=\"3\">ドキュメントタイトル</h1>"));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\">ドキュメントタイトル</h1>"
+        ));
         assert!(rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">1.</span>概要"));
@@ -8888,9 +8936,9 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">2.1</span>C child"));
-        assert!(rendered_preview
-            .html
-            .contains("<h2 data-source-line-start=\"18\" data-source-line-end=\"18\">Outside</h2>"));
+        assert!(rendered_preview.html.contains(
+            "<h2 data-source-line-start=\"18\" data-source-line-end=\"18\">Outside</h2>"
+        ));
         assert!(!rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">3.</span>Outside"));

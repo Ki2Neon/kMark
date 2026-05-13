@@ -183,6 +183,7 @@ CONFIDENTIAL
 
 - 目次対象: directive位置より後の見出し
 - link有効時: heading id 未指定なら `kmark-heading-*` を生成
+- heading_number有効時: 見出し番号を目次にも表示
 - 用紙preview: 目次page番号列を補完
 
 ### 表を詰める

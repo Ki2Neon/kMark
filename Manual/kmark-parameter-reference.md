@@ -404,6 +404,7 @@
 - page break跨ぎ: 対象
 - explicit heading id: `{#manual}` を優先
 - generated heading id: link有効時に自動生成
+- heading_number有効時: 目次labelへ同一番号を表示
 - 用紙preview: heading実pageから page番号列を補完
 
 ## Preset Parameters
