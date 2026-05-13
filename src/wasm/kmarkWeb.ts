@@ -17,6 +17,42 @@ type RenderedMarkdownPreviewPayload = {
   readonly defaultTextStyle: PreviewTextStyle;
 };
 
+export type TableFormatOptionsPayload = {
+  readonly inferNumericAlignment?: boolean;
+  readonly minSeparatorWidth?: number;
+  readonly tabWidth?: number;
+  readonly preserveLineEnding?: boolean;
+};
+
+export type TableFormatLineRangePayload = {
+  readonly startLine: number;
+  readonly endLine: number;
+};
+
+export type TableDiagnosticKind =
+  | "invalidLeftMerge"
+  | "invalidUpMerge"
+  | "nonRectangularMerge"
+  | "columnCountMismatch";
+
+export type SourceRangePayload = {
+  readonly start: number;
+  readonly end: number;
+};
+
+export type TableDiagnosticPayload = {
+  readonly kind: TableDiagnosticKind;
+  readonly message: string;
+  readonly line: number | null;
+  readonly column: number | null;
+  readonly range: SourceRangePayload | null;
+};
+
+export type FormatMarkdownTablesPayload = {
+  readonly text: string;
+  readonly diagnostics: readonly TableDiagnosticPayload[];
+};
+
 export function parseJsonPayload<T>(json: string): T {
   return JSON.parse(json) as T;
 }
@@ -133,4 +169,26 @@ export function resolveEditFontFamilyWithWasmSync(editFontId: string): string {
 
 export function deriveEditorStatsJsonWithWasmSync(content: string): string {
   return loadKmarkWebModuleSync().derive_editor_stats_json(content);
+}
+
+export function formatMarkdownTablesJsonWithWasmSync(
+  content: string,
+  options: TableFormatOptionsPayload | null,
+): string {
+  return loadKmarkWebModuleSync().format_markdown_tables_json(
+    content,
+    options === null ? null : JSON.stringify(options),
+  );
+}
+
+export function formatMarkdownTablesInLineRangesJsonWithWasmSync(
+  content: string,
+  lineRanges: readonly TableFormatLineRangePayload[],
+  options: TableFormatOptionsPayload | null,
+): string {
+  return loadKmarkWebModuleSync().format_markdown_tables_in_line_ranges_json(
+    content,
+    JSON.stringify(lineRanges),
+    options === null ? null : JSON.stringify(options),
+  );
 }

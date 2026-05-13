@@ -1,9 +1,11 @@
 use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
-    reduce_editor_state, render_markdown_preview_with_file_path, resolve_app_font_family,
-    resolve_edit_font_family, DesktopLayoutPreferences, EditorPreferences, EditorState,
-    EditorStateAction, EditorStats, PageNumberConfig, PageStyle, PreviewPreferences,
-    PreviewTextStyle, RenderedPage, StoredEdit, ThemePreferences,
+    format_markdown_tables, format_markdown_tables_in_line_ranges, reduce_editor_state,
+    render_markdown_preview_with_file_path, resolve_app_font_family, resolve_edit_font_family,
+    DesktopLayoutPreferences, EditorPreferences, EditorState, EditorStateAction, EditorStats,
+    PageNumberConfig, PageStyle, PreviewPreferences, PreviewTextStyle, RenderedPage, StoredEdit,
+    TableDiagnostic, TableDiagnosticKind, TableFormatLineRange, TableFormatOptions,
+    ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -145,6 +147,46 @@ struct EditorStatsPayload {
     characters: usize,
     lines: usize,
     reading_minutes: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TableFormatOptionsInput {
+    infer_numeric_alignment: Option<bool>,
+    min_separator_width: Option<usize>,
+    tab_width: Option<usize>,
+    preserve_line_ending: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TableFormatLineRangeInput {
+    start_line: usize,
+    end_line: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FormatMarkdownTablesPayload {
+    text: String,
+    diagnostics: Vec<TableDiagnosticPayload>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TableDiagnosticPayload {
+    kind: String,
+    message: String,
+    line: Option<usize>,
+    column: Option<usize>,
+    range: Option<SourceRangePayload>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceRangePayload {
+    start: usize,
+    end: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -332,6 +374,46 @@ pub fn derive_editor_stats_json(content: String) -> String {
 }
 
 #[wasm_bindgen]
+pub fn format_markdown_tables_json(content: String, options_input: Option<String>) -> String {
+    let options = parse_json::<TableFormatOptionsInput>(options_input)
+        .map(TableFormatOptions::from)
+        .unwrap_or_default();
+    let result = format_markdown_tables(&content, options);
+
+    stringify_format_result(result)
+}
+
+#[wasm_bindgen]
+pub fn format_markdown_tables_in_line_ranges_json(
+    content: String,
+    line_ranges_input: String,
+    options_input: Option<String>,
+) -> String {
+    let line_ranges = parse_json::<Vec<TableFormatLineRangeInput>>(Some(line_ranges_input))
+        .unwrap_or_default()
+        .into_iter()
+        .map(TableFormatLineRange::from)
+        .collect::<Vec<_>>();
+    let options = parse_json::<TableFormatOptionsInput>(options_input)
+        .map(TableFormatOptions::from)
+        .unwrap_or_default();
+    let result = format_markdown_tables_in_line_ranges(&content, &line_ranges, options);
+
+    stringify_format_result(result)
+}
+
+fn stringify_format_result(result: kmark_core::FormatResult) -> String {
+    stringify(&FormatMarkdownTablesPayload {
+        text: result.text,
+        diagnostics: result
+            .diagnostics
+            .iter()
+            .map(TableDiagnosticPayload::from)
+            .collect(),
+    })
+}
+
+#[wasm_bindgen]
 pub fn normalize_preview_preferences_json(input: Option<String>) -> String {
     let payload = parse_json::<PreviewPreferencesInput>(input);
     let preview_preferences = PreviewPreferences::new(
@@ -504,6 +586,58 @@ impl From<&EditorStats> for EditorStatsPayload {
     }
 }
 
+impl From<TableFormatOptionsInput> for TableFormatOptions {
+    fn from(input: TableFormatOptionsInput) -> Self {
+        let default_options = TableFormatOptions::default();
+
+        Self {
+            infer_numeric_alignment: input
+                .infer_numeric_alignment
+                .unwrap_or(default_options.infer_numeric_alignment),
+            min_separator_width: input
+                .min_separator_width
+                .unwrap_or(default_options.min_separator_width),
+            tab_width: input.tab_width.unwrap_or(default_options.tab_width),
+            preserve_line_ending: input
+                .preserve_line_ending
+                .unwrap_or(default_options.preserve_line_ending),
+        }
+    }
+}
+
+impl From<TableFormatLineRangeInput> for TableFormatLineRange {
+    fn from(input: TableFormatLineRangeInput) -> Self {
+        Self {
+            start_line: input.start_line,
+            end_line: input.end_line,
+        }
+    }
+}
+
+impl From<&TableDiagnostic> for TableDiagnosticPayload {
+    fn from(diagnostic: &TableDiagnostic) -> Self {
+        Self {
+            kind: table_diagnostic_kind_name(diagnostic.kind).to_owned(),
+            message: diagnostic.message.clone(),
+            line: diagnostic.line,
+            column: diagnostic.column,
+            range: diagnostic.range.as_ref().map(|range| SourceRangePayload {
+                start: range.start,
+                end: range.end,
+            }),
+        }
+    }
+}
+
+fn table_diagnostic_kind_name(kind: TableDiagnosticKind) -> &'static str {
+    match kind {
+        TableDiagnosticKind::InvalidLeftMerge => "invalidLeftMerge",
+        TableDiagnosticKind::InvalidUpMerge => "invalidUpMerge",
+        TableDiagnosticKind::NonRectangularMerge => "nonRectangularMerge",
+        TableDiagnosticKind::ColumnCountMismatch => "columnCountMismatch",
+    }
+}
+
 impl From<EditorStateActionInput> for EditorStateAction {
     fn from(action: EditorStateActionInput) -> Self {
         match action {
@@ -559,7 +693,10 @@ impl From<&StoredEdit> for EditorDraftPayload {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_markdown_preview_json, RenderedMarkdownPreviewPayload};
+    use super::{
+        format_markdown_tables_in_line_ranges_json, format_markdown_tables_json,
+        render_markdown_preview_json, FormatMarkdownTablesPayload, RenderedMarkdownPreviewPayload,
+    };
 
     #[test]
     fn wasm_render_output_matches_core_renderer() {
@@ -572,5 +709,37 @@ mod tests {
 
         assert_eq!(wasm_output.html, core_output.html);
         assert_eq!(wasm_output.page_htmls, core_output.page_htmls);
+    }
+
+    #[test]
+    fn wasm_table_formatter_returns_core_format_result() {
+        let output = serde_json::from_str::<FormatMarkdownTablesPayload>(
+            &format_markdown_tables_json("|名前|年齢|\n|-|-|\n|山田|20|".to_owned(), None),
+        )
+        .expect("wasm table format payload parse failed");
+
+        assert_eq!(
+            output.text,
+            "| 名前 | 年齢 |\n| ---- | ---: |\n| 山田 |   20 |"
+        );
+        assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn wasm_table_formatter_can_limit_target_line_ranges() {
+        let output = serde_json::from_str::<FormatMarkdownTablesPayload>(
+            &format_markdown_tables_in_line_ranges_json(
+                "|a|b|\n|-|-|\n|x|y|\n\n|c|d|\n|-|-|\n|1|2|".to_owned(),
+                r#"[{"startLine":5,"endLine":5}]"#.to_owned(),
+                None,
+            ),
+        )
+        .expect("wasm table format payload parse failed");
+
+        assert_eq!(
+            output.text,
+            "|a|b|\n|-|-|\n|x|y|\n\n|    c |    d |\n| ---: | ---: |\n|    1 |    2 |"
+        );
+        assert!(output.diagnostics.is_empty());
     }
 }
