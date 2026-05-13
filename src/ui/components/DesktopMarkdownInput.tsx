@@ -11,6 +11,7 @@ import { type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
 import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
 import { createCodeMirrorMarkdownTableAutoFormatExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableAutoFormatExtension";
+import { createCodeMirrorMarkdownTableEditExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableEditExtension";
 
 const DESKTOP_EDITOR_BASIC_SETUP = {
   autocompletion: false,
@@ -82,6 +83,7 @@ const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COM
 const KMARK_COMPLETION_SOURCE = createCodeMirrorKmarkCompletionSource();
 const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
 const MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION = createCodeMirrorMarkdownTableAutoFormatExtension();
+const MARKDOWN_TABLE_EDIT_EXTENSION = createCodeMirrorMarkdownTableEditExtension();
 const EDITOR_COMPLETION_SOURCE: CompletionSource = (context) => (
   KMARK_COMPLETION_SOURCE(context) ?? (context.explicit ? MARKDOWN_SNIPPET_COMPLETION_SOURCE(context) : null)
 );
@@ -393,6 +395,7 @@ function DesktopMarkdownInputComponent({
       markdown(),
       previewRequestedLineHighlightField,
       KMARK_VALIDATION_EXTENSION,
+      MARKDOWN_TABLE_EDIT_EXTENSION,
       MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       EditorView.lineWrapping,
