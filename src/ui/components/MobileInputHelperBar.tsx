@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 
 export type MobileEditorInsertAdapter = {
   readonly insertText: (text: string) => void;
@@ -66,7 +67,11 @@ function MobileInputHelperBarComponent({ insertAdapter }: MobileInputHelperBarPr
     event.preventDefault();
   };
 
-  return (
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div
       className="mobile-input-helper-bar"
       style={{ bottom: `calc(${bottomOffset}px + env(safe-area-inset-bottom))` }}
@@ -88,7 +93,8 @@ function MobileInputHelperBarComponent({ insertAdapter }: MobileInputHelperBarPr
           {command.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

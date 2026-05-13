@@ -781,12 +781,6 @@ input:focus-visible,
     color-mix(in srgb, var(--surface-muted) 48%, var(--surface));
 }
 
-@media (min-width: 769px) {
-  .mobile-input-helper-bar {
-    display: none;
-  }
-}
-
 .edit-section__textarea:focus,
 .edit-section__textarea:focus-visible {
   outline: none;
