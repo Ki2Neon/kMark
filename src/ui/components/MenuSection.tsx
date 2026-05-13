@@ -1,4 +1,4 @@
-import { memo, useState, type ChangeEvent } from "react";
+import { memo, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { type LayoutMode } from "../../domain/editor";
 import {
   APP_FONT_OPTIONS,
@@ -102,6 +102,10 @@ function MenuSectionComponent({
   onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
   const [menuSearchText, setMenuSearchText] = useState("");
+  const [appFontDraft, setAppFontDraft] = useState(appFontId);
+  const [editFontDraft, setEditFontDraft] = useState(editFontId);
+  const [focusedFontField, setFocusedFontField] = useState<"app" | "edit" | null>(null);
+  const discardNextFontBlurRef = useRef(false);
   const normalizedMenuSearchText = normalizeMenuSearchValue(menuSearchText);
   const matchesMenuSearch = (...values: string[]) => {
     if (normalizedMenuSearchText.length === 0) {
@@ -156,6 +160,18 @@ function MenuSectionComponent({
     layoutModeGroupVisible ||
     multiCursorGroupVisible;
 
+  useEffect(() => {
+    if (focusedFontField !== "app") {
+      setAppFontDraft(appFontId);
+    }
+  }, [appFontId, focusedFontField]);
+
+  useEffect(() => {
+    if (focusedFontField !== "edit") {
+      setEditFontDraft(editFontId);
+    }
+  }, [editFontId, focusedFontField]);
+
   const handleMenuSearchInput = (event: ChangeEvent<HTMLInputElement>) => {
     setMenuSearchText(event.currentTarget.value);
   };
@@ -197,11 +213,71 @@ function MenuSectionComponent({
   };
 
   const handleAppFontInput = (event: ChangeEvent<HTMLInputElement>) => {
-    onAppFontChange(event.currentTarget.value);
+    setAppFontDraft(event.currentTarget.value);
   };
 
   const handleEditFontInput = (event: ChangeEvent<HTMLInputElement>) => {
-    onEditFontChange(event.currentTarget.value);
+    setEditFontDraft(event.currentTarget.value);
+  };
+
+  const commitAppFontDraft = () => {
+    onAppFontChange(appFontDraft);
+  };
+
+  const commitEditFontDraft = () => {
+    onEditFontChange(editFontDraft);
+  };
+
+  const handleAppFontFocus = () => {
+    setFocusedFontField("app");
+  };
+
+  const handleEditFontFocus = () => {
+    setFocusedFontField("edit");
+  };
+
+  const handleAppFontBlur = () => {
+    setFocusedFontField(null);
+    if (discardNextFontBlurRef.current) {
+      discardNextFontBlurRef.current = false;
+      return;
+    }
+    commitAppFontDraft();
+  };
+
+  const handleEditFontBlur = () => {
+    setFocusedFontField(null);
+    if (discardNextFontBlurRef.current) {
+      discardNextFontBlurRef.current = false;
+      return;
+    }
+    commitEditFontDraft();
+  };
+
+  const handleAppFontKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      discardNextFontBlurRef.current = true;
+      setAppFontDraft(appFontId);
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleEditFontKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      discardNextFontBlurRef.current = true;
+      setEditFontDraft(editFontId);
+      event.currentTarget.blur();
+    }
   };
 
   const handleEditFontSizeInput = (event: ChangeEvent<HTMLInputElement>) => {
@@ -513,8 +589,11 @@ function MenuSectionComponent({
               <span className="menu-section__field-label">Edit</span>
               <input
                 type="text"
-                value={editFontId}
+                value={editFontDraft}
                 onChange={handleEditFontInput}
+                onBlur={handleEditFontBlur}
+                onFocus={handleEditFontFocus}
+                onKeyDown={handleEditFontKeyDown}
                 aria-label="Edit フォント"
                 className="menu-section__select"
                 list={EDIT_FONT_DATALIST_ID}
@@ -534,8 +613,11 @@ function MenuSectionComponent({
               <span className="menu-section__field-label">アプリ</span>
               <input
                 type="text"
-                value={appFontId}
+                value={appFontDraft}
                 onChange={handleAppFontInput}
+                onBlur={handleAppFontBlur}
+                onFocus={handleAppFontFocus}
+                onKeyDown={handleAppFontKeyDown}
                 aria-label="アプリフォント"
                 className="menu-section__select"
                 list={APP_FONT_DATALIST_ID}
