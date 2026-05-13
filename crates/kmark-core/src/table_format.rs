@@ -504,7 +504,7 @@ fn collect_table_end(lines: &[SourceLine<'_>], start: usize) -> usize {
     end
 }
 
-fn split_table_cells(line: &str) -> Vec<String> {
+pub(crate) fn split_table_cells(line: &str) -> Vec<String> {
     let mut cells = Vec::new();
     let mut cell_start = 0;
     let mut code_span_ticks: Option<usize> = None;
@@ -548,7 +548,7 @@ fn split_table_cells(line: &str) -> Vec<String> {
     cells
 }
 
-fn has_table_delimiter_pipe(line: &str) -> bool {
+pub(crate) fn has_table_delimiter_pipe(line: &str) -> bool {
     let mut code_span_ticks: Option<usize> = None;
     let mut index = 0;
 
