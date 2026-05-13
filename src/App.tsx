@@ -3,6 +3,17 @@ import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
 import { useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
+import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
+
+function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
+  if (typeof window === "undefined") {
+    return "stored";
+  }
+
+  return new URLSearchParams(window.location.search).get("kmarkInitialDocument") === "new-untitled"
+    ? "new-untitled"
+    : "stored";
+}
 
 function App() {
   const {
@@ -52,6 +63,7 @@ function App() {
       canControlWindowsStartupTrayResident={canControlWindowsStartupTrayResident}
       editFontId={editFontId}
       editFontSizePx={editFontSizePx}
+      initialDocumentMode={detectInitialEditorDocumentMode()}
       multiCursorModifier={multiCursorModifier}
       showLineNumbers={showLineNumbers}
       startupEditMode={startupEditMode}

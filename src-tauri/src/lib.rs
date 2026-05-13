@@ -9,7 +9,7 @@ use std::{
     ffi::OsStr,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, MutexGuard,
     },
 };
@@ -17,7 +17,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
 use infra::{
@@ -33,8 +33,9 @@ use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ICON_ID: &str = "main-tray";
-const TRAY_SHOW_MENU_ITEM_ID: &str = "tray-show";
 const TRAY_QUIT_MENU_ITEM_ID: &str = "tray-quit";
+const TRAY_UNTITLED_WINDOW_LABEL_PREFIX: &str = "tray-untitled";
+const TRAY_UNTITLED_WINDOW_URL: &str = "index.html?kmarkInitialDocument=new-untitled";
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
 
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +57,7 @@ pub(crate) struct AppState {
     pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
     pub(crate) should_exit: AtomicBool,
+    pub(crate) next_untitled_window_sequence: AtomicU64,
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -85,17 +87,51 @@ fn should_start_hidden() -> bool {
         .any(|arg| arg == OsStr::new(AUTOSTART_HIDDEN_ARG))
 }
 
-#[cfg(desktop)]
-fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(
+fn create_new_untitled_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::Result<()> {
+    let label = next_untitled_window_label(app);
+    let window = WebviewWindowBuilder::new(
         app,
-        TRAY_SHOW_MENU_ITEM_ID,
-        "Show All kMark",
-        true,
-        None::<&str>,
-    )?;
+        label,
+        WebviewUrl::App(TRAY_UNTITLED_WINDOW_URL.into()),
+    )
+    .title("untitled.md - kMark")
+    .inner_size(1280.0, 860.0)
+    .min_inner_size(50.0, 50.0)
+    .visible(true)
+    .focused(true)
+    .build()?;
+
+    let _ = window.set_focus();
+
+    Ok(())
+}
+
+fn next_untitled_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    let state = app.state::<AppState>();
+    let next_sequence = state
+        .next_untitled_window_sequence
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+
+    format!("{TRAY_UNTITLED_WINDOW_LABEL_PREFIX}-{next_sequence}")
+}
+
+fn request_new_untitled_window<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) {
+    let app_handle = app.clone();
+
+    std::thread::spawn(move || {
+        if let Err(error) = create_new_untitled_window(&app_handle) {
+            eprintln!("failed to create tray untitled window: {error}");
+        }
+    });
+}
+
+#[cfg(desktop)]
+fn create_tray<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let quit_item = MenuItem::with_id(app, TRAY_QUIT_MENU_ITEM_ID, "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&quit_item])?;
 
     let icon = app
         .default_window_icon()
@@ -108,12 +144,6 @@ fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            TRAY_SHOW_MENU_ITEM_ID => {
-                if let Err(error) = broadcast_command(app, TrayCommandKind::ShowAll) {
-                    eprintln!("failed to broadcast tray show-all command: {error}");
-                }
-                focus_main_window(app);
-            }
             TRAY_QUIT_MENU_ITEM_ID => {
                 if let Err(error) = broadcast_command(app, TrayCommandKind::QuitAll) {
                     eprintln!("failed to broadcast tray quit-all command: {error}");
@@ -132,10 +162,7 @@ fn create_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()
                 ..
             } = event
             {
-                if let Err(error) = broadcast_command(tray.app_handle(), TrayCommandKind::ShowAll) {
-                    eprintln!("failed to broadcast tray show-all command: {error}");
-                }
-                focus_main_window(tray.app_handle());
+                request_new_untitled_window(tray.app_handle());
             }
         })
         .build(app)?;
@@ -171,7 +198,7 @@ fn handle_startup_markdown_open_requests<R: tauri::Runtime>(app: &tauri::AppHand
 fn handle_tray_command<R: tauri::Runtime>(app: &tauri::AppHandle<R>, command: TrayCommandKind) {
     match command {
         TrayCommandKind::ShowAll => {
-            show_main_window(app);
+            // Keep stale commands from older versions inert instead of restoring hidden windows.
         }
         TrayCommandKind::QuitAll => {
             app.state::<AppState>()
@@ -193,7 +220,7 @@ fn lock_tray_coordinator<'a>(
 }
 
 #[cfg(desktop)]
-fn maybe_register_tray<R: tauri::Runtime>(
+fn maybe_register_tray<R: tauri::Runtime + 'static>(
     app: &tauri::AppHandle<R>,
     coordinator: &Arc<Mutex<TrayCoordinator>>,
 ) -> Result<(), TrayRuntimeError> {
