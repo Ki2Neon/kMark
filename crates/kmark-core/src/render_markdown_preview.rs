@@ -5163,16 +5163,14 @@ fn is_pending_kmark_target_event(event: &Event<'static>) -> bool {
 fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective> {
     let mut directive = PartialPageDirective::default();
 
-    for token in split_kmark_tokens(input) {
-        let Some((key, value)) = token.split_once(':') else {
-            continue;
-        };
+    for (key, value) in split_kmark_param_pairs(input) {
+        let value = value.as_str();
 
         if key == "page_scope" {
             return None;
         }
 
-        match key {
+        match key.as_str() {
             "page_size" => {
                 if let Some(page_size) = parse_kmark_page_size_value(value) {
                     directive.page_size = Some(page_size);
