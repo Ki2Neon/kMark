@@ -374,7 +374,19 @@ function findCellInTable(state: EditorState, table: MarkdownTable, position: num
     }
   }
 
-  if (fallbackCell === undefined || position < row.cells[0].contentFrom) {
+  if (fallbackCell === undefined) {
+    return null;
+  }
+
+  if (
+    position > fallbackCell.rawTo
+    && rowIndex === table.rows.length - 1
+    && fallbackCell.columnIndex === table.columnCount - 1
+  ) {
+    return null;
+  }
+
+  if (position < row.cells[0].contentFrom) {
     const firstCell = row.cells[0];
 
     return firstCell === undefined
@@ -744,6 +756,15 @@ function moveActiveTableCell(view: EditorView, direction: "left" | "right" | "do
 
   if (activeCell === null) {
     return false;
+  }
+
+  if (
+    direction === "down"
+    && activeCell.row.kind === "body"
+    && activeCell.rowIndex === activeCell.table.rows.length - 1
+    && activeCell.columnIndex === activeCell.table.columnCount - 1
+  ) {
+    return true;
   }
 
   let rowIndex = activeCell.rowIndex;
