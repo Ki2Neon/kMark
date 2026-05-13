@@ -30,6 +30,17 @@ impl AssetRepository for FileSystemAssetRepository {
         result
     }
 
+    fn has_same_file_content(&self, left: &Path, right: &Path) -> io::Result<bool> {
+        if fs::metadata(left)?.len() != fs::metadata(right)?.len() {
+            return Ok(false);
+        }
+
+        let mut left_file = File::open(left)?;
+        let mut right_file = File::open(right)?;
+
+        has_same_stream_content(&mut left_file, &mut right_file)
+    }
+
     fn exists(&self, path: &Path) -> bool {
         path.exists()
     }
@@ -40,6 +51,28 @@ impl AssetRepository for FileSystemAssetRepository {
 
     fn is_file(&self, path: &Path) -> bool {
         path.is_file()
+    }
+}
+
+fn has_same_stream_content(left: &mut File, right: &mut File) -> io::Result<bool> {
+    let mut left_buffer = [0_u8; 64 * 1024];
+    let mut right_buffer = [0_u8; 64 * 1024];
+
+    loop {
+        let left_read = left.read(&mut left_buffer)?;
+        let right_read = right.read(&mut right_buffer)?;
+
+        if left_read != right_read {
+            return Ok(false);
+        }
+
+        if left_read == 0 {
+            return Ok(true);
+        }
+
+        if left_buffer[..left_read] != right_buffer[..right_read] {
+            return Ok(false);
+        }
     }
 }
 
