@@ -59,9 +59,9 @@ export type PageNumberConfig = {
 
 export type PageChromeRegionConfig = {
   readonly enabled: boolean;
-  readonly left?: string;
-  readonly center?: string;
-  readonly right?: string;
+  readonly left?: string | null;
+  readonly center?: string | null;
+  readonly right?: string | null;
   readonly opacity: string;
   readonly offset?: string | null;
   readonly borderSize?: string | null;

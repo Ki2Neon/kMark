@@ -3112,15 +3112,6 @@ function getPageChromeRegionStyle(
     opacity: config.opacity,
   };
 
-  if (config.borderSize !== undefined && config.borderSize !== null) {
-    style.borderWidth = config.borderSize;
-    style.borderStyle = config.borderStyle ?? "solid";
-  } else if (config.borderStyle !== undefined && config.borderStyle !== null) {
-    style.borderStyle = config.borderStyle;
-  }
-  if (config.borderColor !== undefined && config.borderColor !== null) {
-    style.borderColor = config.borderColor;
-  }
   if (config.fontSize !== undefined && config.fontSize !== null) {
     style.fontSize = config.fontSize;
   }
@@ -3142,6 +3133,41 @@ function getPageChromeRegionStyle(
   return style;
 }
 
+function getPageChromeRegionTextStyle(config: PageChromeRegionConfig): CSSProperties | undefined {
+  const style: CSSProperties = {};
+
+  if (config.borderSize !== undefined && config.borderSize !== null) {
+    style.borderWidth = config.borderSize;
+    style.borderStyle = config.borderStyle ?? "solid";
+  } else if (config.borderStyle !== undefined && config.borderStyle !== null) {
+    style.borderStyle = config.borderStyle;
+  }
+  if (config.borderColor !== undefined && config.borderColor !== null) {
+    style.borderColor = config.borderColor;
+  }
+
+  return Object.keys(style).length > 0 ? style : undefined;
+}
+
+function renderPageChromeRegionSlot(
+  baseClassName: string,
+  slotName: "left" | "center" | "right",
+  text: string | null | undefined,
+  textStyle: CSSProperties | undefined,
+): ReactNode {
+  const slotText = text ?? "";
+
+  return (
+    <div className={`${baseClassName}__${slotName}`}>
+      {slotText.length === 0 ? null : (
+        <span className={`${baseClassName}__text`} style={textStyle}>
+          {slotText}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function renderPageChromeRegion(
   region: "header" | "footer",
   config: PageChromeRegionConfig,
@@ -3151,12 +3177,13 @@ function renderPageChromeRegion(
   }
 
   const baseClassName = `kmark-page-${region}`;
+  const textStyle = getPageChromeRegionTextStyle(config);
 
   return (
     <div className={baseClassName} style={getPageChromeRegionStyle(region, config)}>
-      <div className={`${baseClassName}__left`}>{config.left ?? ""}</div>
-      <div className={`${baseClassName}__center`}>{config.center ?? ""}</div>
-      <div className={`${baseClassName}__right`}>{config.right ?? ""}</div>
+      {renderPageChromeRegionSlot(baseClassName, "left", config.left, textStyle)}
+      {renderPageChromeRegionSlot(baseClassName, "center", config.center, textStyle)}
+      {renderPageChromeRegionSlot(baseClassName, "right", config.right, textStyle)}
     </div>
   );
 }
