@@ -8,14 +8,10 @@
   <body>
     <script>
       (() => {
-        const baseSegment = "/kmark";
-        const base = `${baseSegment}/`;
-        const path = location.pathname === baseSegment
-          ? ""
-          : location.pathname.startsWith(base)
-            ? location.pathname.slice(base.length)
-            : location.pathname.replace(/^\/+/u, "");
-        const route = path.length > 0 ? `/${path}` : "/";
+        const pathSegments = location.pathname.split("/").filter(Boolean);
+        const base = pathSegments.length > 0 ? `/${pathSegments[0]}/` : "/";
+        const routeSegments = pathSegments.slice(1);
+        const route = routeSegments.length > 0 ? `/${routeSegments.join("/")}` : "/";
 
         location.replace(`${base}${location.search}#${route}${location.hash}`);
       })();

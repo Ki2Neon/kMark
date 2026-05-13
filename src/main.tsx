@@ -13,4 +13,18 @@ async function bootstrap() {
   );
 }
 
-void bootstrap();
+function renderBootstrapError(error: unknown): void {
+  const root = document.getElementById("root");
+
+  if (root === null) {
+    return;
+  }
+
+  const message = error instanceof Error && error.message.length > 0
+    ? error.message
+    : "kMark の起動に失敗しました。";
+
+  root.textContent = message;
+}
+
+void bootstrap().catch(renderBootstrapError);
