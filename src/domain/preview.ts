@@ -64,6 +64,12 @@ export type PageChromeRegionConfig = {
   readonly right?: string;
   readonly opacity: string;
   readonly offset?: string | null;
+  readonly borderSize?: string | null;
+  readonly borderColor?: string | null;
+  readonly borderStyle?: string | null;
+  readonly fontSize?: string | null;
+  readonly fontFamily?: string | null;
+  readonly fontColor?: string | null;
 };
 
 export type PageChromeConfig = {

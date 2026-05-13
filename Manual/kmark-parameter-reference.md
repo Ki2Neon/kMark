@@ -2,8 +2,8 @@
 
 ## 結論
 
-- Schema version: `5`
-- Parameter総数: `65`
+- Schema version: `9`
+- Parameter総数: `93`
 - renderer未知key: 無視
 - renderer不正値: 無視
 - editor validation: unknown duplicate missing enum undefined-use unclosed-scope を警告
@@ -121,6 +121,30 @@
 | `page_margin_right` |  | length | page scope |  |
 | `page_margin_bottom` |  | length | page scope |  |
 | `page_margin_left` |  | length | page scope |  |
+| `page_header` |  | boolean | page scope |  |
+| `page_header_left` |  | string | page scope |  |
+| `page_header_center` |  | string | page scope |  |
+| `page_header_right` |  | string | page scope |  |
+| `page_header_opacity` |  | number | page scope | `0`-`1` |
+| `page_header_offset` |  | length | page scope | physical length |
+| `page_header_border_size` |  | length | page scope |  |
+| `page_header_border_color` |  | color | page scope |  |
+| `page_header_border_style` |  | enum | page scope | `solid` `dashed` `dotted` `double` `none` |
+| `page_header_font_size` |  | length | page scope |  |
+| `page_header_font_family` |  | string | page scope |  |
+| `page_header_font_color` |  | color | page scope |  |
+| `page_footer` |  | boolean | page scope |  |
+| `page_footer_left` |  | string | page scope |  |
+| `page_footer_center` |  | string | page scope |  |
+| `page_footer_right` |  | string | page scope |  |
+| `page_footer_opacity` |  | number | page scope | `0`-`1` |
+| `page_footer_offset` |  | length | page scope | physical length |
+| `page_footer_border_size` |  | length | page scope |  |
+| `page_footer_border_color` |  | color | page scope |  |
+| `page_footer_border_style` |  | enum | page scope | `solid` `dashed` `dotted` `double` `none` |
+| `page_footer_font_size` |  | length | page scope |  |
+| `page_footer_font_family` |  | string | page scope |  |
+| `page_footer_font_color` |  | color | page scope |  |
 | `page_number` |  | enum | page scope | `show` `hide` `none` `top-left` `top-center` `top-right` `bottom-left` `bottom-center` `bottom-right` |
 | `page_number_format` |  | string | page scope | placeholders |
 | `page_number_start` |  | number | page scope | positive integer |
@@ -270,6 +294,35 @@
 | `page_margin_right` | 右余白 | physical length | `page_margin_right:10mm` |  |
 | `page_margin_bottom` | 下余白 | physical length | `page_margin_bottom:12mm` |  |
 | `page_margin_left` | 左余白 | physical length | `page_margin_left:10mm` |  |
+
+### Page Header/Footer
+
+| Parameter | 使用者視点 | 値 | 例 | 注意 |
+| --- | --- | --- | --- | --- |
+| `page_header` | header表示ON/OFF | boolean | `page_header:false` | falseでslot消去 |
+| `page_header_left` | header左 | string | `page_header_left:"左"` | 指定時header有効 |
+| `page_header_center` | header中央 | string | `page_header_center:"社外秘"` | 指定時header有効 |
+| `page_header_right` | header右 | string | `page_header_right:"右"` | 指定時header有効 |
+| `page_header_opacity` | header透明度 | number | `page_header_opacity:0.6` | `0`-`1` |
+| `page_header_offset` | page上端から距離 | physical length | `page_header_offset:6mm` |  |
+| `page_header_border_size` | header枠線太さ | length | `page_header_border_size:1px` | style省略時solid |
+| `page_header_border_color` | header枠線色 | color | `page_header_border_color:#999` |  |
+| `page_header_border_style` | header枠線種類 | enum | `page_header_border_style:dashed` | `solid` `dashed` `dotted` `double` `none` |
+| `page_header_font_size` | header文字size | length | `page_header_font_size:9pt` |  |
+| `page_header_font_family` | header font | string | `page_header_font_family:"Yu Gothic"` |  |
+| `page_header_font_color` | header文字色 | color | `page_header_font_color:#333` |  |
+| `page_footer` | footer表示ON/OFF | boolean | `page_footer:false` | falseでslot消去 |
+| `page_footer_left` | footer左 | string | `page_footer_left:"左"` | 指定時footer有効 |
+| `page_footer_center` | footer中央 | string | `page_footer_center:"中央"` | 指定時footer有効 |
+| `page_footer_right` | footer右 | string | `page_footer_right:"関係者外秘"` | 指定時footer有効 |
+| `page_footer_opacity` | footer透明度 | number | `page_footer_opacity:0.6` | `0`-`1` |
+| `page_footer_offset` | page下端から距離 | physical length | `page_footer_offset:6mm` |  |
+| `page_footer_border_size` | footer枠線太さ | length | `page_footer_border_size:1px` | style省略時solid |
+| `page_footer_border_color` | footer枠線色 | color | `page_footer_border_color:#999` |  |
+| `page_footer_border_style` | footer枠線種類 | enum | `page_footer_border_style:dashed` | `solid` `dashed` `dotted` `double` `none` |
+| `page_footer_font_size` | footer文字size | length | `page_footer_font_size:9pt` |  |
+| `page_footer_font_family` | footer font | string | `page_footer_font_family:"Yu Gothic"` |  |
+| `page_footer_font_color` | footer文字色 | color | `page_footer_font_color:#333` |  |
 
 ## Page Number Parameters
 

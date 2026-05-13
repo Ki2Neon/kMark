@@ -77,6 +77,12 @@ pub struct PageChromeRegionConfig {
     pub right: Option<String>,
     pub opacity: String,
     pub offset: Option<CssLength>,
+    pub border_size: Option<String>,
+    pub border_color: Option<String>,
+    pub border_style: Option<String>,
+    pub font_size: Option<String>,
+    pub font_family: Option<String>,
+    pub font_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -453,6 +459,12 @@ struct PartialPageChromeRegionDirective {
     right: Option<String>,
     opacity: Option<String>,
     offset: Option<CssLength>,
+    border_size: Option<String>,
+    border_color: Option<String>,
+    border_style: Option<String>,
+    font_size: Option<String>,
+    font_family: Option<String>,
+    font_color: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4156,6 +4168,12 @@ impl PageChromeRegionConfig {
             right: None,
             opacity: "1".to_owned(),
             offset: None,
+            border_size: None,
+            border_color: None,
+            border_style: None,
+            font_size: None,
+            font_family: None,
+            font_color: None,
         }
     }
 
@@ -4182,6 +4200,24 @@ impl PageChromeRegionConfig {
         }
         if let Some(offset) = &directive.offset {
             self.offset = Some(offset.clone());
+        }
+        if let Some(border_size) = &directive.border_size {
+            self.border_size = Some(border_size.clone());
+        }
+        if let Some(border_color) = &directive.border_color {
+            self.border_color = Some(border_color.clone());
+        }
+        if let Some(border_style) = &directive.border_style {
+            self.border_style = Some(border_style.clone());
+        }
+        if let Some(font_size) = &directive.font_size {
+            self.font_size = Some(font_size.clone());
+        }
+        if let Some(font_family) = &directive.font_family {
+            self.font_family = Some(font_family.clone());
+        }
+        if let Some(font_color) = &directive.font_color {
+            self.font_color = Some(font_color.clone());
         }
 
         self.enabled = self.left.is_some() || self.center.is_some() || self.right.is_some();
@@ -4486,6 +4522,30 @@ impl PartialPageChromeRegionDirective {
         self.offset = Some(value);
     }
 
+    fn set_border_size(&mut self, value: String) {
+        self.border_size = Some(value);
+    }
+
+    fn set_border_color(&mut self, value: String) {
+        self.border_color = Some(value);
+    }
+
+    fn set_border_style(&mut self, value: String) {
+        self.border_style = Some(value);
+    }
+
+    fn set_font_size(&mut self, value: String) {
+        self.font_size = Some(value);
+    }
+
+    fn set_font_family(&mut self, value: String) {
+        self.font_family = Some(value);
+    }
+
+    fn set_font_color(&mut self, value: String) {
+        self.font_color = Some(value);
+    }
+
     fn merge(&mut self, other: &Self) {
         if other.enabled == Some(false) {
             self.set_enabled(false);
@@ -4507,6 +4567,24 @@ impl PartialPageChromeRegionDirective {
         if let Some(offset) = &other.offset {
             self.offset = Some(offset.clone());
         }
+        if let Some(border_size) = &other.border_size {
+            self.border_size = Some(border_size.clone());
+        }
+        if let Some(border_color) = &other.border_color {
+            self.border_color = Some(border_color.clone());
+        }
+        if let Some(border_style) = &other.border_style {
+            self.border_style = Some(border_style.clone());
+        }
+        if let Some(font_size) = &other.font_size {
+            self.font_size = Some(font_size.clone());
+        }
+        if let Some(font_family) = &other.font_family {
+            self.font_family = Some(font_family.clone());
+        }
+        if let Some(font_color) = &other.font_color {
+            self.font_color = Some(font_color.clone());
+        }
         if other.enabled == Some(true)
             || other.left.is_some()
             || other.center.is_some()
@@ -4523,6 +4601,12 @@ impl PartialPageChromeRegionDirective {
             || self.right.is_some()
             || self.opacity.is_some()
             || self.offset.is_some()
+            || self.border_size.is_some()
+            || self.border_color.is_some()
+            || self.border_style.is_some()
+            || self.font_size.is_some()
+            || self.font_family.is_some()
+            || self.font_color.is_some()
     }
 }
 
@@ -5213,6 +5297,36 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_header.set_offset(offset);
                 }
             }
+            "page_header_border_size" => {
+                if let Some(border_size) = parse_kmark_border_size_value(value) {
+                    directive.page_header.set_border_size(border_size);
+                }
+            }
+            "page_header_border_color" => {
+                if let Some(border_color) = parse_kmark_border_color_value(value) {
+                    directive.page_header.set_border_color(border_color);
+                }
+            }
+            "page_header_border_style" => {
+                if let Some(border_style) = parse_kmark_border_style_value(value) {
+                    directive.page_header.set_border_style(border_style);
+                }
+            }
+            "page_header_font_size" => {
+                if let Some(font_size) = parse_kmark_font_size_value(value) {
+                    directive.page_header.set_font_size(font_size);
+                }
+            }
+            "page_header_font_family" => {
+                if let Some(font_family) = parse_kmark_font_family_value(value) {
+                    directive.page_header.set_font_family(font_family);
+                }
+            }
+            "page_header_font_color" => {
+                if let Some(font_color) = parse_kmark_color_value(value) {
+                    directive.page_header.set_font_color(font_color);
+                }
+            }
             "page_footer" => {
                 if let Some(enabled) = parse_kmark_bool_value(value) {
                     directive.page_footer.set_enabled(enabled);
@@ -5241,6 +5355,36 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
             "page_footer_offset" => {
                 if let Some(offset) = parse_kmark_page_length_value(value) {
                     directive.page_footer.set_offset(offset);
+                }
+            }
+            "page_footer_border_size" => {
+                if let Some(border_size) = parse_kmark_border_size_value(value) {
+                    directive.page_footer.set_border_size(border_size);
+                }
+            }
+            "page_footer_border_color" => {
+                if let Some(border_color) = parse_kmark_border_color_value(value) {
+                    directive.page_footer.set_border_color(border_color);
+                }
+            }
+            "page_footer_border_style" => {
+                if let Some(border_style) = parse_kmark_border_style_value(value) {
+                    directive.page_footer.set_border_style(border_style);
+                }
+            }
+            "page_footer_font_size" => {
+                if let Some(font_size) = parse_kmark_font_size_value(value) {
+                    directive.page_footer.set_font_size(font_size);
+                }
+            }
+            "page_footer_font_family" => {
+                if let Some(font_family) = parse_kmark_font_family_value(value) {
+                    directive.page_footer.set_font_family(font_family);
+                }
+            }
+            "page_footer_font_color" => {
+                if let Some(font_color) = parse_kmark_color_value(value) {
+                    directive.page_footer.set_font_color(font_color);
                 }
             }
             _ => {}
@@ -7271,6 +7415,27 @@ mod tests {
             chrome.footer.offset.as_ref().map(CssLength::as_str),
             Some("6mm")
         );
+    }
+
+    #[test]
+    fn applies_page_chrome_border_and_font_styles() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark page_header_center:\"Header\" page_header_border_size:1px page_header_border_color:#999 page_header_border_style:dashed page_header_font_size:9pt page_header_font_family:\"Yu Gothic\" page_header_font_color:#333 page_footer_right:\"Footer\" page_footer_border_size:2px page_footer_border_color:red page_footer_border_style:double page_footer_font_size:8pt page_footer_font_family:\"Noto Sans\" page_footer_font_color:blue -->\n# Body",
+        );
+        let chrome = &rendered_preview.pages[0].page_chrome_config;
+
+        assert_eq!(chrome.header.border_size.as_deref(), Some("1px"));
+        assert_eq!(chrome.header.border_color.as_deref(), Some("#999"));
+        assert_eq!(chrome.header.border_style.as_deref(), Some("dashed"));
+        assert_eq!(chrome.header.font_size.as_deref(), Some("9pt"));
+        assert_eq!(chrome.header.font_family.as_deref(), Some("Yu Gothic"));
+        assert_eq!(chrome.header.font_color.as_deref(), Some("#333"));
+        assert_eq!(chrome.footer.border_size.as_deref(), Some("2px"));
+        assert_eq!(chrome.footer.border_color.as_deref(), Some("red"));
+        assert_eq!(chrome.footer.border_style.as_deref(), Some("double"));
+        assert_eq!(chrome.footer.font_size.as_deref(), Some("8pt"));
+        assert_eq!(chrome.footer.font_family.as_deref(), Some("Noto Sans"));
+        assert_eq!(chrome.footer.font_color.as_deref(), Some("blue"));
     }
 
     #[test]

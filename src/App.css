@@ -875,6 +875,7 @@ input:focus-visible,
   right: var(--kmark-page-margin-right, 16mm);
   z-index: 1;
   display: grid;
+  box-sizing: border-box;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
   align-items: center;
   gap: 4mm;

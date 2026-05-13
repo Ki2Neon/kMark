@@ -176,7 +176,13 @@ function arePageChromeRegionConfigsEqual(left: PageChromeRegionConfig, right: Pa
     && left.center === right.center
     && left.right === right.right
     && left.opacity === right.opacity
-    && left.offset === right.offset;
+    && left.offset === right.offset
+    && left.borderSize === right.borderSize
+    && left.borderColor === right.borderColor
+    && left.borderStyle === right.borderStyle
+    && left.fontSize === right.fontSize
+    && left.fontFamily === right.fontFamily
+    && left.fontColor === right.fontColor;
 }
 
 function arePageChromeConfigsEqual(left: PageChromeConfig, right: PageChromeConfig): boolean {
@@ -229,6 +235,12 @@ function pageChromeRegionConfigKey(config: PageChromeRegionConfig): string {
     config.right ?? "",
     config.opacity,
     config.offset ?? "",
+    config.borderSize ?? "",
+    config.borderColor ?? "",
+    config.borderStyle ?? "",
+    config.fontSize ?? "",
+    config.fontFamily ?? "",
+    config.fontColor ?? "",
   ].join("|");
 }
 
@@ -3099,6 +3111,25 @@ function getPageChromeRegionStyle(
   const style: CSSProperties = {
     opacity: config.opacity,
   };
+
+  if (config.borderSize !== undefined && config.borderSize !== null) {
+    style.borderWidth = config.borderSize;
+    style.borderStyle = config.borderStyle ?? "solid";
+  } else if (config.borderStyle !== undefined && config.borderStyle !== null) {
+    style.borderStyle = config.borderStyle;
+  }
+  if (config.borderColor !== undefined && config.borderColor !== null) {
+    style.borderColor = config.borderColor;
+  }
+  if (config.fontSize !== undefined && config.fontSize !== null) {
+    style.fontSize = config.fontSize;
+  }
+  if (config.fontFamily !== undefined && config.fontFamily !== null) {
+    style.fontFamily = config.fontFamily;
+  }
+  if (config.fontColor !== undefined && config.fontColor !== null) {
+    style.color = config.fontColor;
+  }
 
   if (config.offset !== undefined && config.offset !== null) {
     if (region === "header") {

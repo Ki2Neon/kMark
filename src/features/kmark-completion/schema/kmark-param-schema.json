@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "params": [
     {
       "name": "align",
@@ -619,6 +619,67 @@
       "priority": 86
     },
     {
+      "name": "page_header_border_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_border_size:",
+      "description": "ページヘッダーの枠線太さを指定する",
+      "examples": ["<!-- kmark page_header_border_size:1px -->"],
+      "priority": 84
+    },
+    {
+      "name": "page_header_border_color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_border_color:",
+      "description": "ページヘッダーの枠線色を指定する",
+      "examples": ["<!-- kmark page_header_border_color:#999 -->"],
+      "priority": 84
+    },
+    {
+      "name": "page_header_border_style",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["page", "scope"],
+      "values": ["solid", "dashed", "dotted", "double", "none"],
+      "insertText": "page_header_border_style:",
+      "description": "ページヘッダーの枠線種類を指定する",
+      "examples": ["<!-- kmark page_header_border_style:dashed -->"],
+      "priority": 84
+    },
+    {
+      "name": "page_header_font_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_font_size:",
+      "description": "ページヘッダーの文字サイズを指定する",
+      "examples": ["<!-- kmark page_header_font_size:9pt -->"],
+      "priority": 84
+    },
+    {
+      "name": "page_header_font_family",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_font_family:",
+      "description": "ページヘッダーのフォントを指定する",
+      "examples": ["<!-- kmark page_header_font_family:\"Yu Gothic\" -->"],
+      "priority": 84
+    },
+    {
+      "name": "page_header_font_color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["page", "scope"],
+      "insertText": "page_header_font_color:",
+      "description": "ページヘッダーの文字色を指定する",
+      "examples": ["<!-- kmark page_header_font_color:#333 -->"],
+      "priority": 84
+    },
+    {
       "name": "page_footer",
       "aliases": [],
       "type": "boolean",
@@ -677,6 +738,67 @@
       "description": "ページ下端からフッターまでの距離を指定する",
       "examples": ["<!-- kmark page_footer_offset:6mm -->"],
       "priority": 85
+    },
+    {
+      "name": "page_footer_border_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_border_size:",
+      "description": "ページフッターの枠線太さを指定する",
+      "examples": ["<!-- kmark page_footer_border_size:1px -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_footer_border_color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_border_color:",
+      "description": "ページフッターの枠線色を指定する",
+      "examples": ["<!-- kmark page_footer_border_color:#999 -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_footer_border_style",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["page", "scope"],
+      "values": ["solid", "dashed", "dotted", "double", "none"],
+      "insertText": "page_footer_border_style:",
+      "description": "ページフッターの枠線種類を指定する",
+      "examples": ["<!-- kmark page_footer_border_style:dashed -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_footer_font_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_font_size:",
+      "description": "ページフッターの文字サイズを指定する",
+      "examples": ["<!-- kmark page_footer_font_size:9pt -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_footer_font_family",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_font_family:",
+      "description": "ページフッターのフォントを指定する",
+      "examples": ["<!-- kmark page_footer_font_family:\"Yu Gothic\" -->"],
+      "priority": 83
+    },
+    {
+      "name": "page_footer_font_color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["page", "scope"],
+      "insertText": "page_footer_font_color:",
+      "description": "ページフッターの文字色を指定する",
+      "examples": ["<!-- kmark page_footer_font_color:#333 -->"],
+      "priority": 83
     },
     {
       "name": "page_number",

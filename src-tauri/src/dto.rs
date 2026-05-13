@@ -78,6 +78,12 @@ pub struct PageChromeRegionConfigPayload {
     pub right: Option<String>,
     pub opacity: String,
     pub offset: Option<String>,
+    pub border_size: Option<String>,
+    pub border_color: Option<String>,
+    pub border_style: Option<String>,
+    pub font_size: Option<String>,
+    pub font_family: Option<String>,
+    pub font_color: Option<String>,
 }
 
 impl From<RenderedMarkdownPreview> for RenderedMarkdownPreviewPayload {
@@ -169,6 +175,12 @@ impl From<PageChromeRegionConfig> for PageChromeRegionConfigPayload {
             right: config.right,
             opacity: config.opacity,
             offset: config.offset.map(|offset| offset.as_str().to_owned()),
+            border_size: config.border_size,
+            border_color: config.border_color,
+            border_style: config.border_style,
+            font_size: config.font_size,
+            font_family: config.font_family,
+            font_color: config.font_color,
         }
     }
 }
