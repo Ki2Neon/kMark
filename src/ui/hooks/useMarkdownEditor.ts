@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createBrowserDraftStore } from "../../adapters/browser/browserDraftStore";
 import { createBrowserEditorStateRules } from "../../adapters/browser/browserEditorStateRules";
 import { createBrowserMarkdownAssetImporter } from "../../adapters/browser/browserMarkdownAssetImporter";
@@ -53,7 +53,6 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     dispatch,
     getState: () => stateRef.current,
   }), [dispatch]);
-  const deferredContent = useDeferredValue(state.content);
   const currentDocumentFilePath = controller.getCurrentDocumentFilePath();
   const [renderedPreview, setRenderedPreview] = useState<RenderedPreview>({
     html: "",
@@ -119,7 +118,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     renderRequestIdRef.current = requestId;
     let disposed = false;
 
-    void controller.renderPreview(deferredContent)
+    void controller.renderPreview(state.content)
       .then((nextRenderedPreview) => {
         if (disposed || renderRequestIdRef.current !== requestId) {
           return;
@@ -140,7 +139,7 @@ export function useMarkdownEditor(startupEditMode: StartupEditMode) {
     return () => {
       disposed = true;
     };
-  }, [controller, currentDocumentFilePath, deferredContent, isReady, store]);
+  }, [controller, currentDocumentFilePath, isReady, state.content, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {

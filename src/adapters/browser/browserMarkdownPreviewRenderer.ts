@@ -2,6 +2,10 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { invokeTauriCommand } from "../../infra/tauriCommand";
 import { renderMarkdownPreviewWithWasm } from "../../wasm/kmarkWeb";
 import {
+  type BrowserMarkdownPreviewWorkerRequest,
+  type BrowserMarkdownPreviewWorkerResponse,
+} from "./browserMarkdownPreviewWorker";
+import {
   DEFAULT_PAGE_CHROME_CONFIG,
   DEFAULT_PAGE_NUMBER_CONFIG,
   DEFAULT_PAGE_STYLE,
@@ -39,6 +43,15 @@ type NormalizedRenderedMarkdownPreviewPayload = {
 };
 
 const FILE_IMAGE_SOURCE_PATTERN = /(<img\b[^>]*?\bsrc=")(file:[^"]+)(")/giu;
+
+type PendingPreviewWorkerRequest = {
+  readonly reject: (reason?: unknown) => void;
+  readonly resolve: (renderedPreview: RenderedMarkdownPreviewPayload) => void;
+};
+
+let previewWorker: Worker | null = null;
+let previewWorkerRequestId = 0;
+const pendingPreviewWorkerRequests = new Map<number, PendingPreviewWorkerRequest>();
 
 function fileUrlToPath(fileUrl: string): string | null {
   try {
@@ -137,12 +150,93 @@ function normalizeRenderedMarkdownPreview(
   };
 }
 
+function rejectPendingPreviewWorkerRequests(reason: unknown): void {
+  const pendingRequests = [...pendingPreviewWorkerRequests.values()];
+  pendingPreviewWorkerRequests.clear();
+
+  for (const pendingRequest of pendingRequests) {
+    pendingRequest.reject(reason);
+  }
+}
+
+function resetPreviewWorker(reason: unknown): void {
+  rejectPendingPreviewWorkerRequests(reason);
+  previewWorker?.terminate();
+  previewWorker = null;
+}
+
+function handlePreviewWorkerMessage(event: MessageEvent<BrowserMarkdownPreviewWorkerResponse>): void {
+  const pendingRequest = pendingPreviewWorkerRequests.get(event.data.id);
+
+  if (pendingRequest === undefined) {
+    return;
+  }
+
+  pendingPreviewWorkerRequests.delete(event.data.id);
+
+  if (event.data.type === "failed") {
+    pendingRequest.reject(new Error(event.data.message));
+    return;
+  }
+
+  pendingRequest.resolve(event.data.renderedPreview);
+}
+
+function getPreviewWorker(): Worker {
+  if (previewWorker !== null) {
+    return previewWorker;
+  }
+
+  const nextPreviewWorker = new Worker(new URL("./browserMarkdownPreviewWorker.ts", import.meta.url), {
+    type: "module",
+  });
+
+  nextPreviewWorker.onmessage = handlePreviewWorkerMessage;
+  nextPreviewWorker.onerror = (event) => {
+    resetPreviewWorker(event instanceof ErrorEvent ? event.error : new Error("プレビュー描画Workerでエラーが発生しました。"));
+  };
+  nextPreviewWorker.onmessageerror = () => {
+    resetPreviewWorker(new Error("プレビュー描画Workerの通信に失敗しました。"));
+  };
+  previewWorker = nextPreviewWorker;
+
+  return nextPreviewWorker;
+}
+
+async function renderMarkdownPreviewWithWorker(
+  content: string,
+  filePath?: string | null,
+): Promise<RenderedMarkdownPreviewPayload> {
+  let worker: Worker;
+
+  try {
+    worker = getPreviewWorker();
+  } catch {
+    return renderMarkdownPreviewWithWasm(content, filePath);
+  }
+
+  const requestId = previewWorkerRequestId + 1;
+  previewWorkerRequestId = requestId;
+
+  return new Promise((resolve, reject) => {
+    pendingPreviewWorkerRequests.set(requestId, { reject, resolve });
+
+    const request: BrowserMarkdownPreviewWorkerRequest = {
+      content,
+      filePath: filePath ?? null,
+      id: requestId,
+    };
+
+    worker.postMessage(request);
+  });
+}
+
 export async function renderMarkdownPreview(
   content: string,
   filePath?: string | null,
 ): Promise<NormalizedRenderedMarkdownPreviewPayload> {
   if (!isTauri()) {
-    return renderMarkdownPreviewWithWasm(content, filePath);
+    return normalizeRenderedMarkdownPreview(await renderMarkdownPreviewWithWorker(content, filePath));
   }
 
   const renderedPreview = await invokeTauriCommand<RenderedMarkdownPreviewPayload>(

@@ -7,6 +7,7 @@ mod markdown_document;
 mod markdown_document_error;
 mod preview_preferences;
 mod render_markdown_preview;
+pub mod table_format;
 mod theme;
 
 pub use desktop_layout::{
@@ -34,5 +35,10 @@ pub use render_markdown_preview::{
     render_markdown_preview, render_markdown_preview_with_file_path, CssLength, PageChromeConfig,
     PageChromeRegionConfig, PageNumberConfig, PageNumberPosition, PageNumberStyle, PageStyle,
     PreviewTextStyle, RenderedMarkdownPreview, RenderedPage,
+};
+pub use table_format::{
+    format_markdown_tables, format_markdown_tables_in_line_ranges, format_table_block,
+    visual_width, FormatResult, SourceRange, TableDiagnostic, TableDiagnosticKind,
+    TableFormatError, TableFormatLineRange, TableFormatOptions,
 };
 pub use theme::{AppThemeId, ThemePreferences};

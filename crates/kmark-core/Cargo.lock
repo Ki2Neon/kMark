@@ -22,6 +22,8 @@ name = "kmark-core"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
@@ -54,6 +56,12 @@ name = "unicase"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
 name = "unicode-width"

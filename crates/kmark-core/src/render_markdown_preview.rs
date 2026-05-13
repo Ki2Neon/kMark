@@ -9,6 +9,8 @@ use pulldown_cmark::{
     Tag, TagEnd,
 };
 
+use crate::table_format::{has_table_delimiter_pipe, split_table_cells};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedMarkdownPreview {
     pub html: String,
@@ -577,6 +579,8 @@ struct HtmlEmitter<'a> {
     table_alignments: Vec<Alignment>,
     table_cell_index: usize,
     table_body_open: bool,
+    table_html_start: Option<usize>,
+    table_source_start: Option<usize>,
     footnote_numbers: HashMap<String, usize>,
     footnote_reference_ids: HashMap<String, Vec<String>>,
     footnote_reference_render_counts: HashMap<String, usize>,
@@ -1661,6 +1665,8 @@ impl<'a> HtmlEmitter<'a> {
             table_alignments: Vec::new(),
             table_cell_index: 0,
             table_body_open: false,
+            table_html_start: None,
+            table_source_start: None,
             footnote_numbers: HashMap::new(),
             footnote_reference_ids: HashMap::new(),
             footnote_reference_render_counts: HashMap::new(),
@@ -1976,6 +1982,8 @@ impl<'a> HtmlEmitter<'a> {
                 self.table_section = TableSection::Head;
                 self.table_cell_index = 0;
                 self.table_body_open = false;
+                self.table_html_start = Some(self.html.len());
+                self.table_source_start = Some(range.start);
                 let attributes = self.take_pending_kmark_table_attributes();
                 self.push_raw(&format!("<table{}>", attributes));
             }
@@ -2134,6 +2142,7 @@ impl<'a> HtmlEmitter<'a> {
                 self.table_alignments.clear();
                 self.table_cell_index = 0;
                 self.table_body_open = false;
+                self.apply_table_merges();
             }
             TagEnd::TableHead => {
                 self.table_section = TableSection::Body;
@@ -2423,6 +2432,37 @@ impl<'a> HtmlEmitter<'a> {
             start_line,
             end_line.max(start_line),
         )
+    }
+
+    fn apply_table_merges(&mut self) {
+        let Some(html_start) = self.table_html_start.take() else {
+            return;
+        };
+        let Some(source_start) = self.table_source_start.take() else {
+            return;
+        };
+        if html_start > self.html.len() {
+            return;
+        }
+
+        let Some(markers) =
+            collect_table_body_merge_markers(self.content, &self.line_starts, source_start)
+        else {
+            return;
+        };
+        if !markers
+            .iter()
+            .flatten()
+            .any(|marker| !matches!(marker, TableMergeMarker::None))
+        {
+            return;
+        }
+
+        let table_html = self.html[html_start..].to_owned();
+        let Some(merged_html) = render_table_with_body_merges(&table_html, &markers) else {
+            return;
+        };
+        self.html.replace_range(html_start.., &merged_html);
     }
 
     fn start_callout(&mut self, callout_start: CalloutStart, range: &Range<usize>) {
@@ -6420,6 +6460,333 @@ fn is_html_line_break(html: &str) -> bool {
     tag_name.eq_ignore_ascii_case("br")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableMergeMarker {
+    None,
+    Left,
+    Up,
+}
+
+#[derive(Debug, Clone)]
+struct HtmlTableBodyRow {
+    open_tag: String,
+    cells: Vec<HtmlTableBodyCell>,
+}
+
+#[derive(Debug, Clone)]
+struct HtmlTableBodyCell {
+    open_tag: String,
+    content: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TableCellSpan {
+    owner: (usize, usize),
+    hidden: bool,
+    rowspan: usize,
+    colspan: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TableCellBounds {
+    min_row: usize,
+    max_row: usize,
+    min_col: usize,
+    max_col: usize,
+    count: usize,
+}
+
+fn collect_table_body_merge_markers(
+    content: &str,
+    line_starts: &[usize],
+    table_source_start: usize,
+) -> Option<Vec<Vec<TableMergeMarker>>> {
+    let mut line_index = resolve_line_number(line_starts, table_source_start);
+    let mut table_lines = Vec::new();
+
+    while let Some(line) = source_line_text(content, line_starts, line_index) {
+        if !has_table_delimiter_pipe(line) {
+            break;
+        }
+        table_lines.push(line);
+        line_index += 1;
+    }
+
+    if table_lines.len() < 3 {
+        return None;
+    }
+
+    Some(
+        table_lines[2..]
+            .iter()
+            .map(|line| {
+                split_table_cells(line)
+                    .into_iter()
+                    .map(|cell| match cell.as_str() {
+                        "<" => TableMergeMarker::Left,
+                        "^" => TableMergeMarker::Up,
+                        _ => TableMergeMarker::None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn source_line_text<'a>(
+    content: &'a str,
+    line_starts: &[usize],
+    line_index: usize,
+) -> Option<&'a str> {
+    let start = *line_starts.get(line_index)?;
+    let end = line_starts
+        .get(line_index + 1)
+        .copied()
+        .unwrap_or(content.len());
+    let line = &content[start..end];
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+
+    Some(line)
+}
+
+fn render_table_with_body_merges(
+    table_html: &str,
+    markers: &[Vec<TableMergeMarker>],
+) -> Option<String> {
+    let tbody_open = "<tbody>";
+    let tbody_close = "</tbody>";
+    let tbody_start = table_html.find(tbody_open)? + tbody_open.len();
+    let tbody_end = table_html.rfind(tbody_close)?;
+    if tbody_start > tbody_end {
+        return None;
+    }
+
+    let mut rows = parse_html_table_body_rows(&table_html[tbody_start..tbody_end])?;
+    if rows.is_empty() {
+        return None;
+    }
+    apply_table_body_merges(&mut rows, markers)?;
+
+    let mut html = String::with_capacity(table_html.len());
+    html.push_str(&table_html[..tbody_start]);
+    for row in rows {
+        html.push_str(&row.open_tag);
+        for cell in row.cells {
+            html.push_str(&cell.open_tag);
+            html.push_str(&cell.content);
+            html.push_str("</td>");
+        }
+        html.push_str("</tr>");
+    }
+    html.push_str(&table_html[tbody_end..]);
+
+    Some(html)
+}
+
+fn parse_html_table_body_rows(body_html: &str) -> Option<Vec<HtmlTableBodyRow>> {
+    let mut rows = Vec::new();
+    let mut rest = body_html;
+
+    while !rest.is_empty() {
+        if rest.trim().is_empty() {
+            break;
+        }
+
+        let tr_start = rest.find("<tr")?;
+        if !rest[..tr_start].trim().is_empty() {
+            return None;
+        }
+
+        let tr_open_end = tr_start + rest[tr_start..].find('>')?;
+        let tr_content_start = tr_open_end + 1;
+        let tr_close = tr_content_start + rest[tr_content_start..].find("</tr>")?;
+        let row_html = &rest[tr_content_start..tr_close];
+
+        rows.push(HtmlTableBodyRow {
+            open_tag: rest[tr_start..=tr_open_end].to_owned(),
+            cells: parse_html_table_body_cells(row_html)?,
+        });
+
+        rest = &rest[tr_close + "</tr>".len()..];
+    }
+
+    Some(rows)
+}
+
+fn parse_html_table_body_cells(row_html: &str) -> Option<Vec<HtmlTableBodyCell>> {
+    let mut cells = Vec::new();
+    let mut rest = row_html;
+
+    while !rest.is_empty() {
+        if rest.trim().is_empty() {
+            break;
+        }
+
+        let td_start = rest.find("<td")?;
+        if !rest[..td_start].trim().is_empty() {
+            return None;
+        }
+
+        let td_open_end = td_start + rest[td_start..].find('>')?;
+        let td_content_start = td_open_end + 1;
+        let td_close = td_content_start + rest[td_content_start..].find("</td>")?;
+
+        cells.push(HtmlTableBodyCell {
+            open_tag: rest[td_start..=td_open_end].to_owned(),
+            content: rest[td_content_start..td_close].to_owned(),
+        });
+
+        rest = &rest[td_close + "</td>".len()..];
+    }
+
+    Some(cells)
+}
+
+fn apply_table_body_merges(
+    rows: &mut [HtmlTableBodyRow],
+    markers: &[Vec<TableMergeMarker>],
+) -> Option<()> {
+    let mut spans = rows
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            (0..row.cells.len())
+                .map(|column_index| TableCellSpan {
+                    owner: (row_index, column_index),
+                    hidden: false,
+                    rowspan: 1,
+                    colspan: 1,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    for row_index in 0..spans.len() {
+        for column_index in 0..spans[row_index].len() {
+            let marker = markers
+                .get(row_index)
+                .and_then(|row| row.get(column_index))
+                .copied()
+                .unwrap_or(TableMergeMarker::None);
+
+            match marker {
+                TableMergeMarker::None => {}
+                TableMergeMarker::Left => {
+                    if column_index == 0 {
+                        continue;
+                    }
+                    let owner = spans[row_index][column_index - 1].owner;
+                    spans[row_index][column_index].owner = owner;
+                    spans[row_index][column_index].hidden = true;
+                }
+                TableMergeMarker::Up => {
+                    if row_index == 0 || column_index >= spans[row_index - 1].len() {
+                        continue;
+                    }
+                    let owner = spans[row_index - 1][column_index].owner;
+                    spans[row_index][column_index].owner = owner;
+                    spans[row_index][column_index].hidden = true;
+                }
+            }
+        }
+    }
+
+    let mut bounds_by_owner: HashMap<(usize, usize), TableCellBounds> = HashMap::new();
+    for (row_index, row) in spans.iter().enumerate() {
+        for (column_index, span) in row.iter().enumerate() {
+            bounds_by_owner
+                .entry(span.owner)
+                .and_modify(|bounds| {
+                    bounds.min_row = bounds.min_row.min(row_index);
+                    bounds.max_row = bounds.max_row.max(row_index);
+                    bounds.min_col = bounds.min_col.min(column_index);
+                    bounds.max_col = bounds.max_col.max(column_index);
+                    bounds.count += 1;
+                })
+                .or_insert(TableCellBounds {
+                    min_row: row_index,
+                    max_row: row_index,
+                    min_col: column_index,
+                    max_col: column_index,
+                    count: 1,
+                });
+        }
+    }
+
+    for (owner, bounds) in &bounds_by_owner {
+        if bounds.count == 1 {
+            continue;
+        }
+
+        for row_index in bounds.min_row..=bounds.max_row {
+            for column_index in bounds.min_col..=bounds.max_col {
+                if spans
+                    .get(row_index)
+                    .and_then(|row| row.get(column_index))
+                    .map(|span| span.owner)
+                    != Some(*owner)
+                {
+                    return None;
+                }
+            }
+        }
+
+        let owner_span = spans.get_mut(owner.0)?.get_mut(owner.1)?;
+        owner_span.rowspan = bounds.max_row - bounds.min_row + 1;
+        owner_span.colspan = bounds.max_col - bounds.min_col + 1;
+    }
+
+    for (row_index, row) in rows.iter_mut().enumerate() {
+        let mut visible_cells = Vec::with_capacity(row.cells.len());
+        for (column_index, cell) in row.cells.drain(..).enumerate() {
+            let span = spans[row_index][column_index];
+            if span.hidden {
+                continue;
+            }
+
+            visible_cells.push(HtmlTableBodyCell {
+                open_tag: table_body_cell_open_tag_with_span(
+                    &cell.open_tag,
+                    span.rowspan,
+                    span.colspan,
+                )?,
+                content: cell.content,
+            });
+        }
+        row.cells = visible_cells;
+    }
+
+    Some(())
+}
+
+fn table_body_cell_open_tag_with_span(
+    open_tag: &str,
+    rowspan: usize,
+    colspan: usize,
+) -> Option<String> {
+    if rowspan <= 1 && colspan <= 1 {
+        return Some(open_tag.to_owned());
+    }
+
+    let insert_position = open_tag.rfind('>')?;
+    let mut tag = String::with_capacity(open_tag.len() + 28);
+    tag.push_str(&open_tag[..insert_position]);
+    if rowspan > 1 {
+        tag.push_str(" rowspan=\"");
+        tag.push_str(&rowspan.to_string());
+        tag.push('"');
+    }
+    if colspan > 1 {
+        tag.push_str(" colspan=\"");
+        tag.push_str(&colspan.to_string());
+        tag.push('"');
+    }
+    tag.push_str(&open_tag[insert_position..]);
+
+    Some(tag)
+}
+
 fn escape_html(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
 
@@ -7489,6 +7856,98 @@ mod tests {
             .html
             .contains("<pre data-source-line-start=\"6\""));
         assert!(rendered_preview.html.contains("<table>"));
+    }
+
+    #[test]
+    fn renders_table_left_merge_marker_as_colspan() {
+        let rendered_preview = render_markdown_preview(
+            "| A | B | C |\n\
+             | --- | --- | --- |\n\
+             | 親 | < | 通常 |",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<td colspan=\"2\">親</td><td>通常</td>"));
+        assert!(!rendered_preview.html.contains("<td>&lt;</td>"));
+    }
+
+    #[test]
+    fn renders_table_up_merge_marker_as_rowspan() {
+        let rendered_preview = render_markdown_preview(
+            "| 分類 | 項目 |\n\
+             | --- | --- |\n\
+             | 入力 | A |\n\
+             | ^ | B |\n\
+             | ^ | C |",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<td rowspan=\"3\">入力</td><td>A</td>"));
+        assert!(!rendered_preview.html.contains("<td>^</td>"));
+    }
+
+    #[test]
+    fn renders_rectangular_table_merge_as_rowspan_and_colspan() {
+        let rendered_preview = render_markdown_preview(
+            "| A | B | C |\n\
+             | --- | --- | --- |\n\
+             | 親 | < | 通常 |\n\
+             | ^ | < | 通常 |",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<td rowspan=\"2\" colspan=\"2\">親</td><td>通常</td>"));
+        assert!(!rendered_preview.html.contains("<td>&lt;</td>"));
+        assert!(!rendered_preview.html.contains("<td>^</td>"));
+    }
+
+    #[test]
+    fn keeps_escaped_table_merge_markers_as_text() {
+        let rendered_preview = render_markdown_preview(
+            "| A | B |\n\
+             | --- | --- |\n\
+             | \\< | \\^ |",
+        );
+
+        assert!(rendered_preview.html.contains("<td>&lt;</td><td>^</td>"));
+        assert!(!rendered_preview.html.contains("rowspan=\""));
+        assert!(!rendered_preview.html.contains("colspan=\""));
+    }
+
+    #[test]
+    fn keeps_invalid_table_merge_markers_as_text() {
+        let invalid_left = render_markdown_preview(
+            "| A | B |\n\
+             | --- | --- |\n\
+             | < | B |",
+        );
+        let invalid_up = render_markdown_preview(
+            "| A | B |\n\
+             | --- | --- |\n\
+             | ^ | B |",
+        );
+
+        assert!(invalid_left.html.contains("<td>&lt;</td><td>B</td>"));
+        assert!(!invalid_left.html.contains("colspan=\""));
+        assert!(invalid_up.html.contains("<td>^</td><td>B</td>"));
+        assert!(!invalid_up.html.contains("rowspan=\""));
+    }
+
+    #[test]
+    fn falls_back_to_literal_markers_for_non_rectangular_table_merge() {
+        let rendered_preview = render_markdown_preview(
+            "| A | B |\n\
+             | --- | --- |\n\
+             | 親 | 通常 |\n\
+             | ^ | < |",
+        );
+
+        assert!(rendered_preview.html.contains("<td>^</td><td>&lt;</td>"));
+        assert!(!rendered_preview.html.contains("rowspan=\""));
+        assert!(!rendered_preview.html.contains("colspan=\""));
     }
 
     #[test]

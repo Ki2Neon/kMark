@@ -6,6 +6,8 @@ import { type ThemePreferences } from "../../domain/theme";
 import {
   createStartupEditorStateJsonWithWasmSync,
   deriveEditorStatsJsonWithWasmSync,
+  formatMarkdownTablesInLineRangesJsonWithWasmSync,
+  formatMarkdownTablesJsonWithWasmSync,
   normalizeEditorPreferencesJsonWithWasmSync,
   normalizeMarkdownFileNameWithWasmSync,
   normalizePreviewPreferencesJsonWithWasmSync,
@@ -14,6 +16,9 @@ import {
   reduceEditorStateJsonWithWasmSync,
   resolveAppFontFamilyWithWasmSync,
   resolveEditFontFamilyWithWasmSync,
+  type FormatMarkdownTablesPayload,
+  type TableFormatLineRangePayload,
+  type TableFormatOptionsPayload,
 } from "../../wasm/kmarkWeb";
 
 export function createDefaultThemePreferences(): ThemePreferences {
@@ -70,6 +75,25 @@ export function normalizeMarkdownFileName(fileName: string): string {
 
 export function deriveEditorStats(content: string): EditorStats {
   return parseJsonPayload<EditorStats>(deriveEditorStatsJsonWithWasmSync(content));
+}
+
+export function formatMarkdownTables(
+  content: string,
+  options: TableFormatOptionsPayload | null = null,
+): FormatMarkdownTablesPayload {
+  return parseJsonPayload<FormatMarkdownTablesPayload>(
+    formatMarkdownTablesJsonWithWasmSync(content, options),
+  );
+}
+
+export function formatMarkdownTablesInLineRanges(
+  content: string,
+  lineRanges: readonly TableFormatLineRangePayload[],
+  options: TableFormatOptionsPayload | null = null,
+): FormatMarkdownTablesPayload {
+  return parseJsonPayload<FormatMarkdownTablesPayload>(
+    formatMarkdownTablesInLineRangesJsonWithWasmSync(content, lineRanges, options),
+  );
 }
 
 export function resolveAppFontFamily(appFontId: string): string {
