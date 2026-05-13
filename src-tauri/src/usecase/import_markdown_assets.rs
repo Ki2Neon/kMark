@@ -160,11 +160,13 @@ where
         ImportMarkdownAssetsError::InvalidDroppedFileName(display_path(source_path))
     })?;
     let direct_destination_path = markdown_directory.join(file_name);
-    let copied_path = if is_same_existing_file(repository, source_path, &direct_destination_path) {
-        direct_destination_path
-    } else {
-        copy_to_non_conflicting_path(repository, source_path, markdown_directory, file_name)?
-    };
+    let copied_path =
+        if should_reference_existing_destination(repository, source_path, &direct_destination_path)
+        {
+            direct_destination_path
+        } else {
+            copy_to_non_conflicting_path(repository, source_path, markdown_directory, file_name)?
+        };
     let relative_path = to_markdown_relative_path(markdown_directory, &copied_path);
 
     Ok(ImportedMarkdownAsset {
@@ -213,6 +215,24 @@ where
             }
         }
     }
+}
+
+fn should_reference_existing_destination<R>(
+    repository: &R,
+    source: &Path,
+    destination: &Path,
+) -> bool
+where
+    R: AssetRepository,
+{
+    if is_same_existing_file(repository, source, destination) {
+        return true;
+    }
+
+    repository.is_file(destination)
+        && repository
+            .has_same_file_content(source, destination)
+            .unwrap_or(false)
 }
 
 fn is_same_existing_file<R>(repository: &R, left: &Path, right: &Path) -> bool
@@ -385,6 +405,32 @@ mod tests {
             fs::read(project.join("logo_1.png")).expect("failed to read copied image"),
             b"new"
         );
+    }
+
+    #[test]
+    fn references_same_named_existing_file_when_content_matches() {
+        let sandbox = create_temp_test_directory();
+        let project = sandbox.join("project");
+        let source = sandbox.join("source");
+        fs::create_dir_all(&project).expect("failed to create project directory");
+        fs::create_dir_all(&source).expect("failed to create source directory");
+        let markdown_path = project.join("note.md");
+        let image_path = source.join("logo.png");
+        fs::write(&markdown_path, "# note").expect("failed to write markdown");
+        fs::write(project.join("logo.png"), "image").expect("failed to write existing image");
+        fs::write(&image_path, "image").expect("failed to write image");
+
+        let imported = import_markdown_assets(
+            &FileSystemAssetRepository,
+            &markdown_path,
+            &[image_path.clone()],
+        )
+        .expect("asset import should succeed");
+
+        assert_eq!(imported[0].relative_path, "logo.png");
+        assert_eq!(imported[0].markdown_text, "![](logo.png)");
+        assert_eq!(imported[0].copied_path, project.join("logo.png"));
+        assert!(!project.join("logo_1.png").exists());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { type EditorState } from "../../domain/editor";
+import { DEFAULT_FILE_NAME, type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PageStyle, type PreviewDisplayMode, type PreviewTextStyle, type RenderedPreviewPage } from "../../domain/preview";
@@ -89,6 +89,26 @@ export class EditorSessionController {
     return {
       initialState: this.#rules.createStartupState(startupEditMode, storedEdit),
       shouldSkipInitialPersist: startupEditMode !== "last-opened-file" && storedEdit !== null,
+    };
+  }
+
+  async bootstrapNewUntitled(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
+    const storedEdit = await this.#draftStore.load();
+    const startupState = this.#rules.createStartupState(
+      startupEditMode,
+      startupEditMode === "last-opened-file" ? storedEdit : null,
+    );
+
+    this.#currentDocumentFilePath = null;
+    this.#documentGateway.restoreDocumentReference(null);
+
+    return {
+      initialState: {
+        ...startupState,
+        fileName: DEFAULT_FILE_NAME,
+        lastSavedAt: null,
+      },
+      shouldSkipInitialPersist: storedEdit !== null,
     };
   }
 
