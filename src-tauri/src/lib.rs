@@ -288,7 +288,7 @@ fn start_tray_coordinator<R: tauri::Runtime + 'static>(
 pub fn run() {
     let builder = tauri::Builder::default().manage(AppState::default());
 
-    #[cfg(desktop)]
+    #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(
         tauri_plugin_autostart::Builder::new()
             .args([AUTOSTART_HIDDEN_ARG])

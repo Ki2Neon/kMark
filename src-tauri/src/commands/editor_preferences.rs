@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter, Runtime, State};
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(debug_assertions)))]
 use tauri_plugin_autostart::ManagerExt;
 
 use super::error::CommandErrorPayload;
@@ -58,7 +58,7 @@ pub fn set_editor_preferences<R: Runtime>(
     Ok(payload)
 }
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(debug_assertions)))]
 pub(crate) fn sync_autostart_preference<R: Runtime>(
     app: &AppHandle<R>,
     editor_preferences: &EditorPreferences,
@@ -98,7 +98,7 @@ pub(crate) fn sync_autostart_preference<R: Runtime>(
     Ok(())
 }
 
-#[cfg(not(desktop))]
+#[cfg(any(not(desktop), debug_assertions))]
 pub(crate) fn sync_autostart_preference<R: Runtime>(
     _app: &AppHandle<R>,
     _editor_preferences: &EditorPreferences,
