@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
           fetch-depth: 0
@@ -62,7 +62,12 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
             throw "Release tag must match vX.Y.Z, for example v1.0.0."
           }
-          git rev-parse --verify "refs/tags/$tag^{commit}"
+          $commit = git rev-parse --verify HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Checked-out release commit is unavailable."
+          }
+          Write-Host "Release tag: $tag"
+          Write-Host "Release commit: $commit"
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -82,12 +87,12 @@ jobs:
             libfuse2
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
           cache: pnpm
@@ -122,7 +127,7 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: List Tauri bundles
-        if: always()
+        if: success()
         shell: pwsh
         run: |
           $extensions = @(".msi", ".exe", ".dmg", ".AppImage", ".deb", ".rpm")
