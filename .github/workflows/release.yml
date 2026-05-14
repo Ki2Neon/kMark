@@ -95,12 +95,15 @@ jobs:
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin' || 'wasm32-unknown-unknown' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -117,3 +120,15 @@ jobs:
           prerelease: false
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
+
+      - name: List Tauri bundles
+        if: always()
+        shell: pwsh
+        run: |
+          $extensions = @(".msi", ".exe", ".dmg", ".AppImage", ".deb", ".rpm")
+          $files = Get-ChildItem -Path "src-tauri/target" -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $extensions -contains $_.Extension }
+          if (-not $files) {
+            Write-Error "No Tauri installer or bundle files found under src-tauri/target."
+          }
+          $files | ForEach-Object { $_.FullName }
