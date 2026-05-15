@@ -370,6 +370,19 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     text-align: right;
   }
 
+  .kmark-page-header__text,
+  .kmark-page-footer__text {
+    box-sizing: border-box;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+    white-space: nowrap;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   .kmark-page-number {
     position: absolute;
     z-index: 1;
