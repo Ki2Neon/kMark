@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "params": [
     {
       "name": "align",
@@ -342,6 +342,16 @@
       "description": "行高を指定する",
       "examples": ["<!-- kmark line_height:1.2 -->\n承認済"],
       "priority": 73
+    },
+    {
+      "name": "block_gap",
+      "aliases": ["block_margin", "paragraph_gap"],
+      "type": "length",
+      "contexts": ["single", "text", "scope", "table"],
+      "insertText": "block_gap:",
+      "description": "Markdown block間の下余白を指定する",
+      "examples": ["<!-- kmark block_gap:8px -->\n本文", "<!-- kmark { block_gap:8px } -->"],
+      "priority": 72
     },
     {
       "name": "table_cell_padding",

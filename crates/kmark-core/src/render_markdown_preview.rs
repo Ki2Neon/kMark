@@ -250,6 +250,7 @@ struct KmarkTextParams {
     font_style: Option<String>,
     letter_spacing: Option<String>,
     line_height: Option<String>,
+    block_gap: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3663,7 +3664,7 @@ impl KmarkParams {
         let mut rules = Vec::new();
         let should_fit_content = !self.image.has_explicit_width()
             && (self.image.has_box_directives()
-                || self.text.has_text_directives()
+                || self.text.has_text_box_directives()
                 || (fit_plain_align && self.layout.has_plain_text_align()));
 
         if should_fit_content {
@@ -3895,6 +3896,9 @@ impl KmarkTextParams {
         if let Some(line_height) = &other.line_height {
             self.line_height = Some(line_height.clone());
         }
+        if let Some(block_gap) = &other.block_gap {
+            self.block_gap = Some(block_gap.clone());
+        }
     }
 
     fn has_text_directives(&self) -> bool {
@@ -3905,6 +3909,16 @@ impl KmarkTextParams {
             || self.font_style.is_some()
             || self.letter_spacing.is_some()
             || self.line_height.is_some()
+            || self.block_gap.is_some()
+    }
+
+    fn has_text_box_directives(&self) -> bool {
+        self.color.is_some()
+            || self.font_size.is_some()
+            || self.font_weight.is_some()
+            || self.font_family.is_some()
+            || self.font_style.is_some()
+            || self.letter_spacing.is_some()
     }
 
     fn to_style(&self) -> Option<String> {
@@ -3936,6 +3950,9 @@ impl KmarkTextParams {
         }
         if let Some(line_height) = &self.line_height {
             rules.push(format!("line-height:{line_height}"));
+        }
+        if let Some(block_gap) = &self.block_gap {
+            rules.push(format!("--kmark-block-gap:{block_gap}"));
         }
     }
 }
@@ -5854,6 +5871,11 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.text.line_height = Some(line_height);
                 }
             }
+            "block_gap" | "block_margin" | "paragraph_gap" => {
+                if let Some(block_gap) = parse_kmark_block_gap_value(&value) {
+                    bundle.params.text.block_gap = Some(block_gap);
+                }
+            }
             "table_cell_padding" => {
                 if let Some((cell_padding_y, cell_padding_x)) =
                     parse_kmark_table_cell_padding_value(&value)
@@ -5956,6 +5978,10 @@ fn parse_kmark_page_valign_value(value: &str) -> Option<KmarkPageValign> {
 }
 
 fn parse_kmark_gap_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_block_gap_value(value: &str) -> Option<String> {
     parse_css_length_value(value, false)
 }
 
@@ -8535,6 +8561,27 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("<p data-source-line-start=\"3\" data-source-line-end=\"3\">本文</p>"));
+    }
+
+    #[test]
+    fn applies_block_gap_to_single_and_scoped_block_roots() {
+        let single = render_markdown_preview("<!-- kmark block_gap:6px -->\n本文\n\n続き");
+        assert!(single.html.contains(
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"--kmark-block-gap:6px;\">本文</p>"
+        ));
+        assert!(single
+            .html
+            .contains("<p data-source-line-start=\"3\" data-source-line-end=\"3\">続き</p>"));
+
+        let scoped = render_markdown_preview(
+            "<!-- kmark { block_gap:4px line_height:1.25 -->\n本文\n\n# 見出し\n<!-- kmark } -->",
+        );
+        assert!(scoped.html.contains(
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"line-height:1.25;--kmark-block-gap:4px;\">本文</p>"
+        ));
+        assert!(scoped.html.contains(
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"line-height:1.25;--kmark-block-gap:4px;\">見出し</h1>"
+        ));
     }
 
     #[test]

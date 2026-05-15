@@ -76,6 +76,8 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body h4,
   .markdown-body h5,
   .markdown-body h6 {
+    margin-top: var(--kmark-heading-gap, calc(var(--kmark-block-gap, 1em) * 1.5));
+    margin-bottom: var(--kmark-block-gap, 1em);
     color: #111111;
     font-family: var(--kmark-heading-font-family, inherit);
     line-height: 1.2;
@@ -86,7 +88,6 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body h2 {
-    margin-top: 1.2963em;
     font-size: 1.35em;
   }
 
@@ -98,7 +99,8 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body .kmark-callout,
   .markdown-body pre,
   .markdown-body table {
-    margin: 1em 0;
+    margin-top: 0;
+    margin-bottom: var(--kmark-block-gap, 1em);
   }
 
   .markdown-body a {
