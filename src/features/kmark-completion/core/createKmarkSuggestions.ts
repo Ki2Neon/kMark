@@ -109,6 +109,8 @@ const FONT_FAMILY_PARAM_NAMES = new Set([
   "font_family",
   "page_font_family",
   "page_heading_font_family",
+  "page_header_font_family",
+  "page_footer_font_family",
 ]);
 
 export function createKmarkSuggestions(input: {

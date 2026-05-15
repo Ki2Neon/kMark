@@ -3140,6 +3140,10 @@ function getPageChromeRegionTextStyle(config: PageChromeRegionConfig): CSSProper
   const hasBorderSize = config.borderSize !== undefined && config.borderSize !== null;
   const hasBorderStyle = config.borderStyle !== undefined && config.borderStyle !== null;
 
+  if (config.fontFamily !== undefined && config.fontFamily !== null) {
+    style.fontFamily = config.fontFamily;
+  }
+
   if (hasBorderSize) {
     style.borderWidth = config.borderSize;
     style.borderStyle = config.borderStyle ?? "solid";
