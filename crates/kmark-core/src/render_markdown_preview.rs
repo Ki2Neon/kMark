@@ -3663,7 +3663,7 @@ impl KmarkParams {
         let mut rules = Vec::new();
         let should_fit_content = !self.image.has_explicit_width()
             && (self.image.has_box_directives()
-                || self.text.has_text_directives()
+                || self.text.has_text_box_directives()
                 || (fit_plain_align && self.layout.has_plain_text_align()));
 
         if should_fit_content {
@@ -3905,6 +3905,15 @@ impl KmarkTextParams {
             || self.font_style.is_some()
             || self.letter_spacing.is_some()
             || self.line_height.is_some()
+    }
+
+    fn has_text_box_directives(&self) -> bool {
+        self.color.is_some()
+            || self.font_size.is_some()
+            || self.font_weight.is_some()
+            || self.font_family.is_some()
+            || self.font_style.is_some()
+            || self.letter_spacing.is_some()
     }
 
     fn to_style(&self) -> Option<String> {
