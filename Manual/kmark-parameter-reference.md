@@ -2,8 +2,8 @@
 
 ## 結論
 
-- Schema version: `11`
-- Parameter総数: `96`
+- Schema version: `10`
+- Parameter総数: `95`
 - renderer未知key: 無視
 - renderer不正値: 無視
 - editor validation: unknown duplicate missing enum undefined-use unclosed-scope を警告
@@ -100,7 +100,6 @@
 | `font_style` |  | enum | single text scope | `normal` `italic` `oblique` |
 | `letter_spacing` |  | length | single text scope |  |
 | `line_height` |  | string | single text scope table | `normal` number length |
-| `block_gap` | `block_margin` `paragraph_gap` | length | single text scope table | block下余白 |
 | `table_cell_padding` |  | length | single scope table | 1-2値 |
 | `table_cell_padding_x` |  | length | single scope table |  |
 | `table_cell_padding_y` |  | length | single scope table |  |
@@ -231,7 +230,6 @@
 | `font_style` | style | `normal` `italic` `oblique` | `font_style:italic` |  |
 | `letter_spacing` | 字間 | length | `letter_spacing:0.08em` |  |
 | `line_height` | 行高 | `normal` number length | `line_height:1.2` | tableにも有効 |
-| `block_gap` | Markdown block間下余白 | length | `block_gap:8px` | alias `block_margin` `paragraph_gap` scope可 |
 
 ## Table Parameters
 
@@ -447,7 +445,7 @@
 ## Table Compact例
 
 ```markdown
-<!-- kmark table_cell_padding_x:1mm table_cell_padding_y:0.3mm line_height:1.05 block_gap:4px font_size:8.5pt table_fit:shrink table_layout:fixed -->
+<!-- kmark table_cell_padding_x:1mm table_cell_padding_y:0.3mm line_height:1.05 font_size:8.5pt table_fit:shrink table_layout:fixed -->
 | No | Name | Note |
 | ---: | --- | --- |
 | 1 | COM | common |

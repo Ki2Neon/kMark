@@ -1051,8 +1051,8 @@ input:focus-visible,
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
-  margin-top: var(--kmark-heading-gap, calc(var(--kmark-block-gap, 16px) * 1.5));
-  margin-bottom: var(--kmark-block-gap, 16px);
+  margin-top: 24px;
+  margin-bottom: 16px;
   color: var(--preview-text);
   font-family: var(--kmark-heading-font-family, inherit);
   font-weight: 600;
@@ -1109,7 +1109,7 @@ input:focus-visible,
 .markdown-body pre,
 .markdown-body table {
   margin-top: 0;
-  margin-bottom: var(--kmark-block-gap, 16px);
+  margin-bottom: 16px;
 }
 
 .markdown-body ul,
@@ -1130,7 +1130,7 @@ input:focus-visible,
 }
 
 .markdown-body li > p {
-  margin-top: var(--kmark-block-gap, 16px);
+  margin-top: 16px;
 }
 
 .markdown-body li > :last-child {
@@ -1151,7 +1151,7 @@ input:focus-visible,
 .markdown-body hr {
   height: 0.25em;
   padding: 0;
-  margin: calc(var(--kmark-block-gap, 16px) * 1.5) 0;
+  margin: 24px 0;
   border: 0;
   background: var(--markdown-body-border-muted);
 }

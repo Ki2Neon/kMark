@@ -83,7 +83,6 @@ const SCOPE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["heading_number_from", 460],
   ["heading_number_depth", 450],
   ["heading_number_pattern", 440],
-  ["block_gap", 430],
 ]);
 
 const TABLE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
@@ -94,8 +93,7 @@ const TABLE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["table_layout", 460],
   ["font_size", 430],
   ["line_height", 420],
-  ["block_gap", 410],
-  ["w", 400],
+  ["w", 410],
 ]);
 
 const TOC_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([

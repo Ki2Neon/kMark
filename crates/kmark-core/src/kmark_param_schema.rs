@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 11;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 10;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -403,20 +403,6 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         description: "行高を指定する",
         examples: &["<!-- kmark line_height:1.2 -->\n承認済"],
         priority: 73,
-    },
-    KmarkParamSpec {
-        name: "block_gap",
-        aliases: &["block_margin", "paragraph_gap"],
-        param_type: "length",
-        contexts: &["single", "text", "scope", "table"],
-        values: &[],
-        insert_text: "block_gap:",
-        description: "Markdown block間の下余白を指定する",
-        examples: &[
-            "<!-- kmark block_gap:8px -->\n本文",
-            "<!-- kmark { block_gap:8px } -->",
-        ],
-        priority: 72,
     },
     KmarkParamSpec {
         name: "table_cell_padding",
