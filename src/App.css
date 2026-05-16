@@ -1025,6 +1025,7 @@ input:focus-visible,
   max-width: none;
   padding: 32px;
   font-family: var(--kmark-font-family, var(--preview-font-family));
+  font-synthesis: weight style;
   font-size: var(--markdown-body-font-size);
   line-height: 1.6;
   color: var(--preview-text);
@@ -1146,6 +1147,14 @@ input:focus-visible,
 
 .markdown-body a:hover {
   text-decoration-thickness: 2px;
+}
+
+.markdown-body :where(strong, b) {
+  font-weight: 700;
+}
+
+.markdown-body :where(em, i) {
+  font-style: italic;
 }
 
 .markdown-body hr {
