@@ -5,7 +5,7 @@ import { Decoration, EditorView, highlightActiveLineGutter, keymap, lineNumbers,
 import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
-import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownTabAction } from "../../domain/markdownEditing";
+import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownSelectionWrapAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
@@ -165,6 +165,63 @@ function isCompletionOrSnippetActive(view: EditorView): boolean {
     || hasNextSnippetField(view.state)
     || hasPrevSnippetField(view.state);
 }
+
+function runMarkdownSelectionWrap(view: EditorView, inputText: string): boolean {
+  if (view.state.selection.ranges.length === 0 || isCompletionOrSnippetActive(view)) {
+    return false;
+  }
+
+  const wrapAction = getMarkdownSelectionWrapAction(
+    view.state.doc.toString(),
+    view.state.selection.ranges.map((range) => ({
+      anchor: range.anchor,
+      head: range.head,
+    })),
+    inputText,
+  );
+
+  if (wrapAction === null) {
+    return false;
+  }
+
+  const nextSelectionRanges = wrapAction.nextSelections.map((selection) => (
+    EditorSelection.range(selection.anchor, selection.head)
+  ));
+
+  view.dispatch({
+    changes: wrapAction.changes.map((change) => ({
+      from: change.rangeStart,
+      insert: change.text,
+      to: change.rangeEnd,
+    })),
+    selection: EditorSelection.create(
+      nextSelectionRanges,
+      Math.min(view.state.selection.mainIndex, nextSelectionRanges.length - 1),
+    ),
+  });
+
+  return true;
+}
+
+const MARKDOWN_SELECTION_WRAP_EXTENSION = EditorView.domEventHandlers({
+  beforeinput: (event, view) => {
+    if (
+      view.composing
+      || event.isComposing
+      || event.inputType !== "insertText"
+      || event.data === null
+    ) {
+      return false;
+    }
+
+    if (!runMarkdownSelectionWrap(view, event.data)) {
+      return false;
+    }
+
+    event.preventDefault();
+    return true;
+  },
+});
 
 function runMarkdownEnter(view: EditorView): boolean {
   if (view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty || isCompletionOrSnippetActive(view)) {
@@ -674,6 +731,7 @@ function DesktopMarkdownInputComponent({
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
+      MARKDOWN_SELECTION_WRAP_EXTENSION,
       autocompletion({
         activateOnTyping: true,
         override: [EDITOR_COMPLETION_SOURCE],
