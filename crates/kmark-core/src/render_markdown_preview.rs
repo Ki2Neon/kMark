@@ -200,6 +200,15 @@ struct ActiveCalloutContext {
     marker_paragraph: CalloutMarkerParagraphState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveMermaidBlock {
+    index: usize,
+    source: String,
+    source_line_start: usize,
+    source_line_end: usize,
+    decoration: KmarkRootDecoration,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockQuoteRenderKind {
     Normal,
@@ -226,6 +235,11 @@ struct PreprocessedKmarkDirective {
     offset: usize,
     source_line_start: usize,
     source_line_end: usize,
+}
+
+struct HtmlRenderOutput {
+    html: String,
+    next_mermaid_block_index: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -640,6 +654,8 @@ struct HtmlEmitter<'a> {
     pending_kmark_image_paragraph_style: Option<String>,
     pending_kmark_page_valign: Option<KmarkPageValign>,
     pending_kmark_table_fit: Option<KmarkTableFit>,
+    active_mermaid_block: Option<ActiveMermaidBlock>,
+    next_mermaid_block_index: usize,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -668,21 +684,24 @@ pub fn render_markdown_preview_with_file_path(
     let heading_number_document = collect_kmark_heading_number_document(content);
     let markdown_pages = split_markdown_pages(content);
     let document_page_config = DocumentPageConfig::default_config();
+    let mut next_mermaid_block_index = 1usize;
     let pages = markdown_pages
         .segments
         .iter()
         .map(|page_segment| {
             let page_config = document_page_config.resolve_page(&page_segment.page_directive);
-            let html = render_markdown_page(
+            let rendered_page = render_markdown_page(
                 &page_segment.content,
                 page_segment.line_offset,
                 markdown_file_path,
                 &toc_document,
                 &heading_number_document,
+                next_mermaid_block_index,
             );
+            next_mermaid_block_index = rendered_page.next_mermaid_block_index;
 
             RenderedPage {
-                html,
+                html: rendered_page.html,
                 page_style: page_config.default_page_style,
                 text_style: page_config.default_text_style,
                 page_number_config: page_config.page_number_config,
@@ -710,7 +729,8 @@ fn render_markdown_page(
     markdown_file_path: Option<&str>,
     toc_document: &KmarkTocDocument,
     heading_number_document: &KmarkHeadingNumberDocument,
-) -> String {
+    next_mermaid_block_index: usize,
+) -> HtmlRenderOutput {
     let preprocessed = preprocess_markdown_comments(content, line_offset);
     let events = collect_preprocessed_markdown_events(&preprocessed);
     let mut emitter = HtmlEmitter::new(
@@ -720,6 +740,7 @@ fn render_markdown_page(
         markdown_file_path,
         toc_document,
         heading_number_document,
+        next_mermaid_block_index,
     );
     emitter.prepare_footnotes(&events);
     emitter.render(events)
@@ -1887,6 +1908,7 @@ impl<'a> HtmlEmitter<'a> {
         markdown_file_path: Option<&'a str>,
         toc_document: &'a KmarkTocDocument,
         heading_number_document: &'a KmarkHeadingNumberDocument,
+        next_mermaid_block_index: usize,
     ) -> Self {
         Self {
             content,
@@ -1921,6 +1943,8 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_image_paragraph_style: None,
             pending_kmark_page_valign: None,
             pending_kmark_table_fit: None,
+            active_mermaid_block: None,
+            next_mermaid_block_index,
         }
     }
 
@@ -1941,7 +1965,7 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
-    fn render(mut self, events: Vec<OwnedEvent>) -> String {
+    fn render(mut self, events: Vec<OwnedEvent>) -> HtmlRenderOutput {
         for owned_event in events {
             self.push_event(
                 owned_event.event,
@@ -1951,9 +1975,13 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         self.flush_pending_kmark_toc();
+        self.finish_mermaid_block();
         self.close_active_kmark_single_block();
         self.close_unclosed_kmark_scopes();
-        self.html
+        HtmlRenderOutput {
+            html: self.html,
+            next_mermaid_block_index: self.next_mermaid_block_index,
+        }
     }
 
     fn push_event(
@@ -2178,12 +2206,17 @@ impl<'a> HtmlEmitter<'a> {
                 }
             }
             Tag::CodeBlock(kind) => {
+                if is_mermaid_code_block(&kind) {
+                    self.start_mermaid_block(range);
+                    return;
+                }
+
                 let mut html = format!(
                     "<pre{}{}><code",
                     self.source_line_attributes(range),
                     self.take_pending_kmark_block_attributes(),
                 );
-                if let Some(language) = code_block_language(kind) {
+                if let Some(language) = code_block_language(&kind) {
                     html.push_str(" class=\"language-");
                     html.push_str(&escape_html(&language));
                     html.push('"');
@@ -2382,7 +2415,13 @@ impl<'a> HtmlEmitter<'a> {
                 BlockQuoteRenderKind::Normal => self.push_raw("</blockquote>"),
                 BlockQuoteRenderKind::Callout => self.finish_callout(),
             },
-            TagEnd::CodeBlock => self.push_raw("</code></pre>"),
+            TagEnd::CodeBlock => {
+                if self.active_mermaid_block.is_some() {
+                    self.finish_mermaid_block();
+                } else {
+                    self.push_raw("</code></pre>");
+                }
+            }
             TagEnd::HtmlBlock => {
                 self.suppressed_html_text_depth = self.suppressed_html_text_depth.saturating_sub(1);
             }
@@ -2436,6 +2475,43 @@ impl<'a> HtmlEmitter<'a> {
         if should_close_kmark_single_block {
             self.close_active_kmark_single_block();
         }
+    }
+
+    fn start_mermaid_block(&mut self, range: &Range<usize>) {
+        let index = self.next_mermaid_block_index;
+        self.next_mermaid_block_index += 1;
+        self.active_mermaid_block = Some(ActiveMermaidBlock {
+            index,
+            source: String::new(),
+            source_line_start: self.resolve_range_start_line(range.clone()),
+            source_line_end: self.resolve_range_end_line(range.clone()),
+            decoration: self.take_pending_kmark_block_decoration(),
+        });
+    }
+
+    fn append_mermaid_source(&mut self, text: &str) -> bool {
+        let Some(block) = self.active_mermaid_block.as_mut() else {
+            return false;
+        };
+
+        block.source.push_str(text);
+        true
+    }
+
+    fn finish_mermaid_block(&mut self) {
+        let Some(block) = self.active_mermaid_block.take() else {
+            return;
+        };
+
+        self.push_raw(&format!(
+            "<div id=\"kmark-mermaid-{index}\" class=\"kmark-mermaid-block{class_suffix}\" data-kmark-mermaid-index=\"{index}\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"{source_line_start}\" data-source-line-end=\"{source_line_end}\"{decoration_attributes}><div class=\"kmark-mermaid-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source\" hidden><summary>source</summary><pre><code>{source}</code></pre></details></div>",
+            index = block.index,
+            class_suffix = block.decoration.class_suffix(),
+            source_line_start = block.source_line_start,
+            source_line_end = block.source_line_end,
+            decoration_attributes = block.decoration.data_and_style_attributes(),
+            source = escape_html(&block.source),
+        ));
     }
 
     fn finish_footnote_definition(&mut self) {
@@ -2584,6 +2660,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_text_event(&mut self, text: &str, range: &Range<usize>) {
+        if self.append_mermaid_source(text) {
+            return;
+        }
+
         if self.should_suppress_callout_marker_event(range) {
             return;
         }
@@ -2593,6 +2673,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_code_event(&mut self, text: &str, range: &Range<usize>) {
+        if self.append_mermaid_source(text) {
+            return;
+        }
+
         if self.should_suppress_callout_marker_event(range) {
             return;
         }
@@ -2602,6 +2686,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_soft_break_event(&mut self, range: &Range<usize>) {
+        if self.append_mermaid_source("\n") {
+            return;
+        }
+
         if self.should_suppress_callout_marker_soft_break(range) {
             return;
         }
@@ -2611,6 +2699,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_hard_break_event(&mut self, range: &Range<usize>) {
+        if self.append_mermaid_source("\n") {
+            return;
+        }
+
         if self.should_suppress_callout_marker_event(range) {
             return;
         }
@@ -5483,14 +5575,18 @@ fn parse_callout_marker_line(line: &str) -> Option<(CalloutKind, String)> {
     Some((kind, title.trim().to_owned()))
 }
 
-fn code_block_language(kind: CodeBlockKind<'_>) -> Option<String> {
+fn code_block_language(kind: &CodeBlockKind<'_>) -> Option<String> {
     match kind {
         CodeBlockKind::Indented => None,
         CodeBlockKind::Fenced(info) => {
-            let language = info.split(' ').next().unwrap_or_default().trim();
+            let language = info.split_whitespace().next().unwrap_or_default().trim();
             (!language.is_empty()).then_some(language.to_string())
         }
     }
+}
+
+fn is_mermaid_code_block(kind: &CodeBlockKind<'_>) -> bool {
+    code_block_language(kind).is_some_and(|language| language.eq_ignore_ascii_case("mermaid"))
 }
 
 fn collect_line_starts(content: &str) -> Vec<usize> {
@@ -8550,6 +8646,33 @@ mod tests {
             rendered_preview.html,
             "<pre data-source-line-start=\"0\" data-source-line-end=\"2\"><code class=\"language-rust\">&lt;script&gt;alert(1)&lt;/script&gt;\n</code></pre>"
         );
+    }
+
+    #[test]
+    fn renders_mermaid_code_block_placeholders_with_escaped_source() {
+        let rendered_preview = render_markdown_preview(
+            "```MERMAID title=\"sample\"\nflowchart TD\n  A[\"<script>\"] --> B\n```",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div id=\"kmark-mermaid-1\" class=\"kmark-mermaid-block\" data-kmark-mermaid-index=\"1\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"0\" data-source-line-end=\"3\"><div class=\"kmark-mermaid-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source\" hidden><summary>source</summary><pre><code>flowchart TD\n  A[&quot;&lt;script&gt;&quot;] --&gt; B\n</code></pre></details></div>"
+        );
+    }
+
+    #[test]
+    fn detects_spaced_tilde_mermaid_fences_and_keeps_ids_unique_across_pages() {
+        let rendered_preview = render_markdown_preview(
+            "~~~ mermaid\nflowchart TD\n  A --> B\n~~~\n<!-- --- -->\n```mermaid\nflowchart TD\n  C --> D\n```",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert!(rendered_preview.pages[0]
+            .html
+            .contains("id=\"kmark-mermaid-1\""));
+        assert!(rendered_preview.pages[1]
+            .html
+            .contains("id=\"kmark-mermaid-2\""));
     }
 
     #[test]

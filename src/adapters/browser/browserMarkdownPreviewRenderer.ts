@@ -17,6 +17,7 @@ import {
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../../domain/preview";
+import { renderMermaidPreviewHtml, resolveMermaidPreviewTheme } from "./browserMermaidRenderer";
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
@@ -202,16 +203,24 @@ async function normalizeRenderedMarkdownPreview(
       pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
       pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
     }));
+  const standardMermaidTheme = resolveMermaidPreviewTheme("standard");
+  const paperMermaidTheme = resolveMermaidPreviewTheme("paper");
+  const html = await normalizePreviewHtmlMediaSources(renderedPreview.html);
+  const pageHtmls = await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlMediaSources));
+  const normalizedPages = await Promise.all(pages.map(async (page) => ({
+    ...page,
+    html: await normalizePreviewHtmlMediaSources(page.html),
+    textStyle: normalizePreviewTextStyle(page.textStyle),
+    pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
+    pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
+  })));
 
   return {
-    html: await normalizePreviewHtmlMediaSources(renderedPreview.html),
-    pageHtmls: await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlMediaSources)),
-    pages: await Promise.all(pages.map(async (page) => ({
+    html: await renderMermaidPreviewHtml(html, { surface: "standard", theme: standardMermaidTheme }),
+    pageHtmls: await Promise.all(pageHtmls.map((pageHtml) => renderMermaidPreviewHtml(pageHtml, { surface: "paper", theme: paperMermaidTheme }))),
+    pages: await Promise.all(normalizedPages.map(async (page) => ({
       ...page,
-      html: await normalizePreviewHtmlMediaSources(page.html),
-      textStyle: normalizePreviewTextStyle(page.textStyle),
-      pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
-      pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
+      html: await renderMermaidPreviewHtml(page.html, { surface: "paper", theme: paperMermaidTheme }),
     }))),
     defaultPageStyle,
     defaultTextStyle,

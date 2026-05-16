@@ -1254,6 +1254,7 @@ input:focus-visible,
 .markdown-body blockquote,
 .markdown-body .kmark-toc,
 .markdown-body .kmark-callout,
+.markdown-body .kmark-mermaid-block,
 .markdown-body pre,
 .markdown-body table {
   margin-top: 0;
@@ -1339,6 +1340,63 @@ input:focus-visible,
 
 .markdown-body .kmark-video-error[hidden] {
   display: none;
+}
+
+.markdown-body .kmark-mermaid-block {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.75em;
+  border: 1px solid color-mix(in srgb, var(--preview-text) 14%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--preview-text) 2.5%, var(--preview-surface));
+  color: var(--preview-text);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.markdown-body .kmark-mermaid-rendered {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.markdown-body .kmark-mermaid-rendered svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body .kmark-mermaid-error {
+  border-color: color-mix(in srgb, #dc2626 52%, var(--preview-border));
+  background: color-mix(in srgb, #dc2626 7%, var(--preview-surface));
+}
+
+.markdown-body .kmark-mermaid-error-title {
+  margin-bottom: 0.45em;
+  color: color-mix(in srgb, #b91c1c 82%, var(--preview-text));
+  font-weight: 700;
+}
+
+.markdown-body .kmark-mermaid-error-message {
+  margin: 0 0 0.75em;
+  white-space: pre-wrap;
+}
+
+.markdown-body .kmark-mermaid-source {
+  margin-top: 0.75em;
+}
+
+.markdown-body .kmark-mermaid-source summary {
+  cursor: pointer;
+  color: var(--preview-text-soft);
+}
+
+.markdown-body .kmark-mermaid-source pre {
+  margin-top: 0.5em;
+  margin-bottom: 0;
 }
 
 .markdown-body .kmark-toc {
