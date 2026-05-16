@@ -118,6 +118,9 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body .kmark-mermaid-rendered {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
     max-width: 100%;
     overflow: hidden;
   }

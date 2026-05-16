@@ -1331,6 +1331,9 @@ input:focus-visible,
 }
 
 .markdown-body .kmark-mermaid-rendered {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   min-width: max-content;
 }
 

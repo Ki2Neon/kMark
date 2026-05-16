@@ -14,7 +14,7 @@ const MERMAID_EMPTY_ERROR_MESSAGE = "Mermaid diagram is empty";
 const MERMAID_RENDER_ERROR_TITLE = "Mermaid render error";
 const SAFE_MERMAID_THEMES = new Set<MermaidPreviewTheme>(["default", "dark", "neutral"]);
 const DARK_APP_THEME_IDS = new Set(["vscode-dark", "github-dark", "dracula", "night-owl", "monokai"]);
-const UNSAFE_SVG_ELEMENT_NAMES = new Set(["script", "foreignobject", "iframe", "object", "embed", "audio", "video", "canvas"]);
+const UNSAFE_SVG_ELEMENT_NAMES = new Set(["script", "iframe", "object", "embed", "audio", "video", "canvas"]);
 const SVG_LINK_ATTRIBUTE_NAMES = new Set(["href", "xlink:href"]);
 const UNSAFE_URL_PATTERN = /^\s*(?:javascript|vbscript|data):/iu;
 const UNSAFE_CSS_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\()/iu;
@@ -128,10 +128,28 @@ function parseSafeMermaidSvg(svg: string, targetDocument: Document): SVGElement 
 
   sanitizeSvgElement(svgElement);
   const importedSvg = targetDocument.importNode(svgElement, true) as unknown as SVGElement;
+  normalizeMermaidSvgSize(importedSvg);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
 
   return importedSvg;
+}
+
+function normalizeMermaidSvgSize(svgElement: SVGElement): void {
+  const viewBox = svgElement.getAttribute("viewBox")?.trim();
+  const viewBoxParts = viewBox?.split(/\s+/u).map(Number) ?? [];
+  const width = viewBoxParts[2];
+  const height = viewBoxParts[3];
+
+  if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    svgElement.setAttribute("width", `${width}`);
+    svgElement.setAttribute("height", `${height}`);
+  }
+
+  svgElement.style.removeProperty("max-width");
+  if ((svgElement.getAttribute("style") ?? "").trim().length === 0) {
+    svgElement.removeAttribute("style");
+  }
 }
 
 function toMermaidErrorMessage(error: unknown): string {
