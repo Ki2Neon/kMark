@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     ops::Range,
     path::Path,
@@ -608,6 +609,7 @@ struct HtmlEmitter<'a> {
     pending_kmark_image_paragraph_style: Option<String>,
     pending_kmark_page_valign: Option<KmarkPageValign>,
     pending_kmark_table_fit: Option<KmarkTableFit>,
+    definition_list_title_line: Option<usize>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -623,6 +625,7 @@ const DEFAULT_PREVIEW_FONT_SIZE: &str = "10.5pt";
 const DEFAULT_PREVIEW_FONT_FAMILY: &str = "BIZ UDPGothic";
 const DEFAULT_TOC_TITLE: &str = "目次";
 const HEADING_NUMBER_MAX_LEVEL: u8 = 6;
+const ESCAPED_DEFINITION_MARKER_COLON: char = '\u{1f}';
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
@@ -692,10 +695,95 @@ fn render_markdown_page(
 }
 
 fn collect_markdown_events(content: &str) -> Vec<OwnedEvent> {
-    Parser::new_ext(content, markdown_options())
+    let parser_content = escape_invalid_definition_markers(content);
+
+    Parser::new_ext(parser_content.as_ref(), markdown_options())
         .into_offset_iter()
         .map(|(event, range)| (event.into_static(), range))
         .collect()
+}
+
+fn escape_invalid_definition_markers(content: &str) -> Cow<'_, str> {
+    let bytes = content.as_bytes();
+    let mut line_start = 0usize;
+    let mut escaped: Option<String> = None;
+
+    while line_start < content.len() {
+        let mut line_content_end = line_start;
+        while line_content_end < content.len() && !matches!(bytes[line_content_end], b'\r' | b'\n')
+        {
+            line_content_end += 1;
+        }
+
+        if let Some(marker_offset) =
+            invalid_definition_marker_offset(content, line_start, line_content_end)
+        {
+            let escaped_content = escaped.get_or_insert_with(|| content.to_owned());
+            escaped_content.replace_range(
+                marker_offset..marker_offset + 1,
+                &ESCAPED_DEFINITION_MARKER_COLON.to_string(),
+            );
+        }
+
+        line_start = if matches!(bytes.get(line_content_end), Some(b'\r'))
+            && matches!(bytes.get(line_content_end + 1), Some(b'\n'))
+        {
+            line_content_end + 2
+        } else if line_content_end < content.len() {
+            line_content_end + 1
+        } else {
+            line_content_end
+        };
+    }
+
+    escaped.map(Cow::Owned).unwrap_or(Cow::Borrowed(content))
+}
+
+fn invalid_definition_marker_offset(
+    content: &str,
+    line_start: usize,
+    line_content_end: usize,
+) -> Option<usize> {
+    let line = &content[line_start..line_content_end];
+    let mut indent_width = 0usize;
+    let mut marker_offset = line_start;
+
+    for byte in line.as_bytes() {
+        match byte {
+            b' ' if indent_width < 4 => {
+                indent_width += 1;
+                marker_offset += 1;
+            }
+            _ => break,
+        }
+    }
+
+    if indent_width > 3 || !matches!(content.as_bytes().get(marker_offset), Some(b':')) {
+        return None;
+    }
+
+    let after_marker_offset = marker_offset + 1;
+    let Some(after_marker) = content.as_bytes().get(after_marker_offset) else {
+        return Some(marker_offset);
+    };
+
+    if !matches!(after_marker, b' ' | b'\t') {
+        return Some(marker_offset);
+    }
+
+    let definition_content = &content[after_marker_offset + 1..line_content_end];
+    definition_content
+        .trim()
+        .is_empty()
+        .then_some(marker_offset)
+}
+
+fn restore_escaped_definition_marker_colons(value: &str) -> Cow<'_, str> {
+    if value.contains(ESCAPED_DEFINITION_MARKER_COLON) {
+        Cow::Owned(value.replace(ESCAPED_DEFINITION_MARKER_COLON, ":"))
+    } else {
+        Cow::Borrowed(value)
+    }
 }
 
 fn markdown_options() -> Options {
@@ -705,6 +793,7 @@ fn markdown_options() -> Options {
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    options.insert(Options::ENABLE_DEFINITION_LIST);
     options
 }
 
@@ -1707,6 +1796,7 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_image_paragraph_style: None,
             pending_kmark_page_valign: None,
             pending_kmark_table_fit: None,
+            definition_list_title_line: None,
         }
     }
 
@@ -2001,10 +2091,18 @@ impl<'a> HtmlEmitter<'a> {
             }
             Tag::DefinitionList => {
                 let attributes = self.take_pending_kmark_block_attributes();
-                self.push_raw(&format!("<dl{}>", attributes));
+                self.push_raw(&format!(
+                    "<dl{}{}>",
+                    self.source_line_attributes(range),
+                    attributes,
+                ));
             }
-            Tag::DefinitionListTitle => self.push_raw("<dt>"),
-            Tag::DefinitionListDefinition => self.push_raw("<dd>"),
+            Tag::DefinitionListTitle => {
+                self.start_definition_list_title(range);
+            }
+            Tag::DefinitionListDefinition => {
+                self.push_raw(&format!("<dd{}>", self.source_line_attributes(range)));
+            }
             Tag::Table(alignments) => {
                 self.table_alignments = alignments;
                 self.table_section = TableSection::Head;
@@ -2160,7 +2258,7 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::Item => self.push_raw("</li>"),
             TagEnd::FootnoteDefinition => self.finish_footnote_definition(),
             TagEnd::DefinitionList => self.push_raw("</dl>"),
-            TagEnd::DefinitionListTitle => self.push_raw("</dt>"),
+            TagEnd::DefinitionListTitle => self.finish_definition_list_title(),
             TagEnd::DefinitionListDefinition => self.push_raw("</dd>"),
             TagEnd::Table => {
                 if self.table_body_open {
@@ -2224,6 +2322,30 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         self.push_raw("</div>");
+    }
+
+    fn start_definition_list_title(&mut self, range: &Range<usize>) {
+        let source_line = self.resolve_range_start_line(range.clone());
+        self.definition_list_title_line = Some(source_line);
+        self.push_raw(&format!(
+            "<dt{}>",
+            self.source_line_attributes_from_lines(source_line, source_line),
+        ));
+    }
+
+    fn split_definition_list_title(&mut self) {
+        let next_line = self.definition_list_title_line.unwrap_or(0) + 1;
+        self.definition_list_title_line = Some(next_line);
+        self.push_raw("</dt>");
+        self.push_raw(&format!(
+            "<dt{}>",
+            self.source_line_attributes_from_lines(next_line, next_line),
+        ));
+    }
+
+    fn finish_definition_list_title(&mut self) {
+        self.definition_list_title_line = None;
+        self.push_raw("</dt>");
     }
 
     fn finish_image(&mut self) {
@@ -2321,6 +2443,11 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        if self.definition_list_title_line.is_some() {
+            self.split_definition_list_title();
+            return;
+        }
+
         self.ensure_callout_marker_paragraph_open();
         self.push_soft_break();
     }
@@ -2335,6 +2462,9 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_text(&mut self, text: &str) {
+        let text = restore_escaped_definition_marker_colons(text);
+        let text = text.as_ref();
+
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -2352,6 +2482,9 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_code(&mut self, text: &str) {
+        let text = restore_escaped_definition_marker_colons(text);
+        let text = text.as_ref();
+
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -8037,6 +8170,87 @@ mod tests {
             rendered_preview.html,
             "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted<br />\n<em>value</em></p></blockquote>"
         );
+    }
+
+    #[test]
+    fn renders_definition_lists_with_multiple_items_and_inline_markup() {
+        let rendered_preview = render_markdown_preview(
+            "`GPIO`\n: General Purpose Input Output\n\n**重要項目**\n: 必ず確認する項目",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<dl data-source-line-start=\"0\""));
+        assert!(rendered_preview.html.contains(
+            "<dt data-source-line-start=\"0\" data-source-line-end=\"0\"><code>GPIO</code></dt>"
+        ));
+        assert!(rendered_preview
+            .html
+            .contains("<dd data-source-line-start=\""));
+        assert!(rendered_preview
+            .html
+            .contains(">General Purpose Input Output</dd>"));
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"3\" data-source-line-end=\"3\"><strong>重要項目</strong></dt>"));
+        assert!(rendered_preview.html.contains(
+            "<dd data-source-line-start=\"4\" data-source-line-end=\"4\">必ず確認する項目</dd>"
+        ));
+    }
+
+    #[test]
+    fn renders_definition_lists_with_multiple_terms_definitions_and_nested_blocks() {
+        let rendered_preview = render_markdown_preview(
+            "GND\n0V\n: 回路の基準電位。\n: Common reference.\n\nUART\n: 特徴\n\n  - TX/RXを使う\n  - 非同期通信\n\n  ```c\n  uart_write(\"hello\");\n  ```",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"0\" data-source-line-end=\"0\">GND</dt>"));
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"1\" data-source-line-end=\"1\">0V</dt>"));
+        assert!(rendered_preview.html.contains("回路の基準電位。"));
+        assert!(rendered_preview.html.contains("Common reference."));
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"5\" data-source-line-end=\"5\">UART</dt>"));
+        assert!(rendered_preview.html.contains("<ul>"));
+        assert!(rendered_preview
+            .html
+            .contains("<pre data-source-line-start=\"11\""));
+        assert!(rendered_preview
+            .html
+            .contains("<code class=\"language-c\">uart_write(&quot;hello&quot;);"));
+    }
+
+    #[test]
+    fn renders_definition_lists_with_multiline_definition_content() {
+        let rendered_preview = render_markdown_preview(
+            "UART\n: 非同期シリアル通信。\n  TXとRXを使う。\n  クロック線は使わない。",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"0\" data-source-line-end=\"0\">UART</dt>"));
+        assert!(rendered_preview.html.contains("非同期シリアル通信。"));
+        assert!(rendered_preview.html.contains("TXとRXを使う。"));
+        assert!(rendered_preview.html.contains("クロック線は使わない。"));
+    }
+
+    #[test]
+    fn keeps_inline_colons_and_definition_markers_without_space_as_paragraphs() {
+        let rendered_preview = render_markdown_preview(
+            "GPIO: General Purpose Input Output\n\nGPIO\n:General Purpose Input Output",
+        );
+
+        assert!(!rendered_preview.html.contains("<dl"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"0\" data-source-line-end=\"0\">GPIO: General Purpose Input Output</p>"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"2\" data-source-line-end=\"3\">GPIO<br />\n:General Purpose Input Output</p>"));
     }
 
     #[test]
