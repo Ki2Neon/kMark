@@ -194,6 +194,20 @@ export class EditorSessionController {
     return result;
   }
 
+  async openDocumentFromRecentFile(store: EditorSessionStore, recentFile: RecentFile): Promise<LoadedMarkdownDocument> {
+    const result = await this.#documentGateway.openDocumentFromPath(recentFile.filePath);
+
+    this.#currentDocumentFilePath = result.filePath;
+    store.dispatch({
+      type: "editor/documentLoaded",
+      fileName: result.fileName,
+      content: result.content,
+      loadedAt: null,
+    });
+
+    return result;
+  }
+
   async openCurrentDocumentFolder(): Promise<void> {
     if (this.#currentDocumentFilePath === null) {
       throw new Error("保存済みMarkdownファイルのフォルダーがありません。");

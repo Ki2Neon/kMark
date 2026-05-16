@@ -749,10 +749,20 @@ input:focus-visible,
 .menu-section__recent-item {
   display: grid;
   gap: 4px;
+  width: 100%;
   min-width: 0;
   padding: 10px 10px 11px 12px;
   border-left: 2px solid transparent;
   background: color-mix(in srgb, var(--surface-muted) 48%, transparent);
+  text-align: left;
+}
+
+.menu-section__recent-item:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    color-mix(in srgb, var(--surface-muted) 48%, transparent);
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
 }
 
 .menu-section__recent-file-name {

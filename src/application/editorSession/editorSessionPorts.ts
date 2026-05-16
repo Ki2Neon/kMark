@@ -75,6 +75,7 @@ export type MarkdownDocumentGateway = {
   restoreDocumentReference(filePath: string | null): void;
   openDocumentFromPicker(): Promise<LoadedMarkdownDocument | null>;
   openDocumentFromFile(file: File): Promise<LoadedMarkdownDocument>;
+  openDocumentFromPath(filePath: string): Promise<LoadedMarkdownDocument>;
   openDocumentFolder(filePath: string): Promise<void>;
   loadExternalDocument(document: ExternalMarkdownDocument): LoadedMarkdownDocument;
   saveDocument(fileName: string, content: string): Promise<SavedMarkdownDocument | null>;

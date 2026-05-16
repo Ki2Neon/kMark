@@ -461,6 +461,7 @@ pub fn run() {
             commands::preview_preferences::set_preview_preferences,
             commands::recent_files::get_recent_files,
             commands::recent_files::record_recent_file,
+            commands::file_open::read_markdown_document_at_path,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,
             commands::file_open::take_pending_markdown_open_requests,

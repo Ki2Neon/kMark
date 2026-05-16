@@ -30,6 +30,7 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
+import { type RecentFile } from "../../domain/recentFiles";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
@@ -132,6 +133,7 @@ export function MarkdownEditorScreen({
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
+    handleOpenRecentFile,
     handlePickedFile,
     handleResetDocument,
     handleOverwriteSaveDocument,
@@ -259,6 +261,19 @@ export function MarkdownEditorScreen({
     closeDesktopMenu();
     void handleOpenCurrentDocumentFolder();
   }, [closeDesktopMenu, handleOpenCurrentDocumentFolder]);
+
+  const handleRequestOpenRecentFile = useCallback((recentFile: RecentFile) => {
+    if (!confirmDiscard()) {
+      return;
+    }
+
+    closeDesktopMenu();
+    void handleOpenRecentFile(recentFile);
+
+    if (layoutMode === "mobile") {
+      requestMobileSection("edit");
+    }
+  }, [closeDesktopMenu, confirmDiscard, handleOpenRecentFile, layoutMode, requestMobileSection]);
 
   const handleRequestOverwriteSave = useCallback(() => {
     closeDesktopMenu();
@@ -494,6 +509,7 @@ export function MarkdownEditorScreen({
     onNewDocument: handleRequestNew,
     onOpenCurrentDocumentFolder: handleRequestOpenCurrentDocumentFolder,
     onOpenDocument: handleRequestOpen,
+    onOpenRecentFile: handleRequestOpenRecentFile,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,
     onPreviewUsesAppThemeColorsChange,

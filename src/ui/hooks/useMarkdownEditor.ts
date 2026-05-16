@@ -239,6 +239,18 @@ export function useMarkdownEditor(
     });
   }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
 
+  const handleOpenRecentFile = useCallback(async (recentFile: RecentFile) => {
+    await executeWithErrorHandling(async () => {
+      const loadedDocument = await controller.openDocumentFromRecentFile(store, recentFile);
+
+      if (loadedDocument.filePath !== null) {
+        await applyRecentFilesRequest(() => (
+          controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+        ));
+      }
+    });
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
+
   const handleOverwriteSaveDocument = useCallback(async () => {
     await executeWithErrorHandling(async () => {
       await controller.overwriteSaveDocument(store);
@@ -340,6 +352,7 @@ export function useMarkdownEditor(
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
+    handleOpenRecentFile,
     handlePickedFile,
     handleResetDocument,
     handleOverwriteSaveDocument,

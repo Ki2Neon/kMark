@@ -50,6 +50,7 @@ type MenuSectionProps = {
   readonly onNewDocument: () => void;
   readonly onOpenCurrentDocumentFolder: () => void;
   readonly onOpenDocument: () => void;
+  readonly onOpenRecentFile: (recentFile: RecentFile) => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
@@ -111,6 +112,7 @@ function MenuSectionComponent({
   onNewDocument,
   onOpenCurrentDocumentFolder,
   onOpenDocument,
+  onOpenRecentFile,
   onOverwriteSaveDocument,
   onPrintDocument,
   onPreviewDisplayModeChange,
@@ -470,9 +472,16 @@ function MenuSectionComponent({
         ) : (
           <ul className="menu-section__recent-list" aria-label="最近開いたファイル一覧">
             {recentFiles.map((recentFile) => (
-              <li key={recentFile.filePath} className="menu-section__recent-item" title={recentFile.filePath}>
-                <span className="menu-section__recent-file-name">{recentFile.fileName}</span>
-                <span className="menu-section__recent-file-path">{recentFile.filePath}</span>
+              <li key={recentFile.filePath}>
+                <button
+                  type="button"
+                  className="menu-section__recent-item"
+                  title={recentFile.filePath}
+                  onClick={() => onOpenRecentFile(recentFile)}
+                >
+                  <span className="menu-section__recent-file-name">{recentFile.fileName}</span>
+                  <span className="menu-section__recent-file-path">{recentFile.filePath}</span>
+                </button>
               </li>
             ))}
           </ul>

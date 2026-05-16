@@ -344,9 +344,11 @@ function DesktopMarkdownInputComponent({
   showMobileInputHelperBar = false,
 }: DesktopMarkdownInputProps) {
   const editorRef = useRef<EditorView | null>(null);
+  const latestContentRef = useRef(content);
   const lastSelectionRef = useRef<EditorSelection | null>(null);
   const lastHandledLineSelectionRequestIdRef = useRef<number | null>(null);
   const lastEmittedCursorLineRef = useRef<number | null>(null);
+  latestContentRef.current = content;
 
   const emitCursorLine = useCallback((view: EditorView) => {
     const nextCursorLine = getCursorLineNumber(view);
@@ -458,6 +460,10 @@ function DesktopMarkdownInputComponent({
   ), []);
 
   const handleEditorChange = useCallback((value: string) => {
+    if (value === latestContentRef.current) {
+      return;
+    }
+
     onContentChange(value);
   }, [onContentChange]);
 
