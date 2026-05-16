@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   publish-tauri:
@@ -89,6 +89,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
+          version: 10
           run_install: false
 
       - name: Setup Node.js
