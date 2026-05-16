@@ -1320,7 +1320,7 @@ input:focus-visible,
 
 .markdown-body .kmark-mermaid-block {
   max-width: 100%;
-  overflow-x: auto;
+  overflow: hidden;
   padding: 0.75em;
   border: 1px solid color-mix(in srgb, var(--preview-text) 14%, transparent);
   border-radius: 6px;
@@ -1334,12 +1334,14 @@ input:focus-visible,
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  min-width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .markdown-body .kmark-mermaid-rendered svg {
   display: block;
-  max-width: none;
+  max-width: 100%;
   height: auto;
 }
 
