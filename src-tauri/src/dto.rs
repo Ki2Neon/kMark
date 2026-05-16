@@ -1,7 +1,7 @@
 use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PageChromeConfig, PageChromeRegionConfig,
-    PageNumberConfig, PageStyle, PreviewPreferences, PreviewTextStyle, RenderedMarkdownPreview,
-    RenderedPage, StoredEdit, ThemePreferences,
+    PageNumberConfig, PageStyle, PreviewPreferences, PreviewTextStyle, RecentFile, RecentFiles,
+    RenderedMarkdownPreview, RenderedPage, StoredEdit, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -315,6 +315,40 @@ impl From<&StoredEdit> for EditorDraftPayload {
             saved_at: stored_edit.saved_at(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentFilePayload {
+    pub file_name: String,
+    pub file_path: String,
+}
+
+impl From<&RecentFile> for RecentFilePayload {
+    fn from(recent_file: &RecentFile) -> Self {
+        Self {
+            file_name: recent_file.file_name().to_owned(),
+            file_path: recent_file.file_path().to_owned(),
+        }
+    }
+}
+
+pub fn recent_file_from_payload(payload: RecentFilePayload) -> Option<RecentFile> {
+    RecentFile::new(payload.file_name, payload.file_path)
+}
+
+pub fn recent_files_from_payloads(payloads: Vec<RecentFilePayload>) -> RecentFiles {
+    RecentFiles::new(payloads.into_iter().filter_map(recent_file_from_payload))
+}
+
+pub fn recent_file_payloads_from_recent_files(
+    recent_files: &RecentFiles,
+) -> Vec<RecentFilePayload> {
+    recent_files
+        .files()
+        .iter()
+        .map(RecentFilePayload::from)
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

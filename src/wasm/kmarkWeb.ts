@@ -3,6 +3,7 @@ import {
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../domain/preview";
+import { type RecentFile } from "../domain/recentFiles";
 
 type KmarkWebModule = typeof import("./pkg/kmark_web");
 
@@ -139,6 +140,30 @@ export function normalizeEditorDraftJsonWithWasmSync(input: string | null): stri
 export async function normalizeEditorDraftWithWasm(input: string | null): Promise<string | null> {
   await initializeKmarkWeb();
   return normalizeEditorDraftJsonWithWasmSync(input);
+}
+
+export function normalizeRecentFilesJsonWithWasmSync(input: string | null): string {
+  return loadKmarkWebModuleSync().normalize_recent_files_json(input);
+}
+
+export async function normalizeRecentFilesWithWasm(input: string | null): Promise<string> {
+  await initializeKmarkWeb();
+  return normalizeRecentFilesJsonWithWasmSync(input);
+}
+
+export function recordRecentFileJsonWithWasmSync(
+  currentInput: string | null,
+  recentFile: RecentFile,
+): string {
+  return loadKmarkWebModuleSync().record_recent_file_json(currentInput, JSON.stringify(recentFile));
+}
+
+export async function recordRecentFileWithWasm(
+  currentInput: string | null,
+  recentFile: RecentFile,
+): Promise<string> {
+  await initializeKmarkWeb();
+  return recordRecentFileJsonWithWasmSync(currentInput, recentFile);
 }
 
 export function createStartupEditorStateJsonWithWasmSync(

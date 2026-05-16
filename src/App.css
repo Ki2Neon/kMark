@@ -512,6 +512,46 @@ input:focus-visible,
   color: var(--text-soft);
 }
 
+.menu-section__stack-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 12px;
+  background: var(--surface);
+}
+
+.menu-section__back-button {
+  min-height: 30px;
+  padding: 0.38rem 0.65rem;
+  background: var(--surface-muted);
+  font-size: 0.82em;
+  line-height: 1.2;
+}
+
+.menu-section__back-button:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    var(--surface-muted);
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
+}
+
+.menu-section__stack-title-block {
+  min-width: 0;
+}
+
+.menu-section__stack-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86em;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
 .menu-section__label {
   display: grid;
   grid-template-columns: minmax(150px, 0.45fr) minmax(160px, 1fr);
@@ -696,6 +736,40 @@ input:focus-visible,
 
 .menu-section__actions .menu-section__action-spaced {
   margin-top: 10px;
+}
+
+.menu-section__recent-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu-section__recent-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 10px 11px 12px;
+  border-left: 2px solid transparent;
+  background: color-mix(in srgb, var(--surface-muted) 48%, transparent);
+}
+
+.menu-section__recent-file-name {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.82em;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.menu-section__recent-file-path {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 0.72em;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .menu-section__empty {

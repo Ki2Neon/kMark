@@ -2,15 +2,18 @@ import { DEFAULT_FILE_NAME, type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PageStyle, type PreviewDisplayMode, type PreviewTextStyle, type RenderedPreviewPage } from "../../domain/preview";
+import { type RecentFile } from "../../domain/recentFiles";
 import { type EditorSessionAction } from "./editorSessionAction";
 import {
   type Clock,
   type DraftStore,
   type EditorStateRules,
+  type LoadedMarkdownDocument,
   type MarkdownAssetImporter,
   type MarkdownDocumentGateway,
   type MarkdownDocumentPrinter,
   type MarkdownRenderer,
+  type RecentFileStore,
 } from "./editorSessionPorts";
 
 export type EditorSessionStore = {
@@ -37,6 +40,7 @@ type EditorSessionControllerDependencies = {
   readonly draftStore: DraftStore;
   readonly documentGateway: MarkdownDocumentGateway;
   readonly printer: MarkdownDocumentPrinter;
+  readonly recentFileStore: RecentFileStore;
   readonly renderer: MarkdownRenderer;
   readonly rules: EditorStateRules;
 };
@@ -55,6 +59,7 @@ export class EditorSessionController {
   readonly #draftStore: DraftStore;
   readonly #documentGateway: MarkdownDocumentGateway;
   readonly #printer: MarkdownDocumentPrinter;
+  readonly #recentFileStore: RecentFileStore;
   readonly #renderer: MarkdownRenderer;
   readonly #rules: EditorStateRules;
   #currentDocumentFilePath: string | null;
@@ -65,6 +70,7 @@ export class EditorSessionController {
     this.#draftStore = dependencies.draftStore;
     this.#documentGateway = dependencies.documentGateway;
     this.#printer = dependencies.printer;
+    this.#recentFileStore = dependencies.recentFileStore;
     this.#renderer = dependencies.renderer;
     this.#rules = dependencies.rules;
     this.#currentDocumentFilePath = null;
@@ -129,6 +135,21 @@ export class EditorSessionController {
     });
   }
 
+  async loadRecentFiles(): Promise<readonly RecentFile[]> {
+    return this.#recentFileStore.load();
+  }
+
+  async recordRecentFile(
+    fileName: string,
+    filePath: string | null,
+  ): Promise<readonly RecentFile[] | null> {
+    if (filePath === null) {
+      return null;
+    }
+
+    return this.#recentFileStore.record({ fileName, filePath });
+  }
+
   async renderPreview(content: string): Promise<RenderedPreview> {
     return this.#renderer.render(content, this.#currentDocumentFilePath);
   }
@@ -141,11 +162,11 @@ export class EditorSessionController {
     store.dispatch({ type: "editor/contentChanged", content });
   }
 
-  async openDocumentFromPicker(store: EditorSessionStore): Promise<void> {
+  async openDocumentFromPicker(store: EditorSessionStore): Promise<LoadedMarkdownDocument | null> {
     const result = await this.#documentGateway.openDocumentFromPicker();
 
     if (result === null) {
-      return;
+      return null;
     }
 
     this.#currentDocumentFilePath = result.filePath;
@@ -155,9 +176,11 @@ export class EditorSessionController {
       content: result.content,
       loadedAt: null,
     });
+
+    return result;
   }
 
-  async openDocumentFromFile(store: EditorSessionStore, file: File): Promise<void> {
+  async openDocumentFromFile(store: EditorSessionStore, file: File): Promise<LoadedMarkdownDocument> {
     const result = await this.#documentGateway.openDocumentFromFile(file);
 
     this.#currentDocumentFilePath = result.filePath;
@@ -167,6 +190,8 @@ export class EditorSessionController {
       content: result.content,
       loadedAt: null,
     });
+
+    return result;
   }
 
   async openCurrentDocumentFolder(): Promise<void> {
@@ -192,7 +217,7 @@ export class EditorSessionController {
       .join("\n\n");
   }
 
-  loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): void {
+  loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): LoadedMarkdownDocument {
     const loadedDocument = this.#documentGateway.loadExternalDocument(document);
 
     this.#currentDocumentFilePath = loadedDocument.filePath;
@@ -202,6 +227,8 @@ export class EditorSessionController {
       content: loadedDocument.content,
       loadedAt: null,
     });
+
+    return loadedDocument;
   }
 
   async overwriteSaveDocument(store: EditorSessionStore): Promise<void> {

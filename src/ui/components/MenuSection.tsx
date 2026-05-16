@@ -21,6 +21,7 @@ import {
 import {
   type PreviewDisplayMode,
 } from "../../domain/preview";
+import { type RecentFile } from "../../domain/recentFiles";
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
 
 type MenuSectionProps = {
@@ -32,6 +33,7 @@ type MenuSectionProps = {
   readonly systemFontSizePx: SystemFontSizePx;
   readonly previewDisplayMode: PreviewDisplayMode;
   readonly previewUsesAppThemeColors: boolean;
+  readonly recentFiles: readonly RecentFile[];
   readonly isPreviewVisible: boolean;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
@@ -63,6 +65,7 @@ const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
 const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 
 type NumberDraftField = "edit-font-size" | "system-font-size";
+type MenuPanel = "root" | "recent-files";
 
 function normalizeMenuSearchValue(value: string): string {
   return value.trim().toLocaleLowerCase("ja-JP");
@@ -91,6 +94,7 @@ function MenuSectionComponent({
   systemFontSizePx,
   previewDisplayMode,
   previewUsesAppThemeColors,
+  recentFiles,
   isPreviewVisible,
   layoutMode,
   multiCursorModifier,
@@ -117,6 +121,7 @@ function MenuSectionComponent({
   onStartupEditModeChange,
   onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
+  const [menuPanel, setMenuPanel] = useState<MenuPanel>("root");
   const [menuSearchText, setMenuSearchText] = useState("");
   const [appFontDraft, setAppFontDraft] = useState(appFontId);
   const [editFontDraft, setEditFontDraft] = useState(editFontId);
@@ -141,6 +146,8 @@ function MenuSectionComponent({
     "保存",
     "印刷",
     "開く",
+    "最近開いたファイル",
+    "recent files",
     ".md",
     "フォルダー",
     "Explorer",
@@ -416,6 +423,42 @@ function MenuSectionComponent({
     onWindowsStartupTrayResidentChange(event.currentTarget.checked);
   };
 
+  const handleRecentFilesOpen = () => {
+    setMenuPanel("recent-files");
+  };
+
+  const handleRootPanelReturn = () => {
+    setMenuPanel("root");
+  };
+
+  if (menuPanel === "recent-files") {
+    return (
+      <section className="section section--menu menu-section" aria-label="最近開いたファイル">
+        <div className="menu-section__stack-header">
+          <button type="button" className="menu-section__back-button" onClick={handleRootPanelReturn}>
+            戻る
+          </button>
+          <div className="menu-section__stack-title-block">
+            <h2 className="menu-section__stack-title">最近開いたファイル</h2>
+          </div>
+        </div>
+
+        {recentFiles.length === 0 ? (
+          <p className="menu-section__empty">履歴なし</p>
+        ) : (
+          <ul className="menu-section__recent-list" aria-label="最近開いたファイル一覧">
+            {recentFiles.map((recentFile) => (
+              <li key={recentFile.filePath} className="menu-section__recent-item" title={recentFile.filePath}>
+                <span className="menu-section__recent-file-name">{recentFile.fileName}</span>
+                <span className="menu-section__recent-file-path">{recentFile.filePath}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="section section--menu menu-section" aria-label="メニュー">
       <div className="menu-section__search" role="search">
@@ -438,6 +481,9 @@ function MenuSectionComponent({
           <div className="menu-section__actions" role="group" aria-label="ファイル操作">
             <button type="button" onClick={onOpenDocument}>
               開く
+            </button>
+            <button type="button" onClick={handleRecentFilesOpen}>
+              最近開いたファイル
             </button>
             <button type="button" onClick={onOverwriteSaveDocument}>
               上書き保存

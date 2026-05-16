@@ -4,7 +4,8 @@ use kmark_core::{
     render_markdown_preview_with_file_path, resolve_app_font_family, resolve_edit_font_family,
     DesktopLayoutPreferences, EditorPreferences, EditorState, EditorStateAction, EditorStats,
     PageChromeConfig, PageChromeRegionConfig, PageNumberConfig, PageStyle, PreviewPreferences,
-    PreviewTextStyle, RenderedPage, StoredEdit, TableDiagnostic, TableDiagnosticKind,
+    PreviewTextStyle, RecentFile, RecentFiles, RenderedPage, StoredEdit, TableDiagnostic,
+    TableDiagnosticKind,
     TableFormatLineRange, TableFormatOptions, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
@@ -270,6 +271,20 @@ struct EditorDraftInput {
     saved_at: Option<u64>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentFilePayload {
+    file_name: String,
+    file_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentFileInput {
+    file_name: Option<String>,
+    file_path: Option<String>,
+}
+
 #[wasm_bindgen]
 pub fn render_markdown_preview_json(content: String, file_path: Option<String>) -> String {
     let rendered_preview = render_markdown_preview_with_file_path(&content, file_path.as_deref());
@@ -460,6 +475,35 @@ pub fn normalize_editor_draft_json(input: Option<String>) -> Option<String> {
     Some(stringify(&EditorDraftPayload::from(&stored_edit)))
 }
 
+#[wasm_bindgen]
+pub fn normalize_recent_files_json(input: Option<String>) -> String {
+    let recent_files = RecentFiles::new(
+        parse_json::<Vec<RecentFileInput>>(input)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(recent_file_from_input),
+    );
+
+    stringify_recent_files(&recent_files)
+}
+
+#[wasm_bindgen]
+pub fn record_recent_file_json(current_input: Option<String>, recent_file_input: String) -> String {
+    let recent_files = RecentFiles::new(
+        parse_json::<Vec<RecentFileInput>>(current_input)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(recent_file_from_input),
+    );
+    let recent_file = parse_json::<RecentFileInput>(Some(recent_file_input))
+        .and_then(recent_file_from_input);
+
+    match recent_file {
+        Some(recent_file) => stringify_recent_files(&recent_files.record(recent_file)),
+        None => stringify_recent_files(&recent_files),
+    }
+}
+
 fn parse_json<T: for<'de> Deserialize<'de>>(input: Option<String>) -> Option<T> {
     let text = input?;
 
@@ -472,6 +516,20 @@ fn parse_json<T: for<'de> Deserialize<'de>>(input: Option<String>) -> Option<T> 
 
 fn stringify<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("json serialization failed")
+}
+
+fn stringify_recent_files(recent_files: &RecentFiles) -> String {
+    stringify(
+        &recent_files
+            .files()
+            .iter()
+            .map(RecentFilePayload::from)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn recent_file_from_input(input: RecentFileInput) -> Option<RecentFile> {
+    RecentFile::new(input.file_name.unwrap_or_default(), input.file_path?)
 }
 
 impl From<RenderedPage> for RenderedPagePayload {
@@ -743,6 +801,15 @@ impl From<&StoredEdit> for EditorDraftPayload {
             content: stored_edit.content().to_owned(),
             file_path: stored_edit.file_path().map(ToOwned::to_owned),
             saved_at: stored_edit.saved_at(),
+        }
+    }
+}
+
+impl From<&RecentFile> for RecentFilePayload {
+    fn from(recent_file: &RecentFile) -> Self {
+        Self {
+            file_name: recent_file.file_name().to_owned(),
+            file_path: recent_file.file_path().to_owned(),
         }
     }
 }
