@@ -24,6 +24,8 @@ const INTERACTIVE_PREVIEW_PAN_THRESHOLD_PX = 3;
 const PREVIEW_CURSOR_TARGET_CLASS_NAME = "preview-section__cursor-target";
 const PREVIEW_CURSOR_SCROLL_PADDING_PX = 72;
 const PREVIEW_CURSOR_VIEWPORT_ANCHOR_RATIO = 0.35;
+const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
+const KMARK_VIDEO_FAILED_STATE = "failed";
 const DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX = 12;
 const DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX = 10.4;
 const MIN_TABLE_CELL_HORIZONTAL_PADDING_PX = 4;
@@ -3201,6 +3203,53 @@ function renderPageChromeRegion(
   );
 }
 
+function resolveVideoErrorElement(video: HTMLVideoElement): HTMLElement | null {
+  const nextElement = video.nextElementSibling;
+
+  return nextElement instanceof HTMLElement && nextElement.classList.contains(KMARK_VIDEO_ERROR_CLASS_NAME)
+    ? nextElement
+    : null;
+}
+
+function ensureVideoErrorElement(video: HTMLVideoElement): HTMLElement {
+  const currentElement = resolveVideoErrorElement(video);
+
+  if (currentElement !== null) {
+    return currentElement;
+  }
+
+  const errorElement = document.createElement("span");
+  errorElement.className = KMARK_VIDEO_ERROR_CLASS_NAME;
+  errorElement.hidden = true;
+  errorElement.setAttribute("role", "alert");
+  video.insertAdjacentElement("afterend", errorElement);
+
+  return errorElement;
+}
+
+function showVideoLoadError(video: HTMLVideoElement): void {
+  const errorElement = ensureVideoErrorElement(video);
+  const altText = video.dataset.kmarkVideoAlt?.trim() ?? "";
+  const source = video.dataset.kmarkVideoSource?.trim() || video.currentSrc || video.getAttribute("src") || "";
+
+  video.dataset.kmarkVideoLoadState = KMARK_VIDEO_FAILED_STATE;
+  errorElement.textContent = [
+    "動画を読み込めませんでした",
+    altText,
+    source,
+  ].filter((line) => line.length > 0).join("\n");
+  errorElement.hidden = false;
+}
+
+function hideVideoLoadError(video: HTMLVideoElement): void {
+  delete video.dataset.kmarkVideoLoadState;
+
+  const errorElement = resolveVideoErrorElement(video);
+  if (errorElement !== null) {
+    errorElement.hidden = true;
+  }
+}
+
 function MarkdownPreviewComponent({
   activeSourceLine = null,
   defaultPageStyle = DEFAULT_PAGE_STYLE,
@@ -3514,11 +3563,20 @@ function MarkdownPreviewComponent({
     const previewImages = previewViewport === null
       ? []
       : Array.from(previewViewport.querySelectorAll<HTMLImageElement>("img"));
+    const previewVideos = previewViewport === null
+      ? []
+      : Array.from(previewViewport.querySelectorAll<HTMLVideoElement>("video"));
 
     for (const previewImage of previewImages) {
       if (!previewImage.complete) {
         previewImage.addEventListener("load", scheduleA4Pagination);
         previewImage.addEventListener("error", scheduleA4Pagination);
+      }
+    }
+    for (const previewVideo of previewVideos) {
+      if (previewVideo.readyState < 1) {
+        previewVideo.addEventListener("loadedmetadata", scheduleA4Pagination);
+        previewVideo.addEventListener("error", scheduleA4Pagination);
       }
     }
 
@@ -3533,8 +3591,51 @@ function MarkdownPreviewComponent({
         previewImage.removeEventListener("load", scheduleA4Pagination);
         previewImage.removeEventListener("error", scheduleA4Pagination);
       }
+      for (const previewVideo of previewVideos) {
+        previewVideo.removeEventListener("loadedmetadata", scheduleA4Pagination);
+        previewVideo.removeEventListener("error", scheduleA4Pagination);
+      }
     };
   }, [a4PaginationSourceKey, displayMode, normalizedPages]);
+
+  useLayoutEffect(() => {
+    const previewViewport = previewViewportRef.current;
+
+    if (previewViewport === null) {
+      return;
+    }
+
+    const previewVideos = Array.from(
+      previewViewport.querySelectorAll<HTMLVideoElement>("video[data-kmark-video-source]"),
+    );
+    const handleVideoLoaded = (event: Event) => {
+      if (event.currentTarget instanceof HTMLVideoElement) {
+        hideVideoLoadError(event.currentTarget);
+      }
+    };
+    const handleVideoError = (event: Event) => {
+      if (event.currentTarget instanceof HTMLVideoElement) {
+        showVideoLoadError(event.currentTarget);
+      }
+    };
+
+    for (const previewVideo of previewVideos) {
+      ensureVideoErrorElement(previewVideo);
+      previewVideo.addEventListener("loadedmetadata", handleVideoLoaded);
+      previewVideo.addEventListener("error", handleVideoError);
+
+      if (previewVideo.error !== null) {
+        showVideoLoadError(previewVideo);
+      }
+    }
+
+    return () => {
+      for (const previewVideo of previewVideos) {
+        previewVideo.removeEventListener("loadedmetadata", handleVideoLoaded);
+        previewVideo.removeEventListener("error", handleVideoError);
+      }
+    };
+  }, [currentPreviewPageHtmls, html]);
 
   useLayoutEffect(() => {
     const previewViewport = previewViewportRef.current;
@@ -3653,7 +3754,7 @@ function MarkdownPreviewComponent({
 
     const eventTarget = resolveEventTargetElement(event.target);
 
-    if (eventTarget === null || eventTarget.closest("a, button, input, textarea, select") !== null) {
+    if (eventTarget === null || eventTarget.closest("a, button, input, textarea, select, video") !== null) {
       return;
     }
 

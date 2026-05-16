@@ -22,7 +22,7 @@ export type ImportedMarkdownAsset = {
   readonly copiedPath: string;
   readonly relativePath: string;
   readonly markdownText: string;
-  readonly assetKind: "image";
+  readonly assetKind: "image" | "video";
 };
 
 export type ImportMarkdownAssetsRequest = {

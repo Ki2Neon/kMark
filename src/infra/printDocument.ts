@@ -105,6 +105,12 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     color: inherit;
   }
 
+  .markdown-body img,
+  .markdown-body video {
+    max-width: 100%;
+    box-sizing: content-box;
+  }
+
   .markdown-body .kmark-toc {
     max-width: 100%;
     padding: 0;

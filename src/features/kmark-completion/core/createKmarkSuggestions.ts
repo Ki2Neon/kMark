@@ -27,6 +27,13 @@ const IMAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["align", 410],
 ]);
 
+const VIDEO_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["video_autoplay", 500],
+  ["video_muted", 490],
+  ["video_loop", 480],
+  ["video_poster", 470],
+]);
+
 const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["image size", 470],
   ["image border", 460],
@@ -353,6 +360,10 @@ function matchesAnyContext(
 function scoreParamSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, prefix: string): number {
   const prefixBoost = scorePrefix(spec, prefix);
 
+  if (context.contexts.includes("video") && spec.contexts.includes("video")) {
+    return 10_500 + (VIDEO_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
   if (context.contexts.includes("image") && spec.contexts.includes("image")) {
     return 10_000 + (IMAGE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
@@ -451,6 +462,10 @@ function resolveCompletionSection(
   activeContexts: readonly KmarkParamContext[],
   fallback: KmarkCompletionSection,
 ): KmarkCompletionSection {
+  if (activeContexts.includes("video") && candidateContexts.includes("video")) {
+    return "video";
+  }
+
   if (activeContexts.includes("image") && candidateContexts.includes("image")) {
     return "image";
   }
@@ -482,6 +497,8 @@ function detailForSection(section: KmarkCompletionSection): string {
   switch (section) {
     case "image":
       return "kmark image";
+    case "video":
+      return "kmark video";
     case "page":
       return "kmark page";
     case "scope":

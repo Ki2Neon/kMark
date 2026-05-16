@@ -8,7 +8,7 @@ export type ImportedMarkdownAssetPayload = {
   readonly copiedPath: string;
   readonly relativePath: string;
   readonly markdownText: string;
-  readonly assetKind: "image";
+  readonly assetKind: "image" | "video";
 };
 
 export async function importMarkdownAssetFiles(

@@ -146,6 +146,7 @@ struct ImageContext {
     title: String,
     alt_text: String,
     style: Option<String>,
+    video: KmarkVideoParams,
     source_line_attributes: String,
 }
 
@@ -244,6 +245,14 @@ struct KmarkImageParams {
     padding: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkVideoParams {
+    autoplay: Option<bool>,
+    muted: Option<bool>,
+    loop_playback: Option<bool>,
+    poster: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum KmarkSizeValue {
     Length(String),
@@ -314,6 +323,7 @@ enum KmarkHeadingNumberPattern {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkParams {
     image: KmarkImageParams,
+    video: KmarkVideoParams,
     layout: KmarkLayoutParams,
     text: KmarkTextParams,
     table: KmarkTableParams,
@@ -2052,6 +2062,7 @@ impl<'a> HtmlEmitter<'a> {
                     title: String::new(),
                     alt_text: String::new(),
                     style: None,
+                    video: KmarkVideoParams::default(),
                     source_line_attributes: String::new(),
                 });
             }
@@ -2308,7 +2319,8 @@ impl<'a> HtmlEmitter<'a> {
                 self.mark_paragraph_image();
                 let source_line_attributes = self.source_line_attributes(range);
                 let single_layer = self.take_pending_kmark_layer_for_image(range.start);
-                let image_style = self.resolve_image_style(single_layer.as_ref());
+                let resolved_params = self.resolve_visual_params(single_layer.as_ref());
+                let image_style = resolved_params.to_image_style();
                 self.image_stack.push(ImageContext {
                     destination_url: resolve_image_destination_url(
                         &dest_url,
@@ -2317,6 +2329,7 @@ impl<'a> HtmlEmitter<'a> {
                     title: title.to_string(),
                     alt_text: String::new(),
                     style: image_style,
+                    video: resolved_params.video,
                     source_line_attributes,
                 });
             }
@@ -2458,10 +2471,15 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        let Some(destination_url) = image_context.destination_url else {
+        let Some(destination_url) = image_context.destination_url.as_deref() else {
             self.push_text(&image_context.alt_text);
             return;
         };
+
+        if is_video_destination_url(&destination_url) {
+            self.push_video(&image_context, &destination_url);
+            return;
+        }
 
         let mut html = format!(
             "<img src=\"{}\" alt=\"{}\"{}",
@@ -2480,6 +2498,55 @@ impl<'a> HtmlEmitter<'a> {
             html.push('"');
         }
         html.push_str(" />");
+        self.push_raw(&html);
+    }
+
+    fn push_video(&mut self, image_context: &ImageContext, destination_url: &str) {
+        let mut html = format!(
+            "<video src=\"{}\" controls{} data-kmark-video-source=\"{}\"",
+            escape_html(destination_url),
+            image_context.source_line_attributes,
+            escape_html(destination_url),
+        );
+
+        if !image_context.alt_text.is_empty() {
+            html.push_str(" aria-label=\"");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push_str("\" data-kmark-video-alt=\"");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push('"');
+        }
+        if !image_context.title.is_empty() {
+            html.push_str(" title=\"");
+            html.push_str(&escape_html(&image_context.title));
+            html.push('"');
+        }
+        if let Some(style) = &image_context.style {
+            html.push_str(" style=\"");
+            html.push_str(&escape_html(style));
+            html.push('"');
+        }
+        if image_context.video.autoplay == Some(true) {
+            html.push_str(" autoplay");
+        }
+        if image_context.video.muted == Some(true) {
+            html.push_str(" muted");
+        }
+        if image_context.video.loop_playback == Some(true) {
+            html.push_str(" loop");
+        }
+        if let Some(poster_url) = image_context
+            .video
+            .poster
+            .as_deref()
+            .and_then(|poster| resolve_image_destination_url(poster, self.markdown_file_path))
+        {
+            html.push_str(" poster=\"");
+            html.push_str(&escape_html(&poster_url));
+            html.push('"');
+        }
+
+        html.push_str("></video>");
         self.push_raw(&html);
     }
 
@@ -3074,10 +3141,6 @@ impl<'a> HtmlEmitter<'a> {
         self.discard_pending_kmark_params_if_gap_is_incompatible(image_start_offset);
         let bundle = self.take_pending_kmark_bundle()?;
         Some(self.resolve_kmark_bundle_layer(&bundle))
-    }
-
-    fn resolve_image_style(&self, single_layer: Option<&KmarkParamLayer>) -> Option<String> {
-        self.resolve_visual_params(single_layer).to_image_style()
     }
 
     fn resolve_visual_params(&self, single_layer: Option<&KmarkParamLayer>) -> KmarkParams {
@@ -3802,6 +3865,7 @@ impl KmarkParamLayer {
 impl KmarkParams {
     fn merge(&mut self, other: &Self) {
         self.image.merge(&other.image);
+        self.video.merge(&other.video);
         self.layout.merge(&other.layout);
         self.text.merge(&other.text);
         self.table.merge(&other.table);
@@ -3810,6 +3874,7 @@ impl KmarkParams {
 
     fn has_directives(&self) -> bool {
         self.image.has_image_directives()
+            || self.video.has_video_directives()
             || self.layout.has_layout_directives()
             || self.text.has_text_directives()
             || self.table.has_table_directives()
@@ -5222,6 +5287,30 @@ impl KmarkImageParams {
     }
 }
 
+impl KmarkVideoParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(autoplay) = other.autoplay {
+            self.autoplay = Some(autoplay);
+        }
+        if let Some(muted) = other.muted {
+            self.muted = Some(muted);
+        }
+        if let Some(loop_playback) = other.loop_playback {
+            self.loop_playback = Some(loop_playback);
+        }
+        if let Some(poster) = &other.poster {
+            self.poster = Some(poster.clone());
+        }
+    }
+
+    fn has_video_directives(&self) -> bool {
+        self.autoplay.is_some()
+            || self.muted.is_some()
+            || self.loop_playback.is_some()
+            || self.poster.is_some()
+    }
+}
+
 impl KmarkSizeValue {
     fn is_page_fit(&self) -> bool {
         matches!(self, Self::PageFit | Self::PageFitContain)
@@ -6114,6 +6203,26 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.image.padding = Some(padding);
                 }
             }
+            "video_autoplay" => {
+                if let Some(autoplay) = parse_kmark_bool_value(&value) {
+                    bundle.params.video.autoplay = Some(autoplay);
+                }
+            }
+            "video_muted" => {
+                if let Some(muted) = parse_kmark_bool_value(&value) {
+                    bundle.params.video.muted = Some(muted);
+                }
+            }
+            "video_loop" => {
+                if let Some(loop_playback) = parse_kmark_bool_value(&value) {
+                    bundle.params.video.loop_playback = Some(loop_playback);
+                }
+            }
+            "video_poster" => {
+                if let Some(poster) = parse_kmark_video_poster_value(&value) {
+                    bundle.params.video.poster = Some(poster);
+                }
+            }
             "color" => {
                 if let Some(color) = parse_kmark_color_value(&value) {
                     bundle.params.text.color = Some(color);
@@ -6362,6 +6471,12 @@ fn parse_kmark_margin_value(value: &str) -> Option<String> {
 
 fn parse_kmark_padding_value(value: &str) -> Option<String> {
     parse_css_box_spacing_value(value, false)
+}
+
+fn parse_kmark_video_poster_value(value: &str) -> Option<String> {
+    let poster = trim_kmark_quotes(value).trim();
+
+    (!poster.is_empty() && !is_unsafe_image_url(poster)).then(|| poster.to_owned())
 }
 
 fn parse_kmark_font_size_value(value: &str) -> Option<String> {
@@ -6680,6 +6795,19 @@ fn is_safe_url(url: &str) -> bool {
     !(normalized.starts_with("javascript:") || normalized.starts_with("data:"))
 }
 
+fn is_video_destination_url(url: &str) -> bool {
+    let normalized = url.trim();
+    let (path, _) = split_resource_path_and_suffix(normalized);
+    let Some((_, extension)) = path.rsplit_once('.') else {
+        return false;
+    };
+
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "mp4" | "webm" | "ogg" | "mov" | "m4v"
+    )
+}
+
 fn resolve_image_destination_url(
     destination_url: &str,
     markdown_file_path: Option<&str>,
@@ -6694,19 +6822,37 @@ fn resolve_image_destination_url(
         return Some(normalized_url.to_owned());
     }
 
-    if is_windows_absolute_path(normalized_url) || Path::new(normalized_url).is_absolute() {
-        return Some(file_path_to_url(&resolve_existing_path_string(
-            normalized_url,
-        )));
+    let (resource_path, resource_suffix) = split_resource_path_and_suffix(normalized_url);
+
+    if resource_path.is_empty() {
+        return None;
+    }
+
+    if is_windows_absolute_path(resource_path) || Path::new(resource_path).is_absolute() {
+        return Some(format!(
+            "{}{}",
+            file_path_to_url(&resolve_existing_path_string(resource_path)),
+            resource_suffix,
+        ));
     }
 
     if let Some(markdown_file_path) = markdown_file_path {
         let resolved_path =
-            resolve_relative_path_from_markdown_file(markdown_file_path, normalized_url);
-        return Some(file_path_to_url(&resolved_path));
+            resolve_relative_path_from_markdown_file(markdown_file_path, resource_path);
+        return Some(format!(
+            "{}{}",
+            file_path_to_url(&resolved_path),
+            resource_suffix
+        ));
     }
 
     Some(normalized_url.to_owned())
+}
+
+fn split_resource_path_and_suffix(resource: &str) -> (&str, &str) {
+    let suffix_start = resource.find(['?', '#']).unwrap_or(resource.len());
+
+    (&resource[..suffix_start], &resource[suffix_start..])
 }
 
 fn resolve_relative_path_from_markdown_file(
@@ -8864,6 +9010,70 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"board.png\" alt=\"基板写真\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:200px;\" /></p>"
+        );
+    }
+
+    #[test]
+    fn renders_markdown_image_video_extensions_as_video_players() {
+        let rendered_preview = render_markdown_preview(
+            "![demo](./DEMO.MP4?version=1)\n\n![movie](./demo.webm#chapter1)",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<video src=\"./DEMO.MP4?version=1\" controls data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"./DEMO.MP4?version=1\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video>"
+        ));
+        assert!(rendered_preview.html.contains(
+            "<video src=\"./demo.webm#chapter1\" controls data-source-line-start=\"2\" data-source-line-end=\"2\" data-kmark-video-source=\"./demo.webm#chapter1\" aria-label=\"movie\" data-kmark-video-alt=\"movie\"></video>"
+        ));
+    }
+
+    #[test]
+    fn preserves_local_video_query_and_hash_when_markdown_file_path_is_available() {
+        let sandbox_directory = create_temp_test_directory();
+        let markdown_file_path = sandbox_directory.join("notes.md");
+        let video_file_path = sandbox_directory.join("demo.mp4");
+        fs::write(&markdown_file_path, "# notes").expect("failed to create markdown file");
+        fs::write(&video_file_path, "video").expect("failed to create video file");
+
+        let rendered_preview = render_markdown_preview_with_file_path(
+            "![demo](./demo.mp4?version=1#chapter1)",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        );
+        let resolved_video_url = resolve_image_destination_url(
+            "./demo.mp4?version=1#chapter1",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        )
+        .expect("resolved video url");
+
+        assert_eq!(
+            rendered_preview.html,
+            format!(
+                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><video src=\"{}\" controls data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"{}\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video></p>",
+                resolved_video_url, resolved_video_url,
+            )
+        );
+        assert!(resolved_video_url.ends_with("/demo.mp4?version=1#chapter1"));
+    }
+
+    #[test]
+    fn keeps_unsupported_video_extensions_as_images() {
+        let rendered_preview = render_markdown_preview("![demo](./demo.avi)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"./demo.avi\" alt=\"demo\" data-source-line-start=\"0\" data-source-line-end=\"0\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_video_params_and_shared_size_to_video() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:640 h:360 video_autoplay:true video_muted:true video_loop:true video_poster:./thumb.png -->\n![操作説明動画](./operation.mp4)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"操作説明動画\" data-kmark-video-alt=\"操作説明動画\" style=\"width:640px;height:360px;\" autoplay muted loop poster=\"./thumb.png\"></video></p>"
         );
     }
 
