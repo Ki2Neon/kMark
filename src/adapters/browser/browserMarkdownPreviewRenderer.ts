@@ -160,7 +160,8 @@ async function normalizeRenderedMarkdownPreview(
       pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
       pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
     }));
-  const mermaidTheme = resolveMermaidPreviewTheme();
+  const standardMermaidTheme = resolveMermaidPreviewTheme("standard");
+  const paperMermaidTheme = resolveMermaidPreviewTheme("paper");
   const html = await normalizePreviewHtmlImageSources(renderedPreview.html);
   const pageHtmls = await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources));
   const normalizedPages = await Promise.all(pages.map(async (page) => ({
@@ -172,11 +173,11 @@ async function normalizeRenderedMarkdownPreview(
   })));
 
   return {
-    html: await renderMermaidPreviewHtml(html, { theme: mermaidTheme }),
-    pageHtmls: await Promise.all(pageHtmls.map((pageHtml) => renderMermaidPreviewHtml(pageHtml, { theme: mermaidTheme }))),
+    html: await renderMermaidPreviewHtml(html, { surface: "standard", theme: standardMermaidTheme }),
+    pageHtmls: await Promise.all(pageHtmls.map((pageHtml) => renderMermaidPreviewHtml(pageHtml, { surface: "paper", theme: paperMermaidTheme }))),
     pages: await Promise.all(normalizedPages.map(async (page) => ({
       ...page,
-      html: await renderMermaidPreviewHtml(page.html, { theme: mermaidTheme }),
+      html: await renderMermaidPreviewHtml(page.html, { surface: "paper", theme: paperMermaidTheme }),
     }))),
     defaultPageStyle,
     defaultTextStyle,

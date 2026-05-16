@@ -1,8 +1,10 @@
 import mermaid from "mermaid";
 
 export type MermaidPreviewTheme = "default" | "dark" | "neutral";
+export type MermaidPreviewSurface = "standard" | "paper";
 
 type RenderMermaidHtmlOptions = {
+  readonly surface?: MermaidPreviewSurface;
   readonly theme?: MermaidPreviewTheme;
 };
 
@@ -28,7 +30,7 @@ function resolveMermaidTheme(value: string | undefined): MermaidPreviewTheme | n
     : null;
 }
 
-export function resolveMermaidPreviewTheme(): MermaidPreviewTheme {
+export function resolveMermaidPreviewTheme(surface: MermaidPreviewSurface = "standard"): MermaidPreviewTheme {
   if (typeof document === "undefined") {
     return "default";
   }
@@ -37,6 +39,14 @@ export function resolveMermaidPreviewTheme(): MermaidPreviewTheme {
 
   if (explicitTheme !== null) {
     return explicitTheme;
+  }
+
+  if (surface === "paper") {
+    return "neutral";
+  }
+
+  if (document.documentElement.dataset.previewColors !== "app") {
+    return "neutral";
   }
 
   const appTheme = document.documentElement.dataset.appTheme;
@@ -227,7 +237,7 @@ export async function renderMermaidBlocks(
   root: ParentNode,
   options: RenderMermaidHtmlOptions = {},
 ): Promise<void> {
-  const theme = options.theme ?? resolveMermaidPreviewTheme();
+  const theme = options.theme ?? resolveMermaidPreviewTheme(options.surface);
   const blocks = Array.from(root.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
 
   for (const block of blocks) {
