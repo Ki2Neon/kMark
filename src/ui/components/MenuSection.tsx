@@ -211,6 +211,28 @@ function MenuSectionComponent({
     }
   }, [focusedNumberField, systemFontSizePx]);
 
+  useEffect(() => {
+    if (menuPanel !== "recent-files") {
+      return;
+    }
+
+    const handleRecentFilesEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setMenuPanel("root");
+    };
+
+    window.addEventListener("keydown", handleRecentFilesEscape, { capture: true });
+
+    return () => {
+      window.removeEventListener("keydown", handleRecentFilesEscape, { capture: true });
+    };
+  }, [menuPanel]);
+
   const handleMenuSearchInput = (event: ChangeEvent<HTMLInputElement>) => {
     setMenuSearchText(event.currentTarget.value);
   };
@@ -482,9 +504,6 @@ function MenuSectionComponent({
             <button type="button" onClick={onOpenDocument}>
               開く
             </button>
-            <button type="button" onClick={handleRecentFilesOpen}>
-              最近開いたファイル
-            </button>
             <button type="button" onClick={onOverwriteSaveDocument}>
               上書き保存
             </button>
@@ -496,6 +515,9 @@ function MenuSectionComponent({
             </button>
             <button type="button" onClick={onPrintDocument}>
               印刷
+            </button>
+            <button type="button" className="menu-section__action-spaced" onClick={handleRecentFilesOpen}>
+              最近開いたファイル
             </button>
             <button
               type="button"
