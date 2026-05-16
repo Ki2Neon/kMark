@@ -93,6 +93,7 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body p,
   .markdown-body ul,
   .markdown-body ol,
+  .markdown-body dl,
   .markdown-body blockquote,
   .markdown-body .kmark-toc,
   .markdown-body .kmark-callout,
@@ -159,6 +160,36 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body .kmark-mermaid-source pre {
     margin-top: 0.5em;
+    margin-bottom: 0;
+  }
+
+  .markdown-body dt {
+    margin-top: 0.85em;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .markdown-body dt:first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body dd {
+    margin: 0.25em 0 0 1.5em;
+  }
+
+  .markdown-body dd + dt {
+    margin-top: 1em;
+  }
+
+  .markdown-body dd + dd {
+    margin-top: 0.35em;
+  }
+
+  .markdown-body dd > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body dd > :last-child {
     margin-bottom: 0;
   }
 
