@@ -22,8 +22,6 @@ jobs:
   publish-tauri:
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
     strategy:
       fail-fast: false
@@ -51,23 +49,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
           fetch-depth: 0
-
-      - name: Validate release tag
-        shell: pwsh
-        run: |
-          $tag = "$env:RELEASE_TAG"
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            throw "Release tag is required."
-          }
-          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
-            throw "Release tag must match vX.Y.Z, for example v1.0.0."
-          }
-          $commit = git rev-parse --verify HEAD
-          if ($LASTEXITCODE -ne 0) {
-            throw "Checked-out release commit is unavailable."
-          }
-          Write-Host "Release tag: $tag"
-          Write-Host "Release commit: $commit"
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -113,18 +94,63 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Derive Tauri version from Git tag
+        id: version
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          TAG="$RAW_TAG"
+          VERSION="${TAG#v}"
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag format: $TAG"
+            echo "::error::Use tag format like v0.1.0"
+            exit 1
+          fi
+
+          COMMIT="$(git rev-parse --verify HEAD)"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          export APP_VERSION="$VERSION"
+
+          node <<'NODE'
+          const fs = require("fs");
+
+          const version = process.env.APP_VERSION;
+
+          const config = {
+            version
+          };
+
+          fs.writeFileSync(
+            "src-tauri/tauri.ci.conf.json",
+            JSON.stringify(config, null, 2) + "\n"
+          );
+
+          console.log(`Generated src-tauri/tauri.ci.conf.json`);
+          console.log(`Tauri app version: ${version}`);
+          NODE
+
+          echo "Release tag: $TAG"
+          echo "Release commit: $COMMIT"
+
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "kmark ${{ env.RELEASE_TAG }}"
+          tagName: ${{ steps.version.outputs.tag }}
+          releaseName: "kmark ${{ steps.version.outputs.tag }}"
           releaseBody: "See the assets below to download and install this version."
           releaseDraft: false
           prerelease: false
           tauriScript: pnpm tauri
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json
 
       - name: List Tauri bundles
         if: success()
