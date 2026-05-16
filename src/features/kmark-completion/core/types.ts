@@ -12,6 +12,7 @@ export type KmarkParamContext =
   | "scope"
   | "page"
   | "image"
+  | "video"
   | "text"
   | "shape"
   | "table"
@@ -78,6 +79,7 @@ export type KmarkCompletionItemKind = "parameter" | "value" | "snippet" | "style
 
 export type KmarkCompletionSection =
   | "image"
+  | "video"
   | "page"
   | "scope"
   | "table"

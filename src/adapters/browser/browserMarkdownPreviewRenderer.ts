@@ -42,7 +42,14 @@ type NormalizedRenderedMarkdownPreviewPayload = {
   readonly defaultTextStyle: PreviewTextStyle;
 };
 
-const FILE_IMAGE_SOURCE_PATTERN = /(<img\b[^>]*?\bsrc=")(file:[^"]+)(")/giu;
+const MEDIA_TAG_PATTERN = /<(?:img|video)\b[^>]*>/giu;
+const FILE_MEDIA_ATTRIBUTE_PATTERN = /(\s(?:src|poster)=")(file:[^"]+)(")/giu;
+
+type FileUrlParts = {
+  readonly hash: string;
+  readonly path: string;
+  readonly search: string;
+};
 
 type PendingPreviewWorkerRequest = {
   readonly reject: (reason?: unknown) => void;
@@ -53,7 +60,7 @@ let previewWorker: Worker | null = null;
 let previewWorkerRequestId = 0;
 const pendingPreviewWorkerRequests = new Map<number, PendingPreviewWorkerRequest>();
 
-function fileUrlToPath(fileUrl: string): string | null {
+function fileUrlToPathParts(fileUrl: string): FileUrlParts | null {
   try {
     const url = new URL(fileUrl);
 
@@ -69,32 +76,41 @@ function fileUrlToPath(fileUrl: string): string | null {
         : decodedPath.startsWith("//?/")
           ? decodedPath.slice(4)
           : decodedPath;
+    const suffix = {
+      hash: url.hash,
+      search: url.search,
+    };
 
     if (url.hostname.length > 0 && url.hostname !== "localhost") {
-      return `\\\\${url.hostname}${normalizedDecodedPath.replace(/\//gu, "\\")}`;
+      return {
+        ...suffix,
+        path: `\\\\${url.hostname}${normalizedDecodedPath.replace(/\//gu, "\\")}`,
+      };
     }
 
     if (/^\/[A-Za-z]:/u.test(normalizedDecodedPath)) {
-      return normalizedDecodedPath.slice(1).replace(/\//gu, "\\");
+      return {
+        ...suffix,
+        path: normalizedDecodedPath.slice(1).replace(/\//gu, "\\"),
+      };
     }
 
-    return normalizedDecodedPath;
+    return {
+      ...suffix,
+      path: normalizedDecodedPath,
+    };
   } catch {
     return null;
   }
 }
 
-async function normalizePreviewHtmlImageSources(html: string): Promise<string> {
-  if (!isTauri()) {
-    return html;
-  }
-
+async function normalizePreviewHtmlMediaTag(tagHtml: string): Promise<string> {
   const replacements = await Promise.all(
-    Array.from(html.matchAll(FILE_IMAGE_SOURCE_PATTERN), async (match) => {
+    Array.from(tagHtml.matchAll(FILE_MEDIA_ATTRIBUTE_PATTERN), async (match) => {
       const [raw, prefix, source, suffix] = match;
-      const filePath = fileUrlToPath(source);
+      const fileUrlParts = fileUrlToPathParts(source);
 
-      if (filePath === null) {
+      if (fileUrlParts === null) {
         return {
           index: match.index ?? 0,
           rawLength: raw.length,
@@ -105,7 +121,34 @@ async function normalizePreviewHtmlImageSources(html: string): Promise<string> {
       return {
         index: match.index ?? 0,
         rawLength: raw.length,
-        replacement: `${prefix}${await convertRuntimeFileSrc(filePath)}${suffix}`,
+        replacement: `${prefix}${await convertRuntimeFileSrc(fileUrlParts.path)}${fileUrlParts.search}${fileUrlParts.hash}${suffix}`,
+      };
+    }),
+  );
+
+  let normalizedTagHtml = "";
+  let cursor = 0;
+
+  for (const { index, rawLength, replacement } of replacements) {
+    normalizedTagHtml += `${tagHtml.slice(cursor, index)}${replacement}`;
+    cursor = index + rawLength;
+  }
+
+  return `${normalizedTagHtml}${tagHtml.slice(cursor)}`;
+}
+
+async function normalizePreviewHtmlMediaSources(html: string): Promise<string> {
+  if (!isTauri()) {
+    return html;
+  }
+
+  const replacements = await Promise.all(
+    Array.from(html.matchAll(MEDIA_TAG_PATTERN), async (match) => {
+      const [raw] = match;
+      return {
+        index: match.index ?? 0,
+        rawLength: raw.length,
+        replacement: await normalizePreviewHtmlMediaTag(raw),
       };
     }),
   );
@@ -161,11 +204,11 @@ async function normalizeRenderedMarkdownPreview(
     }));
 
   return {
-    html: await normalizePreviewHtmlImageSources(renderedPreview.html),
-    pageHtmls: await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources)),
+    html: await normalizePreviewHtmlMediaSources(renderedPreview.html),
+    pageHtmls: await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlMediaSources)),
     pages: await Promise.all(pages.map(async (page) => ({
       ...page,
-      html: await normalizePreviewHtmlImageSources(page.html),
+      html: await normalizePreviewHtmlMediaSources(page.html),
       textStyle: normalizePreviewTextStyle(page.textStyle),
       pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
       pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),

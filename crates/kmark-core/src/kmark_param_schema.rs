@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 10;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 11;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -334,6 +334,50 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         description: "対象要素の内側余白を指定する",
         examples: &["<!-- kmark padding:2mm 4mm -->"],
         priority: 70,
+    },
+    KmarkParamSpec {
+        name: "video_autoplay",
+        aliases: &[],
+        param_type: "boolean",
+        contexts: &["single", "video"],
+        values: &[],
+        insert_text: "video_autoplay:true",
+        description: "動画を自動再生する",
+        examples: &["<!-- kmark video_autoplay:true video_muted:true -->"],
+        priority: 84,
+    },
+    KmarkParamSpec {
+        name: "video_muted",
+        aliases: &[],
+        param_type: "boolean",
+        contexts: &["single", "video"],
+        values: &[],
+        insert_text: "video_muted:true",
+        description: "動画をミュート状態で開始する",
+        examples: &["<!-- kmark video_muted:true -->"],
+        priority: 83,
+    },
+    KmarkParamSpec {
+        name: "video_loop",
+        aliases: &[],
+        param_type: "boolean",
+        contexts: &["single", "video"],
+        values: &[],
+        insert_text: "video_loop:true",
+        description: "動画をループ再生する",
+        examples: &["<!-- kmark video_loop:true -->"],
+        priority: 82,
+    },
+    KmarkParamSpec {
+        name: "video_poster",
+        aliases: &[],
+        param_type: "string",
+        contexts: &["single", "video"],
+        values: &[],
+        insert_text: "video_poster:",
+        description: "動画の再生前に表示するサムネイル画像を指定する",
+        examples: &["<!-- kmark video_poster:./thumb.png -->"],
+        priority: 81,
     },
     KmarkParamSpec {
         name: "color",

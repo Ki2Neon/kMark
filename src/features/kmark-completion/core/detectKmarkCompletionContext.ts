@@ -18,6 +18,9 @@ type MarkdownFence = {
   readonly length: number;
 };
 
+const MARKDOWN_IMAGE_PATTERN = /^!\[[^\]]*\]\((?:<([^>]+)>|([^)]+?))\)/u;
+const VIDEO_EXTENSION_PATTERN = /\.(?:mp4|webm|ogg|mov|m4v)$/iu;
+
 export function detectKmarkCompletionContext(input: {
   readonly markdown: string;
   readonly cursorOffset: number;
@@ -220,8 +223,12 @@ function resolveCompletionContexts(input: {
     addContext(contexts, "toc");
   }
 
-  if (nextBlockKind === "image") {
+  if (nextBlockKind === "image" || nextBlockKind === "video") {
     addContext(contexts, "image");
+  }
+
+  if (nextBlockKind === "video") {
+    addContext(contexts, "video");
   }
 
   if (nextBlockKind === "table") {
@@ -255,7 +262,7 @@ function isDocumentStart(markdown: string, lineStart: number): boolean {
   return markdown.slice(0, lineStart).split(/\r?\n/u).length <= 5;
 }
 
-function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "table" | "text" | "none" {
+function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "video" | "table" | "text" | "none" {
   const followingLines = markdown.slice(lineEnd).split(/\r?\n/u).slice(1);
 
   for (let lineIndex = 0; lineIndex < followingLines.length; lineIndex += 1) {
@@ -266,8 +273,10 @@ function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "tab
       continue;
     }
 
-    if (/^!\[[^\]]*\]\([^)]+?\)/u.test(trimmedLine)) {
-      return "image";
+    const imageMatch = MARKDOWN_IMAGE_PATTERN.exec(trimmedLine);
+
+    if (imageMatch !== null) {
+      return isVideoMarkdownDestination((imageMatch[1] ?? imageMatch[2] ?? "").trim()) ? "video" : "image";
     }
 
     if (isMarkdownTableStart(trimmedLine, followingLines.slice(lineIndex + 1))) {
@@ -278,6 +287,16 @@ function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "tab
   }
 
   return "none";
+}
+
+function isVideoMarkdownDestination(destination: string): boolean {
+  const suffixStartCandidates = [
+    destination.indexOf("?"),
+    destination.indexOf("#"),
+  ].filter((index) => index >= 0);
+  const suffixStart = suffixStartCandidates.length > 0 ? Math.min(...suffixStartCandidates) : destination.length;
+
+  return VIDEO_EXTENSION_PATTERN.test(destination.slice(0, suffixStart));
 }
 
 function isMarkdownTableStart(headerLine: string, followingLines: readonly string[]): boolean {
