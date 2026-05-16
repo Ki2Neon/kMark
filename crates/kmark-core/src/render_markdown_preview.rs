@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     ops::Range,
     path::Path,
@@ -9,7 +10,10 @@ use pulldown_cmark::{
     Tag, TagEnd,
 };
 
-use crate::table_format::{has_table_delimiter_pipe, split_table_cells};
+use crate::{
+    math_render::{render_math_html, MarkdownMathDisplay},
+    table_format::{has_table_delimiter_pipe, split_table_cells},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedMarkdownPreview {
@@ -146,6 +150,7 @@ struct ImageContext {
     title: String,
     alt_text: String,
     style: Option<String>,
+    video: KmarkVideoParams,
     source_line_attributes: String,
 }
 
@@ -199,13 +204,47 @@ struct ActiveCalloutContext {
     marker_paragraph: CalloutMarkerParagraphState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveMermaidBlock {
+    index: usize,
+    source: String,
+    source_line_start: usize,
+    source_line_end: usize,
+    decoration: KmarkRootDecoration,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockQuoteRenderKind {
     Normal,
     Callout,
 }
 
-type OwnedEvent = (Event<'static>, Range<usize>);
+#[derive(Debug, Clone)]
+struct OwnedEvent {
+    event: Event<'static>,
+    range: Range<usize>,
+    source_line_range: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreprocessedMarkdown {
+    content: String,
+    source_line_by_clean_line: Vec<usize>,
+    kmark_directives: Vec<PreprocessedKmarkDirective>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreprocessedKmarkDirective {
+    html: String,
+    offset: usize,
+    source_line_start: usize,
+    source_line_end: usize,
+}
+
+struct HtmlRenderOutput {
+    html: String,
+    next_mermaid_block_index: usize,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkImageParams {
@@ -222,6 +261,14 @@ struct KmarkImageParams {
     shadow: Option<String>,
     margin: Option<String>,
     padding: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkVideoParams {
+    autoplay: Option<bool>,
+    muted: Option<bool>,
+    loop_playback: Option<bool>,
+    poster: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,6 +341,7 @@ enum KmarkHeadingNumberPattern {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkParams {
     image: KmarkImageParams,
+    video: KmarkVideoParams,
     layout: KmarkLayoutParams,
     text: KmarkTextParams,
     table: KmarkTableParams,
@@ -327,6 +375,7 @@ struct PendingKmarkParams {
     start_line: usize,
     end_offset: usize,
     end_line: usize,
+    clean_end_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -579,6 +628,7 @@ enum KmarkComment {
 struct HtmlEmitter<'a> {
     content: &'a str,
     line_offset: usize,
+    source_line_by_clean_line: &'a [usize],
     markdown_file_path: Option<&'a str>,
     toc_document: &'a KmarkTocDocument,
     heading_number_document: &'a KmarkHeadingNumberDocument,
@@ -608,6 +658,9 @@ struct HtmlEmitter<'a> {
     pending_kmark_image_paragraph_style: Option<String>,
     pending_kmark_page_valign: Option<KmarkPageValign>,
     pending_kmark_table_fit: Option<KmarkTableFit>,
+    active_mermaid_block: Option<ActiveMermaidBlock>,
+    next_mermaid_block_index: usize,
+    definition_list_title_line: Option<usize>,
 }
 
 const PAGE_BREAK_TOKEN_OPEN: &str = "<!--";
@@ -623,6 +676,7 @@ const DEFAULT_PREVIEW_FONT_SIZE: &str = "10.5pt";
 const DEFAULT_PREVIEW_FONT_FAMILY: &str = "BIZ UDPGothic";
 const DEFAULT_TOC_TITLE: &str = "目次";
 const HEADING_NUMBER_MAX_LEVEL: u8 = 6;
+const ESCAPED_DEFINITION_MARKER_COLON: char = '\u{1f}';
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
@@ -636,21 +690,24 @@ pub fn render_markdown_preview_with_file_path(
     let heading_number_document = collect_kmark_heading_number_document(content);
     let markdown_pages = split_markdown_pages(content);
     let document_page_config = DocumentPageConfig::default_config();
+    let mut next_mermaid_block_index = 1usize;
     let pages = markdown_pages
         .segments
         .iter()
         .map(|page_segment| {
             let page_config = document_page_config.resolve_page(&page_segment.page_directive);
-            let html = render_markdown_page(
+            let rendered_page = render_markdown_page(
                 &page_segment.content,
                 page_segment.line_offset,
                 markdown_file_path,
                 &toc_document,
                 &heading_number_document,
+                next_mermaid_block_index,
             );
+            next_mermaid_block_index = rendered_page.next_mermaid_block_index;
 
             RenderedPage {
-                html,
+                html: rendered_page.html,
                 page_style: page_config.default_page_style,
                 text_style: page_config.default_text_style,
                 page_number_config: page_config.page_number_config,
@@ -678,24 +735,148 @@ fn render_markdown_page(
     markdown_file_path: Option<&str>,
     toc_document: &KmarkTocDocument,
     heading_number_document: &KmarkHeadingNumberDocument,
-) -> String {
-    let events = collect_markdown_events(content);
+    next_mermaid_block_index: usize,
+) -> HtmlRenderOutput {
+    let preprocessed = preprocess_markdown_comments(content, line_offset);
+    let events = collect_preprocessed_markdown_events(&preprocessed);
     let mut emitter = HtmlEmitter::new(
-        content,
+        &preprocessed.content,
         line_offset,
+        &preprocessed.source_line_by_clean_line,
         markdown_file_path,
         toc_document,
         heading_number_document,
+        next_mermaid_block_index,
     );
     emitter.prepare_footnotes(&events);
     emitter.render(events)
 }
 
 fn collect_markdown_events(content: &str) -> Vec<OwnedEvent> {
-    Parser::new_ext(content, markdown_options())
+    let parser_content = escape_invalid_definition_markers(content);
+
+    Parser::new_ext(parser_content.as_ref(), markdown_options())
         .into_offset_iter()
-        .map(|(event, range)| (event.into_static(), range))
+        .map(|(event, range)| OwnedEvent {
+            event: event.into_static(),
+            range,
+            source_line_range: None,
+        })
         .collect()
+}
+
+fn collect_preprocessed_markdown_events(markdown: &PreprocessedMarkdown) -> Vec<OwnedEvent> {
+    let parser_events = collect_markdown_events(&markdown.content);
+    let mut events = Vec::with_capacity(parser_events.len() + markdown.kmark_directives.len());
+    let mut directive_index = 0;
+
+    for event in parser_events {
+        while let Some(directive) = markdown.kmark_directives.get(directive_index) {
+            if directive.offset > event.range.start {
+                break;
+            }
+            events.push(kmark_directive_to_event(directive));
+            directive_index += 1;
+        }
+        events.push(event);
+    }
+
+    for directive in &markdown.kmark_directives[directive_index..] {
+        events.push(kmark_directive_to_event(directive));
+    }
+
+    events
+}
+
+fn kmark_directive_to_event(directive: &PreprocessedKmarkDirective) -> OwnedEvent {
+    OwnedEvent {
+        event: Event::Html(directive.html.clone().into()),
+        range: directive.offset..directive.offset,
+        source_line_range: Some((directive.source_line_start, directive.source_line_end)),
+    }
+}
+
+fn escape_invalid_definition_markers(content: &str) -> Cow<'_, str> {
+    let bytes = content.as_bytes();
+    let mut line_start = 0usize;
+    let mut escaped: Option<String> = None;
+
+    while line_start < content.len() {
+        let mut line_content_end = line_start;
+        while line_content_end < content.len() && !matches!(bytes[line_content_end], b'\r' | b'\n')
+        {
+            line_content_end += 1;
+        }
+
+        if let Some(marker_offset) =
+            invalid_definition_marker_offset(content, line_start, line_content_end)
+        {
+            let escaped_content = escaped.get_or_insert_with(|| content.to_owned());
+            escaped_content.replace_range(
+                marker_offset..marker_offset + 1,
+                &ESCAPED_DEFINITION_MARKER_COLON.to_string(),
+            );
+        }
+
+        line_start = if matches!(bytes.get(line_content_end), Some(b'\r'))
+            && matches!(bytes.get(line_content_end + 1), Some(b'\n'))
+        {
+            line_content_end + 2
+        } else if line_content_end < content.len() {
+            line_content_end + 1
+        } else {
+            line_content_end
+        };
+    }
+
+    escaped.map(Cow::Owned).unwrap_or(Cow::Borrowed(content))
+}
+
+fn invalid_definition_marker_offset(
+    content: &str,
+    line_start: usize,
+    line_content_end: usize,
+) -> Option<usize> {
+    let line = &content[line_start..line_content_end];
+    let mut indent_width = 0usize;
+    let mut marker_offset = line_start;
+
+    for byte in line.as_bytes() {
+        match byte {
+            b' ' if indent_width < 4 => {
+                indent_width += 1;
+                marker_offset += 1;
+            }
+            _ => break,
+        }
+    }
+
+    if indent_width > 3 || !matches!(content.as_bytes().get(marker_offset), Some(b':')) {
+        return None;
+    }
+
+    let after_marker_offset = marker_offset + 1;
+    let Some(after_marker) = content.as_bytes().get(after_marker_offset) else {
+        return Some(marker_offset);
+    };
+
+    if !matches!(after_marker, b' ' | b'\t') {
+        return Some(marker_offset);
+    }
+
+    let definition_content = &content[after_marker_offset + 1..line_content_end];
+    definition_content
+        .trim()
+        .is_empty()
+        .then_some(marker_offset)
+}
+
+fn restore_escaped_definition_marker_colons(value: &str) -> Cow<'_, str> {
+    if value.contains(ESCAPED_DEFINITION_MARKER_COLON) {
+        Cow::Owned(value.replace(ESCAPED_DEFINITION_MARKER_COLON, ":"))
+    } else {
+        Cow::Borrowed(value)
+    }
 }
 
 fn markdown_options() -> Options {
@@ -705,21 +886,141 @@ fn markdown_options() -> Options {
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    options.insert(Options::ENABLE_DEFINITION_LIST);
+    options.insert(Options::ENABLE_MATH);
     options
 }
 
+fn preprocess_markdown_comments(content: &str, line_offset: usize) -> PreprocessedMarkdown {
+    let line_spans = collect_markdown_line_spans(content);
+    let mut clean_content = String::new();
+    let mut source_line_by_clean_line = Vec::new();
+    let mut kmark_directives = Vec::new();
+    let mut active_fence = None;
+    let mut is_inside_html_comment_block = false;
+
+    for (line_index, line_span) in line_spans.iter().copied().enumerate() {
+        let source_line = line_offset + line_index;
+        let line = &content[line_span.start..line_span.content_end];
+        let line_with_ending = &content[line_span.start..line_span.end];
+
+        if is_inside_html_comment_block {
+            if line.contains(PAGE_BREAK_TOKEN_CLOSE) {
+                is_inside_html_comment_block = false;
+            }
+            continue;
+        }
+
+        if let Some(fence) = active_fence {
+            push_preprocessed_markdown_line(
+                &mut clean_content,
+                &mut source_line_by_clean_line,
+                line_with_ending,
+                source_line,
+            );
+            if is_markdown_fence_close(line, fence) {
+                active_fence = None;
+            }
+            continue;
+        }
+
+        if let Some(fence) = parse_markdown_fence_open(line) {
+            push_preprocessed_markdown_line(
+                &mut clean_content,
+                &mut source_line_by_clean_line,
+                line_with_ending,
+                source_line,
+            );
+            active_fence = Some(fence);
+            continue;
+        }
+
+        if let Some(comment) = standalone_html_comment_line(line) {
+            if parse_kmark_comment(comment).is_some() {
+                kmark_directives.push(PreprocessedKmarkDirective {
+                    html: comment.to_owned(),
+                    offset: clean_content.len(),
+                    source_line_start: source_line,
+                    source_line_end: source_line,
+                });
+            }
+            continue;
+        }
+
+        if starts_standalone_html_comment_block(line) {
+            is_inside_html_comment_block = true;
+            continue;
+        }
+
+        push_preprocessed_markdown_line(
+            &mut clean_content,
+            &mut source_line_by_clean_line,
+            line_with_ending,
+            source_line,
+        );
+    }
+
+    if source_line_by_clean_line.is_empty() {
+        source_line_by_clean_line.push(line_offset);
+    } else if clean_content.ends_with('\n') {
+        source_line_by_clean_line.push(line_offset + line_spans.len());
+    }
+
+    PreprocessedMarkdown {
+        content: clean_content,
+        source_line_by_clean_line,
+        kmark_directives,
+    }
+}
+
+fn push_preprocessed_markdown_line(
+    clean_content: &mut String,
+    source_line_by_clean_line: &mut Vec<usize>,
+    line: &str,
+    source_line: usize,
+) {
+    if clean_content.is_empty() || clean_content.ends_with('\n') {
+        source_line_by_clean_line.push(source_line);
+    }
+    clean_content.push_str(line);
+}
+
+fn standalone_html_comment_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+
+    (trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && trimmed.ends_with(PAGE_BREAK_TOKEN_CLOSE))
+        .then_some(trimmed)
+}
+
+fn starts_standalone_html_comment_block(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && !trimmed.contains(PAGE_BREAK_TOKEN_CLOSE)
+}
+
 fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
-    let events = collect_markdown_events(content);
-    let line_starts = collect_line_starts(content);
+    let preprocessed = preprocess_markdown_comments(content, 0);
+    let events = collect_preprocessed_markdown_events(&preprocessed);
+    let line_starts = collect_line_starts(&preprocessed.content);
     let mut headings = Vec::new();
     let mut directives = Vec::new();
     let mut pending_heading: Option<PendingKmarkTocHeading> = None;
 
-    for (event, range) in events {
+    for owned_event in events {
+        let OwnedEvent {
+            event,
+            range,
+            source_line_range,
+        } = owned_event;
         match event {
             Event::Start(Tag::Heading { level, id, .. }) => {
                 pending_heading = Some(PendingKmarkTocHeading {
-                    source_line: resolve_line_number(&line_starts, range.start),
+                    source_line: resolve_source_line_number(
+                        &line_starts,
+                        &preprocessed.source_line_by_clean_line,
+                        0,
+                        range.start,
+                    ),
                     level: heading_level_number(level),
                     explicit_id: id.map(|value| value.to_string()),
                     text: String::new(),
@@ -765,8 +1066,15 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
 
                 if let Some(KmarkComment::Params(bundle)) = parse_kmark_comment(html.as_ref()) {
                     if bundle.toc.enabled == Some(true) {
-                        let (_, end_line) =
-                            resolve_source_line_range(content, &line_starts, 0, &range);
+                        let (_, end_line) = source_line_range.unwrap_or_else(|| {
+                            resolve_source_line_range(
+                                &preprocessed.content,
+                                &line_starts,
+                                0,
+                                &preprocessed.source_line_by_clean_line,
+                                &range,
+                            )
+                        });
                         directives.push(KmarkTocDirective {
                             source_line: end_line,
                             params: bundle.toc,
@@ -796,20 +1104,22 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
 }
 
 fn collect_kmark_heading_number_document(content: &str) -> KmarkHeadingNumberDocument {
-    let events = collect_markdown_events(content);
-    let line_starts = collect_line_starts(content);
+    let preprocessed = preprocess_markdown_comments(content, 0);
+    let events = collect_preprocessed_markdown_events(&preprocessed);
+    let line_starts = collect_line_starts(&preprocessed.content);
     let mut text_by_source_line = HashMap::new();
     let mut scope_stack = Vec::new();
     let mut pending_kmark_params: Option<PendingKmarkParams> = None;
     let mut counters = [0u32; HEADING_NUMBER_MAX_LEVEL as usize];
 
-    for (event, range) in events {
+    for owned_event in events {
+        let OwnedEvent { event, range, .. } = owned_event;
         if let Event::Html(html) | Event::InlineHtml(html) = &event {
             if let Some(comment) = parse_kmark_comment(html.as_ref()) {
                 apply_kmark_heading_number_comment(
                     comment,
                     range.clone(),
-                    content,
+                    &preprocessed.content,
                     &line_starts,
                     &mut pending_kmark_params,
                     &mut scope_stack,
@@ -822,7 +1132,12 @@ fn collect_kmark_heading_number_document(content: &str) -> KmarkHeadingNumberDoc
 
         if let Event::Start(Tag::Heading { level, .. }) = event {
             pending_kmark_params = None;
-            let source_line = resolve_line_number(&line_starts, range.start);
+            let source_line = resolve_source_line_number(
+                &line_starts,
+                &preprocessed.source_line_by_clean_line,
+                0,
+                range.start,
+            );
             let level = heading_level_number(level);
 
             if let Some(text) = next_kmark_heading_number_text(&scope_stack, &mut counters, level) {
@@ -855,18 +1170,29 @@ fn apply_kmark_heading_number_comment(
 
     match comment {
         KmarkComment::Params(bundle) => {
-            let (start_line, end_line) = resolve_source_line_range(content, line_starts, 0, &range);
+            let start_line = resolve_line_number(line_starts, range.start);
+            let end_line = if content.is_empty() {
+                start_line
+            } else {
+                let end_offset = range
+                    .end
+                    .saturating_sub(1)
+                    .min(content.len().saturating_sub(1));
+                resolve_line_number(line_starts, end_offset)
+            };
 
             if let Some(pending) = pending_kmark_params.as_mut() {
                 pending.bundle.merge(&bundle);
                 pending.end_offset = range.end;
                 pending.end_line = end_line;
+                pending.clean_end_line = end_line;
             } else {
                 *pending_kmark_params = Some(PendingKmarkParams {
                     bundle,
                     start_line,
                     end_offset: range.end,
                     end_line,
+                    clean_end_line: end_line,
                 });
             }
         }
@@ -900,7 +1226,7 @@ fn discard_pending_kmark_params_if_gap_is_incompatible_for_heading_numbers(
 
     let next_start_line = resolve_line_number(line_starts, next_offset);
 
-    if next_start_line > pending.end_line + 1 {
+    if next_start_line > pending.clean_end_line + 1 {
         *pending_kmark_params = None;
         return;
     }
@@ -911,7 +1237,7 @@ fn discard_pending_kmark_params_if_gap_is_incompatible_for_heading_numbers(
 
     let gap = &content[pending.end_offset..next_offset];
 
-    if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+    if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
         *pending_kmark_params = None;
     }
 }
@@ -1671,13 +1997,16 @@ impl<'a> HtmlEmitter<'a> {
     fn new(
         content: &'a str,
         line_offset: usize,
+        source_line_by_clean_line: &'a [usize],
         markdown_file_path: Option<&'a str>,
         toc_document: &'a KmarkTocDocument,
         heading_number_document: &'a KmarkHeadingNumberDocument,
+        next_mermaid_block_index: usize,
     ) -> Self {
         Self {
             content,
             line_offset,
+            source_line_by_clean_line,
             markdown_file_path,
             toc_document,
             heading_number_document,
@@ -1707,12 +2036,15 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_image_paragraph_style: None,
             pending_kmark_page_valign: None,
             pending_kmark_table_fit: None,
+            active_mermaid_block: None,
+            next_mermaid_block_index,
+            definition_list_title_line: None,
         }
     }
 
     fn prepare_footnotes(&mut self, events: &[OwnedEvent]) {
-        for (event, _) in events {
-            match event {
+        for owned_event in events {
+            match &owned_event.event {
                 Event::FootnoteReference(label) => {
                     let label = label.to_string();
                     let number = self.resolve_footnote_number(&label);
@@ -1727,20 +2059,33 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
-    fn render(mut self, events: Vec<OwnedEvent>) -> String {
-        for (event, range) in events {
-            self.push_event(event, range);
+    fn render(mut self, events: Vec<OwnedEvent>) -> HtmlRenderOutput {
+        for owned_event in events {
+            self.push_event(
+                owned_event.event,
+                owned_event.range,
+                owned_event.source_line_range,
+            );
         }
 
         self.flush_pending_kmark_toc();
+        self.finish_mermaid_block();
         self.close_active_kmark_single_block();
         self.close_unclosed_kmark_scopes();
-        self.html
+        HtmlRenderOutput {
+            html: self.html,
+            next_mermaid_block_index: self.next_mermaid_block_index,
+        }
     }
 
-    fn push_event(&mut self, event: Event<'static>, range: Range<usize>) {
+    fn push_event(
+        &mut self,
+        event: Event<'static>,
+        range: Range<usize>,
+        source_line_range: Option<(usize, usize)>,
+    ) {
         if matches!(event, Event::Html(_) | Event::InlineHtml(_)) {
-            self.push_html_event(event, range);
+            self.push_html_event(event, range, source_line_range);
             return;
         }
 
@@ -1759,20 +2104,25 @@ impl<'a> HtmlEmitter<'a> {
             }
             Event::FootnoteReference(label) => self.push_footnote_reference(label.as_ref()),
             Event::TaskListMarker(checked) => self.push_task_list_marker(checked),
-            Event::InlineMath(text) => self.push_math_text("math-inline", &text),
-            Event::DisplayMath(text) => self.push_math_text("math-display", &text),
+            Event::InlineMath(text) => self.push_math_text(MarkdownMathDisplay::Inline, &text),
+            Event::DisplayMath(text) => self.push_math_text(MarkdownMathDisplay::Block, &text),
             Event::Html(_) | Event::InlineHtml(_) => unreachable!("html handled earlier"),
         }
     }
 
-    fn push_html_event(&mut self, event: Event<'static>, range: Range<usize>) {
+    fn push_html_event(
+        &mut self,
+        event: Event<'static>,
+        range: Range<usize>,
+        source_line_range: Option<(usize, usize)>,
+    ) {
         let html = match event {
             Event::Html(html) | Event::InlineHtml(html) => html,
             _ => return,
         };
 
         if let Some(comment) = parse_kmark_comment(html.as_ref()) {
-            self.apply_kmark_comment(comment, range.clone());
+            self.apply_kmark_comment(comment, range.clone(), source_line_range);
             return;
         }
 
@@ -1834,6 +2184,7 @@ impl<'a> HtmlEmitter<'a> {
                     title: String::new(),
                     alt_text: String::new(),
                     style: None,
+                    video: KmarkVideoParams::default(),
                     source_line_attributes: String::new(),
                 });
             }
@@ -1949,12 +2300,17 @@ impl<'a> HtmlEmitter<'a> {
                 }
             }
             Tag::CodeBlock(kind) => {
+                if is_mermaid_code_block(&kind) {
+                    self.start_mermaid_block(range);
+                    return;
+                }
+
                 let mut html = format!(
                     "<pre{}{}><code",
                     self.source_line_attributes(range),
                     self.take_pending_kmark_block_attributes(),
                 );
-                if let Some(language) = code_block_language(kind) {
+                if let Some(language) = code_block_language(&kind) {
                     html.push_str(" class=\"language-");
                     html.push_str(&escape_html(&language));
                     html.push('"');
@@ -2001,10 +2357,18 @@ impl<'a> HtmlEmitter<'a> {
             }
             Tag::DefinitionList => {
                 let attributes = self.take_pending_kmark_block_attributes();
-                self.push_raw(&format!("<dl{}>", attributes));
+                self.push_raw(&format!(
+                    "<dl{}{}>",
+                    self.source_line_attributes(range),
+                    attributes,
+                ));
             }
-            Tag::DefinitionListTitle => self.push_raw("<dt>"),
-            Tag::DefinitionListDefinition => self.push_raw("<dd>"),
+            Tag::DefinitionListTitle => {
+                self.start_definition_list_title(range);
+            }
+            Tag::DefinitionListDefinition => {
+                self.push_raw(&format!("<dd{}>", self.source_line_attributes(range)));
+            }
             Tag::Table(alignments) => {
                 self.table_alignments = alignments;
                 self.table_section = TableSection::Head;
@@ -2090,7 +2454,8 @@ impl<'a> HtmlEmitter<'a> {
                 self.mark_paragraph_image();
                 let source_line_attributes = self.source_line_attributes(range);
                 let single_layer = self.take_pending_kmark_layer_for_image(range.start);
-                let image_style = self.resolve_image_style(single_layer.as_ref());
+                let resolved_params = self.resolve_visual_params(single_layer.as_ref());
+                let image_style = resolved_params.to_image_style();
                 self.image_stack.push(ImageContext {
                     destination_url: resolve_image_destination_url(
                         &dest_url,
@@ -2099,6 +2464,7 @@ impl<'a> HtmlEmitter<'a> {
                     title: title.to_string(),
                     alt_text: String::new(),
                     style: image_style,
+                    video: resolved_params.video,
                     source_line_attributes,
                 });
             }
@@ -2151,7 +2517,13 @@ impl<'a> HtmlEmitter<'a> {
                 BlockQuoteRenderKind::Normal => self.push_raw("</blockquote>"),
                 BlockQuoteRenderKind::Callout => self.finish_callout(),
             },
-            TagEnd::CodeBlock => self.push_raw("</code></pre>"),
+            TagEnd::CodeBlock => {
+                if self.active_mermaid_block.is_some() {
+                    self.finish_mermaid_block();
+                } else {
+                    self.push_raw("</code></pre>");
+                }
+            }
             TagEnd::HtmlBlock => {
                 self.suppressed_html_text_depth = self.suppressed_html_text_depth.saturating_sub(1);
             }
@@ -2160,7 +2532,7 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::Item => self.push_raw("</li>"),
             TagEnd::FootnoteDefinition => self.finish_footnote_definition(),
             TagEnd::DefinitionList => self.push_raw("</dl>"),
-            TagEnd::DefinitionListTitle => self.push_raw("</dt>"),
+            TagEnd::DefinitionListTitle => self.finish_definition_list_title(),
             TagEnd::DefinitionListDefinition => self.push_raw("</dd>"),
             TagEnd::Table => {
                 if self.table_body_open {
@@ -2207,6 +2579,43 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
+    fn start_mermaid_block(&mut self, range: &Range<usize>) {
+        let index = self.next_mermaid_block_index;
+        self.next_mermaid_block_index += 1;
+        self.active_mermaid_block = Some(ActiveMermaidBlock {
+            index,
+            source: String::new(),
+            source_line_start: self.resolve_range_start_line(range.clone()),
+            source_line_end: self.resolve_range_end_line(range.clone()),
+            decoration: self.take_pending_kmark_block_decoration(),
+        });
+    }
+
+    fn append_mermaid_source(&mut self, text: &str) -> bool {
+        let Some(block) = self.active_mermaid_block.as_mut() else {
+            return false;
+        };
+
+        block.source.push_str(text);
+        true
+    }
+
+    fn finish_mermaid_block(&mut self) {
+        let Some(block) = self.active_mermaid_block.take() else {
+            return;
+        };
+
+        self.push_raw(&format!(
+            "<div id=\"kmark-mermaid-{index}\" class=\"kmark-mermaid-block{class_suffix}\" data-kmark-mermaid-index=\"{index}\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"{source_line_start}\" data-source-line-end=\"{source_line_end}\"{decoration_attributes}><div class=\"kmark-mermaid-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source\" hidden><summary>source</summary><pre><code>{source}</code></pre></details></div>",
+            index = block.index,
+            class_suffix = block.decoration.class_suffix(),
+            source_line_start = block.source_line_start,
+            source_line_end = block.source_line_end,
+            decoration_attributes = block.decoration.data_and_style_attributes(),
+            source = escape_html(&block.source),
+        ));
+    }
+
     fn finish_footnote_definition(&mut self) {
         let Some(context) = self.footnote_definition_stack.pop() else {
             self.push_raw("</div>");
@@ -2226,6 +2635,30 @@ impl<'a> HtmlEmitter<'a> {
         self.push_raw("</div>");
     }
 
+    fn start_definition_list_title(&mut self, range: &Range<usize>) {
+        let source_line = self.resolve_range_start_line(range.clone());
+        self.definition_list_title_line = Some(source_line);
+        self.push_raw(&format!(
+            "<dt{}>",
+            self.source_line_attributes_from_lines(source_line, source_line),
+        ));
+    }
+
+    fn split_definition_list_title(&mut self) {
+        let next_line = self.definition_list_title_line.unwrap_or(0) + 1;
+        self.definition_list_title_line = Some(next_line);
+        self.push_raw("</dt>");
+        self.push_raw(&format!(
+            "<dt{}>",
+            self.source_line_attributes_from_lines(next_line, next_line),
+        ));
+    }
+
+    fn finish_definition_list_title(&mut self) {
+        self.definition_list_title_line = None;
+        self.push_raw("</dt>");
+    }
+
     fn finish_image(&mut self) {
         let Some(image_context) = self.image_stack.pop() else {
             return;
@@ -2240,10 +2673,15 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        let Some(destination_url) = image_context.destination_url else {
+        let Some(destination_url) = image_context.destination_url.as_deref() else {
             self.push_text(&image_context.alt_text);
             return;
         };
+
+        if is_video_destination_url(&destination_url) {
+            self.push_video(&image_context, &destination_url);
+            return;
+        }
 
         let mut html = format!(
             "<img src=\"{}\" alt=\"{}\"{}",
@@ -2265,6 +2703,55 @@ impl<'a> HtmlEmitter<'a> {
         self.push_raw(&html);
     }
 
+    fn push_video(&mut self, image_context: &ImageContext, destination_url: &str) {
+        let mut html = format!(
+            "<video src=\"{}\" controls{} data-kmark-video-source=\"{}\"",
+            escape_html(destination_url),
+            image_context.source_line_attributes,
+            escape_html(destination_url),
+        );
+
+        if !image_context.alt_text.is_empty() {
+            html.push_str(" aria-label=\"");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push_str("\" data-kmark-video-alt=\"");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push('"');
+        }
+        if !image_context.title.is_empty() {
+            html.push_str(" title=\"");
+            html.push_str(&escape_html(&image_context.title));
+            html.push('"');
+        }
+        if let Some(style) = &image_context.style {
+            html.push_str(" style=\"");
+            html.push_str(&escape_html(style));
+            html.push('"');
+        }
+        if image_context.video.autoplay == Some(true) {
+            html.push_str(" autoplay");
+        }
+        if image_context.video.muted == Some(true) {
+            html.push_str(" muted");
+        }
+        if image_context.video.loop_playback == Some(true) {
+            html.push_str(" loop");
+        }
+        if let Some(poster_url) = image_context
+            .video
+            .poster
+            .as_deref()
+            .and_then(|poster| resolve_image_destination_url(poster, self.markdown_file_path))
+        {
+            html.push_str(" poster=\"");
+            html.push_str(&escape_html(&poster_url));
+            html.push('"');
+        }
+
+        html.push_str("></video>");
+        self.push_raw(&html);
+    }
+
     fn push_task_list_marker(&mut self, checked: bool) {
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context
@@ -2283,7 +2770,7 @@ impl<'a> HtmlEmitter<'a> {
         self.push_raw(markup);
     }
 
-    fn push_math_text(&mut self, class_name: &str, text: &str) {
+    fn push_math_text(&mut self, display: MarkdownMathDisplay, text: &str) {
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -2292,13 +2779,14 @@ impl<'a> HtmlEmitter<'a> {
         self.ensure_callout_marker_paragraph_open();
         self.mark_paragraph_non_image_content();
 
-        self.push_raw(&format!(
-            "<span class=\"math {class_name}\">{}</span>",
-            escape_html(text),
-        ));
+        self.push_raw(&render_math_html(text, display));
     }
 
     fn push_text_event(&mut self, text: &str, range: &Range<usize>) {
+        if self.append_mermaid_source(text) {
+            return;
+        }
+
         if self.should_suppress_callout_marker_event(range) {
             return;
         }
@@ -2308,6 +2796,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_code_event(&mut self, text: &str, range: &Range<usize>) {
+        if self.append_mermaid_source(text) {
+            return;
+        }
+
         if self.should_suppress_callout_marker_event(range) {
             return;
         }
@@ -2317,7 +2809,16 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_soft_break_event(&mut self, range: &Range<usize>) {
+        if self.append_mermaid_source("\n") {
+            return;
+        }
+
         if self.should_suppress_callout_marker_soft_break(range) {
+            return;
+        }
+
+        if self.definition_list_title_line.is_some() {
+            self.split_definition_list_title();
             return;
         }
 
@@ -2326,6 +2827,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_hard_break_event(&mut self, range: &Range<usize>) {
+        if self.append_mermaid_source("\n") {
+            return;
+        }
+
         if self.should_suppress_callout_marker_event(range) {
             return;
         }
@@ -2335,6 +2840,9 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_text(&mut self, text: &str) {
+        let text = restore_escaped_definition_marker_colons(text);
+        let text = text.as_ref();
+
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -2352,6 +2860,9 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_code(&mut self, text: &str) {
+        let text = restore_escaped_definition_marker_colons(text);
+        let text = text.as_ref();
+
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -2446,8 +2957,13 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn source_line_attributes(&self, range: &Range<usize>) -> String {
-        let (start_line, end_line) =
-            resolve_source_line_range(self.content, &self.line_starts, self.line_offset, range);
+        let (start_line, end_line) = resolve_source_line_range(
+            self.content,
+            &self.line_starts,
+            self.line_offset,
+            self.source_line_by_clean_line,
+            range,
+        );
         format!(
             " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
             start_line, end_line,
@@ -2629,7 +3145,12 @@ impl<'a> HtmlEmitter<'a> {
         })
     }
 
-    fn apply_kmark_comment(&mut self, comment: KmarkComment, range: Range<usize>) {
+    fn apply_kmark_comment(
+        &mut self,
+        comment: KmarkComment,
+        range: Range<usize>,
+        source_line_range: Option<(usize, usize)>,
+    ) {
         self.discard_pending_kmark_params_if_gap_is_incompatible(range.start);
 
         if !matches!(comment, KmarkComment::Params(_)) {
@@ -2638,18 +3159,25 @@ impl<'a> HtmlEmitter<'a> {
 
         match comment {
             KmarkComment::Params(bundle) => {
-                let start_line = self.resolve_range_start_line(range.clone());
-                let end_line = self.resolve_range_end_line(range.clone());
+                let (start_line, end_line) = source_line_range.unwrap_or_else(|| {
+                    (
+                        self.resolve_range_start_line(range.clone()),
+                        self.resolve_range_end_line(range.clone()),
+                    )
+                });
+                let clean_end_line = self.resolve_range_end_clean_line(range.clone());
                 if let Some(pending) = self.pending_kmark_params.as_mut() {
                     pending.bundle.merge(&bundle);
                     pending.end_offset = range.end;
                     pending.end_line = end_line;
+                    pending.clean_end_line = clean_end_line;
                 } else {
                     self.pending_kmark_params = Some(PendingKmarkParams {
                         bundle,
                         start_line,
                         end_offset: range.end,
                         end_line,
+                        clean_end_line,
                     });
                 }
             }
@@ -2705,9 +3233,9 @@ impl<'a> HtmlEmitter<'a> {
             return;
         };
 
-        let next_start_line = self.resolve_range_start_line(range.clone());
+        let next_start_line = self.resolve_range_start_clean_line(range.clone());
 
-        if next_start_line > pending.end_line + 1 {
+        if next_start_line > pending.clean_end_line + 1 {
             self.pending_kmark_params = None;
             return;
         }
@@ -2723,7 +3251,7 @@ impl<'a> HtmlEmitter<'a> {
 
         let gap = &self.content[pending.end_offset..range.start];
 
-        if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+        if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
             self.pending_kmark_params = None;
             return;
         }
@@ -2744,9 +3272,9 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        let next_start_line = self.resolve_offset_line(next_offset);
+        let next_start_line = self.resolve_offset_clean_line(next_offset);
 
-        if next_start_line > pending.end_line + 1 {
+        if next_start_line > pending.clean_end_line + 1 {
             self.pending_kmark_params = None;
             return;
         }
@@ -2757,7 +3285,7 @@ impl<'a> HtmlEmitter<'a> {
 
         let gap = &self.content[pending.end_offset..next_offset];
 
-        if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+        if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
             self.pending_kmark_params = None;
         }
     }
@@ -2839,10 +3367,6 @@ impl<'a> HtmlEmitter<'a> {
         self.discard_pending_kmark_params_if_gap_is_incompatible(image_start_offset);
         let bundle = self.take_pending_kmark_bundle()?;
         Some(self.resolve_kmark_bundle_layer(&bundle))
-    }
-
-    fn resolve_image_style(&self, single_layer: Option<&KmarkParamLayer>) -> Option<String> {
-        self.resolve_visual_params(single_layer).to_image_style()
     }
 
     fn resolve_visual_params(&self, single_layer: Option<&KmarkParamLayer>) -> KmarkParams {
@@ -3264,7 +3788,12 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
-        resolve_line_number(&self.line_starts, range.start) + self.line_offset
+        resolve_source_line_number(
+            &self.line_starts,
+            self.source_line_by_clean_line,
+            self.line_offset,
+            range.start,
+        )
     }
 
     fn resolve_range_end_line(&self, range: Range<usize>) -> usize {
@@ -3276,16 +3805,37 @@ impl<'a> HtmlEmitter<'a> {
             .end
             .saturating_sub(1)
             .min(self.content.len().saturating_sub(1));
-        resolve_line_number(&self.line_starts, end_offset) + self.line_offset
+        resolve_source_line_number(
+            &self.line_starts,
+            self.source_line_by_clean_line,
+            self.line_offset,
+            end_offset,
+        )
     }
 
-    fn resolve_offset_line(&self, offset: usize) -> usize {
+    fn resolve_range_start_clean_line(&self, range: Range<usize>) -> usize {
+        resolve_line_number(&self.line_starts, range.start)
+    }
+
+    fn resolve_range_end_clean_line(&self, range: Range<usize>) -> usize {
         if self.content.is_empty() {
-            return self.line_offset;
+            return 0;
+        }
+
+        let end_offset = range
+            .end
+            .saturating_sub(1)
+            .min(self.content.len().saturating_sub(1));
+        resolve_line_number(&self.line_starts, end_offset)
+    }
+
+    fn resolve_offset_clean_line(&self, offset: usize) -> usize {
+        if self.content.is_empty() {
+            return 0;
         }
 
         let bounded_offset = offset.min(self.content.len().saturating_sub(1));
-        resolve_line_number(&self.line_starts, bounded_offset) + self.line_offset
+        resolve_line_number(&self.line_starts, bounded_offset)
     }
 }
 
@@ -3541,6 +4091,7 @@ impl KmarkParamLayer {
 impl KmarkParams {
     fn merge(&mut self, other: &Self) {
         self.image.merge(&other.image);
+        self.video.merge(&other.video);
         self.layout.merge(&other.layout);
         self.text.merge(&other.text);
         self.table.merge(&other.table);
@@ -3549,6 +4100,7 @@ impl KmarkParams {
 
     fn has_directives(&self) -> bool {
         self.image.has_image_directives()
+            || self.video.has_video_directives()
             || self.layout.has_layout_directives()
             || self.text.has_text_directives()
             || self.table.has_table_directives()
@@ -4961,6 +5513,30 @@ impl KmarkImageParams {
     }
 }
 
+impl KmarkVideoParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(autoplay) = other.autoplay {
+            self.autoplay = Some(autoplay);
+        }
+        if let Some(muted) = other.muted {
+            self.muted = Some(muted);
+        }
+        if let Some(loop_playback) = other.loop_playback {
+            self.loop_playback = Some(loop_playback);
+        }
+        if let Some(poster) = &other.poster {
+            self.poster = Some(poster.clone());
+        }
+    }
+
+    fn has_video_directives(&self) -> bool {
+        self.autoplay.is_some()
+            || self.muted.is_some()
+            || self.loop_playback.is_some()
+            || self.poster.is_some()
+    }
+}
+
 impl KmarkSizeValue {
     fn is_page_fit(&self) -> bool {
         matches!(self, Self::PageFit | Self::PageFitContain)
@@ -5133,14 +5709,18 @@ fn parse_callout_marker_line(line: &str) -> Option<(CalloutKind, String)> {
     Some((kind, title.trim().to_owned()))
 }
 
-fn code_block_language(kind: CodeBlockKind<'_>) -> Option<String> {
+fn code_block_language(kind: &CodeBlockKind<'_>) -> Option<String> {
     match kind {
         CodeBlockKind::Indented => None,
         CodeBlockKind::Fenced(info) => {
-            let language = info.split(' ').next().unwrap_or_default().trim();
+            let language = info.split_whitespace().next().unwrap_or_default().trim();
             (!language.is_empty()).then_some(language.to_string())
         }
     }
+}
+
+fn is_mermaid_code_block(kind: &CodeBlockKind<'_>) -> bool {
+    code_block_language(kind).is_some_and(|language| language.eq_ignore_ascii_case("mermaid"))
 }
 
 fn collect_line_starts(content: &str) -> Vec<usize> {
@@ -5159,9 +5739,15 @@ fn resolve_source_line_range(
     content: &str,
     line_starts: &[usize],
     line_offset: usize,
+    source_line_by_clean_line: &[usize],
     range: &Range<usize>,
 ) -> (usize, usize) {
-    let start_line = resolve_line_number(line_starts, range.start) + line_offset;
+    let start_line = resolve_source_line_number(
+        line_starts,
+        source_line_by_clean_line,
+        line_offset,
+        range.start,
+    );
 
     if content.is_empty() {
         return (start_line, start_line);
@@ -5171,9 +5757,28 @@ fn resolve_source_line_range(
         .end
         .saturating_sub(1)
         .min(content.len().saturating_sub(1));
-    let end_line = resolve_line_number(line_starts, end_offset) + line_offset;
+    let end_line = resolve_source_line_number(
+        line_starts,
+        source_line_by_clean_line,
+        line_offset,
+        end_offset,
+    );
 
     (start_line, end_line.max(start_line))
+}
+
+fn resolve_source_line_number(
+    line_starts: &[usize],
+    source_line_by_clean_line: &[usize],
+    line_offset: usize,
+    offset: usize,
+) -> usize {
+    let clean_line = resolve_line_number(line_starts, offset);
+
+    source_line_by_clean_line
+        .get(clean_line)
+        .copied()
+        .unwrap_or(line_offset + clean_line)
 }
 
 fn resolve_line_number(line_starts: &[usize], offset: usize) -> usize {
@@ -5828,6 +6433,26 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.image.padding = Some(padding);
                 }
             }
+            "video_autoplay" => {
+                if let Some(autoplay) = parse_kmark_bool_value(&value) {
+                    bundle.params.video.autoplay = Some(autoplay);
+                }
+            }
+            "video_muted" => {
+                if let Some(muted) = parse_kmark_bool_value(&value) {
+                    bundle.params.video.muted = Some(muted);
+                }
+            }
+            "video_loop" => {
+                if let Some(loop_playback) = parse_kmark_bool_value(&value) {
+                    bundle.params.video.loop_playback = Some(loop_playback);
+                }
+            }
+            "video_poster" => {
+                if let Some(poster) = parse_kmark_video_poster_value(&value) {
+                    bundle.params.video.poster = Some(poster);
+                }
+            }
             "color" => {
                 if let Some(color) = parse_kmark_color_value(&value) {
                     bundle.params.text.color = Some(color);
@@ -6076,6 +6701,12 @@ fn parse_kmark_margin_value(value: &str) -> Option<String> {
 
 fn parse_kmark_padding_value(value: &str) -> Option<String> {
     parse_css_box_spacing_value(value, false)
+}
+
+fn parse_kmark_video_poster_value(value: &str) -> Option<String> {
+    let poster = trim_kmark_quotes(value).trim();
+
+    (!poster.is_empty() && !is_unsafe_image_url(poster)).then(|| poster.to_owned())
 }
 
 fn parse_kmark_font_size_value(value: &str) -> Option<String> {
@@ -6384,10 +7015,27 @@ fn contains_blank_line(text: &str) -> bool {
     false
 }
 
+fn contains_pending_kmark_break_gap(text: &str) -> bool {
+    contains_blank_line(text) || text.contains('\n') || text.contains('\r')
+}
+
 fn is_safe_url(url: &str) -> bool {
     let normalized = url.trim().to_ascii_lowercase();
 
     !(normalized.starts_with("javascript:") || normalized.starts_with("data:"))
+}
+
+fn is_video_destination_url(url: &str) -> bool {
+    let normalized = url.trim();
+    let (path, _) = split_resource_path_and_suffix(normalized);
+    let Some((_, extension)) = path.rsplit_once('.') else {
+        return false;
+    };
+
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "mp4" | "webm" | "ogg" | "mov" | "m4v"
+    )
 }
 
 fn resolve_image_destination_url(
@@ -6404,19 +7052,37 @@ fn resolve_image_destination_url(
         return Some(normalized_url.to_owned());
     }
 
-    if is_windows_absolute_path(normalized_url) || Path::new(normalized_url).is_absolute() {
-        return Some(file_path_to_url(&resolve_existing_path_string(
-            normalized_url,
-        )));
+    let (resource_path, resource_suffix) = split_resource_path_and_suffix(normalized_url);
+
+    if resource_path.is_empty() {
+        return None;
+    }
+
+    if is_windows_absolute_path(resource_path) || Path::new(resource_path).is_absolute() {
+        return Some(format!(
+            "{}{}",
+            file_path_to_url(&resolve_existing_path_string(resource_path)),
+            resource_suffix,
+        ));
     }
 
     if let Some(markdown_file_path) = markdown_file_path {
         let resolved_path =
-            resolve_relative_path_from_markdown_file(markdown_file_path, normalized_url);
-        return Some(file_path_to_url(&resolved_path));
+            resolve_relative_path_from_markdown_file(markdown_file_path, resource_path);
+        return Some(format!(
+            "{}{}",
+            file_path_to_url(&resolved_path),
+            resource_suffix
+        ));
     }
 
     Some(normalized_url.to_owned())
+}
+
+fn split_resource_path_and_suffix(resource: &str) -> (&str, &str) {
+    let suffix_start = resource.find(['?', '#']).unwrap_or(resource.len());
+
+    (&resource[..suffix_start], &resource[suffix_start..])
 }
 
 fn resolve_relative_path_from_markdown_file(
@@ -7053,6 +7719,10 @@ mod tests {
         &html[start..end]
     }
 
+    fn count_occurrences(text: &str, pattern: &str) -> usize {
+        text.matches(pattern).count()
+    }
+
     #[test]
     fn renders_page_breaks_and_source_line_offsets() {
         let rendered_preview = render_markdown_preview(
@@ -7089,6 +7759,89 @@ mod tests {
 
         assert_eq!(rendered_preview.page_htmls.len(), 1);
         assert!(rendered_preview.html.contains("&lt;!-- --- --&gt;"));
+    }
+
+    #[test]
+    fn list_between_comment() {
+        let rendered_preview = render_markdown_preview("- text\n<!-- note comment -->\n- text");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<ul"), 1);
+        assert_eq!(count_occurrences(&rendered_preview.html, "<li"), 2);
+        assert!(!rendered_preview.html.contains("note comment"));
+        assert!(!rendered_preview.html.contains("<p></p>"));
+        assert!(!rendered_preview.html.contains("<br"));
+    }
+
+    #[test]
+    fn list_between_multiline_comment() {
+        let rendered_preview = render_markdown_preview("- text\n<!--\nnote comment\n-->\n- text");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<ul"), 1);
+        assert_eq!(count_occurrences(&rendered_preview.html, "<li"), 2);
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn paragraph_between_comment() {
+        let rendered_preview = render_markdown_preview("text\n<!-- note comment -->\ntext");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"2\">text<br />\ntext</p>"
+        );
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn heading_between_comment() {
+        let rendered_preview = render_markdown_preview("# Title\n<!-- note comment -->\ntext");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"2\" data-source-line-end=\"2\">text</p>"
+        );
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn blockquote_between_comment() {
+        let rendered_preview = render_markdown_preview("> text\n<!-- note comment -->\n> text");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<blockquote"), 1);
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "</blockquote>"),
+            1
+        );
+        assert!(rendered_preview.html.contains("text<br />\ntext"));
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn table_between_comment() {
+        let rendered_preview =
+            render_markdown_preview("| A | B |\n|---|---|\n<!-- note comment -->\n| 1 | 2 |");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<table"), 1);
+        assert!(rendered_preview.html.contains("<td>1</td><td>2</td>"));
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn fenced_code_comment_keep() {
+        let rendered_preview = render_markdown_preview("```html\n<!-- comment -->\n```");
+
+        assert!(rendered_preview.html.contains("&lt;!-- comment --&gt;"));
+    }
+
+    #[test]
+    fn kmark_comment_apply_and_hide() {
+        let rendered_preview = render_markdown_preview("<!-- kmark align:right -->\ntext");
+
+        assert!(rendered_preview
+            .html
+            .contains("style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;text-align:right\""));
+        assert!(rendered_preview.html.contains(">text</p>"));
+        assert!(!rendered_preview.html.contains("<!-- kmark"));
     }
 
     #[test]
@@ -8030,6 +8783,33 @@ mod tests {
     }
 
     #[test]
+    fn renders_mermaid_code_block_placeholders_with_escaped_source() {
+        let rendered_preview = render_markdown_preview(
+            "```MERMAID title=\"sample\"\nflowchart TD\n  A[\"<script>\"] --> B\n```",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<div id=\"kmark-mermaid-1\" class=\"kmark-mermaid-block\" data-kmark-mermaid-index=\"1\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"0\" data-source-line-end=\"3\"><div class=\"kmark-mermaid-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source\" hidden><summary>source</summary><pre><code>flowchart TD\n  A[&quot;&lt;script&gt;&quot;] --&gt; B\n</code></pre></details></div>"
+        );
+    }
+
+    #[test]
+    fn detects_spaced_tilde_mermaid_fences_and_keeps_ids_unique_across_pages() {
+        let rendered_preview = render_markdown_preview(
+            "~~~ mermaid\nflowchart TD\n  A --> B\n~~~\n<!-- --- -->\n```mermaid\nflowchart TD\n  C --> D\n```",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert!(rendered_preview.pages[0]
+            .html
+            .contains("id=\"kmark-mermaid-1\""));
+        assert!(rendered_preview.pages[1]
+            .html
+            .contains("id=\"kmark-mermaid-2\""));
+    }
+
+    #[test]
     fn renders_blockquotes_with_commonmark_soft_breaks() {
         let rendered_preview = render_markdown_preview("> quoted\n> *value*");
 
@@ -8037,6 +8817,87 @@ mod tests {
             rendered_preview.html,
             "<blockquote data-source-line-start=\"0\" data-source-line-end=\"1\"><p data-source-line-start=\"0\" data-source-line-end=\"1\">quoted<br />\n<em>value</em></p></blockquote>"
         );
+    }
+
+    #[test]
+    fn renders_definition_lists_with_multiple_items_and_inline_markup() {
+        let rendered_preview = render_markdown_preview(
+            "`GPIO`\n: General Purpose Input Output\n\n**重要項目**\n: 必ず確認する項目",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<dl data-source-line-start=\"0\""));
+        assert!(rendered_preview.html.contains(
+            "<dt data-source-line-start=\"0\" data-source-line-end=\"0\"><code>GPIO</code></dt>"
+        ));
+        assert!(rendered_preview
+            .html
+            .contains("<dd data-source-line-start=\""));
+        assert!(rendered_preview
+            .html
+            .contains(">General Purpose Input Output</dd>"));
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"3\" data-source-line-end=\"3\"><strong>重要項目</strong></dt>"));
+        assert!(rendered_preview.html.contains(
+            "<dd data-source-line-start=\"4\" data-source-line-end=\"4\">必ず確認する項目</dd>"
+        ));
+    }
+
+    #[test]
+    fn renders_definition_lists_with_multiple_terms_definitions_and_nested_blocks() {
+        let rendered_preview = render_markdown_preview(
+            "GND\n0V\n: 回路の基準電位。\n: Common reference.\n\nUART\n: 特徴\n\n  - TX/RXを使う\n  - 非同期通信\n\n  ```c\n  uart_write(\"hello\");\n  ```",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"0\" data-source-line-end=\"0\">GND</dt>"));
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"1\" data-source-line-end=\"1\">0V</dt>"));
+        assert!(rendered_preview.html.contains("回路の基準電位。"));
+        assert!(rendered_preview.html.contains("Common reference."));
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"5\" data-source-line-end=\"5\">UART</dt>"));
+        assert!(rendered_preview.html.contains("<ul>"));
+        assert!(rendered_preview
+            .html
+            .contains("<pre data-source-line-start=\"11\""));
+        assert!(rendered_preview
+            .html
+            .contains("<code class=\"language-c\">uart_write(&quot;hello&quot;);"));
+    }
+
+    #[test]
+    fn renders_definition_lists_with_multiline_definition_content() {
+        let rendered_preview = render_markdown_preview(
+            "UART\n: 非同期シリアル通信。\n  TXとRXを使う。\n  クロック線は使わない。",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<dt data-source-line-start=\"0\" data-source-line-end=\"0\">UART</dt>"));
+        assert!(rendered_preview.html.contains("非同期シリアル通信。"));
+        assert!(rendered_preview.html.contains("TXとRXを使う。"));
+        assert!(rendered_preview.html.contains("クロック線は使わない。"));
+    }
+
+    #[test]
+    fn keeps_inline_colons_and_definition_markers_without_space_as_paragraphs() {
+        let rendered_preview = render_markdown_preview(
+            "GPIO: General Purpose Input Output\n\nGPIO\n:General Purpose Input Output",
+        );
+
+        assert!(!rendered_preview.html.contains("<dl"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"0\" data-source-line-end=\"0\">GPIO: General Purpose Input Output</p>"));
+        assert!(rendered_preview
+            .html
+            .contains("<p data-source-line-start=\"2\" data-source-line-end=\"3\">GPIO<br />\n:General Purpose Input Output</p>"));
     }
 
     #[test]
@@ -8067,6 +8928,78 @@ mod tests {
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\">first<br />\nsecond<br />\nthird<br />\nfourth</p>"
         );
+    }
+
+    #[test]
+    fn renders_inline_math_as_mathml() {
+        let rendered_preview = render_markdown_preview(r"速度は $v = \frac{dx}{dt}$ で表される。");
+
+        assert!(rendered_preview.html.contains("class=\"math math-inline\""));
+        assert!(rendered_preview
+            .html
+            .contains("<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\">"));
+        assert!(rendered_preview.html.contains("<mfrac>"));
+        assert!(rendered_preview.html.contains("<mi>v</mi>"));
+    }
+
+    #[test]
+    fn renders_display_matrix_math_as_mathml() {
+        let rendered_preview =
+            render_markdown_preview("$$\n\\begin{matrix}\n1 & 2 \\\\\n3 & 4\n\\end{matrix}\n$$");
+
+        assert!(rendered_preview
+            .html
+            .contains("class=\"math math-display\""));
+        assert!(rendered_preview.html.contains("<mtable>"));
+        assert!(rendered_preview.html.contains("<mtd><mn>1</mn></mtd>"));
+        assert!(rendered_preview.html.contains("<mtd><mn>4</mn></mtd>"));
+    }
+
+    #[test]
+    fn keeps_markdown_syntax_literal_inside_math() {
+        let rendered_preview = render_markdown_preview(r"$**x** + y$");
+
+        assert!(rendered_preview.html.contains("class=\"math math-inline\""));
+        assert!(!rendered_preview.html.contains("<strong>"));
+        assert!(rendered_preview
+            .html
+            .contains("<mo>*</mo><mo>*</mo><mi>x</mi>"));
+    }
+
+    #[test]
+    fn keeps_math_delimiters_literal_inside_code() {
+        let rendered_preview = render_markdown_preview("`$x + y$`\n\n```text\n$E = mc^2$\n```");
+
+        assert!(rendered_preview.html.contains("<code>$x + y$</code>"));
+        assert!(rendered_preview.html.contains("$E = mc^2$"));
+        assert!(!rendered_preview.html.contains("class=\"math math-inline\""));
+    }
+
+    #[test]
+    fn keeps_unclosed_math_delimiters_as_text() {
+        let rendered_preview = render_markdown_preview("$abc\n\n$$\nx + y");
+
+        assert!(rendered_preview.html.contains("$abc"));
+        assert!(rendered_preview.html.contains("$$"));
+        assert!(!rendered_preview.html.contains("class=\"math"));
+    }
+
+    #[test]
+    fn renders_invalid_math_as_local_error() {
+        let rendered_preview = render_markdown_preview(r"ok $a+b$ bad $\frac{1}$ after");
+
+        assert!(rendered_preview.html.contains("class=\"math math-inline\""));
+        assert!(rendered_preview.html.contains("math-error"));
+        assert!(rendered_preview.html.contains(r"\frac{1}"));
+        assert!(rendered_preview.html.contains(" after"));
+    }
+
+    #[test]
+    fn keeps_escaped_dollar_as_text() {
+        let rendered_preview = render_markdown_preview(r"価格は \$100 です。");
+
+        assert!(rendered_preview.html.contains("価格は $100 です。"));
+        assert!(!rendered_preview.html.contains("class=\"math"));
     }
 
     #[test]
@@ -8491,6 +9424,70 @@ mod tests {
     }
 
     #[test]
+    fn renders_markdown_image_video_extensions_as_video_players() {
+        let rendered_preview = render_markdown_preview(
+            "![demo](./DEMO.MP4?version=1)\n\n![movie](./demo.webm#chapter1)",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "<video src=\"./DEMO.MP4?version=1\" controls data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"./DEMO.MP4?version=1\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video>"
+        ));
+        assert!(rendered_preview.html.contains(
+            "<video src=\"./demo.webm#chapter1\" controls data-source-line-start=\"2\" data-source-line-end=\"2\" data-kmark-video-source=\"./demo.webm#chapter1\" aria-label=\"movie\" data-kmark-video-alt=\"movie\"></video>"
+        ));
+    }
+
+    #[test]
+    fn preserves_local_video_query_and_hash_when_markdown_file_path_is_available() {
+        let sandbox_directory = create_temp_test_directory();
+        let markdown_file_path = sandbox_directory.join("notes.md");
+        let video_file_path = sandbox_directory.join("demo.mp4");
+        fs::write(&markdown_file_path, "# notes").expect("failed to create markdown file");
+        fs::write(&video_file_path, "video").expect("failed to create video file");
+
+        let rendered_preview = render_markdown_preview_with_file_path(
+            "![demo](./demo.mp4?version=1#chapter1)",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        );
+        let resolved_video_url = resolve_image_destination_url(
+            "./demo.mp4?version=1#chapter1",
+            Some(markdown_file_path.to_string_lossy().as_ref()),
+        )
+        .expect("resolved video url");
+
+        assert_eq!(
+            rendered_preview.html,
+            format!(
+                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><video src=\"{}\" controls data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"{}\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video></p>",
+                resolved_video_url, resolved_video_url,
+            )
+        );
+        assert!(resolved_video_url.ends_with("/demo.mp4?version=1#chapter1"));
+    }
+
+    #[test]
+    fn keeps_unsupported_video_extensions_as_images() {
+        let rendered_preview = render_markdown_preview("![demo](./demo.avi)");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><img src=\"./demo.avi\" alt=\"demo\" data-source-line-start=\"0\" data-source-line-end=\"0\" /></p>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_video_params_and_shared_size_to_video() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:640 h:360 video_autoplay:true video_muted:true video_loop:true video_poster:./thumb.png -->\n![操作説明動画](./operation.mp4)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"操作説明動画\" data-kmark-video-alt=\"操作説明動画\" style=\"width:640px;height:360px;\" autoplay muted loop poster=\"./thumb.png\"></video></p>"
+        );
+    }
+
+    #[test]
     fn applies_text_params_to_following_paragraph_block() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark color:#c00 font_size:14pt font_weight:700 -->\n重要",
@@ -8805,7 +9802,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:300px;height:100px;\" /></p><p data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"width:300px;height:240px;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"7\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:300px;height:100px;\" /><img src=\"b.png\" alt=\"\" data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"width:300px;height:240px;\" /></p></div>"
         );
     }
 

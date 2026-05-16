@@ -9,10 +9,12 @@ use kmark_core::is_supported_markdown_path;
 use crate::ports::AssetRepository;
 
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogg", "mov", "m4v"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportedAssetKind {
     Image,
+    Video,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,7 +138,7 @@ where
             ));
         }
 
-        if !is_image_path(dropped_file_path) {
+        if imported_asset_kind_for_path(dropped_file_path).is_none() {
             return Err(ImportMarkdownAssetsError::UnsupportedAssetType(
                 display_path(dropped_file_path),
             ));
@@ -168,13 +170,16 @@ where
             copy_to_non_conflicting_path(repository, source_path, markdown_directory, file_name)?
         };
     let relative_path = to_markdown_relative_path(markdown_directory, &copied_path);
+    let asset_kind = imported_asset_kind_for_path(source_path).ok_or_else(|| {
+        ImportMarkdownAssetsError::UnsupportedAssetType(display_path(source_path))
+    })?;
 
     Ok(ImportedMarkdownAsset {
         original_path: source_path.to_path_buf(),
         copied_path,
         relative_path: relative_path.clone(),
         markdown_text: format!("![]({})", markdown_destination(&relative_path)),
-        asset_kind: ImportedAssetKind::Image,
+        asset_kind,
     })
 }
 
@@ -273,11 +278,31 @@ fn numbered_destination_path(
 }
 
 fn is_image_path(path: &Path) -> bool {
+    has_extension(path, IMAGE_EXTENSIONS)
+}
+
+fn is_video_path(path: &Path) -> bool {
+    has_extension(path, VIDEO_EXTENSIONS)
+}
+
+fn imported_asset_kind_for_path(path: &Path) -> Option<ImportedAssetKind> {
+    if is_image_path(path) {
+        return Some(ImportedAssetKind::Image);
+    }
+
+    if is_video_path(path) {
+        return Some(ImportedAssetKind::Video);
+    }
+
+    None
+}
+
+fn has_extension(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
         .map(|extension| {
             let lower_extension = extension.to_ascii_lowercase();
-            IMAGE_EXTENSIONS.contains(&lower_extension.as_str())
+            extensions.contains(&lower_extension.as_str())
         })
         .unwrap_or(false)
 }
@@ -346,7 +371,7 @@ mod tests {
 
     use crate::infra::FileSystemAssetRepository;
 
-    use super::{import_markdown_assets, is_image_path};
+    use super::{import_markdown_assets, is_image_path, is_video_path, ImportedAssetKind};
 
     #[test]
     fn copies_image_next_to_markdown_and_returns_image_markdown() {
@@ -370,9 +395,39 @@ mod tests {
         assert_eq!(imported.len(), 1);
         assert_eq!(imported[0].relative_path, "logo.png");
         assert_eq!(imported[0].markdown_text, "![](logo.png)");
+        assert_eq!(imported[0].asset_kind, ImportedAssetKind::Image);
         assert_eq!(
             fs::read(project.join("logo.png")).expect("failed to read copied image"),
             b"image"
+        );
+    }
+
+    #[test]
+    fn copies_video_next_to_markdown_and_returns_video_markdown() {
+        let sandbox = create_temp_test_directory();
+        let project = sandbox.join("project");
+        let source = sandbox.join("source");
+        fs::create_dir_all(&project).expect("failed to create project directory");
+        fs::create_dir_all(&source).expect("failed to create source directory");
+        let markdown_path = project.join("note.md");
+        let video_path = source.join("demo.mp4");
+        fs::write(&markdown_path, "# note").expect("failed to write markdown");
+        fs::write(&video_path, "video").expect("failed to write video");
+
+        let imported = import_markdown_assets(
+            &FileSystemAssetRepository,
+            &markdown_path,
+            &[video_path.clone()],
+        )
+        .expect("asset import should succeed");
+
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].relative_path, "demo.mp4");
+        assert_eq!(imported[0].markdown_text, "![](demo.mp4)");
+        assert_eq!(imported[0].asset_kind, ImportedAssetKind::Video);
+        assert_eq!(
+            fs::read(project.join("demo.mp4")).expect("failed to read copied video"),
+            b"video"
         );
     }
 
@@ -453,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_image_assets_for_initial_scope() {
+    fn rejects_non_media_assets_for_initial_scope() {
         let sandbox = create_temp_test_directory();
         let markdown_path = sandbox.join("note.md");
         let pdf_path = sandbox.join("manual.pdf");
@@ -467,10 +522,12 @@ mod tests {
     }
 
     #[test]
-    fn detects_supported_image_extensions_case_insensitively() {
+    fn detects_supported_image_and_video_extensions_case_insensitively() {
         assert!(is_image_path(&PathBuf::from("PHOTO.WEBP")));
         assert!(is_image_path(&PathBuf::from("icon.SVG")));
-        assert!(!is_image_path(&PathBuf::from("movie.mp4")));
+        assert!(is_video_path(&PathBuf::from("movie.MP4")));
+        assert!(is_video_path(&PathBuf::from("clip.WEBM")));
+        assert!(!is_video_path(&PathBuf::from("movie.avi")));
     }
 
     #[test]

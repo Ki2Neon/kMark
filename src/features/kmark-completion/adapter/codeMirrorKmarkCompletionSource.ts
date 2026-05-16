@@ -14,6 +14,7 @@ import { loadLocalFontFamilies } from "./localFontFamilies";
 
 const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, CompletionSection> = {
   image: { name: "Image", rank: 10 },
+  video: { name: "Video", rank: 15 },
   page: { name: "Page", rank: 20 },
   scope: { name: "Scope", rank: 30 },
   table: { name: "Table", rank: 40 },

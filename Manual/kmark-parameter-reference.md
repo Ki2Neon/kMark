@@ -2,8 +2,8 @@
 
 ## 結論
 
-- Schema version: `10`
-- Parameter総数: `95`
+- Schema version: `11`
+- Parameter総数: `99`
 - renderer未知key: 無視
 - renderer不正値: 無視
 - editor validation: unknown duplicate missing enum undefined-use unclosed-scope を警告
@@ -16,6 +16,7 @@
 | `scope` | `<!-- kmark { ... -->` から `<!-- kmark } -->` まで適用 |
 | `text` | paragraph/heading/list/blockquote/code/table/callout/toc等の文字装飾 |
 | `image` | Markdown画像 |
+| `video` | Markdown画像記法で指定された動画 |
 | `table` | Markdown表 |
 | `page` | 用紙preview/print page config |
 | `toc` | 自動目次 |
@@ -94,6 +95,10 @@
 | `shadow` |  | string | single image scope shape | `true` `md` `sm` `lg` `false` `none` box-shadow |
 | `margin` |  | length | single image scope shape table | 1-4値 |
 | `padding` |  | length | single image scope shape | 1-4値 |
+| `video_autoplay` |  | boolean | single video |  |
+| `video_muted` |  | boolean | single video |  |
+| `video_loop` |  | boolean | single video |  |
+| `video_poster` |  | string | single video |  |
 | `color` |  | color | single text scope |  |
 | `font_weight` |  | string | single text scope | `normal` `bold` `bolder` `lighter` `100`-`900` |
 | `font_family` |  | string | single text scope |  |
@@ -218,6 +223,22 @@
 | `fit` | `fit-content` | `fit-content` |
 | `page_fit` | page本文領域へ拡張 `display:block` `margin:0` | page本文領域へ拡張 |
 | `page_fit_contain` | max幅/高 + `object-fit:contain` | max幅/高 |
+
+## Video Parameters
+
+| Parameter | 使用者視点 | 値 | 例 | 注意 |
+| --- | --- | --- | --- | --- |
+| `video_autoplay` | 自動再生 | boolean | `video_autoplay:true` | 通常 `video_muted:true` 併用 |
+| `video_muted` | 初期mute | boolean | `video_muted:true` |  |
+| `video_loop` | loop再生 | boolean | `video_loop:true` |  |
+| `video_poster` | poster画像 | path/URL | `video_poster:./thumb.png` | unsafe scheme無視 |
+
+- 対象記法: `![]()`
+- 動画判定: extension `.mp4` `.webm` `.ogg` `.mov` `.m4v`
+- 判定除外: query/hash
+- 大小文字: 不問
+- 常時有効: `controls` fullscreen
+- 未登録: `video_controls` `video_fullscreen` `video_preload` `controls` `fullscreen` `preload`
 
 ## Text Parameters
 

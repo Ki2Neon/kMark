@@ -7,7 +7,7 @@
   "type": "module",
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "build:wasm": "wasm-pack build crates/kmark-web --target web --out-dir ../../src/wasm/pkg --out-name kmark_web",
+    "build:wasm": "node tools/build-wasm.mjs",
     "dev:vite": "vite",
     "dev": "pnpm run build:wasm && pnpm run dev:vite",
     "build:vite": "tsc && vite build",
@@ -32,6 +32,7 @@
     "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2",
     "@uiw/react-codemirror": "^4.25.9",
+    "mermaid": "^11.15.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

@@ -93,9 +93,11 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body p,
   .markdown-body ul,
   .markdown-body ol,
+  .markdown-body dl,
   .markdown-body blockquote,
   .markdown-body .kmark-toc,
   .markdown-body .kmark-callout,
+  .markdown-body .kmark-mermaid-block,
   .markdown-body pre,
   .markdown-body table {
     margin: 1em 0;
@@ -103,6 +105,92 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body a {
     color: inherit;
+  }
+
+  .markdown-body img,
+  .markdown-body video {
+    max-width: 100%;
+    box-sizing: content-box;
+  }
+
+  .markdown-body .kmark-mermaid-block {
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0.75em;
+    border: 0.75pt solid #d7d7d7;
+    border-radius: 4pt;
+    background: #ffffff;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .markdown-body .kmark-mermaid-rendered {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .markdown-body .kmark-mermaid-rendered svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .markdown-body .kmark-mermaid-error {
+    border-color: #dc2626;
+    background: #fff5f5;
+  }
+
+  .markdown-body .kmark-mermaid-error-title {
+    margin-bottom: 0.45em;
+    color: #991b1b;
+    font-weight: 700;
+  }
+
+  .markdown-body .kmark-mermaid-error-message {
+    margin: 0 0 0.75em;
+    white-space: pre-wrap;
+  }
+
+  .markdown-body .kmark-mermaid-source {
+    margin-top: 0.75em;
+  }
+
+  .markdown-body .kmark-mermaid-source pre {
+    margin-top: 0.5em;
+    margin-bottom: 0;
+  }
+
+  .markdown-body dt {
+    margin-top: 0.85em;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .markdown-body dt:first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body dd {
+    margin: 0.25em 0 0 1.5em;
+  }
+
+  .markdown-body dd + dt {
+    margin-top: 1em;
+  }
+
+  .markdown-body dd + dd {
+    margin-top: 0.35em;
+  }
+
+  .markdown-body dd > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body dd > :last-child {
+    margin-bottom: 0;
   }
 
   .markdown-body .kmark-toc {

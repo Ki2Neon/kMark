@@ -2,7 +2,7 @@
 
 kMark itself is licensed under MIT. Third-party components keep their own licenses.
 
-This file records the dependency licenses confirmed in this repository on 2026-04-22.
+This file records the dependency licenses confirmed in this repository on 2026-05-16.
 
 ## Notes
 
@@ -26,6 +26,7 @@ This file records the dependency licenses confirmed in this repository on 2026-0
 | @uiw/react-codemirror | MIT |
 | dompurify | MPL-2.0 OR Apache-2.0 |
 | markdown-it | MIT |
+| mermaid | MIT |
 | react | MIT |
 | react-dom | MIT |
 
