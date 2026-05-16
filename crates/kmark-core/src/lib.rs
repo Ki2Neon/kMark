@@ -5,6 +5,7 @@ mod editor_state;
 mod kmark_param_schema;
 mod markdown_document;
 mod markdown_document_error;
+mod math_render;
 mod preview_preferences;
 mod recent_files;
 mod render_markdown_preview;

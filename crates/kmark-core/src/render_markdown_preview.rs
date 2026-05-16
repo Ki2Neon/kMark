@@ -9,7 +9,10 @@ use pulldown_cmark::{
     Tag, TagEnd,
 };
 
-use crate::table_format::{has_table_delimiter_pipe, split_table_cells};
+use crate::{
+    math_render::{render_math_html, MarkdownMathDisplay},
+    table_format::{has_table_delimiter_pipe, split_table_cells},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedMarkdownPreview {
@@ -705,6 +708,7 @@ fn markdown_options() -> Options {
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    options.insert(Options::ENABLE_MATH);
     options
 }
 
@@ -1759,8 +1763,8 @@ impl<'a> HtmlEmitter<'a> {
             }
             Event::FootnoteReference(label) => self.push_footnote_reference(label.as_ref()),
             Event::TaskListMarker(checked) => self.push_task_list_marker(checked),
-            Event::InlineMath(text) => self.push_math_text("math-inline", &text),
-            Event::DisplayMath(text) => self.push_math_text("math-display", &text),
+            Event::InlineMath(text) => self.push_math_text(MarkdownMathDisplay::Inline, &text),
+            Event::DisplayMath(text) => self.push_math_text(MarkdownMathDisplay::Block, &text),
             Event::Html(_) | Event::InlineHtml(_) => unreachable!("html handled earlier"),
         }
     }
@@ -2283,7 +2287,7 @@ impl<'a> HtmlEmitter<'a> {
         self.push_raw(markup);
     }
 
-    fn push_math_text(&mut self, class_name: &str, text: &str) {
+    fn push_math_text(&mut self, display: MarkdownMathDisplay, text: &str) {
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -2292,10 +2296,7 @@ impl<'a> HtmlEmitter<'a> {
         self.ensure_callout_marker_paragraph_open();
         self.mark_paragraph_non_image_content();
 
-        self.push_raw(&format!(
-            "<span class=\"math {class_name}\">{}</span>",
-            escape_html(text),
-        ));
+        self.push_raw(&render_math_html(text, display));
     }
 
     fn push_text_event(&mut self, text: &str, range: &Range<usize>) {
@@ -8067,6 +8068,78 @@ mod tests {
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\">first<br />\nsecond<br />\nthird<br />\nfourth</p>"
         );
+    }
+
+    #[test]
+    fn renders_inline_math_as_mathml() {
+        let rendered_preview = render_markdown_preview(r"速度は $v = \frac{dx}{dt}$ で表される。");
+
+        assert!(rendered_preview.html.contains("class=\"math math-inline\""));
+        assert!(rendered_preview
+            .html
+            .contains("<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\">"));
+        assert!(rendered_preview.html.contains("<mfrac>"));
+        assert!(rendered_preview.html.contains("<mi>v</mi>"));
+    }
+
+    #[test]
+    fn renders_display_matrix_math_as_mathml() {
+        let rendered_preview =
+            render_markdown_preview("$$\n\\begin{matrix}\n1 & 2 \\\\\n3 & 4\n\\end{matrix}\n$$");
+
+        assert!(rendered_preview
+            .html
+            .contains("class=\"math math-display\""));
+        assert!(rendered_preview.html.contains("<mtable>"));
+        assert!(rendered_preview.html.contains("<mtd><mn>1</mn></mtd>"));
+        assert!(rendered_preview.html.contains("<mtd><mn>4</mn></mtd>"));
+    }
+
+    #[test]
+    fn keeps_markdown_syntax_literal_inside_math() {
+        let rendered_preview = render_markdown_preview(r"$**x** + y$");
+
+        assert!(rendered_preview.html.contains("class=\"math math-inline\""));
+        assert!(!rendered_preview.html.contains("<strong>"));
+        assert!(rendered_preview
+            .html
+            .contains("<mo>*</mo><mo>*</mo><mi>x</mi>"));
+    }
+
+    #[test]
+    fn keeps_math_delimiters_literal_inside_code() {
+        let rendered_preview = render_markdown_preview("`$x + y$`\n\n```text\n$E = mc^2$\n```");
+
+        assert!(rendered_preview.html.contains("<code>$x + y$</code>"));
+        assert!(rendered_preview.html.contains("$E = mc^2$"));
+        assert!(!rendered_preview.html.contains("class=\"math math-inline\""));
+    }
+
+    #[test]
+    fn keeps_unclosed_math_delimiters_as_text() {
+        let rendered_preview = render_markdown_preview("$abc\n\n$$\nx + y");
+
+        assert!(rendered_preview.html.contains("$abc"));
+        assert!(rendered_preview.html.contains("$$"));
+        assert!(!rendered_preview.html.contains("class=\"math"));
+    }
+
+    #[test]
+    fn renders_invalid_math_as_local_error() {
+        let rendered_preview = render_markdown_preview(r"ok $a+b$ bad $\frac{1}$ after");
+
+        assert!(rendered_preview.html.contains("class=\"math math-inline\""));
+        assert!(rendered_preview.html.contains("math-error"));
+        assert!(rendered_preview.html.contains(r"\frac{1}"));
+        assert!(rendered_preview.html.contains(" after"));
+    }
+
+    #[test]
+    fn keeps_escaped_dollar_as_text() {
+        let rendered_preview = render_markdown_preview(r"価格は \$100 です。");
+
+        assert!(rendered_preview.html.contains("価格は $100 です。"));
+        assert!(!rendered_preview.html.contains("class=\"math"));
     }
 
     #[test]

@@ -1304,6 +1304,79 @@ input:focus-visible,
   font-style: italic;
 }
 
+.markdown-body .math {
+  font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+}
+
+.markdown-body .math math {
+  font-size: 1.04em;
+}
+
+.markdown-body .math-inline {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  line-height: 1;
+  vertical-align: -0.08em;
+}
+
+.markdown-body .math-display {
+  display: block;
+  max-width: 100%;
+  margin: 0.85em 0;
+  padding: 0.25em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.markdown-body .math-display math {
+  display: inline-block;
+  min-width: max-content;
+  max-width: none;
+}
+
+.markdown-body .math-error {
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.12em 0.35em;
+  border: 1px solid color-mix(in srgb, var(--danger) 48%, var(--preview-border));
+  background: color-mix(in srgb, var(--danger-bg) 66%, var(--preview-surface));
+  color: var(--danger);
+  font-family: var(--kmark-font-family, var(--preview-font-family));
+  line-height: 1.35;
+}
+
+.markdown-body .math-display.math-error {
+  display: flex;
+  justify-content: center;
+  text-align: left;
+  white-space: normal;
+}
+
+.markdown-body .math-error__label {
+  flex: 0 0 auto;
+  font-size: 0.78em;
+  font-weight: 750;
+}
+
+.markdown-body .math-error__source {
+  min-width: 0;
+  padding: 0.08em 0.26em;
+  background: color-mix(in srgb, var(--danger-bg) 84%, var(--preview-code-bg));
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body .math-error__message {
+  min-width: 0;
+  color: color-mix(in srgb, var(--danger) 72%, var(--preview-text));
+  font-size: 0.82em;
+  overflow-wrap: anywhere;
+}
+
 .markdown-body hr {
   height: 0.25em;
   padding: 0;
