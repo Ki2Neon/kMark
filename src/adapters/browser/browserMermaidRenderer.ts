@@ -6,7 +6,10 @@ export type MermaidPreviewSurface = "standard" | "paper";
 type RenderMermaidHtmlOptions = {
   readonly surface?: MermaidPreviewSurface;
   readonly theme?: MermaidPreviewTheme;
+  readonly themeVariables?: MermaidThemeVariables;
 };
+
+type MermaidThemeVariables = Record<string, string>;
 
 const MERMAID_BLOCK_SELECTOR = ".kmark-mermaid-block";
 const MERMAID_RENDERED_SELECTOR = ".kmark-mermaid-rendered";
@@ -20,6 +23,112 @@ const UNSAFE_SVG_ELEMENT_NAMES = new Set(["script", "iframe", "object", "embed",
 const SVG_LINK_ATTRIBUTE_NAMES = new Set(["href", "xlink:href"]);
 const UNSAFE_URL_PATTERN = /^\s*(?:javascript|vbscript|data):/iu;
 const UNSAFE_CSS_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\()/iu;
+const PAPER_MERMAID_THEME_VARIABLES: MermaidThemeVariables = {
+  background: "#ffffff",
+  mainBkg: "#f8fafc",
+  nodeBkg: "#f8fafc",
+  nodeBorder: "#334155",
+  primaryColor: "#dbeafe",
+  primaryTextColor: "#0f172a",
+  primaryBorderColor: "#1d4ed8",
+  secondaryColor: "#dcfce7",
+  secondaryTextColor: "#052e16",
+  secondaryBorderColor: "#15803d",
+  tertiaryColor: "#fef3c7",
+  tertiaryTextColor: "#422006",
+  tertiaryBorderColor: "#b45309",
+  textColor: "#111827",
+  titleColor: "#111827",
+  lineColor: "#334155",
+  defaultLinkColor: "#334155",
+  arrowheadColor: "#334155",
+  border1: "#334155",
+  border2: "#475569",
+  note: "#fef9c3",
+  noteBorderColor: "#a16207",
+  noteBkgColor: "#fef9c3",
+  noteTextColor: "#422006",
+  clusterBkg: "#f8fafc",
+  clusterBorder: "#94a3b8",
+  edgeLabelBackground: "#ffffff",
+  actorBkg: "#f8fafc",
+  actorBorder: "#334155",
+  actorTextColor: "#111827",
+  actorLineColor: "#64748b",
+  signalColor: "#334155",
+  signalTextColor: "#111827",
+  labelBoxBkgColor: "#ffffff",
+  labelBoxBorderColor: "#94a3b8",
+  labelTextColor: "#111827",
+  loopTextColor: "#111827",
+  activationBorderColor: "#475569",
+  activationBkgColor: "#e2e8f0",
+  sequenceNumberColor: "#111827",
+  stateBkg: "#f8fafc",
+  stateBorder: "#334155",
+  stateLabelColor: "#111827",
+  labelBackgroundColor: "#ffffff",
+  transitionColor: "#334155",
+  classText: "#111827",
+  relationColor: "#334155",
+  entityBkg: "#f8fafc",
+  entityBorder: "#334155",
+  attributeBackgroundColorOdd: "#ffffff",
+  attributeBackgroundColorEven: "#f1f5f9",
+  rowOdd: "#ffffff",
+  rowEven: "#f1f5f9",
+  sectionBkgColor: "#f1f5f9",
+  altSectionBkgColor: "#ffffff",
+  sectionBkgColor2: "#ffffff",
+  taskBkgColor: "#475569",
+  taskBorderColor: "#334155",
+  taskTextLightColor: "#ffffff",
+  taskTextColor: "#ffffff",
+  taskTextDarkColor: "#111827",
+  taskTextOutsideColor: "#111827",
+  taskTextClickableColor: "#ffffff",
+  activeTaskBkgColor: "#2563eb",
+  activeTaskBorderColor: "#1d4ed8",
+  doneTaskBkgColor: "#94a3b8",
+  doneTaskBorderColor: "#64748b",
+  critBkgColor: "#dc2626",
+  critBorderColor: "#991b1b",
+  gridColor: "#cbd5e1",
+  vertLineColor: "#94a3b8",
+  todayLineColor: "#dc2626",
+  excludeBkgColor: "#e5e7eb",
+  pie1: "#2563eb",
+  pie2: "#db2777",
+  pie3: "#16a34a",
+  pie4: "#d97706",
+  pie5: "#7c3aed",
+  pie6: "#0891b2",
+  pie7: "#be123c",
+  pie8: "#4d7c0f",
+  pie9: "#c2410c",
+  pie10: "#4338ca",
+  pie11: "#0f766e",
+  pie12: "#a21caf",
+  pieTitleTextSize: "1.25rem",
+  pieTitleTextColor: "#111827",
+  pieSectionTextSize: "1rem",
+  pieSectionTextColor: "#ffffff",
+  pieLegendTextColor: "#111827",
+  pieStrokeColor: "#ffffff",
+  pieOuterStrokeColor: "#334155",
+  cScale0: "#2563eb",
+  cScale1: "#db2777",
+  cScale2: "#16a34a",
+  cScale3: "#d97706",
+  cScale4: "#7c3aed",
+  cScale5: "#0891b2",
+  cScale6: "#be123c",
+  cScale7: "#4d7c0f",
+  cScale8: "#c2410c",
+  cScale9: "#4338ca",
+  cScale10: "#0f766e",
+  cScale11: "#a21caf",
+};
 
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
@@ -67,7 +176,23 @@ function enqueueMermaidRender<T>(operation: () => Promise<T>): Promise<T> {
   return queued;
 }
 
-async function renderMermaidSvg(source: string, theme: MermaidPreviewTheme): Promise<string> {
+function shouldUsePaperMermaidColors(surface: MermaidPreviewSurface = "standard"): boolean {
+  if (surface === "paper") {
+    return true;
+  }
+
+  return typeof document !== "undefined" && document.documentElement.dataset.previewColors !== "app";
+}
+
+function resolveMermaidThemeVariables(surface: MermaidPreviewSurface = "standard"): MermaidThemeVariables | undefined {
+  return shouldUsePaperMermaidColors(surface) ? PAPER_MERMAID_THEME_VARIABLES : undefined;
+}
+
+async function renderMermaidSvg(
+  source: string,
+  theme: MermaidPreviewTheme,
+  themeVariables?: MermaidThemeVariables,
+): Promise<string> {
   return enqueueMermaidRender(async () => {
     mermaid.initialize({
       flowchart: {
@@ -76,6 +201,7 @@ async function renderMermaidSvg(source: string, theme: MermaidPreviewTheme): Pro
       securityLevel: "strict",
       startOnLoad: false,
       theme,
+      themeVariables,
     });
 
     mermaidRenderSequence += 1;
@@ -203,7 +329,12 @@ function renderMermaidError(
   block.dataset.kmarkMermaidState = "error";
 }
 
-async function renderMermaidBlock(block: HTMLElement, theme: MermaidPreviewTheme): Promise<void> {
+async function renderMermaidBlock(
+  block: HTMLElement,
+  theme: MermaidPreviewTheme,
+  surface: MermaidPreviewSurface,
+  themeVariables?: MermaidThemeVariables,
+): Promise<void> {
   const renderedContainer = block.querySelector<HTMLElement>(MERMAID_RENDERED_SELECTOR);
   const sourceDetails = block.querySelector<HTMLElement>(MERMAID_SOURCE_SELECTOR);
 
@@ -215,6 +346,7 @@ async function renderMermaidBlock(block: HTMLElement, theme: MermaidPreviewTheme
   block.classList.remove("kmark-mermaid-error");
   block.dataset.kmarkMermaidState = "rendering";
   block.dataset.kmarkMermaidTheme = theme;
+  block.dataset.kmarkMermaidSurface = shouldUsePaperMermaidColors(surface) ? "paper" : "standard";
   renderedContainer.replaceChildren();
   hideMermaidSource(sourceDetails);
 
@@ -224,7 +356,7 @@ async function renderMermaidBlock(block: HTMLElement, theme: MermaidPreviewTheme
   }
 
   try {
-    const svg = await renderMermaidSvg(source, theme);
+    const svg = await renderMermaidSvg(source, theme, themeVariables);
     const svgElement = parseSafeMermaidSvg(svg, block.ownerDocument);
     renderedContainer.replaceChildren(svgElement);
     block.dataset.kmarkMermaidState = "rendered";
@@ -238,10 +370,12 @@ export async function renderMermaidBlocks(
   options: RenderMermaidHtmlOptions = {},
 ): Promise<void> {
   const theme = options.theme ?? resolveMermaidPreviewTheme(options.surface);
+  const surface = options.surface ?? "standard";
+  const themeVariables = options.themeVariables ?? resolveMermaidThemeVariables(surface);
   const blocks = Array.from(root.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
 
   for (const block of blocks) {
-    await renderMermaidBlock(block, theme);
+    await renderMermaidBlock(block, theme, surface, themeVariables);
   }
 }
 
