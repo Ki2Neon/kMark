@@ -1,3 +1,4 @@
+pub mod app_exit;
 pub mod asset_import;
 pub mod desktop_layout_preferences;
 pub mod editor_draft;
@@ -7,5 +8,6 @@ pub mod external_link;
 pub mod file_open;
 pub mod markdown_render;
 pub mod preview_preferences;
+pub mod recent_files;
 pub mod system_fonts;
 pub mod theme_preferences;

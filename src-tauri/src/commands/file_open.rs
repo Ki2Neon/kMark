@@ -124,6 +124,18 @@ pub async fn open_markdown_document_dialog(
 }
 
 #[tauri::command]
+pub fn read_markdown_document_at_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<MarkdownDocumentPayload, CommandErrorPayload> {
+    let file_path = PathBuf::from(path.trim());
+
+    read_markdown_document(&state.markdown_document_repository, &file_path)
+        .map(Into::into)
+        .map_err(CommandErrorPayload::from)
+}
+
+#[tauri::command]
 pub fn open_markdown_document_folder(path: String) -> Result<(), CommandErrorPayload> {
     let file_path = PathBuf::from(path.trim());
 

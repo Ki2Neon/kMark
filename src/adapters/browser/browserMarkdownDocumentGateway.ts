@@ -7,6 +7,7 @@ import {
   overwriteMarkdownDocument,
   overwriteMarkdownDocumentAtPath,
   pickMarkdownDocument,
+  readMarkdownDocumentAtPath,
   readMarkdownFile,
   saveMarkdownDocumentAs,
   supportsNativeOpenPicker,
@@ -80,6 +81,16 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
       saveTarget = { kind: "download" };
 
       return toLoadedMarkdownDocument(result.fileName, result.content, null);
+    },
+
+    async openDocumentFromPath(filePath) {
+      const result = await readMarkdownDocumentAtPath(filePath);
+      saveTarget = {
+        kind: "external-path",
+        filePath: result.filePath,
+      };
+
+      return toLoadedMarkdownDocument(result.fileName, result.content, result.filePath);
     },
 
     async openDocumentFolder(filePath) {

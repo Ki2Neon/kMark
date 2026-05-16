@@ -20,7 +20,48 @@ export type MarkdownTabAction = {
   readonly nextSelectionEnd: number;
 };
 
+export type MarkdownSelectionRange = {
+  readonly anchor: number;
+  readonly head: number;
+};
+
+export type MarkdownSelectionWrapChange = {
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+  readonly text: string;
+};
+
+export type MarkdownSelectionWrapAction = {
+  readonly changes: readonly MarkdownSelectionWrapChange[];
+  readonly nextSelections: readonly MarkdownSelectionRange[];
+};
+
 const FENCED_CODE_BLOCK_PATTERN = /^\s*(`{3,}|~{3,})/u;
+
+const MARKDOWN_SELECTION_WRAP_PAIRS: ReadonlyMap<string, readonly [string, string]> = new Map([
+  ["`", ["`", "`"]],
+  ["*", ["*", "*"]],
+  ["(", ["(", ")"]],
+  [")", ["(", ")"]],
+  ["[", ["[", "]"]],
+  ["]", ["[", "]"]],
+  ["{", ["{", "}"]],
+  ["}", ["{", "}"]],
+  ["<", ["<", ">"]],
+  [">", ["<", ">"]],
+  ["（", ["（", "）"]],
+  ["）", ["（", "）"]],
+  ["「", ["「", "」"]],
+  ["」", ["「", "」"]],
+  ["『", ["『", "』"]],
+  ["』", ["『", "』"]],
+  ["【", ["【", "】"]],
+  ["】", ["【", "】"]],
+  ["［", ["［", "］"]],
+  ["］", ["［", "］"]],
+  ["｛", ["｛", "｝"]],
+  ["｝", ["｛", "｝"]],
+]);
 
 export const MARKDOWN_SNIPPET_DEFINITIONS: readonly MarkdownSnippetDefinition[] = [
   {
@@ -118,6 +159,56 @@ export const MARKDOWN_SNIPPET_DEFINITIONS: readonly MarkdownSnippetDefinition[] 
 
 function clampCursorOffset(content: string, cursorOffset: number): number {
   return Math.min(content.length, Math.max(0, cursorOffset));
+}
+
+export function getMarkdownSelectionWrapAction(
+  content: string,
+  selections: readonly MarkdownSelectionRange[],
+  inputText: string,
+): MarkdownSelectionWrapAction | null {
+  const wrapPair = MARKDOWN_SELECTION_WRAP_PAIRS.get(inputText);
+
+  if (wrapPair === undefined || selections.length === 0) {
+    return null;
+  }
+
+  const [openingText, closingText] = wrapPair;
+  const changes: MarkdownSelectionWrapChange[] = [];
+  const nextSelections: MarkdownSelectionRange[] = [];
+  let offsetDelta = 0;
+
+  for (const selection of selections) {
+    const boundedAnchor = clampCursorOffset(content, selection.anchor);
+    const boundedHead = clampCursorOffset(content, selection.head);
+    const rangeStart = Math.min(boundedAnchor, boundedHead);
+    const rangeEnd = Math.max(boundedAnchor, boundedHead);
+
+    if (rangeStart === rangeEnd) {
+      return null;
+    }
+
+    const selectedText = content.slice(rangeStart, rangeEnd);
+    const nextSelectionStart = rangeStart + offsetDelta + openingText.length;
+    const nextSelectionEnd = rangeEnd + offsetDelta + openingText.length;
+
+    changes.push({
+      rangeStart,
+      rangeEnd,
+      text: `${openingText}${selectedText}${closingText}`,
+    });
+    nextSelections.push(
+      boundedAnchor <= boundedHead
+        ? { anchor: nextSelectionStart, head: nextSelectionEnd }
+        : { anchor: nextSelectionEnd, head: nextSelectionStart },
+    );
+
+    offsetDelta += openingText.length + closingText.length;
+  }
+
+  return {
+    changes,
+    nextSelections,
+  };
 }
 
 function getLineStartOffset(content: string, cursorOffset: number): number {

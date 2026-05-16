@@ -512,6 +512,46 @@ input:focus-visible,
   color: var(--text-soft);
 }
 
+.menu-section__stack-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 12px;
+  background: var(--surface);
+}
+
+.menu-section__back-button {
+  min-height: 30px;
+  padding: 0.38rem 0.65rem;
+  background: var(--surface-muted);
+  font-size: 0.82em;
+  line-height: 1.2;
+}
+
+.menu-section__back-button:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    var(--surface-muted);
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
+}
+
+.menu-section__stack-title-block {
+  min-width: 0;
+}
+
+.menu-section__stack-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86em;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
 .menu-section__label {
   display: grid;
   grid-template-columns: minmax(150px, 0.45fr) minmax(160px, 1fr);
@@ -698,6 +738,50 @@ input:focus-visible,
   margin-top: 10px;
 }
 
+.menu-section__recent-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu-section__recent-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 10px 11px 12px;
+  border-left: 2px solid transparent;
+  background: color-mix(in srgb, var(--surface-muted) 48%, transparent);
+  text-align: left;
+}
+
+.menu-section__recent-item:hover {
+  border-color: var(--control-hover-border);
+  background:
+    linear-gradient(var(--control-hover-overlay), var(--control-hover-overlay)),
+    color-mix(in srgb, var(--surface-muted) 48%, transparent);
+  box-shadow: 0 0 0 2px var(--control-hover-ring);
+}
+
+.menu-section__recent-file-name {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.82em;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.menu-section__recent-file-path {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 0.72em;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .menu-section__empty {
   margin: 8px 4px 0;
   padding: 12px;
@@ -830,6 +914,69 @@ input:focus-visible,
 .preview-context-menu__item:hover,
 .preview-context-menu__item:focus-visible {
   background: var(--surface-muted);
+}
+
+.unsaved-exit-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: var(--overlay);
+}
+
+.unsaved-exit-dialog {
+  display: grid;
+  gap: 18px;
+  width: min(460px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.unsaved-exit-dialog__body {
+  display: grid;
+  gap: 8px;
+}
+
+.unsaved-exit-dialog h2,
+.unsaved-exit-dialog p {
+  margin: 0;
+}
+
+.unsaved-exit-dialog h2 {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.unsaved-exit-dialog p {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.unsaved-exit-dialog__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.unsaved-exit-dialog__actions button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0.46rem 0.68rem;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.unsaved-exit-dialog__actions button:disabled {
+  cursor: default;
+  opacity: 0.62;
 }
 
 .preview-section__body--a4 {
@@ -1025,6 +1172,7 @@ input:focus-visible,
   max-width: none;
   padding: 32px;
   font-family: var(--kmark-font-family, var(--preview-font-family));
+  font-synthesis: weight style;
   font-size: var(--markdown-body-font-size);
   line-height: 1.6;
   color: var(--preview-text);
@@ -1146,6 +1294,14 @@ input:focus-visible,
 
 .markdown-body a:hover {
   text-decoration-thickness: 2px;
+}
+
+.markdown-body :where(strong, b) {
+  font-weight: 700;
+}
+
+.markdown-body :where(em, i) {
+  font-style: italic;
 }
 
 .markdown-body hr {
@@ -1553,6 +1709,10 @@ input:focus-visible,
 
   .preview-section__page-stack {
     gap: 16px;
+  }
+
+  .unsaved-exit-dialog__actions {
+    grid-template-columns: 1fr;
   }
 
   .edit-section__textarea,

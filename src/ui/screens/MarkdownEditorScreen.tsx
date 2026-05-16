@@ -20,6 +20,8 @@ import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
+import { UnsavedExitDialog } from "../components/UnsavedExitDialog";
+import { useConfirmSaveOnExit } from "../hooks/useConfirmSaveOnExit";
 import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
 import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
 import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
@@ -30,6 +32,7 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
+import { type RecentFile } from "../../domain/recentFiles";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
@@ -121,6 +124,7 @@ export function MarkdownEditorScreen({
     isDirty,
     isReady: isEditorReady,
     previewHtml,
+    recentFiles,
     handleClearPendingExternalDocuments,
     previewPageHtmls,
     previewPages,
@@ -131,6 +135,7 @@ export function MarkdownEditorScreen({
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
+    handleOpenRecentFile,
     handlePickedFile,
     handleResetDocument,
     handleOverwriteSaveDocument,
@@ -238,6 +243,12 @@ export function MarkdownEditorScreen({
 
   const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
   useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
+  const confirmSaveOnExit = useConfirmSaveOnExit({
+    enabled: isEditorReady,
+    isDirty,
+    onErrorRaise: handleErrorRaise,
+    onSaveDocument: handleOverwriteSaveDocument,
+  });
 
   const handleRequestOpen = useCallback(async () => {
     if (!confirmDiscard()) {
@@ -258,6 +269,19 @@ export function MarkdownEditorScreen({
     closeDesktopMenu();
     void handleOpenCurrentDocumentFolder();
   }, [closeDesktopMenu, handleOpenCurrentDocumentFolder]);
+
+  const handleRequestOpenRecentFile = useCallback((recentFile: RecentFile) => {
+    if (!confirmDiscard()) {
+      return;
+    }
+
+    closeDesktopMenu();
+    void handleOpenRecentFile(recentFile);
+
+    if (layoutMode === "mobile") {
+      requestMobileSection("edit");
+    }
+  }, [closeDesktopMenu, confirmDiscard, handleOpenRecentFile, layoutMode, requestMobileSection]);
 
   const handleRequestOverwriteSave = useCallback(() => {
     closeDesktopMenu();
@@ -455,7 +479,7 @@ export function MarkdownEditorScreen({
   }, [closeDesktopMenu, dismissMobileMenu, layoutMode]);
 
   useMarkdownEditorShortcuts({
-    enabled: isEditorReady,
+    enabled: isEditorReady && !confirmSaveOnExit.isOpen,
     onDismissMenu: handleShortcutDismissMenu,
     onMenuToggle: handleShortcutMenuToggle,
     onNewDocument: handleShortcutNewDocument,
@@ -493,6 +517,7 @@ export function MarkdownEditorScreen({
     onNewDocument: handleRequestNew,
     onOpenCurrentDocumentFolder: handleRequestOpenCurrentDocumentFolder,
     onOpenDocument: handleRequestOpen,
+    onOpenRecentFile: handleRequestOpenRecentFile,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,
     onPreviewUsesAppThemeColorsChange,
@@ -503,6 +528,7 @@ export function MarkdownEditorScreen({
     onStartupEditModeChange,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
+    recentFiles,
     previewUsesAppThemeColors,
     showLineNumbers,
     startupEditMode,
@@ -688,6 +714,16 @@ export function MarkdownEditorScreen({
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
           style={previewContextMenuStyle}
+        />
+      ) : null}
+
+      {confirmSaveOnExit.isOpen ? (
+        <UnsavedExitDialog
+          fileName={normalizedFileName}
+          isSaving={confirmSaveOnExit.isSaving}
+          onCancel={confirmSaveOnExit.onCancel}
+          onDiscard={confirmSaveOnExit.onDiscard}
+          onSave={confirmSaveOnExit.onSave}
         />
       ) : null}
     </main>

@@ -6,6 +6,7 @@ mod kmark_param_schema;
 mod markdown_document;
 mod markdown_document_error;
 mod preview_preferences;
+mod recent_files;
 mod render_markdown_preview;
 pub mod table_format;
 mod theme;
@@ -31,6 +32,7 @@ pub use kmark_param_schema::{kmark_param_schema_json, KMARK_PARAM_SCHEMA_VERSION
 pub use markdown_document::{is_supported_markdown_path, MarkdownDocument};
 pub use markdown_document_error::MarkdownDocumentError;
 pub use preview_preferences::{PreviewDisplayMode, PreviewPreferences};
+pub use recent_files::{RecentFile, RecentFiles, MAX_RECENT_FILES};
 pub use render_markdown_preview::{
     render_markdown_preview, render_markdown_preview_with_file_path, CssLength, PageChromeConfig,
     PageChromeRegionConfig, PageNumberConfig, PageNumberPosition, PageNumberStyle, PageStyle,

@@ -3264,7 +3264,8 @@ function MarkdownPreviewComponent({
     pages: [],
     sourceKey: "",
   });
-  const a4DisplayPages = paginatedA4PageState.sourceKey === a4PaginationSourceKey
+  const hasCurrentA4Pagination = paginatedA4PageState.sourceKey === a4PaginationSourceKey;
+  const a4DisplayPages = hasCurrentA4Pagination || paginatedA4PageState.pages.length > 0
     ? paginatedA4PageState.pages
     : normalizedPages;
   const numberedA4DisplayPages = useMemo(
@@ -3797,7 +3798,7 @@ function MarkdownPreviewComponent({
           <div className="preview-section__page-stack">
             {numberedA4DisplayPages.map((page, index) => (
               <div
-                key={`${index}-${page.html.length}-${pageStyleKey(page.pageStyle)}-${previewTextStyleKey(page.textStyle)}-${pageNumberConfigKey(page.pageNumberConfig)}-${pageChromeConfigKey(page.pageChromeConfig)}-${page.pageNumberText ?? ""}`}
+                key={index}
                 className="preview-section__page-scale"
                 style={getPreviewPageScaleStyle(page, effectiveA4Scale)}
               >
