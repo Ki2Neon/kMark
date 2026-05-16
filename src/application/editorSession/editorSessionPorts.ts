@@ -3,6 +3,7 @@ import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { type PageStyle, type PreviewTextStyle, type RenderedPreviewPage } from "../../domain/preview";
+import { type RecentFile } from "../../domain/recentFiles";
 import { type EditorSessionAction } from "./editorSessionAction";
 
 export type LoadedMarkdownDocument = {
@@ -54,6 +55,11 @@ export type DraftStore = {
   persist(edit: StoredEdit): Promise<void>;
 };
 
+export type RecentFileStore = {
+  load(): Promise<readonly RecentFile[]>;
+  record(recentFile: RecentFile): Promise<readonly RecentFile[]>;
+};
+
 export type MarkdownRenderer = {
   render(content: string, filePath?: string | null): Promise<{
     readonly html: string;
@@ -69,6 +75,7 @@ export type MarkdownDocumentGateway = {
   restoreDocumentReference(filePath: string | null): void;
   openDocumentFromPicker(): Promise<LoadedMarkdownDocument | null>;
   openDocumentFromFile(file: File): Promise<LoadedMarkdownDocument>;
+  openDocumentFromPath(filePath: string): Promise<LoadedMarkdownDocument>;
   openDocumentFolder(filePath: string): Promise<void>;
   loadExternalDocument(document: ExternalMarkdownDocument): LoadedMarkdownDocument;
   saveDocument(fileName: string, content: string): Promise<SavedMarkdownDocument | null>;

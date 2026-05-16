@@ -5,6 +5,7 @@ import { createBrowserMarkdownAssetImporter } from "../../adapters/browser/brows
 import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/browserMarkdownDocumentGateway";
 import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
 import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
+import { createBrowserRecentFileStore } from "../../adapters/browser/browserRecentFileStore";
 import {
   EditorSessionController,
   type RenderedPreview,
@@ -15,6 +16,7 @@ import { createEditorSessionReducer } from "../../application/editorSession/edit
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
 import { DEFAULT_PAGE_STYLE, DEFAULT_PREVIEW_TEXT_STYLE, type PreviewDisplayMode } from "../../domain/preview";
+import { type RecentFile } from "../../domain/recentFiles";
 
 export type InitialEditorDocumentMode = "stored" | "new-untitled";
 
@@ -28,6 +30,7 @@ export function useMarkdownEditor(
 ) {
   const { initialDocumentMode = "stored" } = options;
   const renderRequestIdRef = useRef(0);
+  const recentFilesRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
   const rulesRef = useRef<ReturnType<typeof createBrowserEditorStateRules> | null>(null);
   const controllerRef = useRef<EditorSessionController | null>(null);
@@ -45,6 +48,7 @@ export function useMarkdownEditor(
       draftStore: createBrowserDraftStore(),
       documentGateway: createBrowserMarkdownDocumentGateway(),
       printer: createBrowserMarkdownDocumentPrinter(),
+      recentFileStore: createBrowserRecentFileStore(),
       renderer: createBrowserMarkdownRenderer(),
       rules: rulesRef.current,
     });
@@ -53,6 +57,7 @@ export function useMarkdownEditor(
   const controller = controllerRef.current;
   const reducer = useMemo(() => createEditorSessionReducer(rulesRef.current!), []);
   const [isReady, setIsReady] = useState(false);
+  const [recentFiles, setRecentFiles] = useState<readonly RecentFile[]>([]);
   const [state, dispatch] = useReducer(
     reducer,
     startupEditMode,
@@ -75,6 +80,20 @@ export function useMarkdownEditor(
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  const applyRecentFilesRequest = useCallback(async (
+    operation: () => Promise<readonly RecentFile[] | null>,
+  ) => {
+    const requestId = recentFilesRequestIdRef.current + 1;
+    recentFilesRequestIdRef.current = requestId;
+    const nextRecentFiles = await operation();
+
+    if (nextRecentFiles === null || requestId !== recentFilesRequestIdRef.current) {
+      return;
+    }
+
+    setRecentFiles(nextRecentFiles);
+  }, []);
 
   useEffect(() => {
     let isDisposed = false;
@@ -106,6 +125,23 @@ export function useMarkdownEditor(
       isDisposed = true;
     };
   }, [controller, initialDocumentMode, startupEditMode, store]);
+
+  useEffect(() => {
+    let isDisposed = false;
+
+    void applyRecentFilesRequest(() => controller.loadRecentFiles())
+      .catch((error) => {
+        if (isDisposed) {
+          return;
+        }
+
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      });
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [applyRecentFilesRequest, controller, store]);
 
   useEffect(() => {
     if (!isReady) {
@@ -171,9 +207,15 @@ export function useMarkdownEditor(
 
   const handleOpenDocumentFromPicker = useCallback(async () => {
     await executeWithErrorHandling(async () => {
-      await controller.openDocumentFromPicker(store);
+      const loadedDocument = await controller.openDocumentFromPicker(store);
+
+      if (loadedDocument !== null && loadedDocument.filePath !== null) {
+        await applyRecentFilesRequest(() => (
+          controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+        ));
+      }
     });
-  }, [controller, executeWithErrorHandling, store]);
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
 
   const handleOpenCurrentDocumentFolder = useCallback(async () => {
     await executeWithErrorHandling(async () => {
@@ -187,9 +229,27 @@ export function useMarkdownEditor(
     }
 
     await executeWithErrorHandling(async () => {
-      await controller.openDocumentFromFile(store, file);
+      const loadedDocument = await controller.openDocumentFromFile(store, file);
+
+      if (loadedDocument.filePath !== null) {
+        await applyRecentFilesRequest(() => (
+          controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+        ));
+      }
     });
-  }, [controller, executeWithErrorHandling, store]);
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
+
+  const handleOpenRecentFile = useCallback(async (recentFile: RecentFile) => {
+    await executeWithErrorHandling(async () => {
+      const loadedDocument = await controller.openDocumentFromRecentFile(store, recentFile);
+
+      if (loadedDocument.filePath !== null) {
+        await applyRecentFilesRequest(() => (
+          controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+        ));
+      }
+    });
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
 
   const handleOverwriteSaveDocument = useCallback(async () => {
     let didSave = false;
@@ -212,8 +272,14 @@ export function useMarkdownEditor(
   }, [controller, executeWithErrorHandling, store]);
 
   const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {
-    controller.loadExternalDocument(store, document);
-  }, [controller, store]);
+    const loadedDocument = controller.loadExternalDocument(store, document);
+
+    void applyRecentFilesRequest(() => (
+      controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+    )).catch((error) => {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    });
+  }, [applyRecentFilesRequest, controller, store]);
 
   const handleTakePendingExternalDocuments = useCallback(async () => {
     try {
@@ -279,6 +345,7 @@ export function useMarkdownEditor(
     fileName: state.fileName,
     isDirty: state.isDirty,
     isReady,
+    recentFiles,
     previewHtml: renderedPreview.html,
     previewPageHtmls: renderedPreview.pageHtmls,
     previewPages: renderedPreview.pages,
@@ -293,6 +360,7 @@ export function useMarkdownEditor(
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
+    handleOpenRecentFile,
     handlePickedFile,
     handleResetDocument,
     handleOverwriteSaveDocument,

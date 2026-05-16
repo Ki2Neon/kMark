@@ -21,13 +21,15 @@ use tauri::{
 };
 
 use infra::{
-    load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
-    load_preview_preferences, load_theme_preferences, persist_window_state, restore_window_state,
-    FileSystemAssetRepository, FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue,
-    TrayCommandKind, TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
+    broadcast_command, load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
+    load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
+    restore_window_state, FileSystemAssetRepository, FileSystemMarkdownDocumentRepository,
+    InMemoryOpenRequestQueue, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,
+    TRAY_COORDINATOR_POLL_INTERVAL,
 };
 use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, StoredEdit, ThemePreferences,
+    DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RecentFiles, StoredEdit,
+    ThemePreferences,
 };
 use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
@@ -58,6 +60,7 @@ pub(crate) struct AppState {
     pub(crate) editor_preferences: Mutex<EditorPreferences>,
     pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
+    pub(crate) recent_files: Mutex<RecentFiles>,
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
 }
@@ -419,6 +422,20 @@ pub fn run() {
                 }
             }
 
+            match load_recent_files(&app_handle) {
+                Ok(Some(recent_files)) => {
+                    if let Ok(mut current_recent_files) =
+                        app_handle.state::<AppState>().recent_files.lock()
+                    {
+                        *current_recent_files = recent_files;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to load recent files: {error}");
+                }
+            }
+
             #[cfg(desktop)]
             start_tray_coordinator(&app_handle)?;
 
@@ -447,6 +464,9 @@ pub fn run() {
             commands::markdown_render::render_markdown_preview,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
+            commands::recent_files::get_recent_files,
+            commands::recent_files::record_recent_file,
+            commands::file_open::read_markdown_document_at_path,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,
             commands::file_open::take_pending_markdown_open_requests,

@@ -45,6 +45,7 @@ const MARKDOWN_PICKER_TYPES: readonly MarkdownPickerType[] = [
 const MARKDOWN_OPEN_REQUESTED_EVENT = "markdown-open-requested";
 const OPEN_MARKDOWN_DOCUMENT_DIALOG_COMMAND = "open_markdown_document_dialog";
 const OPEN_MARKDOWN_DOCUMENT_FOLDER_COMMAND = "open_markdown_document_folder";
+const READ_MARKDOWN_DOCUMENT_AT_PATH_COMMAND = "read_markdown_document_at_path";
 const SAVE_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND = "save_markdown_document_as_dialog";
 
 type TauriMarkdownDocumentPayload = {
@@ -142,6 +143,22 @@ export async function overwriteMarkdownDocumentAtPath(filePath: string, content:
       content,
     },
     "Markdown ファイルの保存に失敗しました。",
+  );
+}
+
+export async function readMarkdownDocumentAtPath(filePath: string): Promise<{
+  fileName: string;
+  filePath: string;
+  content: string;
+}> {
+  if (!isTauri()) {
+    throw new Error("Tauri 環境でのみ利用できます。");
+  }
+
+  return invokeTauriCommand<TauriMarkdownDocumentPayload>(
+    READ_MARKDOWN_DOCUMENT_AT_PATH_COMMAND,
+    { path: filePath },
+    "Markdown ファイルを開けませんでした。",
   );
 }
 

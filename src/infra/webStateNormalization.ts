@@ -1,12 +1,14 @@
 import { type StoredEdit } from "../domain/editor";
 import { type EditorPreferences } from "../domain/editorPreferences";
 import { type PreviewPreferences } from "../domain/preview";
+import { type RecentFile } from "../domain/recentFiles";
 import { type ThemePreferences } from "../domain/theme";
 import {
   normalizeDesktopLayoutPreferencesWithWasm,
   normalizeEditorDraftWithWasm,
   normalizeEditorPreferencesWithWasm,
   normalizePreviewPreferencesWithWasm,
+  normalizeRecentFilesWithWasm,
   normalizeThemePreferencesWithWasm,
 } from "../wasm/kmarkWeb";
 
@@ -64,6 +66,17 @@ export async function normalizeEditorDraftState(
   return {
     text: normalizedText,
     value: normalizedText === null ? null : parseJsonPayload<StoredEdit>(normalizedText),
+  };
+}
+
+export async function normalizeRecentFilesState(
+  text: string | null,
+): Promise<NormalizedWebState<readonly RecentFile[]>> {
+  const normalizedText = await normalizeRecentFilesWithWasm(text);
+
+  return {
+    text: normalizedText,
+    value: parseJsonPayload<RecentFile[]>(normalizedText),
   };
 }
 
