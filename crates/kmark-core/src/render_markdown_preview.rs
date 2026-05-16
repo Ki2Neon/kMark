@@ -205,7 +205,27 @@ enum BlockQuoteRenderKind {
     Callout,
 }
 
-type OwnedEvent = (Event<'static>, Range<usize>);
+#[derive(Debug, Clone)]
+struct OwnedEvent {
+    event: Event<'static>,
+    range: Range<usize>,
+    source_line_range: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreprocessedMarkdown {
+    content: String,
+    source_line_by_clean_line: Vec<usize>,
+    kmark_directives: Vec<PreprocessedKmarkDirective>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreprocessedKmarkDirective {
+    html: String,
+    offset: usize,
+    source_line_start: usize,
+    source_line_end: usize,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkImageParams {
@@ -327,6 +347,7 @@ struct PendingKmarkParams {
     start_line: usize,
     end_offset: usize,
     end_line: usize,
+    clean_end_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -579,6 +600,7 @@ enum KmarkComment {
 struct HtmlEmitter<'a> {
     content: &'a str,
     line_offset: usize,
+    source_line_by_clean_line: &'a [usize],
     markdown_file_path: Option<&'a str>,
     toc_document: &'a KmarkTocDocument,
     heading_number_document: &'a KmarkHeadingNumberDocument,
@@ -679,10 +701,12 @@ fn render_markdown_page(
     toc_document: &KmarkTocDocument,
     heading_number_document: &KmarkHeadingNumberDocument,
 ) -> String {
-    let events = collect_markdown_events(content);
+    let preprocessed = preprocess_markdown_comments(content, line_offset);
+    let events = collect_preprocessed_markdown_events(&preprocessed);
     let mut emitter = HtmlEmitter::new(
-        content,
+        &preprocessed.content,
         line_offset,
+        &preprocessed.source_line_by_clean_line,
         markdown_file_path,
         toc_document,
         heading_number_document,
@@ -694,8 +718,43 @@ fn render_markdown_page(
 fn collect_markdown_events(content: &str) -> Vec<OwnedEvent> {
     Parser::new_ext(content, markdown_options())
         .into_offset_iter()
-        .map(|(event, range)| (event.into_static(), range))
+        .map(|(event, range)| OwnedEvent {
+            event: event.into_static(),
+            range,
+            source_line_range: None,
+        })
         .collect()
+}
+
+fn collect_preprocessed_markdown_events(markdown: &PreprocessedMarkdown) -> Vec<OwnedEvent> {
+    let parser_events = collect_markdown_events(&markdown.content);
+    let mut events = Vec::with_capacity(parser_events.len() + markdown.kmark_directives.len());
+    let mut directive_index = 0;
+
+    for event in parser_events {
+        while let Some(directive) = markdown.kmark_directives.get(directive_index) {
+            if directive.offset > event.range.start {
+                break;
+            }
+            events.push(kmark_directive_to_event(directive));
+            directive_index += 1;
+        }
+        events.push(event);
+    }
+
+    for directive in &markdown.kmark_directives[directive_index..] {
+        events.push(kmark_directive_to_event(directive));
+    }
+
+    events
+}
+
+fn kmark_directive_to_event(directive: &PreprocessedKmarkDirective) -> OwnedEvent {
+    OwnedEvent {
+        event: Event::Html(directive.html.clone().into()),
+        range: directive.offset..directive.offset,
+        source_line_range: Some((directive.source_line_start, directive.source_line_end)),
+    }
 }
 
 fn markdown_options() -> Options {
@@ -708,18 +767,136 @@ fn markdown_options() -> Options {
     options
 }
 
+fn preprocess_markdown_comments(content: &str, line_offset: usize) -> PreprocessedMarkdown {
+    let line_spans = collect_markdown_line_spans(content);
+    let mut clean_content = String::new();
+    let mut source_line_by_clean_line = Vec::new();
+    let mut kmark_directives = Vec::new();
+    let mut active_fence = None;
+    let mut is_inside_html_comment_block = false;
+
+    for (line_index, line_span) in line_spans.iter().copied().enumerate() {
+        let source_line = line_offset + line_index;
+        let line = &content[line_span.start..line_span.content_end];
+        let line_with_ending = &content[line_span.start..line_span.end];
+
+        if is_inside_html_comment_block {
+            if line.contains(PAGE_BREAK_TOKEN_CLOSE) {
+                is_inside_html_comment_block = false;
+            }
+            continue;
+        }
+
+        if let Some(fence) = active_fence {
+            push_preprocessed_markdown_line(
+                &mut clean_content,
+                &mut source_line_by_clean_line,
+                line_with_ending,
+                source_line,
+            );
+            if is_markdown_fence_close(line, fence) {
+                active_fence = None;
+            }
+            continue;
+        }
+
+        if let Some(fence) = parse_markdown_fence_open(line) {
+            push_preprocessed_markdown_line(
+                &mut clean_content,
+                &mut source_line_by_clean_line,
+                line_with_ending,
+                source_line,
+            );
+            active_fence = Some(fence);
+            continue;
+        }
+
+        if let Some(comment) = standalone_html_comment_line(line) {
+            if parse_kmark_comment(comment).is_some() {
+                kmark_directives.push(PreprocessedKmarkDirective {
+                    html: comment.to_owned(),
+                    offset: clean_content.len(),
+                    source_line_start: source_line,
+                    source_line_end: source_line,
+                });
+            }
+            continue;
+        }
+
+        if starts_standalone_html_comment_block(line) {
+            is_inside_html_comment_block = true;
+            continue;
+        }
+
+        push_preprocessed_markdown_line(
+            &mut clean_content,
+            &mut source_line_by_clean_line,
+            line_with_ending,
+            source_line,
+        );
+    }
+
+    if source_line_by_clean_line.is_empty() {
+        source_line_by_clean_line.push(line_offset);
+    } else if clean_content.ends_with('\n') {
+        source_line_by_clean_line.push(line_offset + line_spans.len());
+    }
+
+    PreprocessedMarkdown {
+        content: clean_content,
+        source_line_by_clean_line,
+        kmark_directives,
+    }
+}
+
+fn push_preprocessed_markdown_line(
+    clean_content: &mut String,
+    source_line_by_clean_line: &mut Vec<usize>,
+    line: &str,
+    source_line: usize,
+) {
+    if clean_content.is_empty() || clean_content.ends_with('\n') {
+        source_line_by_clean_line.push(source_line);
+    }
+    clean_content.push_str(line);
+}
+
+fn standalone_html_comment_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+
+    (trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && trimmed.ends_with(PAGE_BREAK_TOKEN_CLOSE))
+        .then_some(trimmed)
+}
+
+fn starts_standalone_html_comment_block(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && !trimmed.contains(PAGE_BREAK_TOKEN_CLOSE)
+}
+
 fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
-    let events = collect_markdown_events(content);
-    let line_starts = collect_line_starts(content);
+    let preprocessed = preprocess_markdown_comments(content, 0);
+    let events = collect_preprocessed_markdown_events(&preprocessed);
+    let line_starts = collect_line_starts(&preprocessed.content);
     let mut headings = Vec::new();
     let mut directives = Vec::new();
     let mut pending_heading: Option<PendingKmarkTocHeading> = None;
 
-    for (event, range) in events {
+    for owned_event in events {
+        let OwnedEvent {
+            event,
+            range,
+            source_line_range,
+        } = owned_event;
         match event {
             Event::Start(Tag::Heading { level, id, .. }) => {
                 pending_heading = Some(PendingKmarkTocHeading {
-                    source_line: resolve_line_number(&line_starts, range.start),
+                    source_line: resolve_source_line_number(
+                        &line_starts,
+                        &preprocessed.source_line_by_clean_line,
+                        0,
+                        range.start,
+                    ),
                     level: heading_level_number(level),
                     explicit_id: id.map(|value| value.to_string()),
                     text: String::new(),
@@ -765,8 +942,15 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
 
                 if let Some(KmarkComment::Params(bundle)) = parse_kmark_comment(html.as_ref()) {
                     if bundle.toc.enabled == Some(true) {
-                        let (_, end_line) =
-                            resolve_source_line_range(content, &line_starts, 0, &range);
+                        let (_, end_line) = source_line_range.unwrap_or_else(|| {
+                            resolve_source_line_range(
+                                &preprocessed.content,
+                                &line_starts,
+                                0,
+                                &preprocessed.source_line_by_clean_line,
+                                &range,
+                            )
+                        });
                         directives.push(KmarkTocDirective {
                             source_line: end_line,
                             params: bundle.toc,
@@ -796,20 +980,22 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
 }
 
 fn collect_kmark_heading_number_document(content: &str) -> KmarkHeadingNumberDocument {
-    let events = collect_markdown_events(content);
-    let line_starts = collect_line_starts(content);
+    let preprocessed = preprocess_markdown_comments(content, 0);
+    let events = collect_preprocessed_markdown_events(&preprocessed);
+    let line_starts = collect_line_starts(&preprocessed.content);
     let mut text_by_source_line = HashMap::new();
     let mut scope_stack = Vec::new();
     let mut pending_kmark_params: Option<PendingKmarkParams> = None;
     let mut counters = [0u32; HEADING_NUMBER_MAX_LEVEL as usize];
 
-    for (event, range) in events {
+    for owned_event in events {
+        let OwnedEvent { event, range, .. } = owned_event;
         if let Event::Html(html) | Event::InlineHtml(html) = &event {
             if let Some(comment) = parse_kmark_comment(html.as_ref()) {
                 apply_kmark_heading_number_comment(
                     comment,
                     range.clone(),
-                    content,
+                    &preprocessed.content,
                     &line_starts,
                     &mut pending_kmark_params,
                     &mut scope_stack,
@@ -822,7 +1008,12 @@ fn collect_kmark_heading_number_document(content: &str) -> KmarkHeadingNumberDoc
 
         if let Event::Start(Tag::Heading { level, .. }) = event {
             pending_kmark_params = None;
-            let source_line = resolve_line_number(&line_starts, range.start);
+            let source_line = resolve_source_line_number(
+                &line_starts,
+                &preprocessed.source_line_by_clean_line,
+                0,
+                range.start,
+            );
             let level = heading_level_number(level);
 
             if let Some(text) = next_kmark_heading_number_text(&scope_stack, &mut counters, level) {
@@ -855,18 +1046,29 @@ fn apply_kmark_heading_number_comment(
 
     match comment {
         KmarkComment::Params(bundle) => {
-            let (start_line, end_line) = resolve_source_line_range(content, line_starts, 0, &range);
+            let start_line = resolve_line_number(line_starts, range.start);
+            let end_line = if content.is_empty() {
+                start_line
+            } else {
+                let end_offset = range
+                    .end
+                    .saturating_sub(1)
+                    .min(content.len().saturating_sub(1));
+                resolve_line_number(line_starts, end_offset)
+            };
 
             if let Some(pending) = pending_kmark_params.as_mut() {
                 pending.bundle.merge(&bundle);
                 pending.end_offset = range.end;
                 pending.end_line = end_line;
+                pending.clean_end_line = end_line;
             } else {
                 *pending_kmark_params = Some(PendingKmarkParams {
                     bundle,
                     start_line,
                     end_offset: range.end,
                     end_line,
+                    clean_end_line: end_line,
                 });
             }
         }
@@ -900,7 +1102,7 @@ fn discard_pending_kmark_params_if_gap_is_incompatible_for_heading_numbers(
 
     let next_start_line = resolve_line_number(line_starts, next_offset);
 
-    if next_start_line > pending.end_line + 1 {
+    if next_start_line > pending.clean_end_line + 1 {
         *pending_kmark_params = None;
         return;
     }
@@ -911,7 +1113,7 @@ fn discard_pending_kmark_params_if_gap_is_incompatible_for_heading_numbers(
 
     let gap = &content[pending.end_offset..next_offset];
 
-    if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+    if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
         *pending_kmark_params = None;
     }
 }
@@ -1671,6 +1873,7 @@ impl<'a> HtmlEmitter<'a> {
     fn new(
         content: &'a str,
         line_offset: usize,
+        source_line_by_clean_line: &'a [usize],
         markdown_file_path: Option<&'a str>,
         toc_document: &'a KmarkTocDocument,
         heading_number_document: &'a KmarkHeadingNumberDocument,
@@ -1678,6 +1881,7 @@ impl<'a> HtmlEmitter<'a> {
         Self {
             content,
             line_offset,
+            source_line_by_clean_line,
             markdown_file_path,
             toc_document,
             heading_number_document,
@@ -1711,8 +1915,8 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn prepare_footnotes(&mut self, events: &[OwnedEvent]) {
-        for (event, _) in events {
-            match event {
+        for owned_event in events {
+            match &owned_event.event {
                 Event::FootnoteReference(label) => {
                     let label = label.to_string();
                     let number = self.resolve_footnote_number(&label);
@@ -1728,8 +1932,12 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn render(mut self, events: Vec<OwnedEvent>) -> String {
-        for (event, range) in events {
-            self.push_event(event, range);
+        for owned_event in events {
+            self.push_event(
+                owned_event.event,
+                owned_event.range,
+                owned_event.source_line_range,
+            );
         }
 
         self.flush_pending_kmark_toc();
@@ -1738,9 +1946,14 @@ impl<'a> HtmlEmitter<'a> {
         self.html
     }
 
-    fn push_event(&mut self, event: Event<'static>, range: Range<usize>) {
+    fn push_event(
+        &mut self,
+        event: Event<'static>,
+        range: Range<usize>,
+        source_line_range: Option<(usize, usize)>,
+    ) {
         if matches!(event, Event::Html(_) | Event::InlineHtml(_)) {
-            self.push_html_event(event, range);
+            self.push_html_event(event, range, source_line_range);
             return;
         }
 
@@ -1765,14 +1978,19 @@ impl<'a> HtmlEmitter<'a> {
         }
     }
 
-    fn push_html_event(&mut self, event: Event<'static>, range: Range<usize>) {
+    fn push_html_event(
+        &mut self,
+        event: Event<'static>,
+        range: Range<usize>,
+        source_line_range: Option<(usize, usize)>,
+    ) {
         let html = match event {
             Event::Html(html) | Event::InlineHtml(html) => html,
             _ => return,
         };
 
         if let Some(comment) = parse_kmark_comment(html.as_ref()) {
-            self.apply_kmark_comment(comment, range.clone());
+            self.apply_kmark_comment(comment, range.clone(), source_line_range);
             return;
         }
 
@@ -2446,8 +2664,13 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn source_line_attributes(&self, range: &Range<usize>) -> String {
-        let (start_line, end_line) =
-            resolve_source_line_range(self.content, &self.line_starts, self.line_offset, range);
+        let (start_line, end_line) = resolve_source_line_range(
+            self.content,
+            &self.line_starts,
+            self.line_offset,
+            self.source_line_by_clean_line,
+            range,
+        );
         format!(
             " data-source-line-start=\"{}\" data-source-line-end=\"{}\"",
             start_line, end_line,
@@ -2629,7 +2852,12 @@ impl<'a> HtmlEmitter<'a> {
         })
     }
 
-    fn apply_kmark_comment(&mut self, comment: KmarkComment, range: Range<usize>) {
+    fn apply_kmark_comment(
+        &mut self,
+        comment: KmarkComment,
+        range: Range<usize>,
+        source_line_range: Option<(usize, usize)>,
+    ) {
         self.discard_pending_kmark_params_if_gap_is_incompatible(range.start);
 
         if !matches!(comment, KmarkComment::Params(_)) {
@@ -2638,18 +2866,25 @@ impl<'a> HtmlEmitter<'a> {
 
         match comment {
             KmarkComment::Params(bundle) => {
-                let start_line = self.resolve_range_start_line(range.clone());
-                let end_line = self.resolve_range_end_line(range.clone());
+                let (start_line, end_line) = source_line_range.unwrap_or_else(|| {
+                    (
+                        self.resolve_range_start_line(range.clone()),
+                        self.resolve_range_end_line(range.clone()),
+                    )
+                });
+                let clean_end_line = self.resolve_range_end_clean_line(range.clone());
                 if let Some(pending) = self.pending_kmark_params.as_mut() {
                     pending.bundle.merge(&bundle);
                     pending.end_offset = range.end;
                     pending.end_line = end_line;
+                    pending.clean_end_line = clean_end_line;
                 } else {
                     self.pending_kmark_params = Some(PendingKmarkParams {
                         bundle,
                         start_line,
                         end_offset: range.end,
                         end_line,
+                        clean_end_line,
                     });
                 }
             }
@@ -2705,9 +2940,9 @@ impl<'a> HtmlEmitter<'a> {
             return;
         };
 
-        let next_start_line = self.resolve_range_start_line(range.clone());
+        let next_start_line = self.resolve_range_start_clean_line(range.clone());
 
-        if next_start_line > pending.end_line + 1 {
+        if next_start_line > pending.clean_end_line + 1 {
             self.pending_kmark_params = None;
             return;
         }
@@ -2723,7 +2958,7 @@ impl<'a> HtmlEmitter<'a> {
 
         let gap = &self.content[pending.end_offset..range.start];
 
-        if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+        if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
             self.pending_kmark_params = None;
             return;
         }
@@ -2744,9 +2979,9 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        let next_start_line = self.resolve_offset_line(next_offset);
+        let next_start_line = self.resolve_offset_clean_line(next_offset);
 
-        if next_start_line > pending.end_line + 1 {
+        if next_start_line > pending.clean_end_line + 1 {
             self.pending_kmark_params = None;
             return;
         }
@@ -2757,7 +2992,7 @@ impl<'a> HtmlEmitter<'a> {
 
         let gap = &self.content[pending.end_offset..next_offset];
 
-        if !gap.chars().all(char::is_whitespace) || contains_blank_line(gap) {
+        if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
             self.pending_kmark_params = None;
         }
     }
@@ -3264,7 +3499,12 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn resolve_range_start_line(&self, range: Range<usize>) -> usize {
-        resolve_line_number(&self.line_starts, range.start) + self.line_offset
+        resolve_source_line_number(
+            &self.line_starts,
+            self.source_line_by_clean_line,
+            self.line_offset,
+            range.start,
+        )
     }
 
     fn resolve_range_end_line(&self, range: Range<usize>) -> usize {
@@ -3276,16 +3516,37 @@ impl<'a> HtmlEmitter<'a> {
             .end
             .saturating_sub(1)
             .min(self.content.len().saturating_sub(1));
-        resolve_line_number(&self.line_starts, end_offset) + self.line_offset
+        resolve_source_line_number(
+            &self.line_starts,
+            self.source_line_by_clean_line,
+            self.line_offset,
+            end_offset,
+        )
     }
 
-    fn resolve_offset_line(&self, offset: usize) -> usize {
+    fn resolve_range_start_clean_line(&self, range: Range<usize>) -> usize {
+        resolve_line_number(&self.line_starts, range.start)
+    }
+
+    fn resolve_range_end_clean_line(&self, range: Range<usize>) -> usize {
         if self.content.is_empty() {
-            return self.line_offset;
+            return 0;
+        }
+
+        let end_offset = range
+            .end
+            .saturating_sub(1)
+            .min(self.content.len().saturating_sub(1));
+        resolve_line_number(&self.line_starts, end_offset)
+    }
+
+    fn resolve_offset_clean_line(&self, offset: usize) -> usize {
+        if self.content.is_empty() {
+            return 0;
         }
 
         let bounded_offset = offset.min(self.content.len().saturating_sub(1));
-        resolve_line_number(&self.line_starts, bounded_offset) + self.line_offset
+        resolve_line_number(&self.line_starts, bounded_offset)
     }
 }
 
@@ -5159,9 +5420,15 @@ fn resolve_source_line_range(
     content: &str,
     line_starts: &[usize],
     line_offset: usize,
+    source_line_by_clean_line: &[usize],
     range: &Range<usize>,
 ) -> (usize, usize) {
-    let start_line = resolve_line_number(line_starts, range.start) + line_offset;
+    let start_line = resolve_source_line_number(
+        line_starts,
+        source_line_by_clean_line,
+        line_offset,
+        range.start,
+    );
 
     if content.is_empty() {
         return (start_line, start_line);
@@ -5171,9 +5438,28 @@ fn resolve_source_line_range(
         .end
         .saturating_sub(1)
         .min(content.len().saturating_sub(1));
-    let end_line = resolve_line_number(line_starts, end_offset) + line_offset;
+    let end_line = resolve_source_line_number(
+        line_starts,
+        source_line_by_clean_line,
+        line_offset,
+        end_offset,
+    );
 
     (start_line, end_line.max(start_line))
+}
+
+fn resolve_source_line_number(
+    line_starts: &[usize],
+    source_line_by_clean_line: &[usize],
+    line_offset: usize,
+    offset: usize,
+) -> usize {
+    let clean_line = resolve_line_number(line_starts, offset);
+
+    source_line_by_clean_line
+        .get(clean_line)
+        .copied()
+        .unwrap_or(line_offset + clean_line)
 }
 
 fn resolve_line_number(line_starts: &[usize], offset: usize) -> usize {
@@ -6384,6 +6670,10 @@ fn contains_blank_line(text: &str) -> bool {
     false
 }
 
+fn contains_pending_kmark_break_gap(text: &str) -> bool {
+    contains_blank_line(text) || text.contains('\n') || text.contains('\r')
+}
+
 fn is_safe_url(url: &str) -> bool {
     let normalized = url.trim().to_ascii_lowercase();
 
@@ -7053,6 +7343,10 @@ mod tests {
         &html[start..end]
     }
 
+    fn count_occurrences(text: &str, pattern: &str) -> usize {
+        text.matches(pattern).count()
+    }
+
     #[test]
     fn renders_page_breaks_and_source_line_offsets() {
         let rendered_preview = render_markdown_preview(
@@ -7089,6 +7383,89 @@ mod tests {
 
         assert_eq!(rendered_preview.page_htmls.len(), 1);
         assert!(rendered_preview.html.contains("&lt;!-- --- --&gt;"));
+    }
+
+    #[test]
+    fn list_between_comment() {
+        let rendered_preview = render_markdown_preview("- text\n<!-- note comment -->\n- text");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<ul"), 1);
+        assert_eq!(count_occurrences(&rendered_preview.html, "<li"), 2);
+        assert!(!rendered_preview.html.contains("note comment"));
+        assert!(!rendered_preview.html.contains("<p></p>"));
+        assert!(!rendered_preview.html.contains("<br"));
+    }
+
+    #[test]
+    fn list_between_multiline_comment() {
+        let rendered_preview = render_markdown_preview("- text\n<!--\nnote comment\n-->\n- text");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<ul"), 1);
+        assert_eq!(count_occurrences(&rendered_preview.html, "<li"), 2);
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn paragraph_between_comment() {
+        let rendered_preview = render_markdown_preview("text\n<!-- note comment -->\ntext");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"2\">text<br />\ntext</p>"
+        );
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn heading_between_comment() {
+        let rendered_preview = render_markdown_preview("# Title\n<!-- note comment -->\ntext");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"2\" data-source-line-end=\"2\">text</p>"
+        );
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn blockquote_between_comment() {
+        let rendered_preview = render_markdown_preview("> text\n<!-- note comment -->\n> text");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<blockquote"), 1);
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "</blockquote>"),
+            1
+        );
+        assert!(rendered_preview.html.contains("text<br />\ntext"));
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn table_between_comment() {
+        let rendered_preview =
+            render_markdown_preview("| A | B |\n|---|---|\n<!-- note comment -->\n| 1 | 2 |");
+
+        assert_eq!(count_occurrences(&rendered_preview.html, "<table"), 1);
+        assert!(rendered_preview.html.contains("<td>1</td><td>2</td>"));
+        assert!(!rendered_preview.html.contains("note comment"));
+    }
+
+    #[test]
+    fn fenced_code_comment_keep() {
+        let rendered_preview = render_markdown_preview("```html\n<!-- comment -->\n```");
+
+        assert!(rendered_preview.html.contains("&lt;!-- comment --&gt;"));
+    }
+
+    #[test]
+    fn kmark_comment_apply_and_hide() {
+        let rendered_preview = render_markdown_preview("<!-- kmark align:right -->\ntext");
+
+        assert!(rendered_preview
+            .html
+            .contains("style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;text-align:right\""));
+        assert!(rendered_preview.html.contains(">text</p>"));
+        assert!(!rendered_preview.html.contains("<!-- kmark"));
     }
 
     #[test]
@@ -8805,7 +9182,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:300px;height:100px;\" /></p><p data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"display:contents\"><img src=\"b.png\" alt=\"\" data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"width:300px;height:240px;\" /></p></div>"
+            "<div class=\"kmark-scope\" style=\"display:flex;flex-direction:column;\"><p data-source-line-start=\"5\" data-source-line-end=\"7\" style=\"display:contents\"><img src=\"a.png\" alt=\"\" data-source-line-start=\"5\" data-source-line-end=\"5\" style=\"width:300px;height:100px;\" /><img src=\"b.png\" alt=\"\" data-source-line-start=\"7\" data-source-line-end=\"7\" style=\"width:300px;height:240px;\" /></p></div>"
         );
     }
 
