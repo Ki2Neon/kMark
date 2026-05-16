@@ -192,15 +192,23 @@ export function useMarkdownEditor(
   }, [controller, executeWithErrorHandling, store]);
 
   const handleOverwriteSaveDocument = useCallback(async () => {
+    let didSave = false;
+
     await executeWithErrorHandling(async () => {
-      await controller.overwriteSaveDocument(store);
+      didSave = await controller.overwriteSaveDocument(store);
     });
+
+    return didSave;
   }, [controller, executeWithErrorHandling, store]);
 
   const handleSaveDocumentAs = useCallback(async () => {
+    let didSave = false;
+
     await executeWithErrorHandling(async () => {
-      await controller.saveDocumentAs(store);
+      didSave = await controller.saveDocumentAs(store);
     });
+
+    return didSave;
   }, [controller, executeWithErrorHandling, store]);
 
   const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {

@@ -20,6 +20,8 @@ import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
+import { UnsavedExitDialog } from "../components/UnsavedExitDialog";
+import { useConfirmSaveOnExit } from "../hooks/useConfirmSaveOnExit";
 import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
 import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
 import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
@@ -238,6 +240,12 @@ export function MarkdownEditorScreen({
 
   const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
   useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
+  const confirmSaveOnExit = useConfirmSaveOnExit({
+    enabled: isEditorReady,
+    isDirty,
+    onErrorRaise: handleErrorRaise,
+    onSaveDocument: handleOverwriteSaveDocument,
+  });
 
   const handleRequestOpen = useCallback(async () => {
     if (!confirmDiscard()) {
@@ -455,7 +463,7 @@ export function MarkdownEditorScreen({
   }, [closeDesktopMenu, dismissMobileMenu, layoutMode]);
 
   useMarkdownEditorShortcuts({
-    enabled: isEditorReady,
+    enabled: isEditorReady && !confirmSaveOnExit.isOpen,
     onDismissMenu: handleShortcutDismissMenu,
     onMenuToggle: handleShortcutMenuToggle,
     onNewDocument: handleShortcutNewDocument,
@@ -688,6 +696,16 @@ export function MarkdownEditorScreen({
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
           style={previewContextMenuStyle}
+        />
+      ) : null}
+
+      {confirmSaveOnExit.isOpen ? (
+        <UnsavedExitDialog
+          fileName={normalizedFileName}
+          isSaving={confirmSaveOnExit.isSaving}
+          onCancel={confirmSaveOnExit.onCancel}
+          onDiscard={confirmSaveOnExit.onDiscard}
+          onSave={confirmSaveOnExit.onSave}
         />
       ) : null}
     </main>
