@@ -17,11 +17,11 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
 use infra::{
-    broadcast_command, load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
+    load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_theme_preferences, persist_window_state, restore_window_state,
     FileSystemAssetRepository, FileSystemMarkdownDocumentRepository, InMemoryOpenRequestQueue,
     TrayCommandKind, TrayCoordinator, TrayCoordinatorError, TRAY_COORDINATOR_POLL_INTERVAL,
@@ -31,12 +31,14 @@ use kmark_core::{
 };
 use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
 
-const MAIN_WINDOW_LABEL: &str = "main";
+pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ICON_ID: &str = "main-tray";
 const TRAY_QUIT_MENU_ITEM_ID: &str = "tray-quit";
 const TRAY_UNTITLED_WINDOW_LABEL_PREFIX: &str = "tray-untitled";
 const TRAY_UNTITLED_WINDOW_URL: &str = "index.html?kmarkInitialDocument=new-untitled";
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
+const APP_EXIT_REQUESTED_EVENT: &str = "app-exit-requested";
+const WINDOW_CLOSE_REQUESTED_EVENT: &str = "window-close-requested";
 
 #[derive(Debug, thiserror::Error)]
 enum TrayRuntimeError {
@@ -72,12 +74,6 @@ fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
     if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = main_window.set_focus();
-    }
-}
-
-fn hide_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let _ = main_window.hide();
     }
 }
 
@@ -128,6 +124,16 @@ fn request_new_untitled_window<R: tauri::Runtime + 'static>(app: &tauri::AppHand
     });
 }
 
+fn request_app_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    focus_main_window(app);
+
+    if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        if let Err(error) = main_window.emit_to(MAIN_WINDOW_LABEL, APP_EXIT_REQUESTED_EVENT, ()) {
+            eprintln!("failed to request app exit confirmation: {error}");
+        }
+    }
+}
+
 #[cfg(desktop)]
 fn create_tray<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let quit_item = MenuItem::with_id(app, TRAY_QUIT_MENU_ITEM_ID, "Quit", true, None::<&str>)?;
@@ -145,13 +151,7 @@ fn create_tray<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) -> tauri:
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             TRAY_QUIT_MENU_ITEM_ID => {
-                if let Err(error) = broadcast_command(app, TrayCommandKind::QuitAll) {
-                    eprintln!("failed to broadcast tray quit-all command: {error}");
-                }
-                app.state::<AppState>()
-                    .should_exit
-                    .store(true, Ordering::SeqCst);
-                app.exit(0);
+                request_app_exit(app);
             }
             _ => {}
         })
@@ -201,10 +201,7 @@ fn handle_tray_command<R: tauri::Runtime>(app: &tauri::AppHandle<R>, command: Tr
             // Keep stale commands from older versions inert instead of restoring hidden windows.
         }
         TrayCommandKind::QuitAll => {
-            app.state::<AppState>()
-                .should_exit
-                .store(true, Ordering::SeqCst);
-            app.exit(0);
+            request_app_exit(app);
         }
     }
 }
@@ -300,19 +297,21 @@ pub fn run() {
 
     let builder = builder
         .on_window_event(|window, event| {
-            if window.label() != MAIN_WINDOW_LABEL {
-                return;
-            }
-
             match event {
                 tauri::WindowEvent::Resized(_) => {
+                    if window.label() != MAIN_WINDOW_LABEL {
+                        return;
+                    }
+
                     if let Err(error) = persist_window_state(window.app_handle(), window) {
                         eprintln!("failed to persist main window state: {error}");
                     }
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    if let Err(error) = persist_window_state(window.app_handle(), window) {
-                        eprintln!("failed to persist main window state: {error}");
+                    if window.label() == MAIN_WINDOW_LABEL {
+                        if let Err(error) = persist_window_state(window.app_handle(), window) {
+                            eprintln!("failed to persist main window state: {error}");
+                        }
                     }
 
                     if !window
@@ -322,7 +321,11 @@ pub fn run() {
                         .load(Ordering::SeqCst)
                     {
                         api.prevent_close();
-                        hide_main_window(window.app_handle());
+                        if let Err(error) =
+                            window.emit_to(window.label(), WINDOW_CLOSE_REQUESTED_EVENT, ())
+                        {
+                            eprintln!("failed to request window close confirmation: {error}");
+                        }
                     }
                 }
                 _ => {}
@@ -428,6 +431,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_exit::complete_app_exit,
+            commands::app_exit::complete_window_close,
             commands::asset_import::import_markdown_asset_files,
             commands::desktop_layout_preferences::get_desktop_layout_preferences,
             commands::desktop_layout_preferences::set_desktop_layout_preferences,

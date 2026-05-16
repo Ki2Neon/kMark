@@ -204,12 +204,12 @@ export class EditorSessionController {
     });
   }
 
-  async overwriteSaveDocument(store: EditorSessionStore): Promise<void> {
+  async overwriteSaveDocument(store: EditorSessionStore): Promise<boolean> {
     const state = store.getState();
     const result = await this.#documentGateway.saveDocument(state.fileName, state.content);
 
     if (result === null) {
-      return;
+      return false;
     }
 
     this.#currentDocumentFilePath = result.filePath;
@@ -218,14 +218,16 @@ export class EditorSessionController {
       fileName: result.fileName,
       savedAt: this.#clock.now(),
     });
+
+    return true;
   }
 
-  async saveDocumentAs(store: EditorSessionStore): Promise<void> {
+  async saveDocumentAs(store: EditorSessionStore): Promise<boolean> {
     const state = store.getState();
     const result = await this.#documentGateway.saveDocumentAs(state.fileName, state.content);
 
     if (result === null) {
-      return;
+      return false;
     }
 
     this.#currentDocumentFilePath = result.filePath;
@@ -234,6 +236,8 @@ export class EditorSessionController {
       fileName: result.fileName,
       savedAt: this.#clock.now(),
     });
+
+    return true;
   }
 
   async takePendingExternalDocuments(): Promise<readonly ExternalMarkdownDocument[]> {
