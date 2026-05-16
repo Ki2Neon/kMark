@@ -23,12 +23,14 @@ pub struct ImportedMarkdownAssetPayload {
 #[serde(rename_all = "camelCase")]
 pub enum ImportedAssetKindPayload {
     Image,
+    Video,
 }
 
 impl From<ImportedAssetKind> for ImportedAssetKindPayload {
     fn from(asset_kind: ImportedAssetKind) -> Self {
         match asset_kind {
             ImportedAssetKind::Image => Self::Image,
+            ImportedAssetKind::Video => Self::Video,
         }
     }
 }
@@ -91,7 +93,7 @@ impl From<ImportMarkdownAssetsError> for CommandErrorPayload {
             ),
             ImportMarkdownAssetsError::UnsupportedAssetType(path) => Self::with_detail(
                 "unsupported_asset_type",
-                "現在ドロップできるアセットは画像ファイルのみです。",
+                "現在ドロップできるアセットは画像または動画ファイルのみです。",
                 path,
             ),
             ImportMarkdownAssetsError::InvalidDroppedFileName(path) => Self::with_detail(
