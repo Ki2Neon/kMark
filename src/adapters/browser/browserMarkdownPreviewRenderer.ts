@@ -17,6 +17,7 @@ import {
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../../domain/preview";
+import { renderMermaidPreviewHtml, resolveMermaidPreviewTheme } from "./browserMermaidRenderer";
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
@@ -159,16 +160,23 @@ async function normalizeRenderedMarkdownPreview(
       pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
       pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
     }));
+  const mermaidTheme = resolveMermaidPreviewTheme();
+  const html = await normalizePreviewHtmlImageSources(renderedPreview.html);
+  const pageHtmls = await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources));
+  const normalizedPages = await Promise.all(pages.map(async (page) => ({
+    ...page,
+    html: await normalizePreviewHtmlImageSources(page.html),
+    textStyle: normalizePreviewTextStyle(page.textStyle),
+    pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
+    pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
+  })));
 
   return {
-    html: await normalizePreviewHtmlImageSources(renderedPreview.html),
-    pageHtmls: await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlImageSources)),
-    pages: await Promise.all(pages.map(async (page) => ({
+    html: await renderMermaidPreviewHtml(html, { theme: mermaidTheme }),
+    pageHtmls: await Promise.all(pageHtmls.map((pageHtml) => renderMermaidPreviewHtml(pageHtml, { theme: mermaidTheme }))),
+    pages: await Promise.all(normalizedPages.map(async (page) => ({
       ...page,
-      html: await normalizePreviewHtmlImageSources(page.html),
-      textStyle: normalizePreviewTextStyle(page.textStyle),
-      pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
-      pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
+      html: await renderMermaidPreviewHtml(page.html, { theme: mermaidTheme }),
     }))),
     defaultPageStyle,
     defaultTextStyle,
