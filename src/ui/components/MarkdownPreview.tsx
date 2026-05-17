@@ -3313,8 +3313,10 @@ function MarkdownPreviewComponent({
     pages: [],
     sourceKey: "",
   });
-  const hasCurrentA4Pagination = paginatedA4PageState.sourceKey === a4PaginationSourceKey;
-  const a4DisplayPages = hasCurrentA4Pagination || paginatedA4PageState.pages.length > 0
+  const hasCurrentA4Pagination =
+    paginatedA4PageState.sourceKey === a4PaginationSourceKey
+    && paginatedA4PageState.pages.length > 0;
+  const a4DisplayPages = hasCurrentA4Pagination
     ? paginatedA4PageState.pages
     : normalizedPages;
   const numberedA4DisplayPages = useMemo(
@@ -3557,7 +3559,7 @@ function MarkdownPreviewComponent({
       });
     };
 
-    scheduleA4Pagination();
+    updateA4Pagination();
     void document.fonts?.ready.then(scheduleA4Pagination);
 
     const previewImages = previewViewport === null
