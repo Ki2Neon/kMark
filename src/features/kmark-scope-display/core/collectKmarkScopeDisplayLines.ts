@@ -208,6 +208,11 @@ function collectScopeLineMarkers(
   const markers: ScopeLineMarker[] = [];
   let rest = line.trim();
 
+  const bareMarker = parseBareScopeLineMarker(rest, syntaxConfig);
+  if (bareMarker !== null) {
+    return [bareMarker];
+  }
+
   while (rest.length > 0) {
     const match = rest.match(/^<!--([\s\S]*?)-->/u);
 
@@ -233,6 +238,27 @@ function collectScopeLineMarkers(
   }
 
   return markers;
+}
+
+function parseBareScopeLineMarker(
+  line: string,
+  syntaxConfig: KmarkScopeSyntaxConfig,
+): ScopeLineMarker | null {
+  for (const directiveName of [...syntaxConfig.directiveNames].sort((left, right) => right.length - left.length)) {
+    if (!line.startsWith(directiveName)) {
+      continue;
+    }
+
+    const nextCharacter = line.charAt(directiveName.length);
+
+    if (nextCharacter.length > 0 && /^[A-Za-z0-9_-]$/u.test(nextCharacter)) {
+      continue;
+    }
+
+    return parseScopeLineMarker(line.slice(directiveName.length).trim());
+  }
+
+  return null;
 }
 
 function parseScopeLineMarker(directiveText: string): ScopeLineMarker | null {
