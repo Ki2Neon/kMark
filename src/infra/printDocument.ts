@@ -524,22 +524,36 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     padding: 0.08em 0.3em;
     font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
     font-size: 0.92em;
-    background: #f5f5f5;
+    background: #f3f3f3;
+    color: #111111;
+    border-radius: 2pt;
   }
 
   .markdown-body pre {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     overflow: visible;
     padding: 9pt;
-    border: 0.75pt solid #d7d7d7;
+    border: 0.75pt solid #d0d0d0;
+    border-left: 3pt solid #8a8a8a;
     background: #f5f5f5;
+    color: #111111;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
   }
 
   .markdown-body pre code {
+    display: block;
+    width: auto;
+    min-width: 0;
     padding: 0;
     background: transparent;
+    color: inherit;
     white-space: inherit;
+    overflow-wrap: inherit;
+    word-break: inherit;
   }
 
   .markdown-body table {
