@@ -6,6 +6,7 @@ type ModelViewerCleanup = () => void;
 
 const MODEL_VIEWER_SELECTOR = ".kmark-model-viewer[data-kmark-model-display-src]";
 const DEFAULT_MODEL_HEIGHT_PX = 360;
+const MODEL_UP = new THREE.Vector3(0, 0, 1);
 const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
   back: [180, 0],
   bottom: [0, -90],
@@ -115,7 +116,9 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
     }
 
     if (getBooleanDataset(viewer.dataset.kmarkModelGrid, false)) {
-      scene.add(new THREE.GridHelper(Math.max(sphere.radius * 3, 2), 12));
+      const grid = new THREE.GridHelper(Math.max(sphere.radius * 3, 2), 12);
+      grid.rotation.x = Math.PI / 2;
+      scene.add(grid);
     }
     if (getBooleanDataset(viewer.dataset.kmarkModelAxes, false)) {
       scene.add(new THREE.AxesHelper(Math.max(sphere.radius * 1.25, 1)));
@@ -177,7 +180,7 @@ function renderModelFrame(
       state.controls.autoRotate = true;
       state.controls.autoRotateSpeed = speed;
     } else if (state.model !== null) {
-      state.model.rotation.y += deltaSeconds * speed;
+      state.model.rotation.z += deltaSeconds * speed;
     }
   }
 
@@ -204,11 +207,11 @@ function configureLighting(scene: THREE.Scene, preset: string): void {
 
   if (config.directional > 0) {
     const key = new THREE.DirectionalLight(0xffffff, config.directional);
-    key.position.set(3, 4, 5);
+    key.position.set(3, -4, 5);
     scene.add(key);
 
     const fill = new THREE.DirectionalLight(0xffffff, config.directional * 0.35);
-    fill.position.set(-4, 2, -3);
+    fill.position.set(-4, 3, 2);
     scene.add(fill);
   }
 }
@@ -247,6 +250,8 @@ function configureCameraPose(
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
   radius: number,
 ): void {
+  camera.up.copy(MODEL_UP);
+
   const target = parseVector3(viewer.dataset.kmarkModelCameraTarget) ?? new THREE.Vector3(0, 0, 0);
   const explicitPosition = parseVector3(viewer.dataset.kmarkModelCameraPosition);
 
@@ -265,8 +270,8 @@ function configureCameraPose(
 
   camera.position.set(
     target.x + (Math.sin(yaw) * horizontal),
-    target.y + (Math.sin(pitch) * distance),
-    target.z + (Math.cos(yaw) * horizontal),
+    target.y + (Math.cos(yaw) * horizontal),
+    target.z + (Math.sin(pitch) * distance),
   );
   camera.lookAt(target);
 }
@@ -276,6 +281,7 @@ function configureControls(
   canvas: HTMLCanvasElement,
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
 ): OrbitControls {
+  camera.up.copy(MODEL_UP);
   const controls = new OrbitControls(camera, canvas);
   controls.enabled = getBooleanDataset(viewer.dataset.kmarkModelControls, true);
   controls.enableRotate = getBooleanDataset(viewer.dataset.kmarkModelRotate, true);

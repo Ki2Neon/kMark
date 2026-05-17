@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 13;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 14;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -549,9 +549,9 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         aliases: &[],
         param_type: "enum",
         contexts: &["single", "model"],
-        values: &["auto", "x", "y", "z", "-x", "-y", "-z"],
+        values: &["z", "auto", "x", "y", "-x", "-y", "-z"],
         insert_text: "model_convert_up:",
-        description: "3Dモデル変換時の上方向軸を指定する",
+        description: "3Dモデル変換時の入力上方向軸を指定する Z軸を表示上下に写像する",
         examples: &["<!-- kmark model_convert_up:z -->"],
         priority: 81,
     },

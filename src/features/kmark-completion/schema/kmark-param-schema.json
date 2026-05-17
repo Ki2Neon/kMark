@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "params": [
     {
       "name": "align",
@@ -484,9 +484,9 @@
       "aliases": [],
       "type": "enum",
       "contexts": ["single", "model"],
-      "values": ["auto", "x", "y", "z", "-x", "-y", "-z"],
+      "values": ["z", "auto", "x", "y", "-x", "-y", "-z"],
       "insertText": "model_convert_up:",
-      "description": "3Dモデル変換時の上方向軸を指定する",
+      "description": "3Dモデル変換時の入力上方向軸を指定する Z軸を表示上下に写像する",
       "examples": ["<!-- kmark model_convert_up:z -->"],
       "priority": 81
     },

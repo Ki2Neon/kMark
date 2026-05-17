@@ -216,7 +216,7 @@ impl Default for ModelConvertOptions {
         Self {
             force: false,
             scale: 1.0,
-            up: ModelUpAxis::Auto,
+            up: ModelUpAxis::Z,
             center: true,
         }
     }
@@ -1013,12 +1013,12 @@ fn transform_axis(value: [f32; 3], up: ModelUpAxis) -> [f32; 3] {
     let [x, y, z] = value;
 
     match up {
-        ModelUpAxis::Auto | ModelUpAxis::Y => [x, y, z],
-        ModelUpAxis::NegativeY => [x, -y, -z],
-        ModelUpAxis::Z => [x, z, -y],
-        ModelUpAxis::NegativeZ => [x, -z, y],
-        ModelUpAxis::X => [y, x, z],
-        ModelUpAxis::NegativeX => [-y, x, z],
+        ModelUpAxis::Auto | ModelUpAxis::Z => [x, y, z],
+        ModelUpAxis::NegativeZ => [x, -y, -z],
+        ModelUpAxis::Y => [x, -z, y],
+        ModelUpAxis::NegativeY => [x, z, -y],
+        ModelUpAxis::X => [-z, y, x],
+        ModelUpAxis::NegativeX => [z, y, -x],
     }
 }
 
@@ -1042,7 +1042,7 @@ fn normalize3(value: [f32; 3]) -> [f32; 3] {
     let length = (value[0] * value[0] + value[1] * value[1] + value[2] * value[2]).sqrt();
 
     if length <= f32::EPSILON {
-        return [0.0, 1.0, 0.0];
+        return [0.0, 0.0, 1.0];
     }
 
     [value[0] / length, value[1] / length, value[2] / length]
@@ -1429,6 +1429,44 @@ mod tests {
             Some("case_converted.glb")
         );
         assert!(sandbox.join("case_converted.glb").is_file());
+    }
+
+    #[test]
+    fn default_transform_preserves_z_as_vertical_axis() {
+        let mut mesh = test_mesh_with_position_and_normal([1.0, 2.0, 3.0], [0.0, 0.0, 1.0]);
+        let options = super::ModelConvertOptions {
+            center: false,
+            ..super::ModelConvertOptions::default()
+        };
+
+        super::apply_model_transform(&mut mesh, &options);
+
+        assert_eq!(mesh.positions[0], [1.0, 2.0, 3.0]);
+        assert_eq!(mesh.normals[0], [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn y_up_transform_maps_input_y_axis_to_output_z_axis() {
+        let mut mesh = test_mesh_with_position_and_normal([0.0, 2.0, 0.0], [0.0, 1.0, 0.0]);
+        let options = super::ModelConvertOptions {
+            center: false,
+            up: super::ModelUpAxis::Y,
+            ..super::ModelConvertOptions::default()
+        };
+
+        super::apply_model_transform(&mut mesh, &options);
+
+        assert_eq!(mesh.positions[0], [0.0, 0.0, 2.0]);
+        assert_eq!(mesh.normals[0], [0.0, 0.0, 1.0]);
+    }
+
+    fn test_mesh_with_position_and_normal(position: [f32; 3], normal: [f32; 3]) -> super::MeshData {
+        super::MeshData {
+            positions: vec![position],
+            normals: vec![normal],
+            texcoords: None,
+            indices: vec![0],
+        }
     }
 
     fn create_temp_test_directory() -> std::path::PathBuf {
