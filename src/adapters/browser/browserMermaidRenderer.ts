@@ -293,17 +293,28 @@ function normalizeMermaidSvgSize(svgElement: SVGElement, sizing: MermaidBlockSiz
     svgElement.setAttribute("height", `${height}`);
   }
 
-  svgElement.style.removeProperty("max-width");
+  if (sizing.sizedWidth || sizing.sizedHeight) {
+    svgElement.style.setProperty("max-width", "none", "important");
+    svgElement.style.setProperty("max-height", "none", "important");
+    svgElement.style.setProperty("min-width", "0", "important");
+    svgElement.style.setProperty("min-height", "0", "important");
+  } else {
+    svgElement.style.removeProperty("max-width");
+    svgElement.style.removeProperty("max-height");
+    svgElement.style.removeProperty("min-width");
+    svgElement.style.removeProperty("min-height");
+  }
+
   if (sizing.sizedWidth) {
-    svgElement.style.setProperty("width", "100%");
+    svgElement.style.setProperty("width", "100%", "important");
   } else if (sizing.sizedHeight) {
-    svgElement.style.setProperty("width", "auto");
+    svgElement.style.setProperty("width", "auto", "important");
   }
 
   if (sizing.sizedHeight) {
-    svgElement.style.setProperty("height", "100%");
+    svgElement.style.setProperty("height", "100%", "important");
   } else if (sizing.sizedWidth) {
-    svgElement.style.setProperty("height", "auto");
+    svgElement.style.setProperty("height", "auto", "important");
   }
 
   if ((svgElement.getAttribute("style") ?? "").trim().length === 0) {

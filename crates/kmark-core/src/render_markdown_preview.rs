@@ -4289,7 +4289,6 @@ impl KmarkParams {
                 || (fit_plain_align && self.layout.has_plain_text_align()));
 
         if should_fit_content {
-            rules.push("display:table".to_owned());
             rules.push("width:fit-content".to_owned());
             rules.push("max-width:100%".to_owned());
             rules.push("box-sizing:border-box".to_owned());
@@ -8906,6 +8905,22 @@ mod tests {
         ));
         assert!(!rendered_preview.html.contains("font-size:20pt"));
         assert!(!rendered_preview.html.contains("color:red"));
+    }
+
+    #[test]
+    fn applies_single_kmark_height_only_to_mermaid_blocks_without_table_display() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark h:100 -->\n\
+             ```mermaid\nflowchart TD\n  A --> B\n```",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-height\""
+        ));
+        assert!(rendered_preview.html.contains(
+            "style=\"height:100px;width:fit-content;max-width:100%;box-sizing:border-box;\""
+        ));
+        assert!(!rendered_preview.html.contains("display:table"));
     }
 
     #[test]

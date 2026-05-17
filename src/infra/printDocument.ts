@@ -142,24 +142,31 @@ const PRINT_DOCUMENT_BASE_STYLE = `
 
   .markdown-body .kmark-mermaid-rendered svg {
     display: block;
+    flex: 0 1 auto;
     max-width: 100%;
+    min-width: 0;
+    min-height: 0;
     height: auto;
   }
 
   .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {
-    width: 100%;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
   }
 
   .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered svg {
-    height: 100%;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
   }
 
   .markdown-body .kmark-mermaid-block--sized-height:not(.kmark-mermaid-block--sized-width) .kmark-mermaid-rendered svg {
-    width: auto;
+    width: auto !important;
   }
 
   .markdown-body .kmark-mermaid-block--sized-width:not(.kmark-mermaid-block--sized-height) .kmark-mermaid-rendered svg {
-    height: auto;
+    height: auto !important;
   }
 
   .markdown-body .kmark-mermaid-error {
