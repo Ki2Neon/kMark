@@ -281,6 +281,56 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     font-variant-numeric: tabular-nums;
   }
 
+  .markdown-body .markdown-task-checkbox {
+    display: block;
+    flex: 0 0 auto;
+    width: 1.14em;
+    height: 1.14em;
+    margin: 0.14em 0 0;
+    border: 0.16em solid #111111;
+    background: #ffffff;
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .markdown-body .markdown-task-checkbox svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .markdown-body .markdown-task-checkbox path {
+    fill: none;
+    stroke: #ffffff;
+    stroke-width: 3.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .markdown-body .markdown-task-checkbox[data-checked="true"] {
+    background: #111111;
+  }
+
+  .markdown-body .markdown-task-checkbox[data-checked="false"] svg {
+    visibility: hidden;
+  }
+
+  .markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox) {
+    padding-left: 0;
+  }
+
+  .markdown-body li:has(> .markdown-task-checkbox) {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.68em;
+    list-style: none;
+    min-height: 1.5em;
+  }
+
   .markdown-body blockquote {
     margin-left: 0;
     padding-left: 9pt;
