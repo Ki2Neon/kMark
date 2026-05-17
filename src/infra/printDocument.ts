@@ -113,6 +113,47 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     box-sizing: content-box;
   }
 
+  .markdown-body video[poster] {
+    display: inline-block;
+    overflow: hidden;
+    background-color: #000;
+    object-fit: contain;
+    object-position: center center;
+  }
+
+  .markdown-body .kmark-video-frame {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    background-color: #000;
+    line-height: 0;
+    vertical-align: baseline;
+    box-sizing: content-box;
+  }
+
+  .markdown-body .kmark-video-frame > video {
+    display: block;
+    max-width: 100%;
+  }
+
+  .markdown-body .kmark-video-frame > .kmark-video-poster-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    object-fit: contain;
+    object-position: center center;
+    pointer-events: none;
+    user-select: none;
+    box-sizing: border-box;
+  }
+
+  .markdown-body .kmark-video-frame[data-kmark-video-load-state="failed"] > .kmark-video-poster-image {
+    display: none;
+  }
+
   .markdown-body .kmark-mermaid-block {
     max-width: 100%;
     overflow: hidden;

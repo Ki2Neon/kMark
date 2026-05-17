@@ -24,8 +24,11 @@ const INTERACTIVE_PREVIEW_PAN_THRESHOLD_PX = 3;
 const PREVIEW_CURSOR_TARGET_CLASS_NAME = "preview-section__cursor-target";
 const PREVIEW_CURSOR_SCROLL_PADDING_PX = 72;
 const PREVIEW_CURSOR_VIEWPORT_ANCHOR_RATIO = 0.35;
+const KMARK_VIDEO_FRAME_CLASS_NAME = "kmark-video-frame";
 const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
+const KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME = "kmark-video-poster-image";
 const KMARK_VIDEO_FAILED_STATE = "failed";
+const KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE = "hidden";
 const VIDEO_HAVE_METADATA_READY_STATE = 1;
 const DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX = 12;
 const DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX = 10.4;
@@ -3204,8 +3207,35 @@ function renderPageChromeRegion(
   );
 }
 
+function resolveKmarkVideoFrame(video: HTMLVideoElement): HTMLElement | null {
+  const parentElement = video.parentElement;
+
+  return parentElement instanceof HTMLElement && parentElement.classList.contains(KMARK_VIDEO_FRAME_CLASS_NAME)
+    ? parentElement
+    : null;
+}
+
+function ensureKmarkVideoFrame(video: HTMLVideoElement): HTMLElement {
+  const currentFrame = resolveKmarkVideoFrame(video);
+
+  if (currentFrame !== null) {
+    return currentFrame;
+  }
+
+  const frame = document.createElement("span");
+  frame.className = KMARK_VIDEO_FRAME_CLASS_NAME;
+  video.insertAdjacentElement("beforebegin", frame);
+  frame.appendChild(video);
+
+  return frame;
+}
+
+function resolveVideoSiblingAnchor(video: HTMLVideoElement): HTMLElement {
+  return resolveKmarkVideoFrame(video) ?? video;
+}
+
 function resolveVideoErrorElement(video: HTMLVideoElement): HTMLElement | null {
-  const nextElement = video.nextElementSibling;
+  const nextElement = resolveVideoSiblingAnchor(video).nextElementSibling;
 
   return nextElement instanceof HTMLElement && nextElement.classList.contains(KMARK_VIDEO_ERROR_CLASS_NAME)
     ? nextElement
@@ -3223,9 +3253,24 @@ function ensureVideoErrorElement(video: HTMLVideoElement): HTMLElement {
   errorElement.className = KMARK_VIDEO_ERROR_CLASS_NAME;
   errorElement.hidden = true;
   errorElement.setAttribute("role", "alert");
-  video.insertAdjacentElement("afterend", errorElement);
+  resolveVideoSiblingAnchor(video).insertAdjacentElement("afterend", errorElement);
 
   return errorElement;
+}
+
+function setKmarkVideoFrameLoadState(video: HTMLVideoElement, state: string | null): void {
+  const frame = resolveKmarkVideoFrame(video);
+
+  if (frame === null) {
+    return;
+  }
+
+  if (state === null) {
+    delete frame.dataset.kmarkVideoLoadState;
+    return;
+  }
+
+  frame.dataset.kmarkVideoLoadState = state;
 }
 
 function showVideoLoadError(video: HTMLVideoElement): void {
@@ -3234,6 +3279,7 @@ function showVideoLoadError(video: HTMLVideoElement): void {
   const source = video.dataset.kmarkVideoSource?.trim() || video.currentSrc || video.getAttribute("src") || "";
 
   video.dataset.kmarkVideoLoadState = KMARK_VIDEO_FAILED_STATE;
+  setKmarkVideoFrameLoadState(video, KMARK_VIDEO_FAILED_STATE);
   errorElement.textContent = [
     "動画を読み込めませんでした",
     altText,
@@ -3244,6 +3290,7 @@ function showVideoLoadError(video: HTMLVideoElement): void {
 
 function hideVideoLoadError(video: HTMLVideoElement): void {
   delete video.dataset.kmarkVideoLoadState;
+  setKmarkVideoFrameLoadState(video, null);
 
   const errorElement = resolveVideoErrorElement(video);
   if (errorElement !== null) {
@@ -3266,6 +3313,7 @@ type PreviewVideoSnapshot = {
   readonly paused: boolean;
   readonly playbackRate: number;
   readonly posterFrameReady: boolean;
+  readonly posterImageHidden: boolean;
   readonly posterPlaybackStarted: boolean;
   readonly volume: number;
 };
@@ -3296,6 +3344,7 @@ function collectPreviewVideoSnapshots(surface: HTMLElement): ReadonlyMap<string,
       paused: video.paused,
       playbackRate: video.playbackRate,
       posterFrameReady: video.dataset.kmarkVideoPosterFrameReady === "true",
+      posterImageHidden: video.dataset.kmarkVideoPosterImageState === KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE,
       posterPlaybackStarted: video.dataset.kmarkVideoPosterPlaybackStarted === "true",
       volume: video.volume,
     });
@@ -3311,6 +3360,9 @@ function restorePreviewVideoSnapshot(video: HTMLVideoElement, snapshot: PreviewV
 
   if (snapshot.posterFrameReady) {
     video.dataset.kmarkVideoPosterFrameReady = "true";
+  }
+  if (snapshot.posterImageHidden) {
+    video.dataset.kmarkVideoPosterImageState = KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE;
   }
   if (snapshot.posterPlaybackStarted) {
     video.dataset.kmarkVideoPosterPlaybackStarted = "true";
@@ -3497,6 +3549,86 @@ function prepareKmarkVideoPosterFrame(video: HTMLVideoElement): () => void {
     video.removeEventListener("loadedmetadata", seekPosterFrame);
     video.removeEventListener("play", handlePlay);
   };
+}
+
+function resolveKmarkVideoPosterImage(frame: HTMLElement): HTMLImageElement | null {
+  const posterImage = frame.querySelector(`img.${KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME}`);
+
+  return posterImage instanceof HTMLImageElement ? posterImage : null;
+}
+
+function setKmarkVideoPosterImageHidden(video: HTMLVideoElement, hidden: boolean): void {
+  const frame = resolveKmarkVideoFrame(video);
+  const posterImage = frame === null ? null : resolveKmarkVideoPosterImage(frame);
+
+  if (hidden) {
+    video.dataset.kmarkVideoPosterImageState = KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE;
+  } else {
+    delete video.dataset.kmarkVideoPosterImageState;
+  }
+
+  if (posterImage !== null) {
+    posterImage.hidden = hidden;
+  }
+}
+
+function prepareKmarkVideoPosterImage(video: HTMLVideoElement): () => void {
+  const posterUrl = video.dataset.kmarkVideoPoster || video.getAttribute("poster") || "";
+
+  if (posterUrl.length === 0) {
+    return () => {};
+  }
+
+  const frame = ensureKmarkVideoFrame(video);
+  video.dataset.kmarkVideoPoster = posterUrl;
+  video.removeAttribute("poster");
+
+  let posterImage = resolveKmarkVideoPosterImage(frame);
+  if (posterImage === null) {
+    posterImage = document.createElement("img");
+    posterImage.className = KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME;
+    posterImage.alt = "";
+    posterImage.decoding = "async";
+    posterImage.setAttribute("aria-hidden", "true");
+    frame.appendChild(posterImage);
+  }
+  if (posterImage.getAttribute("src") !== posterUrl) {
+    posterImage.src = posterUrl;
+  }
+
+  const hidePosterImage = () => {
+    setKmarkVideoPosterImageHidden(video, true);
+  };
+
+  if (
+    !video.paused
+    || video.dataset.kmarkVideoPosterPlaybackStarted === "true"
+    || video.dataset.kmarkVideoPosterImageState === KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE
+  ) {
+    hidePosterImage();
+  } else {
+    setKmarkVideoPosterImageHidden(video, false);
+  }
+
+  video.addEventListener("play", hidePosterImage);
+  video.addEventListener("playing", hidePosterImage);
+
+  return () => {
+    video.removeEventListener("play", hidePosterImage);
+    video.removeEventListener("playing", hidePosterImage);
+  };
+}
+
+function syncKmarkVideoIntrinsicSize(video: HTMLVideoElement): void {
+  if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+    return;
+  }
+
+  // Keep the layout tied to the video media dimensions instead of the poster image.
+  video.setAttribute("width", String(video.videoWidth));
+  video.setAttribute("height", String(video.videoHeight));
+  video.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+  video.style.height = "auto";
 }
 
 function MarkdownPreviewComponent({
@@ -3861,9 +3993,10 @@ function MarkdownPreviewComponent({
     const previewVideos = Array.from(
       previewViewport.querySelectorAll<HTMLVideoElement>("video[data-kmark-video-source]"),
     );
-    const videoPosterFrameCleanups: Array<() => void> = [];
+    const videoCleanups: Array<() => void> = [];
     const handleVideoLoaded = (event: Event) => {
       if (event.currentTarget instanceof HTMLVideoElement) {
+        syncKmarkVideoIntrinsicSize(event.currentTarget);
         hideVideoLoadError(event.currentTarget);
       }
     };
@@ -3874,12 +4007,17 @@ function MarkdownPreviewComponent({
     };
 
     for (const previewVideo of previewVideos) {
+      videoCleanups.push(prepareKmarkVideoPosterImage(previewVideo));
       ensureVideoErrorElement(previewVideo);
-      videoPosterFrameCleanups.push(prepareKmarkVideoPosterFrame(previewVideo));
+      videoCleanups.push(prepareKmarkVideoPosterFrame(previewVideo));
       previewVideo.addEventListener("loadedmetadata", handleVideoLoaded);
       previewVideo.addEventListener("loadeddata", handleVideoLoaded);
       previewVideo.addEventListener("canplay", handleVideoLoaded);
       previewVideo.addEventListener("error", handleVideoError);
+
+      if (previewVideo.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+        syncKmarkVideoIntrinsicSize(previewVideo);
+      }
 
       if (previewVideo.error !== null) {
         showVideoLoadError(previewVideo);
@@ -3889,7 +4027,7 @@ function MarkdownPreviewComponent({
     }
 
     return () => {
-      for (const cleanup of videoPosterFrameCleanups) {
+      for (const cleanup of videoCleanups) {
         cleanup();
       }
       for (const previewVideo of previewVideos) {
