@@ -1,0 +1,358 @@
+export type KmarkScopePaletteKey =
+  | "tone-0"
+  | "tone-1"
+  | "tone-2"
+  | "tone-3"
+  | "tone-4"
+  | "tone-5"
+  | "tone-6"
+  | "tone-7"
+  | "tone-8"
+  | "tone-9"
+  | "tone-10"
+  | "tone-11"
+  | "tone-12"
+  | "tone-13"
+  | "tone-14"
+  | "tone-15";
+
+export type KmarkScopeRailShape = "start" | "middle" | "end" | "single";
+
+export type KmarkScopeLineRail = {
+  readonly id: number;
+  readonly displayName: string;
+  readonly colorKey: string;
+  readonly paletteKey: KmarkScopePaletteKey;
+  readonly depthIndex: number;
+  readonly shape: KmarkScopeRailShape;
+};
+
+export type KmarkScopeLineDisplay = {
+  readonly lineNumber: number;
+  readonly rails: readonly KmarkScopeLineRail[];
+};
+
+export type KmarkScopeDisplayDocument = {
+  readonly lines: readonly KmarkScopeLineDisplay[];
+};
+
+type ActiveScope = {
+  readonly id: number;
+  readonly displayName: string;
+  readonly colorKey: string;
+};
+
+type ScopeLineMarker =
+  | {
+    readonly kind: "start";
+    readonly displayName: string;
+    readonly colorKey: string;
+  }
+  | {
+    readonly kind: "end";
+  };
+
+type MarkdownFence = {
+  readonly marker: string;
+  readonly length: number;
+};
+
+const PALETTE_KEYS = [
+  "tone-0",
+  "tone-1",
+  "tone-2",
+  "tone-3",
+  "tone-4",
+  "tone-5",
+  "tone-6",
+  "tone-7",
+  "tone-8",
+  "tone-9",
+  "tone-10",
+  "tone-11",
+  "tone-12",
+  "tone-13",
+  "tone-14",
+  "tone-15",
+] as const satisfies readonly KmarkScopePaletteKey[];
+
+export function collectKmarkScopeDisplayLines(markdown: string): KmarkScopeDisplayDocument {
+  const lines = splitMarkdownLines(markdown);
+  const displays: KmarkScopeLineDisplay[] = [];
+  let activeFence: MarkdownFence | null = null;
+  let activeScopes: ActiveScope[] = [];
+  let nextScopeId = 1;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex] ?? "";
+    const lineNumber = lineIndex + 1;
+    const fenceState = resolveMarkdownFenceLine(line, activeFence);
+    activeFence = fenceState.nextFence;
+
+    const markers = fenceState.isCodeLine
+      ? []
+      : collectScopeLineMarkers(line);
+
+    if (markers.length === 0 && activeScopes.length === 0) {
+      continue;
+    }
+
+    let displayScopes = activeScopes;
+    const startedScopeIds = new Set<number>();
+    const endedScopeIds = new Set<number>();
+
+    for (const marker of markers) {
+      if (marker.kind === "start") {
+        const scope: ActiveScope = {
+          id: nextScopeId,
+          displayName: marker.displayName,
+          colorKey: marker.colorKey,
+        };
+
+        nextScopeId += 1;
+        activeScopes = [...activeScopes, scope];
+        displayScopes = mergeScopeStacks(displayScopes, activeScopes);
+        startedScopeIds.add(scope.id);
+        continue;
+      }
+
+      const closingScope = activeScopes[activeScopes.length - 1];
+
+      if (closingScope === undefined) {
+        continue;
+      }
+
+      displayScopes = mergeScopeStacks(displayScopes, activeScopes);
+      endedScopeIds.add(closingScope.id);
+      activeScopes = activeScopes.slice(0, -1);
+    }
+
+    if (displayScopes.length === 0) {
+      continue;
+    }
+
+    const rails = displayScopes.map((scope, depthIndex): KmarkScopeLineRail => {
+      const shape = resolveRailShape(
+        startedScopeIds.has(scope.id),
+        endedScopeIds.has(scope.id),
+      );
+
+      return {
+        id: scope.id,
+        displayName: scope.displayName,
+        colorKey: scope.colorKey,
+        paletteKey: resolveDepthPalette(depthIndex),
+        depthIndex,
+        shape,
+      };
+    });
+
+    displays.push({
+      lineNumber,
+      rails,
+    });
+  }
+
+  return { lines: displays };
+}
+
+function splitMarkdownLines(markdown: string): readonly string[] {
+  return markdown.split(/\r\n|\n|\r/u);
+}
+
+function resolveRailShape(isStart: boolean, isEnd: boolean): KmarkScopeRailShape {
+  if (isStart && isEnd) {
+    return "single";
+  }
+
+  if (isStart) {
+    return "start";
+  }
+
+  if (isEnd) {
+    return "end";
+  }
+
+  return "middle";
+}
+
+function mergeScopeStacks(left: readonly ActiveScope[], right: readonly ActiveScope[]): ActiveScope[] {
+  const scopes = [...left];
+  const seenScopeIds = new Set(scopes.map((scope) => scope.id));
+
+  for (const scope of right) {
+    if (seenScopeIds.has(scope.id)) {
+      continue;
+    }
+
+    scopes.push(scope);
+    seenScopeIds.add(scope.id);
+  }
+
+  return scopes;
+}
+
+function collectScopeLineMarkers(line: string): readonly ScopeLineMarker[] {
+  const markers: ScopeLineMarker[] = [];
+  let rest = line.trim();
+
+  while (rest.length > 0) {
+    const match = rest.match(/^<!--\s*kmark\b([\s\S]*?)-->/iu);
+
+    if (match === null) {
+      return [];
+    }
+
+    const directiveText = match[1]?.trim() ?? "";
+    const marker = parseScopeLineMarker(directiveText);
+
+    if (marker === null) {
+      return [];
+    }
+
+    markers.push(marker);
+    rest = rest.slice(match[0].length).trim();
+  }
+
+  return markers;
+}
+
+function parseScopeLineMarker(directiveText: string): ScopeLineMarker | null {
+  if (directiveText === "}") {
+    return { kind: "end" };
+  }
+
+  if (!directiveText.startsWith("{")) {
+    return null;
+  }
+
+  const metadata = parseScopeMetadata(directiveText);
+
+  return {
+    kind: "start",
+    displayName: metadata.displayName,
+    colorKey: metadata.colorKey,
+  };
+}
+
+function parseScopeMetadata(directiveText: string): {
+  readonly displayName: string;
+  readonly colorKey: string;
+} {
+  const content = normalizeScopeOpenContent(directiveText);
+  const bareToken = content.match(/^\s*([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)/u)?.[1] ?? null;
+  const defineValue = parseDefineValue(content);
+  const displayName = defineValue ?? bareToken ?? "scope";
+  const colorKey = bareToken ?? defineValue ?? "scope";
+
+  return {
+    displayName,
+    colorKey,
+  };
+}
+
+function normalizeScopeOpenContent(directiveText: string): string {
+  const content = directiveText.slice(1).trim();
+
+  return content.endsWith("}")
+    ? content.slice(0, -1).trim()
+    : content;
+}
+
+function parseDefineValue(content: string): string | null {
+  const match = content.match(/(?:^|\s)define:("([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|([^\s{}]+))/u);
+
+  if (match === null) {
+    return null;
+  }
+
+  const value = match[2] ?? match[3] ?? match[4] ?? "";
+  const normalizedValue = value.replace(/\\(["'\\])/gu, "$1").trim();
+
+  return normalizedValue.length > 0
+    ? normalizedValue
+    : null;
+}
+
+function resolveDepthPalette(depthIndex: number): KmarkScopePaletteKey {
+  return PALETTE_KEYS[depthIndex % PALETTE_KEYS.length] ?? "tone-0";
+}
+
+function resolveMarkdownFenceLine(line: string, activeFence: MarkdownFence | null): {
+  readonly isCodeLine: boolean;
+  readonly nextFence: MarkdownFence | null;
+} {
+  if (activeFence !== null) {
+    return {
+      isCodeLine: true,
+      nextFence: isMarkdownFenceClose(line, activeFence)
+        ? null
+        : activeFence,
+    };
+  }
+
+  const openingFence = parseMarkdownFenceOpen(line);
+
+  return {
+    isCodeLine: openingFence !== null,
+    nextFence: openingFence,
+  };
+}
+
+function parseMarkdownFenceOpen(line: string): MarkdownFence | null {
+  const rest = stripMarkdownFenceIndent(line);
+
+  if (rest === null) {
+    return null;
+  }
+
+  const marker = rest[0];
+
+  if (marker !== "`" && marker !== "~") {
+    return null;
+  }
+
+  const length = countLeadingCharacters(rest, marker);
+
+  if (length < 3) {
+    return null;
+  }
+
+  if (marker === "`" && rest.slice(length).includes("`")) {
+    return null;
+  }
+
+  return { marker, length };
+}
+
+function isMarkdownFenceClose(line: string, fence: MarkdownFence): boolean {
+  const rest = stripMarkdownFenceIndent(line);
+
+  if (rest === null) {
+    return false;
+  }
+
+  const length = countLeadingCharacters(rest, fence.marker);
+
+  return length >= fence.length && rest.slice(length).trim().length === 0;
+}
+
+function stripMarkdownFenceIndent(line: string): string | null {
+  const indent = line.match(/^ */u)?.[0].length ?? 0;
+
+  if (indent > 3) {
+    return null;
+  }
+
+  return line.slice(indent);
+}
+
+function countLeadingCharacters(value: string, character: string): number {
+  let count = 0;
+
+  while (value[count] === character) {
+    count += 1;
+  }
+
+  return count;
+}

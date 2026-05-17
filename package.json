@@ -17,6 +17,7 @@
     "check:cycles": "node tools/architecture/check-cycles.mjs",
     "preview": "vite preview",
     "test:architecture": "node tools/architecture/check-cycles.mjs && node tools/architecture/check-boundaries.mjs",
+    "test:kmark-scope-display": "node tools/test-kmark-scope-display.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "benchmark:rust": "cargo test --manifest-path src-tauri/Cargo.toml benchmark_collect_markdown_file_paths -- --ignored --nocapture",
     "typecheck": "tsc --noEmit",

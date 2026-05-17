@@ -10,6 +10,7 @@ import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPr
 import { type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
 import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
+import { createCodeMirrorKmarkScopeDisplayExtension } from "../../features/kmark-scope-display/adapter/codeMirrorKmarkScopeDisplayExtension";
 import { createCodeMirrorMarkdownTableAutoFormatExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableAutoFormatExtension";
 import { createCodeMirrorMarkdownTableEditExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableEditExtension";
 import { listMarkdownPathSuggestions } from "../../infra/markdownPathSuggestions";
@@ -119,6 +120,7 @@ const MARKDOWN_SNIPPET_COMPLETIONS: readonly Completion[] = MARKDOWN_SNIPPET_DEF
 
 const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COMPLETIONS);
 const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
+const KMARK_SCOPE_DISPLAY_EXTENSION = createCodeMirrorKmarkScopeDisplayExtension();
 const MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION = createCodeMirrorMarkdownTableAutoFormatExtension();
 const MARKDOWN_TABLE_EDIT_EXTENSION = createCodeMirrorMarkdownTableEditExtension();
 
@@ -750,6 +752,7 @@ function DesktopMarkdownInputComponent({
       MARKDOWN_TABLE_EDIT_EXTENSION,
       MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+      KMARK_SCOPE_DISPLAY_EXTENSION,
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
       MARKDOWN_SELECTION_WRAP_EXTENSION,
