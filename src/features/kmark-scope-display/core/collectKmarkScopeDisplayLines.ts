@@ -1,4 +1,16 @@
-export type KmarkScopePaletteKey = "cyan" | "purple" | "yellow";
+export type KmarkScopePaletteKey =
+  | "cyan"
+  | "purple"
+  | "yellow"
+  | "emerald"
+  | "rose"
+  | "indigo"
+  | "orange"
+  | "teal"
+  | "lime"
+  | "fuchsia"
+  | "blue"
+  | "red";
 
 export type KmarkScopeRailShape = "start" | "middle" | "end" | "single";
 
@@ -11,15 +23,9 @@ export type KmarkScopeLineRail = {
   readonly shape: KmarkScopeRailShape;
 };
 
-export type KmarkScopeLineBackground = {
-  readonly paletteKey: KmarkScopePaletteKey;
-  readonly shape: KmarkScopeRailShape;
-};
-
 export type KmarkScopeLineDisplay = {
   readonly lineNumber: number;
   readonly rails: readonly KmarkScopeLineRail[];
-  readonly background: KmarkScopeLineBackground | null;
 };
 
 export type KmarkScopeDisplayDocument = {
@@ -30,7 +36,6 @@ type ActiveScope = {
   readonly id: number;
   readonly displayName: string;
   readonly colorKey: string;
-  readonly paletteKey: KmarkScopePaletteKey;
 };
 
 type ScopeLineMarker =
@@ -38,7 +43,6 @@ type ScopeLineMarker =
     readonly kind: "start";
     readonly displayName: string;
     readonly colorKey: string;
-    readonly paletteKey: KmarkScopePaletteKey;
   }
   | {
     readonly kind: "end";
@@ -49,13 +53,20 @@ type MarkdownFence = {
   readonly length: number;
 };
 
-const PALETTE_KEYS = ["cyan", "purple", "yellow"] as const satisfies readonly KmarkScopePaletteKey[];
-
-const KNOWN_SCOPE_PALETTE = new Map<string, KmarkScopePaletteKey>([
-  ["hero", "cyan"],
-  ["image_group", "purple"],
-  ["table", "yellow"],
-]);
+const PALETTE_KEYS = [
+  "cyan",
+  "purple",
+  "yellow",
+  "emerald",
+  "rose",
+  "indigo",
+  "orange",
+  "teal",
+  "lime",
+  "fuchsia",
+  "blue",
+  "red",
+] as const satisfies readonly KmarkScopePaletteKey[];
 
 export function collectKmarkScopeDisplayLines(markdown: string): KmarkScopeDisplayDocument {
   const lines = splitMarkdownLines(markdown);
@@ -88,7 +99,6 @@ export function collectKmarkScopeDisplayLines(markdown: string): KmarkScopeDispl
           id: nextScopeId,
           displayName: marker.displayName,
           colorKey: marker.colorKey,
-          paletteKey: marker.paletteKey,
         };
 
         nextScopeId += 1;
@@ -123,22 +133,15 @@ export function collectKmarkScopeDisplayLines(markdown: string): KmarkScopeDispl
         id: scope.id,
         displayName: scope.displayName,
         colorKey: scope.colorKey,
-        paletteKey: scope.paletteKey,
+        paletteKey: resolveDepthPalette(depthIndex),
         depthIndex,
         shape,
       };
     });
-    const deepestRail = rails[rails.length - 1] ?? null;
 
     displays.push({
       lineNumber,
       rails,
-      background: deepestRail === null
-        ? null
-        : {
-          paletteKey: deepestRail.paletteKey,
-          shape: deepestRail.shape,
-        },
     });
   }
 
@@ -221,7 +224,6 @@ function parseScopeLineMarker(directiveText: string): ScopeLineMarker | null {
     kind: "start",
     displayName: metadata.displayName,
     colorKey: metadata.colorKey,
-    paletteKey: resolveScopePalette(metadata.colorKey),
   };
 }
 
@@ -264,26 +266,8 @@ function parseDefineValue(content: string): string | null {
     : null;
 }
 
-function resolveScopePalette(colorKey: string): KmarkScopePaletteKey {
-  const normalizedKey = colorKey.toLocaleLowerCase("en-US");
-  const knownPalette = KNOWN_SCOPE_PALETTE.get(normalizedKey);
-
-  if (knownPalette !== undefined) {
-    return knownPalette;
-  }
-
-  return PALETTE_KEYS[hashString(normalizedKey) % PALETTE_KEYS.length] ?? "cyan";
-}
-
-function hashString(value: string): number {
-  let hash = 2166136261;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619) >>> 0;
-  }
-
-  return hash;
+function resolveDepthPalette(depthIndex: number): KmarkScopePaletteKey {
+  return PALETTE_KEYS[depthIndex % PALETTE_KEYS.length] ?? "cyan";
 }
 
 function resolveMarkdownFenceLine(line: string, activeFence: MarkdownFence | null): {

@@ -33,8 +33,7 @@ function getLine(document, lineNumber) {
 
   assert.equal(contentLine.rails.length, 1);
   assert.equal(contentLine.rails[0].depthIndex, 0);
-  assert.equal(contentLine.rails[0].paletteKey, "yellow");
-  assert.equal(contentLine.background.paletteKey, "yellow");
+  assert.equal(contentLine.rails[0].paletteKey, "cyan");
 }
 
 {
@@ -51,7 +50,48 @@ function getLine(document, lineNumber) {
 
   assert.deepEqual(nestedLine.rails.map((rail) => rail.depthIndex), [0, 1, 2]);
   assert.deepEqual(nestedLine.rails.map((rail) => rail.paletteKey), ["cyan", "purple", "yellow"]);
-  assert.equal(nestedLine.background.paletteKey, "yellow");
+}
+
+{
+  const document = collectKmarkScopeDisplayLines([
+    "<!-- kmark { table } -->",
+    "<!-- kmark { table } -->",
+    "same scope name nested",
+    "<!-- kmark } -->",
+    "<!-- kmark } -->",
+  ].join("\n"));
+  const nestedLine = getLine(document, 3);
+
+  assert.deepEqual(nestedLine.rails.map((rail) => rail.colorKey), ["table", "table"]);
+  assert.deepEqual(nestedLine.rails.map((rail) => rail.paletteKey), ["cyan", "purple"]);
+}
+
+{
+  const document = collectKmarkScopeDisplayLines([
+    "<!-- kmark { layer_1 } -->",
+    "<!-- kmark { layer_2 } -->",
+    "<!-- kmark { layer_3 } -->",
+    "<!-- kmark { layer_4 } -->",
+    "<!-- kmark { layer_5 } -->",
+    "<!-- kmark { layer_6 } -->",
+    "six layers",
+    "<!-- kmark } -->",
+    "<!-- kmark } -->",
+    "<!-- kmark } -->",
+    "<!-- kmark } -->",
+    "<!-- kmark } -->",
+    "<!-- kmark } -->",
+  ].join("\n"));
+  const nestedLine = getLine(document, 7);
+
+  assert.deepEqual(nestedLine.rails.map((rail) => rail.paletteKey), [
+    "cyan",
+    "purple",
+    "yellow",
+    "emerald",
+    "rose",
+    "indigo",
+  ]);
 }
 
 {
@@ -94,7 +134,6 @@ function getLine(document, lineNumber) {
 
   assert.equal(fencedContentLine.rails.length, 1);
   assert.equal(fencedContentLine.rails[0].displayName, "hero");
-  assert.equal(fencedContentLine.background.paletteKey, "cyan");
 }
 
 {
@@ -102,7 +141,6 @@ function getLine(document, lineNumber) {
   const singleLine = getLine(document, 1);
 
   assert.equal(singleLine.rails[0].shape, "single");
-  assert.equal(singleLine.background.shape, "single");
 }
 
 console.log("kmark scope display parser tests passed");

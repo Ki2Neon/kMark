@@ -1,28 +1,25 @@
-import { RangeSetBuilder, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, GutterMarker, ViewPlugin, gutter, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { type Extension } from "@codemirror/state";
+import { EditorView, GutterMarker, ViewPlugin, gutter, type ViewUpdate } from "@codemirror/view";
 import {
   collectKmarkScopeDisplayLines,
   type KmarkScopeLineDisplay,
   type KmarkScopeLineRail,
-  type KmarkScopePaletteKey,
-  type KmarkScopeRailShape,
 } from "../core/collectKmarkScopeDisplayLines";
 
-const SCOPE_GUTTER_WIDTH_PX = 32;
+const SCOPE_MAX_GUTTER_WIDTH_PX = 32;
 const SCOPE_HOOK_WIDTH_PX = 12;
 const SCOPE_RAIL_STEP_PX = 8;
 const SCOPE_RAIL_START_X_PX = 8;
+const SCOPE_RAIL_WIDTH_PX = 1;
 const SCOPE_MAX_VISIBLE_DEPTH_INDEX = 2;
 
 const kmarkScopeDisplayPlugin = ViewPlugin.fromClass(class KmarkScopeDisplayPlugin {
-  decorations: DecorationSet;
   lineDisplaysByNumber: ReadonlyMap<number, KmarkScopeLineDisplay>;
 
   constructor(view: EditorView) {
     const displayDocument = collectKmarkScopeDisplayLines(view.state.doc.toString());
 
     this.lineDisplaysByNumber = createLineDisplayMap(displayDocument.lines);
-    this.decorations = buildKmarkScopeBackgroundDecorations(view, displayDocument.lines);
   }
 
   update(update: ViewUpdate): void {
@@ -33,19 +30,15 @@ const kmarkScopeDisplayPlugin = ViewPlugin.fromClass(class KmarkScopeDisplayPlug
     const displayDocument = collectKmarkScopeDisplayLines(update.state.doc.toString());
 
     this.lineDisplaysByNumber = createLineDisplayMap(displayDocument.lines);
-    this.decorations = buildKmarkScopeBackgroundDecorations(update.view, displayDocument.lines);
   }
 
   getLineDisplay(lineNumber: number): KmarkScopeLineDisplay | null {
     return this.lineDisplaysByNumber.get(lineNumber) ?? null;
   }
-}, {
-  decorations: (plugin) => plugin.decorations,
 });
 
 const kmarkScopeGutter = gutter({
   class: "kmark-scope-gutter",
-  initialSpacer: () => new KmarkScopeGutterMarker([]),
   lineMarker(view, line) {
     const plugin = view.plugin(kmarkScopeDisplayPlugin);
 
@@ -68,41 +61,48 @@ const kmarkScopeGutter = gutter({
 
 const kmarkScopeDisplayTheme = EditorView.baseTheme({
   "&": {
-    "--kmark-scope-bg-cyan": "rgba(125, 211, 252, 0.145)",
-    "--kmark-scope-bg-purple": "rgba(167, 139, 250, 0.135)",
-    "--kmark-scope-bg-yellow": "rgba(251, 191, 36, 0.13)",
-    "--kmark-scope-line-cyan": "rgba(125, 211, 252, 0.98)",
-    "--kmark-scope-line-purple": "rgba(167, 139, 250, 0.98)",
-    "--kmark-scope-line-yellow": "rgba(251, 191, 36, 0.98)",
-    "--kmark-scope-line-glow-cyan": "rgba(125, 211, 252, 0.24)",
-    "--kmark-scope-line-glow-purple": "rgba(167, 139, 250, 0.23)",
-    "--kmark-scope-line-glow-yellow": "rgba(251, 191, 36, 0.22)",
+    "--kmark-scope-line-cyan": "hsl(from var(--focus) h s l)",
+    "--kmark-scope-line-purple": "hsl(from var(--focus) calc(h + 30) s l)",
+    "--kmark-scope-line-yellow": "hsl(from var(--focus) calc(h + 60) s l)",
+    "--kmark-scope-line-emerald": "hsl(from var(--focus) calc(h + 90) s l)",
+    "--kmark-scope-line-rose": "hsl(from var(--focus) calc(h + 120) s l)",
+    "--kmark-scope-line-indigo": "hsl(from var(--focus) calc(h + 150) s l)",
+    "--kmark-scope-line-orange": "hsl(from var(--focus) calc(h + 180) s l)",
+    "--kmark-scope-line-teal": "hsl(from var(--focus) calc(h + 210) s l)",
+    "--kmark-scope-line-lime": "hsl(from var(--focus) calc(h + 240) s l)",
+    "--kmark-scope-line-fuchsia": "hsl(from var(--focus) calc(h + 270) s l)",
+    "--kmark-scope-line-blue": "hsl(from var(--focus) calc(h + 300) s l)",
+    "--kmark-scope-line-red": "hsl(from var(--focus) calc(h + 330) s l)",
     "--kmark-scope-rail-w": "1px",
     "--kmark-scope-hook-h": "1px",
     "--kmark-scope-hook-w": "12px",
   },
   ".kmark-scope-gutter": {
-    minWidth: `${SCOPE_GUTTER_WIDTH_PX}px`,
+    background: "transparent",
+    borderRight: "0",
+    minWidth: "0",
     overflow: "hidden",
-    width: `${SCOPE_GUTTER_WIDTH_PX}px`,
+    width: "auto",
   },
   ".kmark-scope-gutter .cm-gutterElement": {
-    minWidth: `${SCOPE_GUTTER_WIDTH_PX}px`,
+    minWidth: "0",
     overflow: "hidden",
     padding: "0",
-    width: `${SCOPE_GUTTER_WIDTH_PX}px`,
+    width: "auto",
   },
   ".kmark-scope-gutter-cell": {
+    background:
+      "linear-gradient(90deg, rgba(255, 255, 255, 0.025), transparent 62%), color-mix(in srgb, var(--surface-muted) 34%, transparent)",
+    borderRight: "1px solid color-mix(in srgb, var(--border) 74%, transparent)",
     height: "100%",
     minHeight: "1.7em",
     overflow: "hidden",
     position: "relative",
-    width: `${SCOPE_GUTTER_WIDTH_PX}px`,
   },
   ".kmark-scope-rail": {
-    backgroundColor: "var(--kmark-scope-line)",
+    backgroundColor: "currentColor",
     bottom: "-1px",
-    boxShadow: "0 0 3px var(--kmark-scope-line-glow)",
+    borderRadius: "999px",
     left: "var(--kmark-scope-rail-x)",
     pointerEvents: "none",
     position: "absolute",
@@ -110,8 +110,8 @@ const kmarkScopeDisplayTheme = EditorView.baseTheme({
     width: "var(--kmark-scope-rail-w)",
   },
   ".kmark-scope-rail::before, .kmark-scope-rail::after": {
-    backgroundColor: "var(--kmark-scope-line)",
-    boxShadow: "0 0 3px var(--kmark-scope-line-glow)",
+    backgroundColor: "currentColor",
+    borderRadius: "999px",
     content: "\"\"",
     height: "var(--kmark-scope-hook-h)",
     left: "0",
@@ -139,39 +139,40 @@ const kmarkScopeDisplayTheme = EditorView.baseTheme({
     width: "var(--kmark-scope-hook-w-resolved, var(--kmark-scope-hook-w))",
   },
   ".kmark-scope-rail-cyan": {
-    "--kmark-scope-line": "var(--kmark-scope-line-cyan)",
-    "--kmark-scope-line-glow": "var(--kmark-scope-line-glow-cyan)",
+    color: "var(--kmark-scope-line-cyan)",
   },
   ".kmark-scope-rail-purple": {
-    "--kmark-scope-line": "var(--kmark-scope-line-purple)",
-    "--kmark-scope-line-glow": "var(--kmark-scope-line-glow-purple)",
+    color: "var(--kmark-scope-line-purple)",
   },
   ".kmark-scope-rail-yellow": {
-    "--kmark-scope-line": "var(--kmark-scope-line-yellow)",
-    "--kmark-scope-line-glow": "var(--kmark-scope-line-glow-yellow)",
+    color: "var(--kmark-scope-line-yellow)",
   },
-  ".cm-line.kmark-scope-bg": {
-    backgroundColor: "var(--kmark-scope-bg)",
+  ".kmark-scope-rail-emerald": {
+    color: "var(--kmark-scope-line-emerald)",
   },
-  ".cm-line.kmark-scope-bg-cyan": {
-    "--kmark-scope-bg": "var(--kmark-scope-bg-cyan)",
+  ".kmark-scope-rail-rose": {
+    color: "var(--kmark-scope-line-rose)",
   },
-  ".cm-line.kmark-scope-bg-purple": {
-    "--kmark-scope-bg": "var(--kmark-scope-bg-purple)",
+  ".kmark-scope-rail-indigo": {
+    color: "var(--kmark-scope-line-indigo)",
   },
-  ".cm-line.kmark-scope-bg-yellow": {
-    "--kmark-scope-bg": "var(--kmark-scope-bg-yellow)",
+  ".kmark-scope-rail-orange": {
+    color: "var(--kmark-scope-line-orange)",
   },
-  ".cm-line.kmark-scope-bg-start": {
-    borderTopLeftRadius: "4px",
-    borderTopRightRadius: "4px",
+  ".kmark-scope-rail-teal": {
+    color: "var(--kmark-scope-line-teal)",
   },
-  ".cm-line.kmark-scope-bg-end": {
-    borderBottomLeftRadius: "4px",
-    borderBottomRightRadius: "4px",
+  ".kmark-scope-rail-lime": {
+    color: "var(--kmark-scope-line-lime)",
   },
-  ".cm-line.kmark-scope-bg-single": {
-    borderRadius: "4px",
+  ".kmark-scope-rail-fuchsia": {
+    color: "var(--kmark-scope-line-fuchsia)",
+  },
+  ".kmark-scope-rail-blue": {
+    color: "var(--kmark-scope-line-blue)",
+  },
+  ".kmark-scope-rail-red": {
+    color: "var(--kmark-scope-line-red)",
   },
 });
 
@@ -201,8 +202,12 @@ class KmarkScopeGutterMarker extends GutterMarker {
 
   toDOM(): HTMLElement {
     const cell = document.createElement("div");
+    const cellWidth = resolveGutterCellWidth(this.#rails);
+
     cell.className = "kmark-scope-gutter-cell";
     cell.setAttribute("aria-hidden", "true");
+    cell.style.minWidth = `${cellWidth}px`;
+    cell.style.width = `${cellWidth}px`;
 
     for (const rail of this.#rails) {
       cell.appendChild(createRailElement(rail));
@@ -216,38 +221,11 @@ function createLineDisplayMap(lines: readonly KmarkScopeLineDisplay[]): Readonly
   return new Map(lines.map((line) => [line.lineNumber, line]));
 }
 
-function buildKmarkScopeBackgroundDecorations(
-  view: EditorView,
-  lines: readonly KmarkScopeLineDisplay[],
-): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-
-  for (const lineDisplay of lines) {
-    if (lineDisplay.background === null || lineDisplay.lineNumber > view.state.doc.lines) {
-      continue;
-    }
-
-    const line = view.state.doc.line(lineDisplay.lineNumber);
-    builder.add(line.from, line.from, Decoration.line({
-      class: createBackgroundClassName(lineDisplay.background.paletteKey, lineDisplay.background.shape),
-    }));
-  }
-
-  return builder.finish();
-}
-
-function createBackgroundClassName(
-  paletteKey: KmarkScopePaletteKey,
-  shape: KmarkScopeRailShape,
-): string {
-  return `kmark-scope-bg kmark-scope-bg-${paletteKey} kmark-scope-bg-${shape}`;
-}
-
 function createRailElement(rail: KmarkScopeLineRail): HTMLElement {
   const element = document.createElement("span");
   const visibleDepthIndex = Math.min(rail.depthIndex, SCOPE_MAX_VISIBLE_DEPTH_INDEX);
   const railX = SCOPE_RAIL_START_X_PX + visibleDepthIndex * SCOPE_RAIL_STEP_PX;
-  const hookWidth = Math.max(0, Math.min(SCOPE_HOOK_WIDTH_PX, SCOPE_GUTTER_WIDTH_PX - railX));
+  const hookWidth = Math.max(0, Math.min(SCOPE_HOOK_WIDTH_PX, SCOPE_MAX_GUTTER_WIDTH_PX - railX));
 
   element.className = [
     "kmark-scope-rail",
@@ -259,4 +237,16 @@ function createRailElement(rail: KmarkScopeLineRail): HTMLElement {
   element.title = rail.displayName;
 
   return element;
+}
+
+function resolveGutterCellWidth(rails: readonly KmarkScopeLineRail[]): number {
+  const deepestVisibleDepthIndex = rails.reduce((currentDepthIndex, rail) => (
+    Math.max(currentDepthIndex, Math.min(rail.depthIndex, SCOPE_MAX_VISIBLE_DEPTH_INDEX))
+  ), 0);
+  const rawWidth = SCOPE_RAIL_START_X_PX
+    + deepestVisibleDepthIndex * SCOPE_RAIL_STEP_PX
+    + SCOPE_HOOK_WIDTH_PX
+    + SCOPE_RAIL_WIDTH_PX;
+
+  return Math.min(SCOPE_MAX_GUTTER_WIDTH_PX, rawWidth);
 }
