@@ -75,7 +75,15 @@ export type KmarkCompletionContext = {
   readonly suffixAfterCursor: string;
 };
 
-export type KmarkCompletionItemKind = "parameter" | "value" | "snippet" | "style";
+export type KmarkCompletionItemKind = "parameter" | "value" | "snippet" | "style" | "path";
+export type KmarkPathCompletionEntryKind = "directory" | "file";
+
+export type KmarkPathCompletionEntry = {
+  readonly label: string;
+  readonly insertText: string;
+  readonly relativePath: string;
+  readonly entryKind: KmarkPathCompletionEntryKind;
+};
 
 export type KmarkCompletionSection =
   | "image"
@@ -95,6 +103,7 @@ export type KmarkCompletionItem = {
   readonly description: string;
   readonly detail?: string;
   readonly kind: KmarkCompletionItemKind;
+  readonly pathEntryKind?: KmarkPathCompletionEntryKind;
   readonly section?: KmarkCompletionSection;
   readonly snippet?: boolean;
   readonly priority?: number;

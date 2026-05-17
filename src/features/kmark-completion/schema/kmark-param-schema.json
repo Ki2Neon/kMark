@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "params": [
     {
       "name": "align",
@@ -320,6 +320,16 @@
       "description": "動画の再生前に表示するサムネイル画像を指定する",
       "examples": ["<!-- kmark video_poster:./thumb.png -->"],
       "priority": 81
+    },
+    {
+      "name": "video_poster_time",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["single", "video"],
+      "insertText": "video_poster_time:",
+      "description": "poster画像未指定時に動画サムネイルとして表示する再生位置を指定する",
+      "examples": ["<!-- kmark video_poster_time:5s -->"],
+      "priority": 80
     },
     {
       "name": "color",

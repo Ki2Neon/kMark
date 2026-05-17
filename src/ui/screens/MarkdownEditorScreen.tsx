@@ -119,6 +119,7 @@ export function MarkdownEditorScreen({
   const {
     canOpenDocumentWithNativePicker,
     content,
+    currentDocumentFilePath,
     errorMessage,
     fileName,
     isDirty,
@@ -572,6 +573,7 @@ export function MarkdownEditorScreen({
               <MarkdownInput
                 appThemeId={appThemeId}
                 content={content}
+                currentDocumentFilePath={currentDocumentFilePath}
                 editFontId={editFontId}
                 layoutMode={layoutMode}
                 multiCursorModifier={multiCursorModifier}
@@ -658,6 +660,7 @@ export function MarkdownEditorScreen({
                     <MarkdownInput
                       appThemeId={appThemeId}
                       content={content}
+                      currentDocumentFilePath={currentDocumentFilePath}
                       editFontId={editFontId}
                       layoutMode={layoutMode}
                       multiCursorModifier={multiCursorModifier}

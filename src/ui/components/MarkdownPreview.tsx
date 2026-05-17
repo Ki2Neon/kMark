@@ -24,8 +24,12 @@ const INTERACTIVE_PREVIEW_PAN_THRESHOLD_PX = 3;
 const PREVIEW_CURSOR_TARGET_CLASS_NAME = "preview-section__cursor-target";
 const PREVIEW_CURSOR_SCROLL_PADDING_PX = 72;
 const PREVIEW_CURSOR_VIEWPORT_ANCHOR_RATIO = 0.35;
+const KMARK_VIDEO_FRAME_CLASS_NAME = "kmark-video-frame";
 const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
+const KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME = "kmark-video-poster-image";
 const KMARK_VIDEO_FAILED_STATE = "failed";
+const KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE = "hidden";
+const VIDEO_HAVE_METADATA_READY_STATE = 1;
 const DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX = 12;
 const DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX = 10.4;
 const MIN_TABLE_CELL_HORIZONTAL_PADDING_PX = 4;
@@ -3203,8 +3207,35 @@ function renderPageChromeRegion(
   );
 }
 
+function resolveKmarkVideoFrame(video: HTMLVideoElement): HTMLElement | null {
+  const parentElement = video.parentElement;
+
+  return parentElement instanceof HTMLElement && parentElement.classList.contains(KMARK_VIDEO_FRAME_CLASS_NAME)
+    ? parentElement
+    : null;
+}
+
+function ensureKmarkVideoFrame(video: HTMLVideoElement): HTMLElement {
+  const currentFrame = resolveKmarkVideoFrame(video);
+
+  if (currentFrame !== null) {
+    return currentFrame;
+  }
+
+  const frame = document.createElement("span");
+  frame.className = KMARK_VIDEO_FRAME_CLASS_NAME;
+  video.insertAdjacentElement("beforebegin", frame);
+  frame.appendChild(video);
+
+  return frame;
+}
+
+function resolveVideoSiblingAnchor(video: HTMLVideoElement): HTMLElement {
+  return resolveKmarkVideoFrame(video) ?? video;
+}
+
 function resolveVideoErrorElement(video: HTMLVideoElement): HTMLElement | null {
-  const nextElement = video.nextElementSibling;
+  const nextElement = resolveVideoSiblingAnchor(video).nextElementSibling;
 
   return nextElement instanceof HTMLElement && nextElement.classList.contains(KMARK_VIDEO_ERROR_CLASS_NAME)
     ? nextElement
@@ -3222,9 +3253,24 @@ function ensureVideoErrorElement(video: HTMLVideoElement): HTMLElement {
   errorElement.className = KMARK_VIDEO_ERROR_CLASS_NAME;
   errorElement.hidden = true;
   errorElement.setAttribute("role", "alert");
-  video.insertAdjacentElement("afterend", errorElement);
+  resolveVideoSiblingAnchor(video).insertAdjacentElement("afterend", errorElement);
 
   return errorElement;
+}
+
+function setKmarkVideoFrameLoadState(video: HTMLVideoElement, state: string | null): void {
+  const frame = resolveKmarkVideoFrame(video);
+
+  if (frame === null) {
+    return;
+  }
+
+  if (state === null) {
+    delete frame.dataset.kmarkVideoLoadState;
+    return;
+  }
+
+  frame.dataset.kmarkVideoLoadState = state;
 }
 
 function showVideoLoadError(video: HTMLVideoElement): void {
@@ -3233,6 +3279,7 @@ function showVideoLoadError(video: HTMLVideoElement): void {
   const source = video.dataset.kmarkVideoSource?.trim() || video.currentSrc || video.getAttribute("src") || "";
 
   video.dataset.kmarkVideoLoadState = KMARK_VIDEO_FAILED_STATE;
+  setKmarkVideoFrameLoadState(video, KMARK_VIDEO_FAILED_STATE);
   errorElement.textContent = [
     "動画を読み込めませんでした",
     altText,
@@ -3243,11 +3290,345 @@ function showVideoLoadError(video: HTMLVideoElement): void {
 
 function hideVideoLoadError(video: HTMLVideoElement): void {
   delete video.dataset.kmarkVideoLoadState;
+  setKmarkVideoFrameLoadState(video, null);
 
   const errorElement = resolveVideoErrorElement(video);
   if (errorElement !== null) {
     errorElement.hidden = true;
   }
+}
+
+type PreviewHtmlSurfaceElement = "article" | "main";
+
+type PreviewHtmlSurfaceProps = {
+  readonly className: string;
+  readonly element: PreviewHtmlSurfaceElement;
+  readonly html: string;
+  readonly style?: CSSProperties;
+};
+
+type PreviewVideoSnapshot = {
+  readonly currentTime: number;
+  readonly muted: boolean;
+  readonly paused: boolean;
+  readonly playbackRate: number;
+  readonly posterFrameReady: boolean;
+  readonly posterImageHidden: boolean;
+  readonly posterPlaybackStarted: boolean;
+  readonly volume: number;
+};
+
+function resolvePreviewVideoSnapshotKey(
+  video: HTMLVideoElement,
+  occurrenceCounts: Map<string, number>,
+): string {
+  const source = video.dataset.kmarkVideoSource ?? video.currentSrc ?? video.getAttribute("src") ?? "";
+  const sourceLineStart = video.dataset.sourceLineStart ?? video.getAttribute("data-source-line-start") ?? "";
+  const sourceLineEnd = video.dataset.sourceLineEnd ?? video.getAttribute("data-source-line-end") ?? "";
+  const baseKey = [source, sourceLineStart, sourceLineEnd].join("\u0000");
+  const occurrence = occurrenceCounts.get(baseKey) ?? 0;
+
+  occurrenceCounts.set(baseKey, occurrence + 1);
+
+  return `${baseKey}\u0000${occurrence}`;
+}
+
+function collectPreviewVideoSnapshots(surface: HTMLElement): ReadonlyMap<string, PreviewVideoSnapshot> {
+  const snapshots = new Map<string, PreviewVideoSnapshot>();
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const video of surface.querySelectorAll<HTMLVideoElement>("video")) {
+    snapshots.set(resolvePreviewVideoSnapshotKey(video, occurrenceCounts), {
+      currentTime: video.currentTime,
+      muted: video.muted,
+      paused: video.paused,
+      playbackRate: video.playbackRate,
+      posterFrameReady: video.dataset.kmarkVideoPosterFrameReady === "true",
+      posterImageHidden: video.dataset.kmarkVideoPosterImageState === KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE,
+      posterPlaybackStarted: video.dataset.kmarkVideoPosterPlaybackStarted === "true",
+      volume: video.volume,
+    });
+  }
+
+  return snapshots;
+}
+
+function restorePreviewVideoSnapshot(video: HTMLVideoElement, snapshot: PreviewVideoSnapshot): void {
+  video.muted = snapshot.muted;
+  video.playbackRate = snapshot.playbackRate;
+  video.volume = snapshot.volume;
+
+  if (snapshot.posterFrameReady) {
+    video.dataset.kmarkVideoPosterFrameReady = "true";
+  }
+  if (snapshot.posterImageHidden) {
+    video.dataset.kmarkVideoPosterImageState = KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE;
+  }
+  if (snapshot.posterPlaybackStarted) {
+    video.dataset.kmarkVideoPosterPlaybackStarted = "true";
+  }
+
+  const restoreTimeAndPlayback = () => {
+    if (Number.isFinite(snapshot.currentTime) && snapshot.currentTime >= 0) {
+      try {
+        video.currentTime = snapshot.currentTime;
+      } catch {
+        // Some engines reject seeking until metadata is fully available.
+      }
+    }
+
+    if (!snapshot.paused) {
+      void video.play().catch(() => {});
+    }
+  };
+
+  if (video.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+    restoreTimeAndPlayback();
+    return;
+  }
+
+  video.addEventListener("loadedmetadata", restoreTimeAndPlayback, { once: true });
+}
+
+function restorePreviewVideoSnapshots(
+  surface: HTMLElement,
+  snapshots: ReadonlyMap<string, PreviewVideoSnapshot>,
+): void {
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const video of surface.querySelectorAll<HTMLVideoElement>("video")) {
+    const snapshot = snapshots.get(resolvePreviewVideoSnapshotKey(video, occurrenceCounts));
+
+    if (snapshot !== undefined) {
+      restorePreviewVideoSnapshot(video, snapshot);
+    }
+  }
+}
+
+function applyPreviewSurfaceHtml(surface: HTMLElement, html: string): void {
+  const videoSnapshots = collectPreviewVideoSnapshots(surface);
+
+  surface.innerHTML = html;
+  restorePreviewVideoSnapshots(surface, videoSnapshots);
+}
+
+function isPreviewSurfaceFullscreen(surface: HTMLElement): boolean {
+  const fullscreenElement = document.fullscreenElement;
+
+  return fullscreenElement instanceof Element
+    && (fullscreenElement === surface || surface.contains(fullscreenElement));
+}
+
+function PreviewHtmlSurface({
+  className,
+  element,
+  html,
+  style,
+}: PreviewHtmlSurfaceProps) {
+  const surfaceRef = useRef<HTMLElement | null>(null);
+  const appliedHtmlRef = useRef<string | null>(null);
+  const pendingHtmlRef = useRef<string | null>(null);
+
+  const handleSurfaceRef = useCallback((node: HTMLElement | null) => {
+    if (surfaceRef.current !== node) {
+      appliedHtmlRef.current = null;
+      pendingHtmlRef.current = null;
+    }
+
+    surfaceRef.current = node;
+  }, []);
+
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+
+    if (surface === null || appliedHtmlRef.current === html) {
+      return;
+    }
+
+    if (isPreviewSurfaceFullscreen(surface)) {
+      pendingHtmlRef.current = html;
+      return;
+    }
+
+    applyPreviewSurfaceHtml(surface, html);
+    appliedHtmlRef.current = html;
+    pendingHtmlRef.current = null;
+  }, [html]);
+
+  useLayoutEffect(() => {
+    const handleFullscreenChange = () => {
+      const surface = surfaceRef.current;
+      const pendingHtml = pendingHtmlRef.current;
+
+      if (surface === null || pendingHtml === null || isPreviewSurfaceFullscreen(surface)) {
+        return;
+      }
+
+      applyPreviewSurfaceHtml(surface, pendingHtml);
+      appliedHtmlRef.current = pendingHtml;
+      pendingHtmlRef.current = null;
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  if (element === "main") {
+    return <main ref={handleSurfaceRef} className={className} style={style} />;
+  }
+
+  return <article ref={handleSurfaceRef} className={className} style={style} />;
+}
+
+function parseKmarkVideoPosterTime(video: HTMLVideoElement): number | null {
+  const value = Number(video.dataset.kmarkVideoPosterTime);
+
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function clampVideoTime(video: HTMLVideoElement, seconds: number): number {
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    return clamp(seconds, 0, video.duration);
+  }
+
+  return seconds;
+}
+
+function prepareKmarkVideoPosterFrame(video: HTMLVideoElement): () => void {
+  const posterTime = parseKmarkVideoPosterTime(video);
+
+  if (posterTime === null) {
+    return () => {};
+  }
+
+  const seekPosterFrame = () => {
+    if (video.dataset.kmarkVideoPosterPlaybackStarted === "true") {
+      return;
+    }
+
+    const posterFrameTime = clampVideoTime(video, posterTime);
+
+    if (Math.abs(video.currentTime - posterFrameTime) > 0.05) {
+      try {
+        video.currentTime = posterFrameTime;
+      } catch {
+        return;
+      }
+    }
+
+    video.dataset.kmarkVideoPosterFrameReady = "true";
+  };
+  const handlePlay = () => {
+    if (video.dataset.kmarkVideoPosterPlaybackStarted === "true") {
+      return;
+    }
+
+    video.dataset.kmarkVideoPosterPlaybackStarted = "true";
+
+    if (video.dataset.kmarkVideoPosterFrameReady === "true" && posterTime > 0) {
+      try {
+        video.currentTime = 0;
+      } catch {
+        // Playback can continue from the browser-selected position if seeking is unavailable.
+      }
+    }
+  };
+
+  if (video.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+    seekPosterFrame();
+  } else {
+    video.addEventListener("loadedmetadata", seekPosterFrame);
+  }
+
+  video.addEventListener("play", handlePlay);
+
+  return () => {
+    video.removeEventListener("loadedmetadata", seekPosterFrame);
+    video.removeEventListener("play", handlePlay);
+  };
+}
+
+function resolveKmarkVideoPosterImage(frame: HTMLElement): HTMLImageElement | null {
+  const posterImage = frame.querySelector(`img.${KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME}`);
+
+  return posterImage instanceof HTMLImageElement ? posterImage : null;
+}
+
+function setKmarkVideoPosterImageHidden(video: HTMLVideoElement, hidden: boolean): void {
+  const frame = resolveKmarkVideoFrame(video);
+  const posterImage = frame === null ? null : resolveKmarkVideoPosterImage(frame);
+
+  if (hidden) {
+    video.dataset.kmarkVideoPosterImageState = KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE;
+  } else {
+    delete video.dataset.kmarkVideoPosterImageState;
+  }
+
+  if (posterImage !== null) {
+    posterImage.hidden = hidden;
+  }
+}
+
+function prepareKmarkVideoPosterImage(video: HTMLVideoElement): () => void {
+  const posterUrl = video.dataset.kmarkVideoPoster || video.getAttribute("poster") || "";
+
+  if (posterUrl.length === 0) {
+    return () => {};
+  }
+
+  const frame = ensureKmarkVideoFrame(video);
+  video.dataset.kmarkVideoPoster = posterUrl;
+  video.removeAttribute("poster");
+
+  let posterImage = resolveKmarkVideoPosterImage(frame);
+  if (posterImage === null) {
+    posterImage = document.createElement("img");
+    posterImage.className = KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME;
+    posterImage.alt = "";
+    posterImage.decoding = "async";
+    posterImage.setAttribute("aria-hidden", "true");
+    frame.appendChild(posterImage);
+  }
+  if (posterImage.getAttribute("src") !== posterUrl) {
+    posterImage.src = posterUrl;
+  }
+
+  const hidePosterImage = () => {
+    setKmarkVideoPosterImageHidden(video, true);
+  };
+
+  if (
+    !video.paused
+    || video.dataset.kmarkVideoPosterPlaybackStarted === "true"
+    || video.dataset.kmarkVideoPosterImageState === KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE
+  ) {
+    hidePosterImage();
+  } else {
+    setKmarkVideoPosterImageHidden(video, false);
+  }
+
+  video.addEventListener("play", hidePosterImage);
+  video.addEventListener("playing", hidePosterImage);
+
+  return () => {
+    video.removeEventListener("play", hidePosterImage);
+    video.removeEventListener("playing", hidePosterImage);
+  };
+}
+
+function syncKmarkVideoIntrinsicSize(video: HTMLVideoElement): void {
+  if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+    return;
+  }
+
+  // Keep the layout tied to the video media dimensions instead of the poster image.
+  video.setAttribute("width", String(video.videoWidth));
+  video.setAttribute("height", String(video.videoHeight));
+  video.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+  video.style.height = "auto";
 }
 
 function MarkdownPreviewComponent({
@@ -3360,6 +3741,10 @@ function MarkdownPreviewComponent({
     const eventTarget = resolveEventTargetElement(event.target);
 
     if (eventTarget === null) {
+      return;
+    }
+
+    if (eventTarget.closest("a, button, input, textarea, select, video") !== null) {
       return;
     }
 
@@ -3610,8 +3995,10 @@ function MarkdownPreviewComponent({
     const previewVideos = Array.from(
       previewViewport.querySelectorAll<HTMLVideoElement>("video[data-kmark-video-source]"),
     );
+    const videoCleanups: Array<() => void> = [];
     const handleVideoLoaded = (event: Event) => {
       if (event.currentTarget instanceof HTMLVideoElement) {
+        syncKmarkVideoIntrinsicSize(event.currentTarget);
         hideVideoLoadError(event.currentTarget);
       }
     };
@@ -3622,18 +4009,33 @@ function MarkdownPreviewComponent({
     };
 
     for (const previewVideo of previewVideos) {
+      videoCleanups.push(prepareKmarkVideoPosterImage(previewVideo));
       ensureVideoErrorElement(previewVideo);
+      videoCleanups.push(prepareKmarkVideoPosterFrame(previewVideo));
       previewVideo.addEventListener("loadedmetadata", handleVideoLoaded);
+      previewVideo.addEventListener("loadeddata", handleVideoLoaded);
+      previewVideo.addEventListener("canplay", handleVideoLoaded);
       previewVideo.addEventListener("error", handleVideoError);
+
+      if (previewVideo.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+        syncKmarkVideoIntrinsicSize(previewVideo);
+      }
 
       if (previewVideo.error !== null) {
         showVideoLoadError(previewVideo);
+      } else if (previewVideo.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+        hideVideoLoadError(previewVideo);
       }
     }
 
     return () => {
+      for (const cleanup of videoCleanups) {
+        cleanup();
+      }
       for (const previewVideo of previewVideos) {
         previewVideo.removeEventListener("loadedmetadata", handleVideoLoaded);
+        previewVideo.removeEventListener("loadeddata", handleVideoLoaded);
+        previewVideo.removeEventListener("canplay", handleVideoLoaded);
         previewVideo.removeEventListener("error", handleVideoError);
       }
     };
@@ -3907,9 +4309,10 @@ function MarkdownPreviewComponent({
               >
                 <div className="preview-section__page-frame" style={getPreviewPageStyle(getPreviewPageConfig(page))}>
                   {renderPageChromeRegion("header", page.pageChromeConfig.header)}
-                  <main
+                  <PreviewHtmlSurface
                     className="preview-section__page kmark-page-body markdown-body markdown-body--a4"
-                    dangerouslySetInnerHTML={{ __html: page.html }}
+                    element="main"
+                    html={page.html}
                   />
                   {renderPageChromeRegion("footer", page.pageChromeConfig.footer)}
                   {page.pageNumberText === null ? null : (
@@ -3945,10 +4348,11 @@ function MarkdownPreviewComponent({
         onPointerUp={handlePreviewPointerEnd}
         onWheel={handlePreviewWheel}
       >
-        <article
+        <PreviewHtmlSurface
           className="preview-section__standard-content markdown-body"
+          element="article"
+          html={html}
           style={standardPreviewContentStyle}
-          dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
     </section>

@@ -14,6 +14,7 @@ import {
   type KmarkCompletionItem,
   type KmarkCompletionResult,
   type KmarkCompletionSection,
+  type KmarkPathCompletionEntry,
   type KmarkParamContext,
   type KmarkParamSpec,
 } from "./types";
@@ -32,6 +33,7 @@ const VIDEO_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["video_muted", 490],
   ["video_loop", 480],
   ["video_poster", 470],
+  ["video_poster_time", 460],
 ]);
 
 const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
@@ -120,10 +122,15 @@ const FONT_FAMILY_PARAM_NAMES = new Set([
   "page_footer_font_family",
 ]);
 
+const PATH_PARAM_NAMES = new Set([
+  "video_poster",
+]);
+
 export function createKmarkSuggestions(input: {
   readonly markdown: string;
   readonly cursorOffset: number;
   readonly fontFamilies?: readonly string[];
+  readonly pathCompletions?: readonly KmarkPathCompletionEntry[];
 }): KmarkCompletionResult {
   const context = detectKmarkCompletionContext(input);
 
@@ -141,7 +148,7 @@ export function createKmarkSuggestions(input: {
   if (context.mode === "parameter-value" || context.mode === "style-define") {
     return {
       context,
-      items: createValueSuggestions(context, input.fontFamilies ?? []),
+      items: createValueSuggestions(context, input.fontFamilies ?? [], input.pathCompletions ?? []),
     };
   }
 
@@ -181,9 +188,14 @@ export function isKmarkFontFamilyParamName(name: string): boolean {
   return FONT_FAMILY_PARAM_NAMES.has(name);
 }
 
+export function isKmarkPathParamName(name: string): boolean {
+  return PATH_PARAM_NAMES.has(name);
+}
+
 function createValueSuggestions(
   context: KmarkCompletionContext,
   fontFamilies: readonly string[],
+  pathCompletions: readonly KmarkPathCompletionEntry[],
 ): readonly KmarkCompletionItem[] {
   const paramName = context.currentParamName ?? "";
   const spec = findParamSpec(paramName);
@@ -194,6 +206,10 @@ function createValueSuggestions(
 
   if (isKmarkFontFamilyParamName(spec.name)) {
     return createFontFamilyValueSuggestions(context, spec, fontFamilies);
+  }
+
+  if (isKmarkPathParamName(spec.name)) {
+    return createPathValueSuggestions(context, spec, pathCompletions);
   }
 
   const prefix = (context.currentValuePrefix ?? "").toLocaleLowerCase("en-US");
@@ -211,6 +227,30 @@ function createValueSuggestions(
       priority: (spec.priority ?? 0) - index,
       sortText: `${String(index).padStart(3, "0")}-${value}`,
     }));
+}
+
+function createPathValueSuggestions(
+  context: KmarkCompletionContext,
+  spec: KmarkParamSpec,
+  pathCompletions: readonly KmarkPathCompletionEntry[],
+): readonly KmarkCompletionItem[] {
+  return pathCompletions.map((pathCompletion, index) => {
+    const insertText = pathCompletion.entryKind === "directory"
+      ? pathCompletion.insertText
+      : withOptionalTrailingSpace(pathCompletion.insertText, context);
+
+    return {
+      label: pathCompletion.label,
+      insertText,
+      description: `${spec.description}: ${pathCompletion.relativePath}`,
+      detail: pathCompletion.entryKind === "directory" ? "directory" : spec.name,
+      kind: "path",
+      pathEntryKind: pathCompletion.entryKind,
+      section: resolveCompletionSection(spec.contexts, context.contexts, "general"),
+      priority: (spec.priority ?? 0) - index,
+      sortText: `${String(index).padStart(3, "0")}-${pathCompletion.label}`,
+    };
+  });
 }
 
 function createFontFamilyValueSuggestions(

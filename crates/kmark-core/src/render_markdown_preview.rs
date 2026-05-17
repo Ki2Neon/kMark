@@ -269,6 +269,7 @@ struct KmarkVideoParams {
     muted: Option<bool>,
     loop_playback: Option<bool>,
     poster: Option<String>,
+    poster_time_seconds: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2727,7 +2728,7 @@ impl<'a> HtmlEmitter<'a> {
 
     fn push_video(&mut self, image_context: &ImageContext, destination_url: &str) {
         let mut html = format!(
-            "<video src=\"{}\" controls{} data-kmark-video-source=\"{}\"",
+            "<video src=\"{}\" controls preload=\"metadata\"{} data-kmark-video-source=\"{}\"",
             escape_html(destination_url),
             image_context.source_line_attributes,
             escape_html(destination_url),
@@ -2759,14 +2760,19 @@ impl<'a> HtmlEmitter<'a> {
         if image_context.video.loop_playback == Some(true) {
             html.push_str(" loop");
         }
-        if let Some(poster_url) = image_context
+        let poster_url = image_context
             .video
             .poster
             .as_deref()
-            .and_then(|poster| resolve_image_destination_url(poster, self.markdown_file_path))
-        {
+            .and_then(|poster| resolve_image_destination_url(poster, self.markdown_file_path));
+
+        if let Some(poster_url) = poster_url {
             html.push_str(" poster=\"");
             html.push_str(&escape_html(&poster_url));
+            html.push('"');
+        } else if let Some(poster_time_seconds) = &image_context.video.poster_time_seconds {
+            html.push_str(" data-kmark-video-poster-time=\"");
+            html.push_str(&escape_html(poster_time_seconds));
             html.push('"');
         }
 
@@ -5623,6 +5629,9 @@ impl KmarkVideoParams {
         if let Some(poster) = &other.poster {
             self.poster = Some(poster.clone());
         }
+        if let Some(poster_time_seconds) = &other.poster_time_seconds {
+            self.poster_time_seconds = Some(poster_time_seconds.clone());
+        }
     }
 
     fn has_video_directives(&self) -> bool {
@@ -5630,6 +5639,7 @@ impl KmarkVideoParams {
             || self.muted.is_some()
             || self.loop_playback.is_some()
             || self.poster.is_some()
+            || self.poster_time_seconds.is_some()
     }
 }
 
@@ -6549,6 +6559,11 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.video.poster = Some(poster);
                 }
             }
+            "video_poster_time" => {
+                if let Some(poster_time_seconds) = parse_kmark_video_poster_time_value(&value) {
+                    bundle.params.video.poster_time_seconds = Some(poster_time_seconds);
+                }
+            }
             "color" => {
                 if let Some(color) = parse_kmark_color_value(&value) {
                     bundle.params.text.color = Some(color);
@@ -6803,6 +6818,60 @@ fn parse_kmark_video_poster_value(value: &str) -> Option<String> {
     let poster = trim_kmark_quotes(value).trim();
 
     (!poster.is_empty() && !is_unsafe_image_url(poster)).then(|| poster.to_owned())
+}
+
+fn parse_kmark_video_poster_time_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let normalized = trimmed
+        .strip_suffix('s')
+        .or_else(|| trimmed.strip_suffix('S'))
+        .unwrap_or(trimmed)
+        .trim();
+
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let seconds = if normalized.contains(':') {
+        parse_colon_video_time_seconds(normalized)?
+    } else {
+        normalized.parse::<f64>().ok()?
+    };
+
+    (seconds.is_finite() && seconds >= 0.0).then(|| seconds.to_string())
+}
+
+fn parse_colon_video_time_seconds(value: &str) -> Option<f64> {
+    let parts = value.split(':').collect::<Vec<_>>();
+
+    match parts.as_slice() {
+        [minutes, seconds] => {
+            let minutes = parse_non_negative_integer_time_part(minutes)?;
+            let seconds = parse_non_negative_float_time_part(seconds)?;
+            Some((minutes * 60) as f64 + seconds)
+        }
+        [hours, minutes, seconds] => {
+            let hours = parse_non_negative_integer_time_part(hours)?;
+            let minutes = parse_non_negative_integer_time_part(minutes)?;
+            let seconds = parse_non_negative_float_time_part(seconds)?;
+            Some((hours * 3600 + minutes * 60) as f64 + seconds)
+        }
+        _ => None,
+    }
+}
+
+fn parse_non_negative_integer_time_part(value: &str) -> Option<u64> {
+    let trimmed = value.trim();
+
+    (!trimmed.is_empty() && trimmed.chars().all(|character| character.is_ascii_digit()))
+        .then(|| trimmed.parse::<u64>().ok())
+        .flatten()
+}
+
+fn parse_non_negative_float_time_part(value: &str) -> Option<f64> {
+    let seconds = value.trim().parse::<f64>().ok()?;
+
+    (seconds.is_finite() && seconds >= 0.0).then_some(seconds)
 }
 
 fn parse_kmark_font_size_value(value: &str) -> Option<String> {
@@ -9591,10 +9660,10 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<video src=\"./DEMO.MP4?version=1\" controls data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"./DEMO.MP4?version=1\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video>"
+            "<video src=\"./DEMO.MP4?version=1\" controls preload=\"metadata\" data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"./DEMO.MP4?version=1\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video>"
         ));
         assert!(rendered_preview.html.contains(
-            "<video src=\"./demo.webm#chapter1\" controls data-source-line-start=\"2\" data-source-line-end=\"2\" data-kmark-video-source=\"./demo.webm#chapter1\" aria-label=\"movie\" data-kmark-video-alt=\"movie\"></video>"
+            "<video src=\"./demo.webm#chapter1\" controls preload=\"metadata\" data-source-line-start=\"2\" data-source-line-end=\"2\" data-kmark-video-source=\"./demo.webm#chapter1\" aria-label=\"movie\" data-kmark-video-alt=\"movie\"></video>"
         ));
     }
 
@@ -9619,7 +9688,7 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             format!(
-                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><video src=\"{}\" controls data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"{}\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video></p>",
+                "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><video src=\"{}\" controls preload=\"metadata\" data-source-line-start=\"0\" data-source-line-end=\"0\" data-kmark-video-source=\"{}\" aria-label=\"demo\" data-kmark-video-alt=\"demo\"></video></p>",
                 resolved_video_url, resolved_video_url,
             )
         );
@@ -9644,7 +9713,31 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"操作説明動画\" data-kmark-video-alt=\"操作説明動画\" style=\"width:640px;height:360px;\" autoplay muted loop poster=\"./thumb.png\"></video></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls preload=\"metadata\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"操作説明動画\" data-kmark-video-alt=\"操作説明動画\" style=\"width:640px;height:360px;\" autoplay muted loop poster=\"./thumb.png\"></video></p>"
+        );
+    }
+
+    #[test]
+    fn applies_kmark_video_poster_time_to_video_without_poster_image() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark video_poster_time:01:02.5 -->\n![demo](./operation.mp4)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls preload=\"metadata\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"demo\" data-kmark-video-alt=\"demo\" data-kmark-video-poster-time=\"62.5\"></video></p>"
+        );
+    }
+
+    #[test]
+    fn prefers_kmark_video_poster_image_over_poster_time() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark video_poster:./thumb.png video_poster_time:5s -->\n![demo](./operation.mp4)",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls preload=\"metadata\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"demo\" data-kmark-video-alt=\"demo\" poster=\"./thumb.png\"></video></p>"
         );
     }
 

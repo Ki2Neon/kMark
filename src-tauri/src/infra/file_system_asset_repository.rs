@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::ports::AssetRepository;
+use crate::ports::{AssetDirectoryEntry, AssetRepository};
 
 #[derive(Default)]
 pub struct FileSystemAssetRepository;
@@ -51,6 +51,24 @@ impl AssetRepository for FileSystemAssetRepository {
 
     fn is_file(&self, path: &Path) -> bool {
         path.is_file()
+    }
+
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<AssetDirectoryEntry>> {
+        let mut entries = Vec::new();
+
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+
+            entries.push(AssetDirectoryEntry {
+                file_name: entry.file_name(),
+                is_dir: file_type.is_dir(),
+                is_file: file_type.is_file(),
+                path: entry.path(),
+            });
+        }
+
+        Ok(entries)
     }
 }
 
