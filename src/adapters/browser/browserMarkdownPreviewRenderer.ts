@@ -43,8 +43,8 @@ type NormalizedRenderedMarkdownPreviewPayload = {
   readonly defaultTextStyle: PreviewTextStyle;
 };
 
-const MEDIA_TAG_PATTERN = /<(?:img|video)\b[^>]*>/giu;
-const FILE_MEDIA_ATTRIBUTE_PATTERN = /(\s(?:src|poster)=")(file:[^"]+)(")/giu;
+const MEDIA_TAG_PATTERN = /<(?:img|video|div)\b[^>]*>/giu;
+const FILE_MEDIA_ATTRIBUTE_PATTERN = /(\s(?:src|poster|data-kmark-model-source|data-kmark-model-display-src|data-kmark-model-poster)=")(file:[^"]+)(")/giu;
 
 type FileUrlParts = {
   readonly hash: string;

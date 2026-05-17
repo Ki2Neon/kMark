@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 12,
+  "schemaVersion": 15,
   "params": [
     {
       "name": "align",
       "aliases": [],
       "type": "enum",
-      "contexts": ["single", "scope", "text", "image"],
+      "contexts": ["single", "scope", "text", "image", "model"],
       "values": ["left", "center", "right"],
       "insertText": "align:",
       "description": "対象ブロックの横方向配置を指定する",
@@ -143,7 +143,7 @@
       "name": "w",
       "aliases": ["width"],
       "type": "length",
-      "contexts": ["single", "scope", "text", "image", "shape", "table"],
+      "contexts": ["single", "scope", "text", "image", "model", "shape", "table"],
       "insertText": "w:",
       "description": "対象要素の幅を指定する。fitで内容幅、page_fitで現在位置からページ本文右端までの残幅、page_fit_containで縦横比維持の最大収まり幅に合わせる",
       "examples": ["<!-- kmark w:200 -->", "<!-- kmark w:fit -->", "<!-- kmark w:page_fit -->", "<!-- kmark w:page_fit_contain h:page_fit_contain -->"],
@@ -153,7 +153,7 @@
       "name": "h",
       "aliases": ["height"],
       "type": "length",
-      "contexts": ["single", "scope", "text", "image", "shape"],
+      "contexts": ["single", "scope", "text", "image", "model", "shape"],
       "insertText": "h:",
       "description": "対象要素の高さを指定する。fitで内容高、page_fitで現在位置からページ本文下端までの残高、page_fit_containで縦横比維持の最大収まり高に合わせる",
       "examples": ["<!-- kmark h:100 -->", "<!-- kmark h:fit -->", "<!-- kmark h:page_fit -->", "<!-- kmark w:page_fit_contain h:page_fit_contain -->"],
@@ -329,6 +329,175 @@
       "insertText": "video_poster_time:",
       "description": "poster画像未指定時に動画サムネイルとして表示する再生位置を指定する",
       "examples": ["<!-- kmark video_poster_time:5s -->"],
+      "priority": 80
+    },
+    {
+      "name": "model_view",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["front", "back", "left", "right", "top", "bottom", "iso"],
+      "insertText": "model_view:",
+      "description": "3Dモデルの基本カメラ方向を指定する",
+      "examples": ["<!-- kmark model_view:iso -->"],
+      "priority": 95
+    },
+    {
+      "name": "model_projection",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["perspective", "orthographic"],
+      "insertText": "model_projection:",
+      "description": "3Dモデルの投影方式を指定する",
+      "examples": ["<!-- kmark model_projection:perspective -->"],
+      "priority": 94
+    },
+    {
+      "name": "model_fov",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "model"],
+      "values": ["25", "35", "45", "55", "60"],
+      "insertText": "model_fov:",
+      "description": "透視投影時の視野角を指定する 25-60度へ制限する",
+      "examples": ["<!-- kmark model_fov:45 -->"],
+      "priority": 93
+    },
+    {
+      "name": "model_camera_yaw",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "model"],
+      "insertText": "model_camera_yaw:",
+      "description": "3Dモデルカメラの水平角度を指定する",
+      "examples": ["<!-- kmark model_camera_yaw:45 -->"],
+      "priority": 92
+    },
+    {
+      "name": "model_camera_pitch",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "model"],
+      "insertText": "model_camera_pitch:",
+      "description": "3Dモデルカメラの上下角度を指定する",
+      "examples": ["<!-- kmark model_camera_pitch:25 -->"],
+      "priority": 91
+    },
+    {
+      "name": "model_camera_distance",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "model"],
+      "insertText": "model_camera_distance:",
+      "description": "3Dモデル中心からカメラまでの距離を指定する",
+      "examples": ["<!-- kmark model_camera_distance:3 -->"],
+      "priority": 90
+    },
+    {
+      "name": "model_light_preset",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["default", "studio", "flat", "product", "none"],
+      "insertText": "model_light_preset:",
+      "description": "3Dモデル照明presetを指定する",
+      "examples": ["<!-- kmark model_light_preset:studio -->"],
+      "priority": 89
+    },
+    {
+      "name": "model_controls",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "model"],
+      "insertText": "model_controls:",
+      "description": "3Dモデル操作可否を指定する",
+      "examples": ["<!-- kmark model_controls:false -->"],
+      "priority": 88
+    },
+    {
+      "name": "model_auto_rotate",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "model"],
+      "insertText": "model_auto_rotate:true",
+      "description": "3Dモデルの自動回転を有効化する",
+      "examples": ["<!-- kmark model_auto_rotate:true -->"],
+      "priority": 87
+    },
+    {
+      "name": "model_bg",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["single", "model"],
+      "values": ["transparent"],
+      "insertText": "model_bg:",
+      "description": "3Dモデルviewer背景色を指定する",
+      "examples": ["<!-- kmark model_bg:#f5f5f5 -->"],
+      "priority": 86
+    },
+    {
+      "name": "model_loading",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["lazy", "eager"],
+      "insertText": "model_loading:",
+      "description": "3Dモデル読み込み方式を指定する",
+      "examples": ["<!-- kmark model_loading:lazy -->"],
+      "priority": 85
+    },
+    {
+      "name": "model_convert",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["auto", "never", "force"],
+      "insertText": "model_convert:",
+      "description": "GLB変換制御を指定する",
+      "examples": ["<!-- kmark model_convert:auto -->"],
+      "priority": 84
+    },
+    {
+      "name": "model_convert_force",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "model"],
+      "insertText": "model_convert_force:",
+      "description": "3DモデルGLB変換を強制する",
+      "examples": ["<!-- kmark model_convert_force:true -->"],
+      "priority": 83
+    },
+    {
+      "name": "model_convert_scale",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "model"],
+      "values": ["0.01", "0.1", "1", "10"],
+      "insertText": "model_convert_scale:",
+      "description": "3Dモデル変換時倍率を指定する",
+      "examples": ["<!-- kmark model_convert_scale:0.01 -->"],
+      "priority": 82
+    },
+    {
+      "name": "model_convert_up",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["z", "auto", "x", "y", "-x", "-y", "-z"],
+      "insertText": "model_convert_up:",
+      "description": "3Dモデル変換時の入力上方向軸を指定する Z軸を表示上下に写像する",
+      "examples": ["<!-- kmark model_convert_up:z -->"],
+      "priority": 81
+    },
+    {
+      "name": "model_convert_center",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "model"],
+      "insertText": "model_convert_center:",
+      "description": "3Dモデル変換時に中心補正する",
+      "examples": ["<!-- kmark model_convert_center:true -->"],
       "priority": 80
     },
     {

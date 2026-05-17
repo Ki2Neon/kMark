@@ -3,6 +3,7 @@ mod enqueue_markdown_open_requests;
 mod import_markdown_assets;
 mod list_markdown_path_suggestions;
 mod pending_markdown_open_requests;
+mod prepare_markdown_model_assets;
 mod read_markdown_document;
 mod write_markdown_document;
 
@@ -18,5 +19,6 @@ pub use list_markdown_path_suggestions::{
 pub use pending_markdown_open_requests::{
     clear_pending_markdown_open_requests, take_pending_markdown_documents,
 };
+pub use prepare_markdown_model_assets::prepare_markdown_model_assets;
 pub use read_markdown_document::read_markdown_document;
 pub use write_markdown_document::write_markdown_document;

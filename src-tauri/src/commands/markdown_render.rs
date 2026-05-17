@@ -1,11 +1,17 @@
 use crate::dto::RenderedMarkdownPreviewPayload;
-use kmark_core::render_markdown_preview_with_file_path;
+use crate::usecase::prepare_markdown_model_assets;
+use kmark_core::render_markdown_preview_with_file_path_and_model_assets;
 
 fn render_markdown_preview_payload(
     content: String,
     file_path: Option<String>,
 ) -> RenderedMarkdownPreviewPayload {
-    let rendered_preview = render_markdown_preview_with_file_path(&content, file_path.as_deref());
+    let model_assets = prepare_markdown_model_assets(file_path.as_deref(), &content);
+    let rendered_preview = render_markdown_preview_with_file_path_and_model_assets(
+        &content,
+        file_path.as_deref(),
+        &model_assets,
+    );
 
     RenderedMarkdownPreviewPayload::from(rendered_preview)
 }
@@ -15,9 +21,11 @@ pub async fn render_markdown_preview(
     content: String,
     file_path: Option<String>,
 ) -> Result<RenderedMarkdownPreviewPayload, String> {
-    tauri::async_runtime::spawn_blocking(move || render_markdown_preview_payload(content, file_path))
-        .await
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        render_markdown_preview_payload(content, file_path)
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

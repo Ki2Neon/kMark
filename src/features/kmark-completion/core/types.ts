@@ -13,6 +13,7 @@ export type KmarkParamContext =
   | "page"
   | "image"
   | "video"
+  | "model"
   | "text"
   | "shape"
   | "table"
@@ -88,6 +89,7 @@ export type KmarkPathCompletionEntry = {
 export type KmarkCompletionSection =
   | "image"
   | "video"
+  | "model"
   | "page"
   | "scope"
   | "table"

@@ -15,6 +15,7 @@ import { loadLocalFontFamilies } from "./localFontFamilies";
 const CODE_MIRROR_COMPLETION_SECTIONS: Record<KmarkCompletionSection, CompletionSection> = {
   image: { name: "Image", rank: 10 },
   video: { name: "Video", rank: 15 },
+  model: { name: "Model", rank: 18 },
   page: { name: "Page", rank: 20 },
   scope: { name: "Scope", rank: 30 },
   table: { name: "Table", rank: 40 },
@@ -92,7 +93,7 @@ export function createCodeMirrorKmarkCompletionSource(
 }
 
 function pathCompletionFilterForParam(paramName: string): KmarkPathCompletionFilter {
-  if (paramName === "video_poster") {
+  if (paramName === "video_poster" || paramName === "model_poster") {
     return {
       kind: "extensions",
       extensions: IMAGE_PATH_COMPLETION_EXTENSIONS,

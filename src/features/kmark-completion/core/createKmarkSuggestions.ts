@@ -36,6 +36,28 @@ const VIDEO_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["video_poster_time", 460],
 ]);
 
+const MODEL_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["model_view", 560],
+  ["model_projection", 550],
+  ["model_fov", 540],
+  ["model_camera_yaw", 530],
+  ["model_camera_pitch", 520],
+  ["model_camera_distance", 510],
+  ["model_light_preset", 500],
+  ["model_controls", 490],
+  ["model_auto_rotate", 480],
+  ["model_bg", 470],
+  ["model_loading", 460],
+  ["model_convert", 450],
+  ["model_convert_force", 440],
+  ["model_convert_scale", 430],
+  ["model_convert_up", 420],
+  ["model_convert_center", 410],
+  ["w", 405],
+  ["h", 400],
+  ["align", 395],
+]);
+
 const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["image size", 470],
   ["image border", 460],
@@ -123,6 +145,7 @@ const FONT_FAMILY_PARAM_NAMES = new Set([
 ]);
 
 const PATH_PARAM_NAMES = new Set([
+  "model_poster",
   "video_poster",
 ]);
 
@@ -404,6 +427,10 @@ function scoreParamSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, p
     return 10_500 + (VIDEO_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
 
+  if (context.contexts.includes("model") && spec.contexts.includes("model")) {
+    return 10_300 + (MODEL_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
   if (context.contexts.includes("image") && spec.contexts.includes("image")) {
     return 10_000 + (IMAGE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
@@ -506,6 +533,10 @@ function resolveCompletionSection(
     return "video";
   }
 
+  if (activeContexts.includes("model") && candidateContexts.includes("model")) {
+    return "model";
+  }
+
   if (activeContexts.includes("image") && candidateContexts.includes("image")) {
     return "image";
   }
@@ -539,6 +570,8 @@ function detailForSection(section: KmarkCompletionSection): string {
       return "kmark image";
     case "video":
       return "kmark video";
+    case "model":
+      return "kmark model";
     case "page":
       return "kmark page";
     case "scope":
