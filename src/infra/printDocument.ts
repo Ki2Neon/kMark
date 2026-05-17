@@ -132,9 +132,33 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     overflow: hidden;
   }
 
+  .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered {
+    width: 100%;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered {
+    height: 100%;
+  }
+
   .markdown-body .kmark-mermaid-rendered svg {
     display: block;
     max-width: 100%;
+    height: auto;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {
+    width: 100%;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered svg {
+    height: 100%;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-height:not(.kmark-mermaid-block--sized-width) .kmark-mermaid-rendered svg {
+    width: auto;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-width:not(.kmark-mermaid-block--sized-height) .kmark-mermaid-rendered svg {
     height: auto;
   }
 
