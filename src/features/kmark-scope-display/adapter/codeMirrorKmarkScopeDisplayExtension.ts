@@ -42,6 +42,11 @@ const kmarkScopeDisplayPlugin = ViewPlugin.fromClass(class KmarkScopeDisplayPlug
 
 const kmarkScopeGutter = gutter({
   class: "kmark-scope-gutter",
+  initialSpacer(view) {
+    const plugin = view.plugin(kmarkScopeDisplayPlugin);
+
+    return new KmarkScopeGutterSpacer(plugin?.gutterWidth ?? 0);
+  },
   lineMarker(view, line) {
     const plugin = view.plugin(kmarkScopeDisplayPlugin);
 
@@ -59,6 +64,16 @@ const kmarkScopeGutter = gutter({
   },
   lineMarkerChange(update) {
     return update.docChanged;
+  },
+  updateSpacer(spacer, update) {
+    const plugin = update.view.plugin(kmarkScopeDisplayPlugin);
+    const gutterWidth = plugin?.gutterWidth ?? 0;
+
+    if (spacer instanceof KmarkScopeGutterSpacer && spacer.matchesWidth(gutterWidth)) {
+      return spacer;
+    }
+
+    return new KmarkScopeGutterSpacer(gutterWidth);
   },
 });
 
@@ -103,6 +118,11 @@ const kmarkScopeDisplayTheme = EditorView.baseTheme({
     minHeight: "1.7em",
     overflow: "hidden",
     position: "relative",
+  },
+  ".kmark-scope-gutter-spacer": {
+    display: "block",
+    height: "1px",
+    overflow: "hidden",
   },
   ".kmark-scope-rail": {
     backgroundColor: "currentColor",
@@ -214,6 +234,34 @@ class KmarkScopeGutterMarker extends GutterMarker {
     }
 
     return cell;
+  }
+}
+
+class KmarkScopeGutterSpacer extends GutterMarker {
+  readonly #gutterWidth: number;
+
+  constructor(gutterWidth: number) {
+    super();
+    this.#gutterWidth = gutterWidth;
+  }
+
+  eq(other: GutterMarker): boolean {
+    return other instanceof KmarkScopeGutterSpacer && other.#gutterWidth === this.#gutterWidth;
+  }
+
+  matchesWidth(gutterWidth: number): boolean {
+    return this.#gutterWidth === gutterWidth;
+  }
+
+  toDOM(): HTMLElement {
+    const spacer = document.createElement("div");
+
+    spacer.className = "kmark-scope-gutter-spacer";
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.minWidth = `${this.#gutterWidth}px`;
+    spacer.style.width = `${this.#gutterWidth}px`;
+
+    return spacer;
   }
 }
 

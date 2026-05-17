@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 15,
+  "schemaVersion": 16,
   "params": [
     {
       "name": "align",
@@ -511,6 +511,16 @@
       "priority": 78
     },
     {
+      "name": "background_color",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "background_color:",
+      "description": "文字背景色を指定する",
+      "examples": ["<!-- k { background_color:yellow -->重要<!-- } -->"],
+      "priority": 77
+    },
+    {
       "name": "font_weight",
       "aliases": [],
       "type": "string",
@@ -541,6 +551,36 @@
       "description": "文字styleを指定する",
       "examples": ["<!-- kmark font_style:italic -->\nDRAFT"],
       "priority": 75
+    },
+    {
+      "name": "underline",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "underline:true",
+      "description": "対象文字に下線を付ける",
+      "examples": ["<!-- k { underline:true -->重要<!-- } -->"],
+      "priority": 74
+    },
+    {
+      "name": "strike",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "text", "scope"],
+      "insertText": "strike:true",
+      "description": "対象文字に取り消し線を付ける",
+      "examples": ["<!-- k { strike:true -->削除<!-- } -->"],
+      "priority": 73
+    },
+    {
+      "name": "ruby",
+      "aliases": [],
+      "type": "string",
+      "contexts": ["text"],
+      "insertText": "ruby:\"\"",
+      "description": "インライン範囲へルビを指定する",
+      "examples": ["<!-- k { ruby:\"きばん\" -->基板<!-- } -->"],
+      "priority": 90
     },
     {
       "name": "letter_spacing",

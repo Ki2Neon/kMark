@@ -1,4 +1,5 @@
 import { type KmarkCompletionContext, type KmarkParamContext } from "./types";
+import { findLastKmarkDirectiveMarker } from "../../../domain/kmarkScopeSyntax";
 import { parseKmarkDirectiveFragment, splitKmarkDirectiveTokens } from "./parseKmarkDirectiveFragment";
 
 const INACTIVE_KMARK_COMPLETION_CONTEXT: KmarkCompletionContext = {
@@ -110,17 +111,7 @@ function clampOffset(value: number, maximum: number): number {
 }
 
 function findKmarkMarker(lineBeforeCursor: string): { readonly index: number; readonly text: string } | null {
-  const matches = [...lineBeforeCursor.matchAll(/<!--\s*kmark\b/giu)];
-  const match = matches[matches.length - 1];
-
-  if (match === undefined || match.index === undefined) {
-    return null;
-  }
-
-  return {
-    index: match.index,
-    text: match[0],
-  };
+  return findLastKmarkDirectiveMarker(lineBeforeCursor);
 }
 
 function resolveCurrentToken(directiveText: string): { readonly start: number; readonly text: string } {

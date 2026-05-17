@@ -1253,6 +1253,19 @@ input:focus-visible,
   user-select: none;
 }
 
+.markdown-body .kmark-inline {
+  display: inline;
+}
+
+.markdown-body .kmark-ruby rt {
+  font-size: 0.5em;
+  line-height: 1;
+}
+
+.markdown-body .kmark-scope {
+  display: block;
+}
+
 .markdown-body p,
 .markdown-body ul,
 .markdown-body ol,
