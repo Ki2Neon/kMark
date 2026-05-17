@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 12;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 13;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -402,6 +402,17 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         priority: 78,
     },
     KmarkParamSpec {
+        name: "background_color",
+        aliases: &[],
+        param_type: "color",
+        contexts: &["single", "text", "scope"],
+        values: &[],
+        insert_text: "background_color:",
+        description: "文字背景色を指定する",
+        examples: &["<!-- k { background_color:yellow -->重要<!-- } -->"],
+        priority: 77,
+    },
+    KmarkParamSpec {
         name: "font_weight",
         aliases: &[],
         param_type: "string",
@@ -436,6 +447,39 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         description: "文字styleを指定する",
         examples: &["<!-- kmark font_style:italic -->\nDRAFT"],
         priority: 75,
+    },
+    KmarkParamSpec {
+        name: "underline",
+        aliases: &[],
+        param_type: "boolean",
+        contexts: &["single", "text", "scope"],
+        values: &[],
+        insert_text: "underline:true",
+        description: "対象文字に下線を付ける",
+        examples: &["<!-- k { underline:true -->重要<!-- } -->"],
+        priority: 74,
+    },
+    KmarkParamSpec {
+        name: "strike",
+        aliases: &[],
+        param_type: "boolean",
+        contexts: &["single", "text", "scope"],
+        values: &[],
+        insert_text: "strike:true",
+        description: "対象文字に取り消し線を付ける",
+        examples: &["<!-- k { strike:true -->削除<!-- } -->"],
+        priority: 73,
+    },
+    KmarkParamSpec {
+        name: "ruby",
+        aliases: &[],
+        param_type: "string",
+        contexts: &["text"],
+        values: &[],
+        insert_text: "ruby:\"\"",
+        description: "インライン範囲へルビを指定する",
+        examples: &["<!-- k { ruby:\"きばん\" -->基板<!-- } -->"],
+        priority: 90,
     },
     KmarkParamSpec {
         name: "letter_spacing",

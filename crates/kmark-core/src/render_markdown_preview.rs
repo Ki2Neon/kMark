@@ -239,6 +239,7 @@ struct PreprocessedKmarkDirective {
     offset: usize,
     source_line_start: usize,
     source_line_end: usize,
+    is_inline: bool,
 }
 
 struct HtmlRenderOutput {
@@ -292,12 +293,16 @@ struct KmarkLayoutParams {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkTextParams {
     color: Option<String>,
+    background_color: Option<String>,
     font_size: Option<String>,
     font_weight: Option<String>,
     font_family: Option<String>,
     font_style: Option<String>,
     letter_spacing: Option<String>,
     line_height: Option<String>,
+    underline: Option<bool>,
+    strike: Option<bool>,
+    ruby: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -368,6 +373,25 @@ struct KmarkParamLayer {
 struct KmarkScopeContext {
     layer: Option<KmarkParamLayer>,
     renders_wrapper: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KmarkInlineScopeKind {
+    Span,
+    Ruby { text: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KmarkInlineScopeContext {
+    kind: Option<KmarkInlineScopeKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KmarkScopeSyntaxConfig {
+    directive_names: &'static [&'static str],
+    open_scope_token: &'static str,
+    close_scope_token: &'static str,
+    allow_bare_close: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -660,6 +684,7 @@ struct HtmlEmitter<'a> {
     paragraph_context: Option<ParagraphContext>,
     kmark_presets: HashMap<String, KmarkParams>,
     kmark_scope_stack: Vec<KmarkScopeContext>,
+    kmark_inline_scope_stack: Vec<KmarkInlineScopeContext>,
     pending_kmark_params: Option<PendingKmarkParams>,
     active_kmark_single_block: Option<ActiveKmarkSingleBlock>,
     pending_kmark_block_style: Option<String>,
@@ -685,6 +710,12 @@ const DEFAULT_PREVIEW_FONT_FAMILY: &str = "BIZ UDPGothic";
 const DEFAULT_TOC_TITLE: &str = "目次";
 const HEADING_NUMBER_MAX_LEVEL: u8 = 6;
 const ESCAPED_DEFINITION_MARKER_COLON: char = '\u{1f}';
+const DEFAULT_KMARK_SCOPE_SYNTAX_CONFIG: KmarkScopeSyntaxConfig = KmarkScopeSyntaxConfig {
+    directive_names: &["k", "kmark"],
+    open_scope_token: "{",
+    close_scope_token: "}",
+    allow_bare_close: true,
+};
 
 pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
@@ -780,13 +811,22 @@ fn collect_preprocessed_markdown_events(markdown: &PreprocessedMarkdown) -> Vec<
 
     for event in parser_events {
         while let Some(directive) = markdown.kmark_directives.get(directive_index) {
-            if directive.offset > event.range.start {
+            if directive.offset > event.range.start
+                || (directive.is_inline
+                    && directive.offset == event.range.start
+                    && is_block_start_event(&event.event))
+            {
                 break;
             }
             events.push(kmark_directive_to_event(directive));
             directive_index += 1;
         }
-        events.push(event);
+        push_preprocessed_event_with_inline_directives(
+            &mut events,
+            event,
+            markdown,
+            &mut directive_index,
+        );
     }
 
     for directive in &markdown.kmark_directives[directive_index..] {
@@ -796,9 +836,84 @@ fn collect_preprocessed_markdown_events(markdown: &PreprocessedMarkdown) -> Vec<
     events
 }
 
+fn push_preprocessed_event_with_inline_directives(
+    events: &mut Vec<OwnedEvent>,
+    event: OwnedEvent,
+    markdown: &PreprocessedMarkdown,
+    directive_index: &mut usize,
+) {
+    let Event::Text(text) = &event.event else {
+        events.push(event);
+        return;
+    };
+
+    let mut text_start = event.range.start;
+    let mut text_cursor = 0usize;
+    let text = text.as_ref();
+
+    while let Some(directive) = markdown.kmark_directives.get(*directive_index) {
+        if !directive.is_inline || directive.offset > event.range.end {
+            break;
+        }
+
+        if directive.offset < event.range.start {
+            break;
+        }
+
+        let split_offset = directive.offset - event.range.start;
+        if split_offset > text_cursor && split_offset <= text.len() {
+            events.push(OwnedEvent {
+                event: Event::Text(text[text_cursor..split_offset].to_owned().into()),
+                range: text_start..directive.offset,
+                source_line_range: event.source_line_range,
+            });
+        }
+
+        events.push(kmark_directive_to_event(directive));
+        *directive_index += 1;
+        text_cursor = split_offset.min(text.len());
+        text_start = directive.offset;
+    }
+
+    if text_cursor < text.len() {
+        events.push(OwnedEvent {
+            event: Event::Text(text[text_cursor..].to_owned().into()),
+            range: text_start..event.range.end,
+            source_line_range: event.source_line_range,
+        });
+    }
+}
+
+fn is_block_start_event(event: &Event<'static>) -> bool {
+    matches!(
+        event,
+        Event::Start(
+            Tag::Paragraph
+                | Tag::Heading { .. }
+                | Tag::BlockQuote(_)
+                | Tag::CodeBlock(_)
+                | Tag::List(_)
+                | Tag::Item
+                | Tag::FootnoteDefinition(_)
+                | Tag::DefinitionList
+                | Tag::DefinitionListTitle
+                | Tag::DefinitionListDefinition
+                | Tag::Table(_)
+                | Tag::TableHead
+                | Tag::TableRow
+                | Tag::TableCell
+                | Tag::MetadataBlock(_)
+        )
+    )
+}
+
 fn kmark_directive_to_event(directive: &PreprocessedKmarkDirective) -> OwnedEvent {
     OwnedEvent {
-        event: Event::Html(directive.html.clone().into()),
+        event: if directive.is_inline {
+            Event::InlineHtml(directive.html.clone().into())
+        } else {
+            Event::Html(directive.html.clone().into())
+        },
         range: directive.offset..directive.offset,
         source_line_range: Some((directive.source_line_start, directive.source_line_end)),
     }
@@ -950,6 +1065,7 @@ fn preprocess_markdown_comments(content: &str, line_offset: usize) -> Preprocess
                     offset: clean_content.len(),
                     source_line_start: source_line,
                     source_line_end: source_line,
+                    is_inline: false,
                 });
             }
             continue;
@@ -960,9 +1076,10 @@ fn preprocess_markdown_comments(content: &str, line_offset: usize) -> Preprocess
             continue;
         }
 
-        push_preprocessed_markdown_line(
+        push_preprocessed_markdown_line_with_kmark_comments(
             &mut clean_content,
             &mut source_line_by_clean_line,
+            &mut kmark_directives,
             line_with_ending,
             source_line,
         );
@@ -993,11 +1110,79 @@ fn push_preprocessed_markdown_line(
     clean_content.push_str(line);
 }
 
+fn push_preprocessed_markdown_line_with_kmark_comments(
+    clean_content: &mut String,
+    source_line_by_clean_line: &mut Vec<usize>,
+    kmark_directives: &mut Vec<PreprocessedKmarkDirective>,
+    line: &str,
+    source_line: usize,
+) {
+    let mut cursor = 0usize;
+    let mut search_start = 0usize;
+    let mut found_kmark_comment = false;
+
+    while let Some(open_offset) = line[search_start..].find(PAGE_BREAK_TOKEN_OPEN) {
+        let token_start = search_start + open_offset;
+        let Some(close_offset) =
+            line[token_start + PAGE_BREAK_TOKEN_OPEN.len()..].find(PAGE_BREAK_TOKEN_CLOSE)
+        else {
+            break;
+        };
+        let token_end =
+            token_start + PAGE_BREAK_TOKEN_OPEN.len() + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
+        let comment = &line[token_start..token_end];
+
+        if parse_kmark_comment(comment).is_some() {
+            if cursor < token_start {
+                push_preprocessed_markdown_line(
+                    clean_content,
+                    source_line_by_clean_line,
+                    &line[cursor..token_start],
+                    source_line,
+                );
+            }
+            kmark_directives.push(PreprocessedKmarkDirective {
+                html: comment.to_owned(),
+                offset: clean_content.len(),
+                source_line_start: source_line,
+                source_line_end: source_line,
+                is_inline: true,
+            });
+            cursor = token_end;
+            found_kmark_comment = true;
+        }
+
+        search_start = token_end;
+    }
+
+    if !found_kmark_comment {
+        push_preprocessed_markdown_line(
+            clean_content,
+            source_line_by_clean_line,
+            line,
+            source_line,
+        );
+        return;
+    }
+
+    if cursor < line.len() {
+        push_preprocessed_markdown_line(
+            clean_content,
+            source_line_by_clean_line,
+            &line[cursor..],
+            source_line,
+        );
+    }
+}
+
 fn standalone_html_comment_line(line: &str) -> Option<&str> {
     let trimmed = line.trim();
 
-    (trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && trimmed.ends_with(PAGE_BREAK_TOKEN_CLOSE))
-        .then_some(trimmed)
+    let remainder = trimmed.strip_prefix(PAGE_BREAK_TOKEN_OPEN)?;
+    let close_offset = remainder.find(PAGE_BREAK_TOKEN_CLOSE)?;
+    let token_end = PAGE_BREAK_TOKEN_OPEN.len() + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
+
+    (token_end == trimmed.len()).then_some(trimmed)
 }
 
 fn starts_standalone_html_comment_block(line: &str) -> bool {
@@ -1920,19 +2105,19 @@ fn is_standalone_html_comment_line(line: &str) -> bool {
     };
     let trimmed = rest.trim_end();
 
-    trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && trimmed.ends_with(PAGE_BREAK_TOKEN_CLOSE)
+    let Some(remainder) = trimmed.strip_prefix(PAGE_BREAK_TOKEN_OPEN) else {
+        return false;
+    };
+    let Some(close_offset) = remainder.find(PAGE_BREAK_TOKEN_CLOSE) else {
+        return false;
+    };
+    let token_end = PAGE_BREAK_TOKEN_OPEN.len() + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
+
+    token_end == trimmed.len()
 }
 
 fn is_kmark_comment_line(line: &str) -> bool {
-    let trimmed = line.trim();
-    let Some(body) = trimmed
-        .strip_prefix(PAGE_BREAK_TOKEN_OPEN)
-        .and_then(|body| body.strip_suffix(PAGE_BREAK_TOKEN_CLOSE))
-    else {
-        return false;
-    };
-
-    body.trim().starts_with("kmark")
+    parse_kmark_comment(line.trim()).is_some()
 }
 
 fn is_kmark_toc_directive_line(line: &str) -> bool {
@@ -1948,12 +2133,16 @@ fn is_kmark_toc_directive_line(line: &str) -> bool {
 
 fn parse_kmark_comment_body(line: &str) -> Option<&str> {
     let trimmed = line.trim();
-    let body = trimmed
-        .strip_prefix(PAGE_BREAK_TOKEN_OPEN)?
-        .strip_suffix(PAGE_BREAK_TOKEN_CLOSE)?
-        .trim();
+    let remainder = trimmed.strip_prefix(PAGE_BREAK_TOKEN_OPEN)?;
+    let close_offset = remainder.find(PAGE_BREAK_TOKEN_CLOSE)?;
+    let token_end = PAGE_BREAK_TOKEN_OPEN.len() + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
+    if token_end != trimmed.len() {
+        return None;
+    }
+    let body =
+        trimmed[PAGE_BREAK_TOKEN_OPEN.len()..trimmed.len() - PAGE_BREAK_TOKEN_CLOSE.len()].trim();
 
-    body.strip_prefix("kmark").map(str::trim)
+    parse_kmark_directive_remainder(body, &DEFAULT_KMARK_SCOPE_SYNTAX_CONFIG)
 }
 
 fn parse_kmark_scope_start_page_directive_line(line: &str) -> Option<PartialPageDirective> {
@@ -2038,6 +2227,7 @@ impl<'a> HtmlEmitter<'a> {
             paragraph_context: None,
             kmark_presets: HashMap::new(),
             kmark_scope_stack: Vec::new(),
+            kmark_inline_scope_stack: Vec::new(),
             pending_kmark_params: None,
             active_kmark_single_block: None,
             pending_kmark_block_style: None,
@@ -2124,13 +2314,14 @@ impl<'a> HtmlEmitter<'a> {
         range: Range<usize>,
         source_line_range: Option<(usize, usize)>,
     ) {
+        let is_inline_context = matches!(event, Event::InlineHtml(_));
         let html = match event {
             Event::Html(html) | Event::InlineHtml(html) => html,
             _ => return,
         };
 
         if let Some(comment) = parse_kmark_comment(html.as_ref()) {
-            self.apply_kmark_comment(comment, range.clone(), source_line_range);
+            self.apply_kmark_comment(comment, range.clone(), source_line_range, is_inline_context);
             return;
         }
 
@@ -3178,6 +3369,7 @@ impl<'a> HtmlEmitter<'a> {
         comment: KmarkComment,
         range: Range<usize>,
         source_line_range: Option<(usize, usize)>,
+        is_inline_context: bool,
     ) {
         self.discard_pending_kmark_params_if_gap_is_incompatible(range.start);
 
@@ -3218,6 +3410,11 @@ impl<'a> HtmlEmitter<'a> {
             KmarkComment::ScopeStart(bundle) => {
                 let mut final_bundle = self.take_pending_kmark_bundle().unwrap_or_default();
                 final_bundle.merge(&bundle);
+                if is_inline_context {
+                    self.start_kmark_inline_scope(final_bundle);
+                    return;
+                }
+
                 let layer = self.resolve_kmark_bundle_layer(&final_bundle);
                 let resolved_params = layer.resolved_params();
                 if !resolved_params.has_directives() {
@@ -3247,7 +3444,11 @@ impl<'a> HtmlEmitter<'a> {
             }
             KmarkComment::ScopeEnd => {
                 self.pending_kmark_params = None;
-                self.close_kmark_scope();
+                if is_inline_context {
+                    self.close_kmark_inline_scope();
+                } else {
+                    self.close_kmark_scope();
+                }
             }
         }
     }
@@ -3664,6 +3865,62 @@ impl<'a> HtmlEmitter<'a> {
         self.pending_kmark_table_fit = None;
     }
 
+    fn start_kmark_inline_scope(&mut self, bundle: KmarkParamBundle) {
+        let layer = self.resolve_kmark_bundle_layer(&bundle);
+        let params = layer.resolved_params();
+        let style = params.to_inline_style();
+        let kind = if let Some(ruby_text) = params.text.ruby.clone() {
+            Some(KmarkInlineScopeKind::Ruby { text: ruby_text })
+        } else if style.is_some() {
+            Some(KmarkInlineScopeKind::Span)
+        } else {
+            None
+        };
+
+        match &kind {
+            Some(KmarkInlineScopeKind::Ruby { .. }) => {
+                self.push_raw("<ruby class=\"kmark-ruby\"");
+                if let Some(style) = style {
+                    self.push_raw(" style=\"");
+                    self.push_raw(&style);
+                    self.push_raw("\"");
+                }
+                self.push_raw(">");
+            }
+            Some(KmarkInlineScopeKind::Span) => {
+                self.push_raw("<span class=\"kmark-inline\"");
+                if let Some(style) = style {
+                    self.push_raw(" style=\"");
+                    self.push_raw(&style);
+                    self.push_raw("\"");
+                }
+                self.push_raw(">");
+            }
+            None => {}
+        }
+
+        self.kmark_inline_scope_stack
+            .push(KmarkInlineScopeContext { kind });
+    }
+
+    fn close_kmark_inline_scope(&mut self) {
+        let Some(context) = self.kmark_inline_scope_stack.pop() else {
+            return;
+        };
+
+        match context.kind {
+            Some(KmarkInlineScopeKind::Ruby { text }) => {
+                self.push_raw("<rt>");
+                self.push_raw(&escape_html(&text));
+                self.push_raw("</rt></ruby>");
+            }
+            Some(KmarkInlineScopeKind::Span) => {
+                self.push_raw("</span>");
+            }
+            None => {}
+        }
+    }
+
     fn close_kmark_scope(&mut self) {
         if self
             .kmark_scope_stack
@@ -3675,6 +3932,10 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn close_unclosed_kmark_scopes(&mut self) {
+        while !self.kmark_inline_scope_stack.is_empty() {
+            self.close_kmark_inline_scope();
+        }
+
         while let Some(context) = self.kmark_scope_stack.pop() {
             if context.renders_wrapper {
                 self.push_raw("</div>");
@@ -4255,6 +4516,19 @@ impl KmarkParams {
         self.image.to_style(&self.layout)
     }
 
+    fn to_inline_style(&self) -> Option<String> {
+        let mut rules = Vec::new();
+
+        self.text.push_style_rules(&mut rules);
+        if self.text.background_color.is_none() {
+            if let Some(background_color) = &self.image.background {
+                rules.push(format!("background-color:{background_color}"));
+            }
+        }
+
+        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
+    }
+
     fn to_text_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
         let mut rules = Vec::new();
         let should_fit_content = !self.image.has_explicit_width()
@@ -4523,6 +4797,9 @@ impl KmarkTextParams {
         if let Some(color) = &other.color {
             self.color = Some(color.clone());
         }
+        if let Some(background_color) = &other.background_color {
+            self.background_color = Some(background_color.clone());
+        }
         if let Some(font_size) = &other.font_size {
             self.font_size = Some(font_size.clone());
         }
@@ -4541,25 +4818,40 @@ impl KmarkTextParams {
         if let Some(line_height) = &other.line_height {
             self.line_height = Some(line_height.clone());
         }
+        if let Some(underline) = other.underline {
+            self.underline = Some(underline);
+        }
+        if let Some(strike) = other.strike {
+            self.strike = Some(strike);
+        }
+        if let Some(ruby) = &other.ruby {
+            self.ruby = Some(ruby.clone());
+        }
     }
 
     fn has_text_directives(&self) -> bool {
         self.color.is_some()
+            || self.background_color.is_some()
             || self.font_size.is_some()
             || self.font_weight.is_some()
             || self.font_family.is_some()
             || self.font_style.is_some()
             || self.letter_spacing.is_some()
             || self.line_height.is_some()
+            || self.underline.is_some()
+            || self.strike.is_some()
     }
 
     fn has_text_box_directives(&self) -> bool {
         self.color.is_some()
+            || self.background_color.is_some()
             || self.font_size.is_some()
             || self.font_weight.is_some()
             || self.font_family.is_some()
             || self.font_style.is_some()
             || self.letter_spacing.is_some()
+            || self.underline.is_some()
+            || self.strike.is_some()
     }
 
     fn to_style(&self) -> Option<String> {
@@ -4573,6 +4865,9 @@ impl KmarkTextParams {
     fn push_style_rules(&self, rules: &mut Vec<String>) {
         if let Some(color) = &self.color {
             rules.push(format!("color:{color}"));
+        }
+        if let Some(background_color) = &self.background_color {
+            rules.push(format!("background-color:{background_color}"));
         }
         if let Some(font_size) = &self.font_size {
             rules.push(format!("font-size:{font_size}"));
@@ -4591,6 +4886,16 @@ impl KmarkTextParams {
         }
         if let Some(line_height) = &self.line_height {
             rules.push(format!("line-height:{line_height}"));
+        }
+        let mut text_decorations = Vec::new();
+        if self.underline == Some(true) {
+            text_decorations.push("underline");
+        }
+        if self.strike == Some(true) {
+            text_decorations.push("line-through");
+        }
+        if !text_decorations.is_empty() {
+            rules.push(format!("text-decoration:{}", text_decorations.join(" ")));
         }
     }
 }
@@ -6279,14 +6584,22 @@ fn parse_kmark_page_number_style_value(value: &str) -> Option<PageNumberStyle> {
 
 fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
     let trimmed = html.trim();
-    let body = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
-    let remainder = body.strip_prefix("kmark")?.trim();
+    let remainder = trimmed.strip_prefix(PAGE_BREAK_TOKEN_OPEN)?;
+    let close_offset = remainder.find(PAGE_BREAK_TOKEN_CLOSE)?;
+    let token_end = PAGE_BREAK_TOKEN_OPEN.len() + close_offset + PAGE_BREAK_TOKEN_CLOSE.len();
+    if token_end != trimmed.len() {
+        return None;
+    }
+    let body =
+        trimmed[PAGE_BREAK_TOKEN_OPEN.len()..trimmed.len() - PAGE_BREAK_TOKEN_CLOSE.len()].trim();
+    let config = &DEFAULT_KMARK_SCOPE_SYNTAX_CONFIG;
+    let remainder = parse_kmark_directive_remainder(body, config)?;
 
-    if remainder == "}" {
+    if remainder == config.close_scope_token {
         return Some(KmarkComment::ScopeEnd);
     }
 
-    if let Some(scope_body) = remainder.strip_prefix('{') {
+    if let Some(scope_body) = remainder.strip_prefix(config.open_scope_token) {
         return Some(KmarkComment::ScopeStart(parse_kmark_param_bundle(
             scope_body.trim(),
         )));
@@ -6299,6 +6612,39 @@ fn parse_kmark_comment(html: &str) -> Option<KmarkComment> {
     }
 
     Some(KmarkComment::Params(bundle))
+}
+
+fn parse_kmark_directive_remainder<'a>(
+    body: &'a str,
+    config: &KmarkScopeSyntaxConfig,
+) -> Option<&'a str> {
+    let trimmed = body.trim();
+
+    if config.allow_bare_close && trimmed == config.close_scope_token {
+        return Some(trimmed);
+    }
+
+    for directive_name in config.directive_names {
+        let Some(remainder) = trimmed.strip_prefix(directive_name) else {
+            continue;
+        };
+
+        if remainder
+            .chars()
+            .next()
+            .is_some_and(is_kmark_directive_name_character)
+        {
+            continue;
+        }
+
+        return Some(remainder.trim());
+    }
+
+    None
+}
+
+fn is_kmark_directive_name_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
 }
 
 fn normalize_kmark_preset_name(value: &str) -> Option<String> {
@@ -6514,6 +6860,11 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.image.background = Some(background);
                 }
             }
+            "background_color" => {
+                if let Some(background_color) = parse_kmark_color_value(&value) {
+                    bundle.params.text.background_color = Some(background_color);
+                }
+            }
             "opacity" => {
                 if let Some(opacity) = parse_kmark_opacity_value(&value) {
                     bundle.params.image.opacity = Some(opacity);
@@ -6587,6 +6938,21 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
             "font_style" => {
                 if let Some(font_style) = parse_kmark_font_style_value(&value) {
                     bundle.params.text.font_style = Some(font_style);
+                }
+            }
+            "underline" => {
+                if let Some(underline) = parse_kmark_bool_value(&value) {
+                    bundle.params.text.underline = Some(underline);
+                }
+            }
+            "strike" => {
+                if let Some(strike) = parse_kmark_bool_value(&value) {
+                    bundle.params.text.strike = Some(strike);
+                }
+            }
+            "ruby" => {
+                if let Some(ruby) = parse_kmark_ruby_value(&value) {
+                    bundle.params.text.ruby = Some(ruby);
                 }
             }
             "letter_spacing" => {
@@ -6909,6 +7275,16 @@ fn parse_kmark_font_style_value(value: &str) -> Option<String> {
     .then(|| trim_kmark_quotes(value).trim().to_owned())
 }
 
+fn parse_kmark_ruby_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    (!trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|character| !character.is_control() && !matches!(character, '<' | '>' | '`')))
+    .then(|| trimmed.to_owned())
+}
+
 fn parse_kmark_letter_spacing_value(value: &str) -> Option<String> {
     parse_css_length_value(value, false)
 }
@@ -7130,6 +7506,11 @@ fn parse_kmark_border_color_value(value: &str) -> Option<String> {
 
 fn parse_kmark_color_value(value: &str) -> Option<String> {
     let trimmed = trim_kmark_quotes(value).trim();
+    let lowercase = trimmed.to_ascii_lowercase();
+
+    if lowercase.contains("javascript") || lowercase.contains("script") {
+        return None;
+    }
 
     if let Some(hex) = trimmed.strip_prefix('#') {
         return (matches!(hex.len(), 3 | 4 | 6 | 8)
@@ -7137,10 +7518,55 @@ fn parse_kmark_color_value(value: &str) -> Option<String> {
         .then(|| trimmed.to_owned());
     }
 
+    if let Some(function_color) = parse_safe_css_color_function(trimmed) {
+        return Some(function_color);
+    }
+
+    if let Some(custom_property_color) = parse_safe_css_color_custom_property(trimmed) {
+        return Some(custom_property_color);
+    }
+
     trimmed
         .chars()
         .all(|character| character.is_ascii_alphabetic())
-        .then(|| trimmed.to_ascii_lowercase())
+        .then_some(lowercase)
+}
+
+fn parse_safe_css_color_function(value: &str) -> Option<String> {
+    let open = value.find('(')?;
+    let close = value.rfind(')')?;
+
+    if close + 1 != value.len() {
+        return None;
+    }
+
+    let name = &value[..open];
+    if !matches!(name, "rgb" | "rgba") {
+        return None;
+    }
+
+    let inner = &value[open + 1..close];
+    if inner.is_empty() {
+        return None;
+    }
+
+    inner
+        .chars()
+        .all(|character| {
+            character.is_ascii_digit() || matches!(character, ' ' | '\t' | ',' | '.' | '%' | '/')
+        })
+        .then(|| value.to_owned())
+}
+
+fn parse_safe_css_color_custom_property(value: &str) -> Option<String> {
+    let token = value.strip_prefix("var(")?.strip_suffix(')')?.trim();
+
+    (token.starts_with("--")
+        && token.len() > 2
+        && token
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_')))
+    .then(|| value.to_owned())
 }
 
 fn parse_kmark_border_style_value(value: &str) -> Option<String> {
@@ -8983,9 +9409,9 @@ mod tests {
              ```mermaid\nflowchart TD\n  A --> B\n```",
         );
 
-        assert!(rendered_preview.html.contains(
-            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-height\""
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--sized-height\""));
         assert!(rendered_preview.html.contains(
             "style=\"height:100px;width:fit-content;max-width:100%;box-sizing:border-box;\""
         ));
@@ -9000,9 +9426,9 @@ mod tests {
              <!-- kmark } -->",
         );
 
-        assert!(rendered_preview.html.contains(
-            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-width\""
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--sized-width\""));
         assert!(rendered_preview.html.contains(
             "style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;\""
         ));
@@ -9019,9 +9445,9 @@ mod tests {
         assert!(rendered_preview.html.contains(
             "class=\"kmark-mermaid-block kmark-mermaid-block--sized-width kmark-mermaid-block--sized-height\""
         ));
-        assert!(rendered_preview.html.contains(
-            "style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""));
     }
 
     #[test]
@@ -9739,6 +10165,55 @@ mod tests {
             rendered_preview.html,
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><video src=\"./operation.mp4\" controls preload=\"metadata\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-video-source=\"./operation.mp4\" aria-label=\"demo\" data-kmark-video-alt=\"demo\" poster=\"./thumb.png\"></video></p>"
         );
+    }
+
+    #[test]
+    fn renders_inline_kmark_scope_with_short_directive_and_bare_close() {
+        let rendered_preview =
+            render_markdown_preview("これは<!-- k { color:red -->赤色<!-- } -->です。");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">これは<span class=\"kmark-inline\" style=\"color:red;\">赤色</span>です。</p>"
+        );
+    }
+
+    #[test]
+    fn renders_inline_kmark_text_style_params() {
+        let rendered_preview = render_markdown_preview(
+            "これは<!-- k { bg:yellow underline:true font_weight:bold font_style:italic -->重要<!-- } -->です。",
+        );
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">これは<span class=\"kmark-inline\" style=\"font-weight:bold;font-style:italic;text-decoration:underline;background-color:yellow;\">重要</span>です。</p>"
+        );
+    }
+
+    #[test]
+    fn renders_inline_kmark_ruby_scope() {
+        let rendered_preview =
+            render_markdown_preview("<!-- k { color:red ruby:\"きばん\" -->基板<!-- } -->");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\"><ruby class=\"kmark-ruby\" style=\"color:red;\">基板<rt>きばん</rt></ruby></p>"
+        );
+    }
+
+    #[test]
+    fn renders_block_kmark_scope_with_short_directive_and_bare_close() {
+        let rendered_preview =
+            render_markdown_preview("<!-- k { color:red -->\n# 赤い見出し\n\n赤い本文\n<!-- } -->");
+
+        assert!(rendered_preview
+            .html
+            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">赤い見出し</h1>"));
+        assert!(rendered_preview.html.contains(
+            "<p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">赤い本文</p>"
+        ));
+        assert!(!rendered_preview.html.contains("<!-- k"));
+        assert!(!rendered_preview.html.contains("<!-- }"));
     }
 
     #[test]

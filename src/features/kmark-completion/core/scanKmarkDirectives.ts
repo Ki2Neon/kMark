@@ -1,3 +1,5 @@
+import { parseKmarkScopeCommentBody } from "../../../domain/kmarkScopeSyntax";
+
 export type KmarkDirectiveOccurrence = {
   readonly directiveText: string;
   readonly rangeStart: number;
@@ -17,21 +19,18 @@ export function collectKmarkDirectiveOccurrences(markdown: string): readonly Kma
 
     const commentText = match[0];
     const body = commentText.slice(4, -3);
-    const markerMatch = body.match(/^\s*kmark\b/iu);
+    const parsedBody = parseKmarkScopeCommentBody(body);
 
-    if (markerMatch === null) {
+    if (parsedBody === null) {
       continue;
     }
 
-    const markerStart = match.index + 4 + markerMatch[0].search(/kmark/iu);
-    const directiveStartInBody = markerMatch[0].length;
-
     occurrences.push({
-      directiveText: body.slice(directiveStartInBody),
-      rangeStart: match.index + 4 + directiveStartInBody,
+      directiveText: parsedBody.directiveText,
+      rangeStart: match.index + 4 + parsedBody.directiveTextStart,
       markerRange: {
-        start: markerStart,
-        end: markerStart + "kmark".length,
+        start: match.index + 4 + parsedBody.directiveNameStart,
+        end: match.index + 4 + parsedBody.directiveNameEnd,
       },
     });
   }

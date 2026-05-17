@@ -4,8 +4,11 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
 const sourcePath = "src/features/kmark-scope-display/core/collectKmarkScopeDisplayLines.ts";
-const outputPath = ".tmp/kmark-scope-display/collectKmarkScopeDisplayLines.mjs";
+const syntaxSourcePath = "src/domain/kmarkScopeSyntax.ts";
+const outputPath = ".tmp/kmark-scope-display/src/features/kmark-scope-display/core/collectKmarkScopeDisplayLines.mjs";
+const syntaxOutputPath = ".tmp/kmark-scope-display/src/domain/kmarkScopeSyntax.mjs";
 const source = await readFile(sourcePath, "utf8");
+const syntaxSource = await readFile(syntaxSourcePath, "utf8");
 const transpiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
@@ -13,9 +16,24 @@ const transpiled = ts.transpileModule(source, {
   },
   fileName: sourcePath,
 });
+const syntaxTranspiled = ts.transpileModule(syntaxSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2020,
+  },
+  fileName: syntaxSourcePath,
+});
 
-await mkdir(".tmp/kmark-scope-display", { recursive: true });
-await writeFile(outputPath, transpiled.outputText);
+await mkdir(".tmp/kmark-scope-display/src/features/kmark-scope-display/core", { recursive: true });
+await mkdir(".tmp/kmark-scope-display/src/domain", { recursive: true });
+await writeFile(syntaxOutputPath, syntaxTranspiled.outputText);
+await writeFile(
+  outputPath,
+  transpiled.outputText.replace(
+    "../../../domain/kmarkScopeSyntax",
+    "../../../domain/kmarkScopeSyntax.mjs",
+  ),
+);
 
 const { collectKmarkScopeDisplayLines } = await import(pathToFileURL(outputPath).href);
 
@@ -25,9 +43,9 @@ function getLine(document, lineNumber) {
 
 {
   const document = collectKmarkScopeDisplayLines([
-    "<!-- kmark { table compact:true } -->",
+    "<!-- k { table compact:true } -->",
     "| A | B |",
-    "<!-- kmark } -->",
+    "<!-- } -->",
   ].join("\n"));
   const contentLine = getLine(document, 2);
 
@@ -152,13 +170,13 @@ function getLine(document, lineNumber) {
 
 {
   const document = collectKmarkScopeDisplayLines([
-    "<!-- kmark { hero } -->",
+    "<!-- k { hero } -->",
     "```markdown",
     "<!-- kmark { table } -->",
     "ignored marker, visible parent scope",
     "<!-- kmark } -->",
     "```",
-    "<!-- kmark } -->",
+    "<!-- } -->",
   ].join("\n"));
   const fencedContentLine = getLine(document, 4);
 
@@ -167,7 +185,7 @@ function getLine(document, lineNumber) {
 }
 
 {
-  const document = collectKmarkScopeDisplayLines("<!-- kmark { table } --> <!-- kmark } -->");
+  const document = collectKmarkScopeDisplayLines("<!-- k { table } --> <!-- } -->");
   const singleLine = getLine(document, 1);
 
   assert.equal(singleLine.rails[0].shape, "single");
