@@ -99,6 +99,7 @@
 | `video_muted` |  | boolean | single video |  |
 | `video_loop` |  | boolean | single video |  |
 | `video_poster` |  | string | single video |  |
+| `video_poster_time` |  | string | single video |  |
 | `color` |  | color | single text scope |  |
 | `font_weight` |  | string | single text scope | `normal` `bold` `bolder` `lighter` `100`-`900` |
 | `font_family` |  | string | single text scope |  |
@@ -224,6 +225,27 @@
 | `page_fit` | page本文領域へ拡張 `display:block` `margin:0` | page本文領域へ拡張 |
 | `page_fit_contain` | max幅/高 + `object-fit:contain` | max幅/高 |
 
+## Mermaid Parameters
+
+| 対象 | 使用可能param | 例 | 注意 |
+| --- | --- | --- | --- |
+| Mermaid code block | `w` `h` `align` `valign` `page_valign` | `w:120mm align:center` | `w`/`h` 指定時 SVG表示sizeも枠へ追従 |
+| Mermaid code block | `margin` `padding` | `padding:2mm` | kmark wrapperへ適用 |
+| Mermaid code block | `border_size` `border_color` `border_style` `radius` | `border_size:1px radius:4px` | 枠線style省略時 `solid` |
+| Mermaid code block | `bg` `background` `opacity` `rotate` `shadow` | `bg:#fff shadow:sm` | Mermaid SVG内部themeは変更しない |
+
+- 構文: 直前 `<!-- kmark ... -->` scope `<!-- kmark { ... -->` define/use を使用
+- 対象外: `font_size` `color` `font_family` `line_height` `table_*` `video_*`
+- fence info: ` ```mermaid w:200 ` 形式は未対応
+
+````markdown
+<!-- kmark w:120mm h:70mm align:center radius:3mm shadow:sm -->
+```mermaid
+flowchart TD
+  A --> B
+```
+````
+
 ## Video Parameters
 
 | Parameter | 使用者視点 | 値 | 例 | 注意 |
@@ -232,12 +254,14 @@
 | `video_muted` | 初期mute | boolean | `video_muted:true` |  |
 | `video_loop` | loop再生 | boolean | `video_loop:true` |  |
 | `video_poster` | poster画像 | path/URL | `video_poster:./thumb.png` | unsafe scheme無視 |
+| `video_poster_time` | 動画内サムネイル位置 | seconds/time | `video_poster_time:5s` | `video_poster`指定時は画像優先 |
 
 - 対象記法: `![]()`
 - 動画判定: extension `.mp4` `.webm` `.ogg` `.mov` `.m4v`
 - 判定除外: query/hash
 - 大小文字: 不問
 - 常時有効: `controls` fullscreen
+- time形式: `5` `5s` `01:23` `01:02:03.5`
 - 未登録: `video_controls` `video_fullscreen` `video_preload` `controls` `fullscreen` `preload`
 
 ## Text Parameters

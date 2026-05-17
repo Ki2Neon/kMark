@@ -1,4 +1,5 @@
 import { type KmarkCompletionContext, type KmarkParamContext } from "./types";
+import { findLastKmarkDirectiveMarker } from "../../../domain/kmarkScopeSyntax";
 import { parseKmarkDirectiveFragment, splitKmarkDirectiveTokens } from "./parseKmarkDirectiveFragment";
 
 const INACTIVE_KMARK_COMPLETION_CONTEXT: KmarkCompletionContext = {
@@ -20,6 +21,7 @@ type MarkdownFence = {
 
 const MARKDOWN_IMAGE_PATTERN = /^!\[[^\]]*\]\((?:<([^>]+)>|([^)]+?))\)/u;
 const VIDEO_EXTENSION_PATTERN = /\.(?:mp4|webm|ogg|mov|m4v)$/iu;
+const MODEL_EXTENSION_PATTERN = /\.(?:glb|gltf|obj|stl|fbx)$/iu;
 
 export function detectKmarkCompletionContext(input: {
   readonly markdown: string;
@@ -109,17 +111,7 @@ function clampOffset(value: number, maximum: number): number {
 }
 
 function findKmarkMarker(lineBeforeCursor: string): { readonly index: number; readonly text: string } | null {
-  const matches = [...lineBeforeCursor.matchAll(/<!--\s*kmark\b/giu)];
-  const match = matches[matches.length - 1];
-
-  if (match === undefined || match.index === undefined) {
-    return null;
-  }
-
-  return {
-    index: match.index,
-    text: match[0],
-  };
+  return findLastKmarkDirectiveMarker(lineBeforeCursor);
 }
 
 function resolveCurrentToken(directiveText: string): { readonly start: number; readonly text: string } {
@@ -223,12 +215,16 @@ function resolveCompletionContexts(input: {
     addContext(contexts, "toc");
   }
 
-  if (nextBlockKind === "image" || nextBlockKind === "video") {
+  if (nextBlockKind === "image" || nextBlockKind === "video" || nextBlockKind === "model") {
     addContext(contexts, "image");
   }
 
   if (nextBlockKind === "video") {
     addContext(contexts, "video");
+  }
+
+  if (nextBlockKind === "model") {
+    addContext(contexts, "model");
   }
 
   if (nextBlockKind === "table") {
@@ -262,7 +258,7 @@ function isDocumentStart(markdown: string, lineStart: number): boolean {
   return markdown.slice(0, lineStart).split(/\r?\n/u).length <= 5;
 }
 
-function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "video" | "table" | "text" | "none" {
+function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "video" | "model" | "table" | "text" | "none" {
   const followingLines = markdown.slice(lineEnd).split(/\r?\n/u).slice(1);
 
   for (let lineIndex = 0; lineIndex < followingLines.length; lineIndex += 1) {
@@ -276,7 +272,16 @@ function resolveNextBlockKind(markdown: string, lineEnd: number): "image" | "vid
     const imageMatch = MARKDOWN_IMAGE_PATTERN.exec(trimmedLine);
 
     if (imageMatch !== null) {
-      return isVideoMarkdownDestination((imageMatch[1] ?? imageMatch[2] ?? "").trim()) ? "video" : "image";
+      const destination = (imageMatch[1] ?? imageMatch[2] ?? "").trim();
+
+      if (isVideoMarkdownDestination(destination)) {
+        return "video";
+      }
+      if (isModelMarkdownDestination(destination)) {
+        return "model";
+      }
+
+      return "image";
     }
 
     if (isMarkdownTableStart(trimmedLine, followingLines.slice(lineIndex + 1))) {
@@ -297,6 +302,16 @@ function isVideoMarkdownDestination(destination: string): boolean {
   const suffixStart = suffixStartCandidates.length > 0 ? Math.min(...suffixStartCandidates) : destination.length;
 
   return VIDEO_EXTENSION_PATTERN.test(destination.slice(0, suffixStart));
+}
+
+function isModelMarkdownDestination(destination: string): boolean {
+  const suffixStartCandidates = [
+    destination.indexOf("?"),
+    destination.indexOf("#"),
+  ].filter((index) => index >= 0);
+  const suffixStart = suffixStartCandidates.length > 0 ? Math.min(...suffixStartCandidates) : destination.length;
+
+  return MODEL_EXTENSION_PATTERN.test(destination.slice(0, suffixStart));
 }
 
 function isMarkdownTableStart(headerLine: string, followingLines: readonly string[]): boolean {

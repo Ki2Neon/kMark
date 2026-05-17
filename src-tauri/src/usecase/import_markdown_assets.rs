@@ -1,20 +1,24 @@
 use std::{
+    collections::HashSet,
     ffi::{OsStr, OsString},
-    io,
+    fs, io,
     path::{Component, Path, PathBuf},
 };
 
 use kmark_core::is_supported_markdown_path;
+use serde_json::Value;
 
 use crate::ports::AssetRepository;
 
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogg", "mov", "m4v"];
+const MODEL_EXTENSIONS: &[&str] = &["glb", "gltf", "obj", "stl", "fbx"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportedAssetKind {
     Image,
     Video,
+    Model,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +177,13 @@ where
     let asset_kind = imported_asset_kind_for_path(source_path).ok_or_else(|| {
         ImportMarkdownAssetsError::UnsupportedAssetType(display_path(source_path))
     })?;
+    copy_related_asset_files(
+        repository,
+        markdown_directory,
+        source_path,
+        &copied_path,
+        &asset_kind,
+    )?;
 
     Ok(ImportedMarkdownAsset {
         original_path: source_path.to_path_buf(),
@@ -285,6 +296,10 @@ fn is_video_path(path: &Path) -> bool {
     has_extension(path, VIDEO_EXTENSIONS)
 }
 
+fn is_model_path(path: &Path) -> bool {
+    has_extension(path, MODEL_EXTENSIONS)
+}
+
 fn imported_asset_kind_for_path(path: &Path) -> Option<ImportedAssetKind> {
     if is_image_path(path) {
         return Some(ImportedAssetKind::Image);
@@ -294,7 +309,200 @@ fn imported_asset_kind_for_path(path: &Path) -> Option<ImportedAssetKind> {
         return Some(ImportedAssetKind::Video);
     }
 
+    if is_model_path(path) {
+        return Some(ImportedAssetKind::Model);
+    }
+
     None
+}
+
+fn copy_related_asset_files<R>(
+    repository: &R,
+    markdown_directory: &Path,
+    source_path: &Path,
+    copied_path: &Path,
+    asset_kind: &ImportedAssetKind,
+) -> Result<(), ImportMarkdownAssetsError>
+where
+    R: AssetRepository,
+{
+    if !matches!(asset_kind, ImportedAssetKind::Model) {
+        return Ok(());
+    }
+
+    for related_path in collect_related_model_paths(source_path) {
+        if !repository.is_file(&related_path)
+            || is_same_existing_file(repository, &related_path, copied_path)
+        {
+            continue;
+        }
+
+        let file_name = related_path.file_name().ok_or_else(|| {
+            ImportMarkdownAssetsError::InvalidDroppedFileName(display_path(&related_path))
+        })?;
+        let direct_destination_path = markdown_directory.join(file_name);
+
+        if should_reference_existing_destination(
+            repository,
+            &related_path,
+            &direct_destination_path,
+        ) {
+            continue;
+        }
+
+        copy_to_non_conflicting_path(repository, &related_path, markdown_directory, file_name)?;
+    }
+
+    Ok(())
+}
+
+fn collect_related_model_paths(source_path: &Path) -> Vec<PathBuf> {
+    match source_path
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("obj") => collect_obj_related_paths(source_path),
+        Some("gltf") => collect_gltf_related_paths(source_path),
+        Some("fbx") => collect_fbx_related_paths(source_path),
+        _ => Vec::new(),
+    }
+}
+
+fn collect_obj_related_paths(source_path: &Path) -> Vec<PathBuf> {
+    let Ok(content) = fs::read_to_string(source_path) else {
+        return Vec::new();
+    };
+    let source_directory = source_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("mtllib ") else {
+            continue;
+        };
+
+        for mtl in rest.split_whitespace() {
+            let mtl_path = source_directory.join(mtl);
+            push_unique_existing_path(&mut paths, &mut seen, mtl_path.clone());
+
+            for texture_path in collect_mtl_texture_paths(&mtl_path) {
+                push_unique_existing_path(&mut paths, &mut seen, texture_path);
+            }
+        }
+    }
+
+    paths
+}
+
+fn collect_mtl_texture_paths(mtl_path: &Path) -> Vec<PathBuf> {
+    let Ok(content) = fs::read_to_string(mtl_path) else {
+        return Vec::new();
+    };
+    let mtl_directory = mtl_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut paths = Vec::new();
+
+    for line in content.lines() {
+        let parts = line.split_whitespace().collect::<Vec<_>>();
+        let Some(keyword) = parts.first() else {
+            continue;
+        };
+
+        if !matches!(
+            *keyword,
+            "map_Kd" | "map_Ks" | "map_Bump" | "bump" | "map_d" | "disp" | "decal"
+        ) {
+            continue;
+        }
+
+        if let Some(texture) = parts.last() {
+            paths.push(mtl_directory.join(texture));
+        }
+    }
+
+    paths
+}
+
+fn collect_gltf_related_paths(source_path: &Path) -> Vec<PathBuf> {
+    let Ok(content) = fs::read_to_string(source_path) else {
+        return Vec::new();
+    };
+    let Ok(document) = serde_json::from_str::<Value>(&content) else {
+        return Vec::new();
+    };
+    let source_directory = source_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for uri in document
+        .get("buffers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|buffer| buffer.get("uri").and_then(Value::as_str))
+        .chain(
+            document
+                .get("images")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|image| image.get("uri").and_then(Value::as_str)),
+        )
+    {
+        if uri.starts_with("data:") {
+            continue;
+        }
+        let (path, _) = split_resource_path_and_suffix(uri);
+        push_unique_existing_path(&mut paths, &mut seen, source_directory.join(path));
+    }
+
+    paths
+}
+
+fn collect_fbx_related_paths(source_path: &Path) -> Vec<PathBuf> {
+    let Ok(bytes) = fs::read(source_path) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let source_directory = source_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for token in text.split(|character: char| {
+        character.is_whitespace() || matches!(character, '"' | '\'' | '\0' | ',' | ';')
+    }) {
+        if is_texture_path_token(token) {
+            push_unique_existing_path(&mut paths, &mut seen, source_directory.join(token));
+        }
+    }
+
+    paths
+}
+
+fn is_texture_path_token(token: &str) -> bool {
+    let extension = Path::new(token)
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(str::to_ascii_lowercase);
+
+    matches!(
+        extension.as_deref(),
+        Some("png" | "jpg" | "jpeg" | "webp" | "bmp" | "tga" | "tif" | "tiff")
+    )
+}
+
+fn push_unique_existing_path(paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, path: PathBuf) {
+    if path.is_file() && seen.insert(path.clone()) {
+        paths.push(path);
+    }
+}
+
+fn split_resource_path_and_suffix(resource: &str) -> (&str, &str) {
+    let suffix_start = resource.find(['?', '#']).unwrap_or(resource.len());
+
+    (&resource[..suffix_start], &resource[suffix_start..])
 }
 
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {

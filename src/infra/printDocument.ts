@@ -37,8 +37,16 @@ const PRINT_DOCUMENT_LOAD_TIMEOUT_MS = 3000;
 const PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 2000;
 const A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 60000;
 const KMARK_PRINT_ROOT_ID = "kmark-print-root";
+const PRINT_DOCUMENT_ROOT_ATTRIBUTE_NAMES = ["data-app-theme", "data-preview-colors"] as const;
 
-const PRINT_DOCUMENT_BASE_STYLE = `
+type StandardPrintPreviewContent = {
+  readonly html: string;
+  readonly style: string;
+};
+
+// Normal print output is derived from the active preview stylesheet.
+// This fallback is only for environments where CSSOM stylesheet access is blocked.
+const PRINT_DOCUMENT_FALLBACK_STYLE = `
   * {
     box-sizing: border-box;
   }
@@ -108,9 +116,81 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 
   .markdown-body img,
-  .markdown-body video {
+  .markdown-body video,
+  .markdown-body .kmark-model-viewer,
+  .markdown-body .kmark-model-error {
     max-width: 100%;
     box-sizing: content-box;
+  }
+
+  .markdown-body .kmark-model-viewer {
+    position: relative;
+    display: inline-block;
+    min-width: 220px;
+    height: 360px;
+    overflow: hidden;
+    border: 0.75pt solid #d7d7d7;
+    border-radius: 4pt;
+    background: #ffffff;
+  }
+
+  .markdown-body .kmark-model-canvas,
+  .markdown-body .kmark-model-canvas > canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .markdown-body .kmark-model-status,
+  .markdown-body .kmark-model-error {
+    display: block;
+    padding: 0.75em 0.9em;
+    border: 0.75pt solid #d7d7d7;
+    border-radius: 4pt;
+    background: #fff5f5;
+    color: #991b1b;
+    white-space: pre-wrap;
+  }
+
+  .markdown-body video[poster] {
+    display: inline-block;
+    overflow: hidden;
+    background-color: #000;
+    object-fit: contain;
+    object-position: center center;
+  }
+
+  .markdown-body .kmark-video-frame {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    background-color: #000;
+    line-height: 0;
+    vertical-align: baseline;
+    box-sizing: content-box;
+  }
+
+  .markdown-body .kmark-video-frame > video {
+    display: block;
+    max-width: 100%;
+  }
+
+  .markdown-body .kmark-video-frame > .kmark-video-poster-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    object-fit: contain;
+    object-position: center center;
+    pointer-events: none;
+    user-select: none;
+    box-sizing: border-box;
+  }
+
+  .markdown-body .kmark-video-frame[data-kmark-video-load-state="failed"] > .kmark-video-poster-image {
+    display: none;
   }
 
   .markdown-body .kmark-mermaid-block {
@@ -132,10 +212,41 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     overflow: hidden;
   }
 
+  .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered {
+    width: 100%;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered {
+    height: 100%;
+  }
+
   .markdown-body .kmark-mermaid-rendered svg {
     display: block;
+    flex: 0 1 auto;
     max-width: 100%;
+    min-width: 0;
+    min-height: 0;
     height: auto;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered svg {
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-height:not(.kmark-mermaid-block--sized-width) .kmark-mermaid-rendered svg {
+    width: auto !important;
+  }
+
+  .markdown-body .kmark-mermaid-block--sized-width:not(.kmark-mermaid-block--sized-height) .kmark-mermaid-rendered svg {
+    height: auto !important;
   }
 
   .markdown-body .kmark-mermaid-error {
@@ -271,6 +382,56 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   .markdown-body .kmark-toc__page {
     color: #555555;
     font-variant-numeric: tabular-nums;
+  }
+
+  .markdown-body .markdown-task-checkbox {
+    display: block;
+    flex: 0 0 auto;
+    width: 1.14em;
+    height: 1.14em;
+    margin: 0.14em 0 0;
+    border: 0.16em solid #111111;
+    background: #ffffff;
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .markdown-body .markdown-task-checkbox svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .markdown-body .markdown-task-checkbox path {
+    fill: none;
+    stroke: #ffffff;
+    stroke-width: 3.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .markdown-body .markdown-task-checkbox[data-checked="true"] {
+    background: #111111;
+  }
+
+  .markdown-body .markdown-task-checkbox[data-checked="false"] svg {
+    visibility: hidden;
+  }
+
+  .markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox) {
+    padding-left: 0;
+  }
+
+  .markdown-body li:has(> .markdown-task-checkbox) {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.68em;
+    list-style: none;
+    min-height: 1.5em;
   }
 
   .markdown-body blockquote {
@@ -524,22 +685,36 @@ const PRINT_DOCUMENT_BASE_STYLE = `
     padding: 0.08em 0.3em;
     font-family: "Iosevka Term", "Cascadia Code", Consolas, monospace;
     font-size: 0.92em;
-    background: #f5f5f5;
+    background: #f3f3f3;
+    color: #111111;
+    border-radius: 2pt;
   }
 
   .markdown-body pre {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     overflow: visible;
     padding: 9pt;
-    border: 0.75pt solid #d7d7d7;
+    border: 0.75pt solid #d0d0d0;
+    border-left: 3pt solid #8a8a8a;
     background: #f5f5f5;
+    color: #111111;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
   }
 
   .markdown-body pre code {
+    display: block;
+    width: auto;
+    min-width: 0;
     padding: 0;
     background: transparent;
+    color: inherit;
     white-space: inherit;
+    overflow-wrap: inherit;
+    word-break: inherit;
   }
 
   .markdown-body table {
@@ -565,20 +740,89 @@ const PRINT_DOCUMENT_BASE_STYLE = `
   }
 `;
 
-const STANDARD_PRINT_DOCUMENT_STYLE = `
+const PRINT_DOCUMENT_PREVIEW_DERIVED_OVERRIDE_STYLE = `
+  html,
+  body {
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0;
+    overflow: visible !important;
+    background: var(--preview-surface, #ffffff);
+    color: var(--preview-text, #111111);
+    touch-action: auto;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    font-family: var(--app-font-family, "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif);
+    line-height: 1.5;
+  }
+
+  .markdown-body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .kmark-page-header__text,
+  .kmark-page-footer__text {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+`;
+
+function getDocumentStyleSheetText(styleSheet: CSSStyleSheet): string {
+  if (styleSheet.disabled) {
+    return "";
+  }
+
+  try {
+    return Array.from(styleSheet.cssRules)
+      .map((rule) => rule.cssText)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function getPreviewSourceStyleText(): string {
+  if (typeof document === "undefined") {
+    return "";
+  }
+
+  return Array.from(document.styleSheets)
+    .map((styleSheet) => getDocumentStyleSheetText(styleSheet))
+    .filter((styleText) => styleText.trim().length > 0)
+    .join("\n\n");
+}
+
+function createPreviewDerivedPrintDocumentStyle(): string {
+  const previewSourceStyleText = getPreviewSourceStyleText();
+  const sourceStyleText = previewSourceStyleText.trim().length > 0
+    ? previewSourceStyleText
+    : PRINT_DOCUMENT_FALLBACK_STYLE;
+
+  return `${sourceStyleText}\n${PRINT_DOCUMENT_PREVIEW_DERIVED_OVERRIDE_STYLE}`;
+}
+
+function createStandardPrintDocumentStyle(): string {
+  return `
   @page {
     margin: 12mm;
   }
 
-  ${PRINT_DOCUMENT_BASE_STYLE}
+  ${createPreviewDerivedPrintDocumentStyle()}
 `;
+}
 
-const A4_PRINT_DOCUMENT_STYLE = `
+function createA4PrintDocumentBaseStyle(): string {
+  return `
   @page {
     margin: 0;
   }
 
-  ${PRINT_DOCUMENT_BASE_STYLE}
+  ${createPreviewDerivedPrintDocumentStyle()}
 
   #${KMARK_PRINT_ROOT_ID} {
     display: block;
@@ -587,7 +831,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
     height: auto;
     min-height: 0;
     overflow: visible;
-    background: #ffffff;
+    background: var(--preview-surface, #ffffff);
   }
 
   #${KMARK_PRINT_ROOT_ID} * {
@@ -607,7 +851,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
       var(--kmark-page-margin-left, ${A4_MARGIN_LEFT_MM}mm);
     box-sizing: border-box;
     overflow: hidden;
-    background: #ffffff;
+    background: var(--preview-surface, #ffffff);
     border: 0;
     box-shadow: none;
     transform: none;
@@ -667,6 +911,7 @@ const A4_PRINT_DOCUMENT_STYLE = `
     }
   }
 `;
+}
 
 function createA4PrintDocumentStyle(pages: readonly A4PrintPreviewPage[]): string {
   const namedPageRules = pages
@@ -682,7 +927,7 @@ function createA4PrintDocumentStyle(pages: readonly A4PrintPreviewPage[]): strin
     `)
     .join("");
 
-  return `${A4_PRINT_DOCUMENT_STYLE}\n${namedPageRules}`;
+  return `${createA4PrintDocumentBaseStyle()}\n${namedPageRules}`;
 }
 
 function escapeHtml(value: string): string {
@@ -692,6 +937,47 @@ function escapeHtml(value: string): string {
     .replace(/>/gu, "&gt;")
     .replace(/"/gu, "&quot;")
     .replace(/'/gu, "&#39;");
+}
+
+function createOptionalHtmlAttribute(name: string, value: string | null): string {
+  const normalizedValue = value?.trim() ?? "";
+
+  return normalizedValue.length > 0 ? ` ${name}="${escapeHtml(normalizedValue)}"` : "";
+}
+
+function createCurrentDocumentRootAttributes(): string {
+  const root = document.documentElement;
+  const copiedAttributes = PRINT_DOCUMENT_ROOT_ATTRIBUTE_NAMES
+    .map((attributeName) => createOptionalHtmlAttribute(attributeName, root.getAttribute(attributeName)))
+    .join("");
+
+  return `lang="ja"${copiedAttributes}${createOptionalHtmlAttribute("style", root.getAttribute("style"))}`;
+}
+
+function createOptionalStyleAttribute(style: string): string {
+  return createOptionalHtmlAttribute("style", style);
+}
+
+function getElementCustomPropertyStyle(element: HTMLElement): string {
+  const declarations: string[] = [];
+
+  for (let index = 0; index < element.style.length; index += 1) {
+    const propertyName = element.style.item(index);
+
+    if (!propertyName.startsWith("--")) {
+      continue;
+    }
+
+    const propertyValue = element.style.getPropertyValue(propertyName).trim();
+
+    if (propertyValue.length === 0) {
+      continue;
+    }
+
+    declarations.push(`${propertyName}: ${propertyValue};`);
+  }
+
+  return declarations.join(" ");
 }
 
 function isVisiblePreviewElement(element: HTMLElement): boolean {
@@ -747,19 +1033,41 @@ function getDisplayedPreviewA4Pages(): readonly A4PrintPreviewPage[] {
     .filter((page) => page.html.trim().length > 0);
 }
 
+function getDisplayedStandardPreviewContent(
+  options: StandardPrintMarkdownDocumentOptions,
+): StandardPrintPreviewContent {
+  const previewContent = document.querySelector<HTMLElement>(".preview-section__standard-content.markdown-body");
+
+  if (
+    previewContent === null
+    || previewContent.closest(`#${KMARK_PRINT_ROOT_ID}`) !== null
+    || !isVisiblePreviewElement(previewContent)
+  ) {
+    return {
+      html: options.html,
+      style: "",
+    };
+  }
+
+  return {
+    html: previewContent.innerHTML,
+    style: getElementCustomPropertyStyle(previewContent),
+  };
+}
+
 function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pages: readonly A4PrintPreviewPage[]): string {
   const pageMarkup = pages
     .map((page) => `
       <div class="preview-section__page-frame kmark-print-page" data-kmark-print-page="${page.pageName}" style="${escapeHtml(page.frameStyle)}">
         ${page.pageChromeHtml}
-        <main class="kmark-page-body markdown-body markdown-body--a4 print-page">${page.html}</main>
+        <main class="preview-section__page kmark-page-body markdown-body markdown-body--a4 print-page">${page.html}</main>
         ${page.pageNumberHtml}
       </div>
     `)
     .join("");
 
   return `<!doctype html>
-<html lang="ja">
+<html ${createCurrentDocumentRootAttributes()}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -860,15 +1168,16 @@ function printA4MarkdownDocument(options: A4PrintMarkdownDocumentOptions): Promi
 }
 
 function createPrintDocumentMarkup(options: StandardPrintMarkdownDocumentOptions): string {
-  const bodyMarkup = `<article class="markdown-body">${options.html}</article>`;
+  const previewContent = getDisplayedStandardPreviewContent(options);
+  const bodyMarkup = `<article class="preview-section__standard-content markdown-body"${createOptionalStyleAttribute(previewContent.style)}>${previewContent.html}</article>`;
 
   return `<!doctype html>
-<html lang="ja">
+<html ${createCurrentDocumentRootAttributes()}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(options.title)}</title>
-    <style>${STANDARD_PRINT_DOCUMENT_STYLE}</style>
+    <style>${createStandardPrintDocumentStyle()}</style>
   </head>
   <body>
     ${bodyMarkup}

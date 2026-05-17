@@ -35,9 +35,11 @@ pub use markdown_document_error::MarkdownDocumentError;
 pub use preview_preferences::{PreviewDisplayMode, PreviewPreferences};
 pub use recent_files::{RecentFile, RecentFiles, MAX_RECENT_FILES};
 pub use render_markdown_preview::{
-    render_markdown_preview, render_markdown_preview_with_file_path, CssLength, PageChromeConfig,
-    PageChromeRegionConfig, PageNumberConfig, PageNumberPosition, PageNumberStyle, PageStyle,
-    PreviewTextStyle, RenderedMarkdownPreview, RenderedPage,
+    render_markdown_preview, render_markdown_preview_with_file_path,
+    render_markdown_preview_with_file_path_and_model_assets, CssLength, KmarkModelAssetError,
+    KmarkModelAssetResolution, PageChromeConfig, PageChromeRegionConfig, PageNumberConfig,
+    PageNumberPosition, PageNumberStyle, PageStyle, PreviewTextStyle, RenderedMarkdownPreview,
+    RenderedPage,
 };
 pub use table_format::{
     format_markdown_tables, format_markdown_tables_in_line_ranges, format_table_block,

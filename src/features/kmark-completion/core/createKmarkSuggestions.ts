@@ -14,6 +14,7 @@ import {
   type KmarkCompletionItem,
   type KmarkCompletionResult,
   type KmarkCompletionSection,
+  type KmarkPathCompletionEntry,
   type KmarkParamContext,
   type KmarkParamSpec,
 } from "./types";
@@ -32,6 +33,29 @@ const VIDEO_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["video_muted", 490],
   ["video_loop", 480],
   ["video_poster", 470],
+  ["video_poster_time", 460],
+]);
+
+const MODEL_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
+  ["model_view", 560],
+  ["model_projection", 550],
+  ["model_fov", 540],
+  ["model_camera_yaw", 530],
+  ["model_camera_pitch", 520],
+  ["model_camera_distance", 510],
+  ["model_light_preset", 500],
+  ["model_controls", 490],
+  ["model_auto_rotate", 480],
+  ["model_bg", 470],
+  ["model_loading", 460],
+  ["model_convert", 450],
+  ["model_convert_force", 440],
+  ["model_convert_scale", 430],
+  ["model_convert_up", 420],
+  ["model_convert_center", 410],
+  ["w", 405],
+  ["h", 400],
+  ["align", 395],
 ]);
 
 const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
@@ -120,10 +144,16 @@ const FONT_FAMILY_PARAM_NAMES = new Set([
   "page_footer_font_family",
 ]);
 
+const PATH_PARAM_NAMES = new Set([
+  "model_poster",
+  "video_poster",
+]);
+
 export function createKmarkSuggestions(input: {
   readonly markdown: string;
   readonly cursorOffset: number;
   readonly fontFamilies?: readonly string[];
+  readonly pathCompletions?: readonly KmarkPathCompletionEntry[];
 }): KmarkCompletionResult {
   const context = detectKmarkCompletionContext(input);
 
@@ -141,7 +171,7 @@ export function createKmarkSuggestions(input: {
   if (context.mode === "parameter-value" || context.mode === "style-define") {
     return {
       context,
-      items: createValueSuggestions(context, input.fontFamilies ?? []),
+      items: createValueSuggestions(context, input.fontFamilies ?? [], input.pathCompletions ?? []),
     };
   }
 
@@ -181,9 +211,14 @@ export function isKmarkFontFamilyParamName(name: string): boolean {
   return FONT_FAMILY_PARAM_NAMES.has(name);
 }
 
+export function isKmarkPathParamName(name: string): boolean {
+  return PATH_PARAM_NAMES.has(name);
+}
+
 function createValueSuggestions(
   context: KmarkCompletionContext,
   fontFamilies: readonly string[],
+  pathCompletions: readonly KmarkPathCompletionEntry[],
 ): readonly KmarkCompletionItem[] {
   const paramName = context.currentParamName ?? "";
   const spec = findParamSpec(paramName);
@@ -194,6 +229,10 @@ function createValueSuggestions(
 
   if (isKmarkFontFamilyParamName(spec.name)) {
     return createFontFamilyValueSuggestions(context, spec, fontFamilies);
+  }
+
+  if (isKmarkPathParamName(spec.name)) {
+    return createPathValueSuggestions(context, spec, pathCompletions);
   }
 
   const prefix = (context.currentValuePrefix ?? "").toLocaleLowerCase("en-US");
@@ -211,6 +250,30 @@ function createValueSuggestions(
       priority: (spec.priority ?? 0) - index,
       sortText: `${String(index).padStart(3, "0")}-${value}`,
     }));
+}
+
+function createPathValueSuggestions(
+  context: KmarkCompletionContext,
+  spec: KmarkParamSpec,
+  pathCompletions: readonly KmarkPathCompletionEntry[],
+): readonly KmarkCompletionItem[] {
+  return pathCompletions.map((pathCompletion, index) => {
+    const insertText = pathCompletion.entryKind === "directory"
+      ? pathCompletion.insertText
+      : withOptionalTrailingSpace(pathCompletion.insertText, context);
+
+    return {
+      label: pathCompletion.label,
+      insertText,
+      description: `${spec.description}: ${pathCompletion.relativePath}`,
+      detail: pathCompletion.entryKind === "directory" ? "directory" : spec.name,
+      kind: "path",
+      pathEntryKind: pathCompletion.entryKind,
+      section: resolveCompletionSection(spec.contexts, context.contexts, "general"),
+      priority: (spec.priority ?? 0) - index,
+      sortText: `${String(index).padStart(3, "0")}-${pathCompletion.label}`,
+    };
+  });
 }
 
 function createFontFamilyValueSuggestions(
@@ -364,6 +427,10 @@ function scoreParamSpec(spec: KmarkParamSpec, context: KmarkCompletionContext, p
     return 10_500 + (VIDEO_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
 
+  if (context.contexts.includes("model") && spec.contexts.includes("model")) {
+    return 10_300 + (MODEL_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
+  }
+
   if (context.contexts.includes("image") && spec.contexts.includes("image")) {
     return 10_000 + (IMAGE_PARAM_PRIORITY.get(spec.name) ?? 300) + prefixBoost;
   }
@@ -466,6 +533,10 @@ function resolveCompletionSection(
     return "video";
   }
 
+  if (activeContexts.includes("model") && candidateContexts.includes("model")) {
+    return "model";
+  }
+
   if (activeContexts.includes("image") && candidateContexts.includes("image")) {
     return "image";
   }
@@ -499,6 +570,8 @@ function detailForSection(section: KmarkCompletionSection): string {
       return "kmark image";
     case "video":
       return "kmark video";
+    case "model":
+      return "kmark model";
     case "page":
       return "kmark page";
     case "scope":

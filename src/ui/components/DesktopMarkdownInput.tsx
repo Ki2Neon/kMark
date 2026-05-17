@@ -10,8 +10,10 @@ import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPr
 import { type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
 import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
+import { createCodeMirrorKmarkScopeDisplayExtension } from "../../features/kmark-scope-display/adapter/codeMirrorKmarkScopeDisplayExtension";
 import { createCodeMirrorMarkdownTableAutoFormatExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableAutoFormatExtension";
 import { createCodeMirrorMarkdownTableEditExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableEditExtension";
+import { listMarkdownPathSuggestions } from "../../infra/markdownPathSuggestions";
 import { isTauri, listenRuntimeDragDropEvent, type RuntimeDragDropEvent } from "../../runtime/runtime";
 import { MobileInputHelperBar, type MobileEditorInsertAdapter } from "./MobileInputHelperBar";
 
@@ -117,13 +119,10 @@ const MARKDOWN_SNIPPET_COMPLETIONS: readonly Completion[] = MARKDOWN_SNIPPET_DEF
 ));
 
 const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COMPLETIONS);
-const KMARK_COMPLETION_SOURCE = createCodeMirrorKmarkCompletionSource();
 const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
+const KMARK_SCOPE_DISPLAY_EXTENSION = createCodeMirrorKmarkScopeDisplayExtension();
 const MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION = createCodeMirrorMarkdownTableAutoFormatExtension();
 const MARKDOWN_TABLE_EDIT_EXTENSION = createCodeMirrorMarkdownTableEditExtension();
-const EDITOR_COMPLETION_SOURCE: CompletionSource = (context) => (
-  KMARK_COMPLETION_SOURCE(context) ?? (context.explicit ? MARKDOWN_SNIPPET_COMPLETION_SOURCE(context) : null)
-);
 
 function isDarkEditorTheme(appThemeId: AppThemeId): boolean {
   return !(appThemeId === "vscode-light" || appThemeId === "github-light" || appThemeId === "paper");
@@ -372,6 +371,7 @@ type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly blurOnEscapeWhenSelectionEmpty?: boolean;
   readonly content: string;
+  readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
@@ -390,6 +390,7 @@ function DesktopMarkdownInputComponent({
   appThemeId,
   blurOnEscapeWhenSelectionEmpty = false,
   content,
+  currentDocumentFilePath = null,
   editFontId,
   multiCursorModifier,
   showLineNumbers,
@@ -473,6 +474,22 @@ function DesktopMarkdownInputComponent({
     restoreSelection: restoreEditorSelection,
     saveSelection: saveEditorSelection,
   }), [focusEditor, insertEditorText, restoreEditorSelection, saveEditorSelection]);
+
+  const kmarkCompletionSource = useMemo(
+    () => createCodeMirrorKmarkCompletionSource({
+      markdownFilePath: currentDocumentFilePath,
+      pathCompletionProvider: listMarkdownPathSuggestions,
+    }),
+    [currentDocumentFilePath],
+  );
+  const editorCompletionSource = useMemo<CompletionSource>(
+    () => async (context) => {
+      const kmarkResult = await kmarkCompletionSource(context);
+
+      return kmarkResult ?? (context.explicit ? MARKDOWN_SNIPPET_COMPLETION_SOURCE(context) : null);
+    },
+    [kmarkCompletionSource],
+  );
 
   const applyRequestedLineSelection = useCallback((view: EditorView, request: NonNullable<DesktopMarkdownInputProps["requestedLineSelection"]>) => {
     const maximumLineNumber = view.state.doc.lines;
@@ -735,12 +752,13 @@ function DesktopMarkdownInputComponent({
       MARKDOWN_TABLE_EDIT_EXTENSION,
       MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+      KMARK_SCOPE_DISPLAY_EXTENSION,
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
       MARKDOWN_SELECTION_WRAP_EXTENSION,
       autocompletion({
         activateOnTyping: true,
-        override: [EDITOR_COMPLETION_SOURCE],
+        override: [editorCompletionSource],
       }),
       keymap.of(completionKeymap),
       Prec.highest(keymap.of(editorKeyBindings)),
@@ -753,7 +771,7 @@ function DesktopMarkdownInputComponent({
       )),
       editorTheme,
     ];
-  }, [blurOnEscapeWhenSelectionEmpty, editorTheme, multiCursorModifier, showLineNumbers]);
+  }, [blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, multiCursorModifier, showLineNumbers]);
 
   return (
     <>
