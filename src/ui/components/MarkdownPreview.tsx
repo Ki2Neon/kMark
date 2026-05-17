@@ -26,6 +26,7 @@ const PREVIEW_CURSOR_SCROLL_PADDING_PX = 72;
 const PREVIEW_CURSOR_VIEWPORT_ANCHOR_RATIO = 0.35;
 const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
 const KMARK_VIDEO_FAILED_STATE = "failed";
+const VIDEO_HAVE_METADATA_READY_STATE = 1;
 const DEFAULT_TABLE_CELL_HORIZONTAL_PADDING_PX = 12;
 const DEFAULT_TABLE_CELL_VERTICAL_PADDING_PX = 10.4;
 const MIN_TABLE_CELL_HORIZONTAL_PADDING_PX = 4;
@@ -3250,6 +3251,254 @@ function hideVideoLoadError(video: HTMLVideoElement): void {
   }
 }
 
+type PreviewHtmlSurfaceElement = "article" | "main";
+
+type PreviewHtmlSurfaceProps = {
+  readonly className: string;
+  readonly element: PreviewHtmlSurfaceElement;
+  readonly html: string;
+  readonly style?: CSSProperties;
+};
+
+type PreviewVideoSnapshot = {
+  readonly currentTime: number;
+  readonly muted: boolean;
+  readonly paused: boolean;
+  readonly playbackRate: number;
+  readonly posterFrameReady: boolean;
+  readonly posterPlaybackStarted: boolean;
+  readonly volume: number;
+};
+
+function resolvePreviewVideoSnapshotKey(
+  video: HTMLVideoElement,
+  occurrenceCounts: Map<string, number>,
+): string {
+  const source = video.dataset.kmarkVideoSource ?? video.currentSrc ?? video.getAttribute("src") ?? "";
+  const sourceLineStart = video.dataset.sourceLineStart ?? video.getAttribute("data-source-line-start") ?? "";
+  const sourceLineEnd = video.dataset.sourceLineEnd ?? video.getAttribute("data-source-line-end") ?? "";
+  const baseKey = [source, sourceLineStart, sourceLineEnd].join("\u0000");
+  const occurrence = occurrenceCounts.get(baseKey) ?? 0;
+
+  occurrenceCounts.set(baseKey, occurrence + 1);
+
+  return `${baseKey}\u0000${occurrence}`;
+}
+
+function collectPreviewVideoSnapshots(surface: HTMLElement): ReadonlyMap<string, PreviewVideoSnapshot> {
+  const snapshots = new Map<string, PreviewVideoSnapshot>();
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const video of surface.querySelectorAll<HTMLVideoElement>("video")) {
+    snapshots.set(resolvePreviewVideoSnapshotKey(video, occurrenceCounts), {
+      currentTime: video.currentTime,
+      muted: video.muted,
+      paused: video.paused,
+      playbackRate: video.playbackRate,
+      posterFrameReady: video.dataset.kmarkVideoPosterFrameReady === "true",
+      posterPlaybackStarted: video.dataset.kmarkVideoPosterPlaybackStarted === "true",
+      volume: video.volume,
+    });
+  }
+
+  return snapshots;
+}
+
+function restorePreviewVideoSnapshot(video: HTMLVideoElement, snapshot: PreviewVideoSnapshot): void {
+  video.muted = snapshot.muted;
+  video.playbackRate = snapshot.playbackRate;
+  video.volume = snapshot.volume;
+
+  if (snapshot.posterFrameReady) {
+    video.dataset.kmarkVideoPosterFrameReady = "true";
+  }
+  if (snapshot.posterPlaybackStarted) {
+    video.dataset.kmarkVideoPosterPlaybackStarted = "true";
+  }
+
+  const restoreTimeAndPlayback = () => {
+    if (Number.isFinite(snapshot.currentTime) && snapshot.currentTime >= 0) {
+      try {
+        video.currentTime = snapshot.currentTime;
+      } catch {
+        // Some engines reject seeking until metadata is fully available.
+      }
+    }
+
+    if (!snapshot.paused) {
+      void video.play().catch(() => {});
+    }
+  };
+
+  if (video.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+    restoreTimeAndPlayback();
+    return;
+  }
+
+  video.addEventListener("loadedmetadata", restoreTimeAndPlayback, { once: true });
+}
+
+function restorePreviewVideoSnapshots(
+  surface: HTMLElement,
+  snapshots: ReadonlyMap<string, PreviewVideoSnapshot>,
+): void {
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const video of surface.querySelectorAll<HTMLVideoElement>("video")) {
+    const snapshot = snapshots.get(resolvePreviewVideoSnapshotKey(video, occurrenceCounts));
+
+    if (snapshot !== undefined) {
+      restorePreviewVideoSnapshot(video, snapshot);
+    }
+  }
+}
+
+function applyPreviewSurfaceHtml(surface: HTMLElement, html: string): void {
+  const videoSnapshots = collectPreviewVideoSnapshots(surface);
+
+  surface.innerHTML = html;
+  restorePreviewVideoSnapshots(surface, videoSnapshots);
+}
+
+function isPreviewSurfaceFullscreen(surface: HTMLElement): boolean {
+  const fullscreenElement = document.fullscreenElement;
+
+  return fullscreenElement instanceof Element
+    && (fullscreenElement === surface || surface.contains(fullscreenElement));
+}
+
+function PreviewHtmlSurface({
+  className,
+  element,
+  html,
+  style,
+}: PreviewHtmlSurfaceProps) {
+  const surfaceRef = useRef<HTMLElement | null>(null);
+  const appliedHtmlRef = useRef<string | null>(null);
+  const pendingHtmlRef = useRef<string | null>(null);
+
+  const handleSurfaceRef = useCallback((node: HTMLElement | null) => {
+    if (surfaceRef.current !== node) {
+      appliedHtmlRef.current = null;
+      pendingHtmlRef.current = null;
+    }
+
+    surfaceRef.current = node;
+  }, []);
+
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+
+    if (surface === null || appliedHtmlRef.current === html) {
+      return;
+    }
+
+    if (isPreviewSurfaceFullscreen(surface)) {
+      pendingHtmlRef.current = html;
+      return;
+    }
+
+    applyPreviewSurfaceHtml(surface, html);
+    appliedHtmlRef.current = html;
+    pendingHtmlRef.current = null;
+  }, [html]);
+
+  useLayoutEffect(() => {
+    const handleFullscreenChange = () => {
+      const surface = surfaceRef.current;
+      const pendingHtml = pendingHtmlRef.current;
+
+      if (surface === null || pendingHtml === null || isPreviewSurfaceFullscreen(surface)) {
+        return;
+      }
+
+      applyPreviewSurfaceHtml(surface, pendingHtml);
+      appliedHtmlRef.current = pendingHtml;
+      pendingHtmlRef.current = null;
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  if (element === "main") {
+    return <main ref={handleSurfaceRef} className={className} style={style} />;
+  }
+
+  return <article ref={handleSurfaceRef} className={className} style={style} />;
+}
+
+function parseKmarkVideoPosterTime(video: HTMLVideoElement): number | null {
+  const value = Number(video.dataset.kmarkVideoPosterTime);
+
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function clampVideoTime(video: HTMLVideoElement, seconds: number): number {
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    return clamp(seconds, 0, video.duration);
+  }
+
+  return seconds;
+}
+
+function prepareKmarkVideoPosterFrame(video: HTMLVideoElement): () => void {
+  const posterTime = parseKmarkVideoPosterTime(video);
+
+  if (posterTime === null) {
+    return () => {};
+  }
+
+  const seekPosterFrame = () => {
+    if (video.dataset.kmarkVideoPosterPlaybackStarted === "true") {
+      return;
+    }
+
+    const posterFrameTime = clampVideoTime(video, posterTime);
+
+    if (Math.abs(video.currentTime - posterFrameTime) > 0.05) {
+      try {
+        video.currentTime = posterFrameTime;
+      } catch {
+        return;
+      }
+    }
+
+    video.dataset.kmarkVideoPosterFrameReady = "true";
+  };
+  const handlePlay = () => {
+    if (video.dataset.kmarkVideoPosterPlaybackStarted === "true") {
+      return;
+    }
+
+    video.dataset.kmarkVideoPosterPlaybackStarted = "true";
+
+    if (video.dataset.kmarkVideoPosterFrameReady === "true" && posterTime > 0) {
+      try {
+        video.currentTime = 0;
+      } catch {
+        // Playback can continue from the browser-selected position if seeking is unavailable.
+      }
+    }
+  };
+
+  if (video.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+    seekPosterFrame();
+  } else {
+    video.addEventListener("loadedmetadata", seekPosterFrame);
+  }
+
+  video.addEventListener("play", handlePlay);
+
+  return () => {
+    video.removeEventListener("loadedmetadata", seekPosterFrame);
+    video.removeEventListener("play", handlePlay);
+  };
+}
+
 function MarkdownPreviewComponent({
   activeSourceLine = null,
   defaultPageStyle = DEFAULT_PAGE_STYLE,
@@ -3358,6 +3607,10 @@ function MarkdownPreviewComponent({
     const eventTarget = resolveEventTargetElement(event.target);
 
     if (eventTarget === null) {
+      return;
+    }
+
+    if (eventTarget.closest("a, button, input, textarea, select, video") !== null) {
       return;
     }
 
@@ -3608,6 +3861,7 @@ function MarkdownPreviewComponent({
     const previewVideos = Array.from(
       previewViewport.querySelectorAll<HTMLVideoElement>("video[data-kmark-video-source]"),
     );
+    const videoPosterFrameCleanups: Array<() => void> = [];
     const handleVideoLoaded = (event: Event) => {
       if (event.currentTarget instanceof HTMLVideoElement) {
         hideVideoLoadError(event.currentTarget);
@@ -3621,17 +3875,27 @@ function MarkdownPreviewComponent({
 
     for (const previewVideo of previewVideos) {
       ensureVideoErrorElement(previewVideo);
+      videoPosterFrameCleanups.push(prepareKmarkVideoPosterFrame(previewVideo));
       previewVideo.addEventListener("loadedmetadata", handleVideoLoaded);
+      previewVideo.addEventListener("loadeddata", handleVideoLoaded);
+      previewVideo.addEventListener("canplay", handleVideoLoaded);
       previewVideo.addEventListener("error", handleVideoError);
 
       if (previewVideo.error !== null) {
         showVideoLoadError(previewVideo);
+      } else if (previewVideo.readyState >= VIDEO_HAVE_METADATA_READY_STATE) {
+        hideVideoLoadError(previewVideo);
       }
     }
 
     return () => {
+      for (const cleanup of videoPosterFrameCleanups) {
+        cleanup();
+      }
       for (const previewVideo of previewVideos) {
         previewVideo.removeEventListener("loadedmetadata", handleVideoLoaded);
+        previewVideo.removeEventListener("loadeddata", handleVideoLoaded);
+        previewVideo.removeEventListener("canplay", handleVideoLoaded);
         previewVideo.removeEventListener("error", handleVideoError);
       }
     };
@@ -3905,9 +4169,10 @@ function MarkdownPreviewComponent({
               >
                 <div className="preview-section__page-frame" style={getPreviewPageStyle(getPreviewPageConfig(page))}>
                   {renderPageChromeRegion("header", page.pageChromeConfig.header)}
-                  <main
+                  <PreviewHtmlSurface
                     className="preview-section__page kmark-page-body markdown-body markdown-body--a4"
-                    dangerouslySetInnerHTML={{ __html: page.html }}
+                    element="main"
+                    html={page.html}
                   />
                   {renderPageChromeRegion("footer", page.pageChromeConfig.footer)}
                   {page.pageNumberText === null ? null : (
@@ -3943,10 +4208,11 @@ function MarkdownPreviewComponent({
         onPointerUp={handlePreviewPointerEnd}
         onWheel={handlePreviewWheel}
       >
-        <article
+        <PreviewHtmlSurface
           className="preview-section__standard-content markdown-body"
+          element="article"
+          html={html}
           style={standardPreviewContentStyle}
-          dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
     </section>

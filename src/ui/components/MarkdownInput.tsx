@@ -14,6 +14,7 @@ const DesktopMarkdownInput = lazy(async () => {
 type MarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly content: string;
+  readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
   readonly layoutMode: LayoutMode;
   readonly multiCursorModifier: MultiCursorModifier;
@@ -32,6 +33,7 @@ type MarkdownInputProps = {
 function MarkdownInputComponent({
   appThemeId,
   content,
+  currentDocumentFilePath = null,
   editFontId,
   layoutMode,
   multiCursorModifier,
@@ -51,6 +53,7 @@ function MarkdownInputComponent({
             appThemeId={appThemeId}
             blurOnEscapeWhenSelectionEmpty={layoutMode === "mobile"}
             content={content}
+            currentDocumentFilePath={currentDocumentFilePath}
             editFontId={editFontId}
             multiCursorModifier={multiCursorModifier}
             showLineNumbers={showLineNumbers}

@@ -451,6 +451,7 @@ pub fn run() {
             commands::app_exit::complete_app_exit,
             commands::app_exit::complete_window_close,
             commands::asset_import::import_markdown_asset_files,
+            commands::asset_import::list_markdown_path_suggestions,
             commands::desktop_layout_preferences::get_desktop_layout_preferences,
             commands::desktop_layout_preferences::set_desktop_layout_preferences,
             commands::editor_draft::get_editor_draft,

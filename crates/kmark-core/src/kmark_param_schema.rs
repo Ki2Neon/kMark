@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 11;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 12;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -378,6 +378,17 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         description: "動画の再生前に表示するサムネイル画像を指定する",
         examples: &["<!-- kmark video_poster:./thumb.png -->"],
         priority: 81,
+    },
+    KmarkParamSpec {
+        name: "video_poster_time",
+        aliases: &[],
+        param_type: "string",
+        contexts: &["single", "video"],
+        values: &[],
+        insert_text: "video_poster_time:",
+        description: "poster画像未指定時に動画サムネイルとして表示する再生位置を指定する",
+        examples: &["<!-- kmark video_poster_time:5s -->"],
+        priority: 80,
     },
     KmarkParamSpec {
         name: "color",

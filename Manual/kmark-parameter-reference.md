@@ -99,6 +99,7 @@
 | `video_muted` |  | boolean | single video |  |
 | `video_loop` |  | boolean | single video |  |
 | `video_poster` |  | string | single video |  |
+| `video_poster_time` |  | string | single video |  |
 | `color` |  | color | single text scope |  |
 | `font_weight` |  | string | single text scope | `normal` `bold` `bolder` `lighter` `100`-`900` |
 | `font_family` |  | string | single text scope |  |
@@ -232,12 +233,14 @@
 | `video_muted` | 初期mute | boolean | `video_muted:true` |  |
 | `video_loop` | loop再生 | boolean | `video_loop:true` |  |
 | `video_poster` | poster画像 | path/URL | `video_poster:./thumb.png` | unsafe scheme無視 |
+| `video_poster_time` | 動画内サムネイル位置 | seconds/time | `video_poster_time:5s` | `video_poster`指定時は画像優先 |
 
 - 対象記法: `![]()`
 - 動画判定: extension `.mp4` `.webm` `.ogg` `.mov` `.m4v`
 - 判定除外: query/hash
 - 大小文字: 不問
 - 常時有効: `controls` fullscreen
+- time形式: `5` `5s` `01:23` `01:02:03.5`
 - 未登録: `video_controls` `video_fullscreen` `video_preload` `controls` `fullscreen` `preload`
 
 ## Text Parameters
