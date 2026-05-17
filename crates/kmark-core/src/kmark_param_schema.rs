@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 14;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 15;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -417,9 +417,9 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         aliases: &[],
         param_type: "number",
         contexts: &["single", "model"],
-        values: &["10", "30", "45", "60", "90"],
+        values: &["25", "35", "45", "55", "60"],
         insert_text: "model_fov:",
-        description: "透視投影時の視野角を指定する",
+        description: "透視投影時の視野角を指定する 25-60度へ制限する",
         examples: &["<!-- kmark model_fov:45 -->"],
         priority: 93,
     },

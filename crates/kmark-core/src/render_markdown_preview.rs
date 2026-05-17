@@ -6879,7 +6879,7 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                 }
             }
             "model_fov" => {
-                if let Some(fov) = parse_kmark_model_number_value(&value, 10.0, 90.0) {
+                if let Some(fov) = parse_kmark_model_number_value(&value, 25.0, 60.0) {
                     bundle.params.model.fov = Some(fov);
                 }
             }

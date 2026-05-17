@@ -6,6 +6,9 @@ type ModelViewerCleanup = () => void;
 
 const MODEL_VIEWER_SELECTOR = ".kmark-model-viewer[data-kmark-model-display-src]";
 const DEFAULT_MODEL_HEIGHT_PX = 360;
+const MODEL_FIT_PADDING = 1.04;
+const MODEL_MIN_FOV_DEGREES = 25;
+const MODEL_MAX_FOV_DEGREES = 60;
 const MODEL_UP = new THREE.Vector3(0, 0, 1);
 const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
   back: [180, 0],
@@ -80,6 +83,7 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
   const loader = new GLTFLoader();
   const state: {
     animationFrame: number | null;
+    bounds: THREE.Box3 | null;
     camera: THREE.PerspectiveCamera | THREE.OrthographicCamera | null;
     controls: OrbitControls | null;
     disposed: boolean;
@@ -87,6 +91,7 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
     previousFrameMs: number;
   } = {
     animationFrame: null,
+    bounds: null,
     camera: null,
     controls: null,
     disposed: false,
@@ -96,6 +101,9 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
 
   const resizeObserver = new ResizeObserver(() => {
     resizeRenderer(viewer, renderer, state.camera);
+    if (state.camera !== null && state.bounds !== null) {
+      fitCameraToModel(viewer, state.camera, state.bounds);
+    }
   });
   resizeObserver.observe(viewer);
   resizeRenderer(viewer, renderer, state.camera);
@@ -113,22 +121,27 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     if (Number.isFinite(sphere.radius) && sphere.radius > 0) {
       model.position.sub(sphere.center);
+      bounds.setFromObject(model);
     }
+    state.bounds = bounds.clone();
+    const modelRadius = getBoundsRadius(bounds);
 
     if (getBooleanDataset(viewer.dataset.kmarkModelGrid, false)) {
-      const grid = new THREE.GridHelper(Math.max(sphere.radius * 3, 2), 12);
+      const grid = new THREE.GridHelper(Math.max(modelRadius * 3, 2), 12);
       grid.rotation.x = Math.PI / 2;
       scene.add(grid);
     }
     if (getBooleanDataset(viewer.dataset.kmarkModelAxes, false)) {
-      scene.add(new THREE.AxesHelper(Math.max(sphere.radius * 1.25, 1)));
+      scene.add(new THREE.AxesHelper(Math.max(modelRadius * 1.25, 1)));
     }
 
-    state.camera = createModelCamera(viewer, sphere.radius);
+    state.camera = createModelCamera(viewer, modelRadius);
     scene.add(state.camera);
-    configureCameraPose(viewer, state.camera, Math.max(sphere.radius, 0.5));
+    configureCameraPose(viewer, state.camera, Math.max(modelRadius, 0.5));
+    fitCameraToModel(viewer, state.camera, bounds);
     state.controls = configureControls(viewer, renderer.domElement, state.camera);
     resizeRenderer(viewer, renderer, state.camera);
+    fitCameraToModel(viewer, state.camera, bounds);
 
     viewer.dataset.kmarkModelState = "ready";
     if (status !== null) {
@@ -238,7 +251,7 @@ function createModelCamera(
   }
 
   return new THREE.PerspectiveCamera(
-    getNumberDataset(viewer.dataset.kmarkModelFov, 45),
+    clampModelFov(getNumberDataset(viewer.dataset.kmarkModelFov, 45)),
     aspect,
     0.01,
     Math.max(radius * 100, 1000),
@@ -257,7 +270,7 @@ function configureCameraPose(
 
   if (explicitPosition !== null) {
     camera.position.copy(explicitPosition);
-    camera.lookAt(target);
+    lookAtModelTarget(camera, target);
     return;
   }
 
@@ -273,7 +286,135 @@ function configureCameraPose(
     target.y + (Math.cos(yaw) * horizontal),
     target.z + (Math.sin(pitch) * distance),
   );
+  lookAtModelTarget(camera, target);
+}
+
+function fitCameraToModel(
+  viewer: HTMLElement,
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
+  bounds: THREE.Box3,
+): void {
+  const target = parseVector3(viewer.dataset.kmarkModelCameraTarget) ?? new THREE.Vector3(0, 0, 0);
+  const explicitPosition = parseVector3(viewer.dataset.kmarkModelCameraPosition);
+  const hasExplicitDistance = hasFiniteNumberDataset(viewer.dataset.kmarkModelCameraDistance);
+
+  if (camera instanceof THREE.PerspectiveCamera) {
+    camera.fov = clampModelFov(camera.fov);
+
+    if (explicitPosition === null && !hasExplicitDistance) {
+      const direction = camera.position.clone().sub(target);
+      if (direction.lengthSq() <= Number.EPSILON) {
+        direction.set(1, -1, 0.75);
+      }
+      direction.normalize();
+
+      const distance = computePerspectiveFitDistance(bounds, target, direction, camera);
+      camera.position.copy(target).addScaledVector(direction, distance);
+      lookAtModelTarget(camera, target);
+    }
+
+    const radius = getBoundsRadius(bounds);
+    const distance = Math.max(camera.position.distanceTo(target), radius);
+    camera.near = Math.max(0.001, distance - (radius * 4));
+    camera.far = Math.max(distance + (radius * 6), 1000);
+    camera.updateProjectionMatrix();
+    return;
+  }
+
+  fitOrthographicCamera(camera, bounds, target);
+  lookAtModelTarget(camera, target);
+}
+
+function computePerspectiveFitDistance(
+  bounds: THREE.Box3,
+  target: THREE.Vector3,
+  direction: THREE.Vector3,
+  camera: THREE.PerspectiveCamera,
+): number {
+  const frame = createCameraFrame(direction);
+  const verticalTan = Math.tan(degreesToRadians(clampModelFov(camera.fov)) * 0.5);
+  const horizontalTan = verticalTan * Math.max(camera.aspect, 0.001);
+  const corners = getBoxCorners(bounds);
+  let requiredDistance = getBoundsRadius(bounds);
+
+  for (const corner of corners) {
+    const offset = corner.clone().sub(target);
+    const depth = offset.dot(direction);
+    const halfHeightDistance = Math.abs(offset.dot(frame.up)) / verticalTan;
+    const halfWidthDistance = Math.abs(offset.dot(frame.right)) / horizontalTan;
+    requiredDistance = Math.max(requiredDistance, depth + halfHeightDistance, depth + halfWidthDistance);
+  }
+
+  return Math.max(requiredDistance * MODEL_FIT_PADDING, 0.1);
+}
+
+function fitOrthographicCamera(
+  camera: THREE.OrthographicCamera,
+  bounds: THREE.Box3,
+  target: THREE.Vector3,
+): void {
+  const direction = camera.position.clone().sub(target);
+  if (direction.lengthSq() <= Number.EPSILON) {
+    direction.set(1, -1, 0.75);
+  }
+  direction.normalize();
+
+  const frame = createCameraFrame(direction);
+  const corners = getBoxCorners(bounds);
+  let halfWidth = 0;
+  let halfHeight = 0;
+
+  for (const corner of corners) {
+    const offset = corner.clone().sub(target);
+    halfWidth = Math.max(halfWidth, Math.abs(offset.dot(frame.right)));
+    halfHeight = Math.max(halfHeight, Math.abs(offset.dot(frame.up)));
+  }
+
+  const aspect = Math.max(0.001, camera.right - camera.left) / Math.max(0.001, camera.top - camera.bottom);
+  const fittedHalfHeight = Math.max(halfHeight, halfWidth / aspect, 0.5) * MODEL_FIT_PADDING;
+  const fittedHalfWidth = fittedHalfHeight * aspect;
+  camera.left = -fittedHalfWidth;
+  camera.right = fittedHalfWidth;
+  camera.top = fittedHalfHeight;
+  camera.bottom = -fittedHalfHeight;
+
+  const radius = getBoundsRadius(bounds);
+  const distance = Math.max(camera.position.distanceTo(target), radius);
+  camera.near = Math.max(0.001, distance - (radius * 4));
+  camera.far = Math.max(distance + (radius * 6), 1000);
+  camera.updateProjectionMatrix();
+}
+
+function createCameraFrame(direction: THREE.Vector3): { right: THREE.Vector3; up: THREE.Vector3 } {
+  const cameraUp = resolveCameraUp(direction);
+  const right = new THREE.Vector3().crossVectors(cameraUp, direction);
+  if (right.lengthSq() <= Number.EPSILON) {
+    right.set(1, 0, 0);
+  }
+  right.normalize();
+
+  const up = new THREE.Vector3().crossVectors(direction, right).normalize();
+
+  return { right, up };
+}
+
+function lookAtModelTarget(
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
+  target: THREE.Vector3,
+): void {
+  const direction = camera.position.clone().sub(target);
+  if (direction.lengthSq() > Number.EPSILON) {
+    camera.up.copy(resolveCameraUp(direction.normalize()));
+  }
   camera.lookAt(target);
+}
+
+function resolveCameraUp(direction: THREE.Vector3): THREE.Vector3 {
+  if (Math.abs(direction.dot(MODEL_UP)) > 0.98) {
+    return new THREE.Vector3(0, 1, 0);
+  }
+
+  return MODEL_UP.clone();
 }
 
 function configureControls(
@@ -281,7 +422,6 @@ function configureControls(
   canvas: HTMLCanvasElement,
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
 ): OrbitControls {
-  camera.up.copy(MODEL_UP);
   const controls = new OrbitControls(camera, canvas);
   controls.enabled = getBooleanDataset(viewer.dataset.kmarkModelControls, true);
   controls.enableRotate = getBooleanDataset(viewer.dataset.kmarkModelRotate, true);
@@ -305,6 +445,7 @@ function resizeRenderer(
 
   if (camera instanceof THREE.PerspectiveCamera) {
     camera.aspect = width / height;
+    camera.fov = clampModelFov(camera.fov);
     camera.updateProjectionMatrix();
   } else if (camera instanceof THREE.OrthographicCamera) {
     const aspect = width / height;
@@ -355,6 +496,18 @@ function getNumberDataset(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function hasFiniteNumberDataset(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+
+  return Number.isFinite(Number(value));
+}
+
+function clampModelFov(value: number): number {
+  return Math.min(MODEL_MAX_FOV_DEGREES, Math.max(MODEL_MIN_FOV_DEGREES, value));
+}
+
 function parseVector3(value: string | undefined): THREE.Vector3 | null {
   if (value === undefined) {
     return null;
@@ -371,6 +524,38 @@ function parseVector3(value: string | undefined): THREE.Vector3 | null {
 
 function degreesToRadians(value: number): number {
   return (value * Math.PI) / 180;
+}
+
+function getBoundsRadius(bounds: THREE.Box3): number {
+  const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+
+  return Number.isFinite(sphere.radius) && sphere.radius > 0 ? sphere.radius : 1;
+}
+
+function getBoxCorners(bounds: THREE.Box3): THREE.Vector3[] {
+  if (
+    !Number.isFinite(bounds.min.x)
+    || !Number.isFinite(bounds.min.y)
+    || !Number.isFinite(bounds.min.z)
+    || !Number.isFinite(bounds.max.x)
+    || !Number.isFinite(bounds.max.y)
+    || !Number.isFinite(bounds.max.z)
+  ) {
+    return [new THREE.Vector3(0, 0, 0)];
+  }
+
+  const { min, max } = bounds;
+
+  return [
+    new THREE.Vector3(min.x, min.y, min.z),
+    new THREE.Vector3(min.x, min.y, max.z),
+    new THREE.Vector3(min.x, max.y, min.z),
+    new THREE.Vector3(min.x, max.y, max.z),
+    new THREE.Vector3(max.x, min.y, min.z),
+    new THREE.Vector3(max.x, min.y, max.z),
+    new THREE.Vector3(max.x, max.y, min.z),
+    new THREE.Vector3(max.x, max.y, max.z),
+  ];
 }
 
 function disposeObject3D(object: THREE.Object3D): void {

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 14,
+  "schemaVersion": 15,
   "params": [
     {
       "name": "align",
@@ -358,9 +358,9 @@
       "aliases": [],
       "type": "number",
       "contexts": ["single", "model"],
-      "values": ["10", "30", "45", "60", "90"],
+      "values": ["25", "35", "45", "55", "60"],
       "insertText": "model_fov:",
-      "description": "透視投影時の視野角を指定する",
+      "description": "透視投影時の視野角を指定する 25-60度へ制限する",
       "examples": ["<!-- kmark model_fov:45 -->"],
       "priority": 93
     },
