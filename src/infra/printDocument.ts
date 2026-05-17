@@ -116,9 +116,40 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
   }
 
   .markdown-body img,
-  .markdown-body video {
+  .markdown-body video,
+  .markdown-body .kmark-model-viewer,
+  .markdown-body .kmark-model-error {
     max-width: 100%;
     box-sizing: content-box;
+  }
+
+  .markdown-body .kmark-model-viewer {
+    position: relative;
+    display: inline-block;
+    min-width: 220px;
+    height: 360px;
+    overflow: hidden;
+    border: 0.75pt solid #d7d7d7;
+    border-radius: 4pt;
+    background: #ffffff;
+  }
+
+  .markdown-body .kmark-model-canvas,
+  .markdown-body .kmark-model-canvas > canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .markdown-body .kmark-model-status,
+  .markdown-body .kmark-model-error {
+    display: block;
+    padding: 0.75em 0.9em;
+    border: 0.75pt solid #d7d7d7;
+    border-radius: 4pt;
+    background: #fff5f5;
+    color: #991b1b;
+    white-space: pre-wrap;
   }
 
   .markdown-body video[poster] {

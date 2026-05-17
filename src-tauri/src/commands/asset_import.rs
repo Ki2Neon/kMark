@@ -29,6 +29,7 @@ pub struct ImportedMarkdownAssetPayload {
 pub enum ImportedAssetKindPayload {
     Image,
     Video,
+    Model,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +60,7 @@ impl From<ImportedAssetKind> for ImportedAssetKindPayload {
         match asset_kind {
             ImportedAssetKind::Image => Self::Image,
             ImportedAssetKind::Video => Self::Video,
+            ImportedAssetKind::Model => Self::Model,
         }
     }
 }
@@ -172,7 +174,7 @@ impl From<ImportMarkdownAssetsError> for CommandErrorPayload {
             ),
             ImportMarkdownAssetsError::UnsupportedAssetType(path) => Self::with_detail(
                 "unsupported_asset_type",
-                "現在ドロップできるアセットは画像または動画ファイルのみです。",
+                "現在ドロップできるアセットは画像、動画、3Dモデルファイルのみです。",
                 path,
             ),
             ImportMarkdownAssetsError::InvalidDroppedFileName(path) => Self::with_detail(

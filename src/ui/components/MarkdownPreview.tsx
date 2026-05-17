@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
+import { prepareKmarkModelViewers } from "../../adapters/browser/browserModelRenderer";
 import {
   A4_PAGE_WIDTH_MM,
   CSS_MM_TO_PX,
@@ -27,6 +28,8 @@ const PREVIEW_CURSOR_VIEWPORT_ANCHOR_RATIO = 0.35;
 const KMARK_VIDEO_FRAME_CLASS_NAME = "kmark-video-frame";
 const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
 const KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME = "kmark-video-poster-image";
+const KMARK_MODEL_VIEWER_CLASS_NAME = "kmark-model-viewer";
+const PREVIEW_INTERACTIVE_ELEMENT_SELECTOR = `a, button, input, textarea, select, video, .${KMARK_MODEL_VIEWER_CLASS_NAME}`;
 const KMARK_VIDEO_FAILED_STATE = "failed";
 const KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE = "hidden";
 const VIDEO_HAVE_METADATA_READY_STATE = 1;
@@ -3744,7 +3747,7 @@ function MarkdownPreviewComponent({
       return;
     }
 
-    if (eventTarget.closest("a, button, input, textarea, select, video") !== null) {
+    if (eventTarget.closest(PREVIEW_INTERACTIVE_ELEMENT_SELECTOR) !== null) {
       return;
     }
 
@@ -3996,6 +3999,7 @@ function MarkdownPreviewComponent({
       previewViewport.querySelectorAll<HTMLVideoElement>("video[data-kmark-video-source]"),
     );
     const videoCleanups: Array<() => void> = [];
+    const cleanupModelViewers = prepareKmarkModelViewers(previewViewport);
     const handleVideoLoaded = (event: Event) => {
       if (event.currentTarget instanceof HTMLVideoElement) {
         syncKmarkVideoIntrinsicSize(event.currentTarget);
@@ -4029,6 +4033,7 @@ function MarkdownPreviewComponent({
     }
 
     return () => {
+      cleanupModelViewers();
       for (const cleanup of videoCleanups) {
         cleanup();
       }
@@ -4158,7 +4163,7 @@ function MarkdownPreviewComponent({
 
     const eventTarget = resolveEventTargetElement(event.target);
 
-    if (eventTarget === null || eventTarget.closest("a, button, input, textarea, select, video") !== null) {
+    if (eventTarget === null || eventTarget.closest(PREVIEW_INTERACTIVE_ELEMENT_SELECTOR) !== null) {
       return;
     }
 

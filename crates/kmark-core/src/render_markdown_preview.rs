@@ -25,6 +25,18 @@ pub struct RenderedMarkdownPreview {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KmarkModelAssetResolution {
+    pub display_destination_url: Option<String>,
+    pub error: Option<KmarkModelAssetError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KmarkModelAssetError {
+    pub title: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPage {
     pub html: String,
     pub page_style: PageStyle,
@@ -146,11 +158,13 @@ enum TableSection {
 
 #[derive(Debug, Clone)]
 struct ImageContext {
+    raw_destination_url: String,
     destination_url: Option<String>,
     title: String,
     alt_text: String,
     style: Option<String>,
     video: KmarkVideoParams,
+    model: KmarkModelParams,
     source_line_attributes: String,
 }
 
@@ -272,6 +286,36 @@ struct KmarkVideoParams {
     poster_time_seconds: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkModelParams {
+    view: Option<String>,
+    projection: Option<String>,
+    fov: Option<String>,
+    camera_yaw: Option<String>,
+    camera_pitch: Option<String>,
+    camera_distance: Option<String>,
+    camera_position: Option<String>,
+    camera_target: Option<String>,
+    light_preset: Option<String>,
+    controls: Option<bool>,
+    rotate: Option<bool>,
+    zoom: Option<bool>,
+    pan: Option<bool>,
+    auto_rotate: Option<bool>,
+    auto_rotate_speed: Option<String>,
+    background: Option<String>,
+    loading: Option<String>,
+    poster: Option<String>,
+    convert: Option<String>,
+    convert_force: Option<bool>,
+    convert_scale: Option<String>,
+    convert_up: Option<String>,
+    convert_center: Option<bool>,
+    shadow: Option<bool>,
+    grid: Option<bool>,
+    axes: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum KmarkSizeValue {
     Length(String),
@@ -343,6 +387,7 @@ enum KmarkHeadingNumberPattern {
 struct KmarkParams {
     image: KmarkImageParams,
     video: KmarkVideoParams,
+    model: KmarkModelParams,
     layout: KmarkLayoutParams,
     text: KmarkTextParams,
     table: KmarkTableParams,
@@ -638,6 +683,7 @@ struct HtmlEmitter<'a> {
     line_offset: usize,
     source_line_by_clean_line: &'a [usize],
     markdown_file_path: Option<&'a str>,
+    model_assets: &'a HashMap<String, KmarkModelAssetResolution>,
     toc_document: &'a KmarkTocDocument,
     heading_number_document: &'a KmarkHeadingNumberDocument,
     line_starts: Vec<usize>,
@@ -694,6 +740,19 @@ pub fn render_markdown_preview_with_file_path(
     content: &str,
     markdown_file_path: Option<&str>,
 ) -> RenderedMarkdownPreview {
+    let model_assets = HashMap::new();
+    render_markdown_preview_with_file_path_and_model_assets(
+        content,
+        markdown_file_path,
+        &model_assets,
+    )
+}
+
+pub fn render_markdown_preview_with_file_path_and_model_assets(
+    content: &str,
+    markdown_file_path: Option<&str>,
+    model_assets: &HashMap<String, KmarkModelAssetResolution>,
+) -> RenderedMarkdownPreview {
     let toc_document = collect_kmark_toc_document(content);
     let heading_number_document = collect_kmark_heading_number_document(content);
     let markdown_pages = split_markdown_pages(content);
@@ -708,6 +767,7 @@ pub fn render_markdown_preview_with_file_path(
                 &page_segment.content,
                 page_segment.line_offset,
                 markdown_file_path,
+                model_assets,
                 &toc_document,
                 &heading_number_document,
                 next_mermaid_block_index,
@@ -741,6 +801,7 @@ fn render_markdown_page(
     content: &str,
     line_offset: usize,
     markdown_file_path: Option<&str>,
+    model_assets: &HashMap<String, KmarkModelAssetResolution>,
     toc_document: &KmarkTocDocument,
     heading_number_document: &KmarkHeadingNumberDocument,
     next_mermaid_block_index: usize,
@@ -752,6 +813,7 @@ fn render_markdown_page(
         line_offset,
         &preprocessed.source_line_by_clean_line,
         markdown_file_path,
+        model_assets,
         toc_document,
         heading_number_document,
         next_mermaid_block_index,
@@ -2007,6 +2069,7 @@ impl<'a> HtmlEmitter<'a> {
         line_offset: usize,
         source_line_by_clean_line: &'a [usize],
         markdown_file_path: Option<&'a str>,
+        model_assets: &'a HashMap<String, KmarkModelAssetResolution>,
         toc_document: &'a KmarkTocDocument,
         heading_number_document: &'a KmarkHeadingNumberDocument,
         next_mermaid_block_index: usize,
@@ -2016,6 +2079,7 @@ impl<'a> HtmlEmitter<'a> {
             line_offset,
             source_line_by_clean_line,
             markdown_file_path,
+            model_assets,
             toc_document,
             heading_number_document,
             line_starts: collect_line_starts(content),
@@ -2188,11 +2252,13 @@ impl<'a> HtmlEmitter<'a> {
         if self.is_collecting_image_alt_text() {
             if matches!(tag, Tag::Image { .. }) {
                 self.image_stack.push(ImageContext {
+                    raw_destination_url: String::new(),
                     destination_url: None,
                     title: String::new(),
                     alt_text: String::new(),
                     style: None,
                     video: KmarkVideoParams::default(),
+                    model: KmarkModelParams::default(),
                     source_line_attributes: String::new(),
                 });
             }
@@ -2463,8 +2529,14 @@ impl<'a> HtmlEmitter<'a> {
                 let source_line_attributes = self.source_line_attributes(range);
                 let single_layer = self.take_pending_kmark_layer_for_image(range.start);
                 let resolved_params = self.resolve_visual_params(single_layer.as_ref());
-                let image_style = resolved_params.to_image_style();
+                let raw_destination_url = dest_url.to_string();
+                let image_style = if is_model_destination_url(&raw_destination_url) {
+                    resolved_params.to_model_style()
+                } else {
+                    resolved_params.to_image_style()
+                };
                 self.image_stack.push(ImageContext {
+                    raw_destination_url,
                     destination_url: resolve_image_destination_url(
                         &dest_url,
                         self.markdown_file_path,
@@ -2473,6 +2545,7 @@ impl<'a> HtmlEmitter<'a> {
                     alt_text: String::new(),
                     style: image_style,
                     video: resolved_params.video,
+                    model: resolved_params.model,
                     source_line_attributes,
                 });
             }
@@ -2706,6 +2779,11 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
+        if is_model_destination_url(&destination_url) {
+            self.push_model(&image_context, &destination_url);
+            return;
+        }
+
         let mut html = format!(
             "<img src=\"{}\" alt=\"{}\"{}",
             escape_html(&destination_url),
@@ -2777,6 +2855,108 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         html.push_str("></video>");
+        self.push_raw(&html);
+    }
+
+    fn push_model(&mut self, image_context: &ImageContext, source_url: &str) {
+        if image_context.model.convert.as_deref() == Some("never")
+            && !is_glb_model_destination_url(&image_context.raw_destination_url)
+        {
+            self.push_model_error(
+                image_context,
+                "この形式はGLB変換なしでは表示できません",
+                &[format!("対象: {}", image_context.raw_destination_url)],
+            );
+            return;
+        }
+
+        if let Some(resolution) = self
+            .model_assets
+            .get(image_context.raw_destination_url.trim())
+        {
+            if let Some(error) = &resolution.error {
+                self.push_model_error(image_context, &error.title, &error.details);
+                return;
+            }
+        }
+
+        let display_url = self
+            .model_assets
+            .get(image_context.raw_destination_url.trim())
+            .and_then(|resolution| resolution.display_destination_url.as_deref())
+            .and_then(|display_destination_url| {
+                resolve_image_destination_url(display_destination_url, self.markdown_file_path)
+            })
+            .or_else(|| {
+                resolve_model_display_destination_url(
+                    &image_context.raw_destination_url,
+                    self.markdown_file_path,
+                )
+            });
+
+        let Some(display_url) = display_url else {
+            self.push_model_error(
+                image_context,
+                "3Dモデルを読み込めませんでした",
+                &[format!("対象: {}", image_context.raw_destination_url)],
+            );
+            return;
+        };
+
+        let mut html = format!(
+            "<div class=\"kmark-model-viewer\" role=\"img\"{} data-kmark-model-source=\"{}\" data-kmark-model-display-src=\"{}\" data-kmark-model-format=\"{}\"",
+            image_context.source_line_attributes,
+            escape_html(source_url),
+            escape_html(&display_url),
+            escape_html(model_destination_extension(&image_context.raw_destination_url).unwrap_or("")),
+        );
+
+        if !image_context.alt_text.is_empty() {
+            html.push_str(" aria-label=\"");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push_str("\" data-kmark-model-alt=\"");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push('"');
+        }
+        if !image_context.title.is_empty() {
+            html.push_str(" title=\"");
+            html.push_str(&escape_html(&image_context.title));
+            html.push('"');
+        }
+        if let Some(style) = &image_context.style {
+            html.push_str(" style=\"");
+            html.push_str(&escape_html(style));
+            html.push('"');
+        }
+        push_model_data_attrs(&mut html, &image_context.model, self.markdown_file_path);
+        html.push_str("><div class=\"kmark-model-canvas\" aria-hidden=\"true\"></div><div class=\"kmark-model-status\" aria-live=\"polite\">3Dモデルを読み込み中</div></div>");
+        self.push_raw(&html);
+    }
+
+    fn push_model_error(&mut self, image_context: &ImageContext, title: &str, details: &[String]) {
+        let mut html = format!(
+            "<div class=\"kmark-model-error\" role=\"alert\"{}",
+            image_context.source_line_attributes,
+        );
+        if let Some(style) = &image_context.style {
+            html.push_str(" style=\"");
+            html.push_str(&escape_html(style));
+            html.push('"');
+        }
+        html.push_str("><div class=\"kmark-model-error__title\">");
+        html.push_str(&escape_html(title));
+        html.push_str("</div>");
+        if !image_context.alt_text.is_empty() {
+            html.push_str("<div>説明: ");
+            html.push_str(&escape_html(&image_context.alt_text));
+            html.push_str("</div>");
+        }
+        for detail in details {
+            html.push_str("<div>");
+            html.push_str(&escape_html(detail));
+            html.push_str("</div>");
+        }
+        html.push_str("</div>");
         self.push_raw(&html);
     }
 
@@ -4120,6 +4300,7 @@ impl KmarkParams {
     fn merge(&mut self, other: &Self) {
         self.image.merge(&other.image);
         self.video.merge(&other.video);
+        self.model.merge(&other.model);
         self.layout.merge(&other.layout);
         self.text.merge(&other.text);
         self.table.merge(&other.table);
@@ -4129,6 +4310,7 @@ impl KmarkParams {
     fn has_directives(&self) -> bool {
         self.image.has_image_directives()
             || self.video.has_video_directives()
+            || self.model.has_model_directives()
             || self.layout.has_layout_directives()
             || self.text.has_text_directives()
             || self.table.has_table_directives()
@@ -4253,6 +4435,16 @@ impl KmarkParams {
 
     fn to_image_style(&self) -> Option<String> {
         self.image.to_style(&self.layout)
+    }
+
+    fn to_model_style(&self) -> Option<String> {
+        let mut image = self.image.clone();
+
+        if image.height.is_none() {
+            image.height = Some(KmarkSizeValue::Length("360px".to_owned()));
+        }
+
+        image.to_style(&self.layout)
     }
 
     fn to_text_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
@@ -5643,6 +5835,118 @@ impl KmarkVideoParams {
     }
 }
 
+impl KmarkModelParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(view) = &other.view {
+            self.view = Some(view.clone());
+        }
+        if let Some(projection) = &other.projection {
+            self.projection = Some(projection.clone());
+        }
+        if let Some(fov) = &other.fov {
+            self.fov = Some(fov.clone());
+        }
+        if let Some(camera_yaw) = &other.camera_yaw {
+            self.camera_yaw = Some(camera_yaw.clone());
+        }
+        if let Some(camera_pitch) = &other.camera_pitch {
+            self.camera_pitch = Some(camera_pitch.clone());
+        }
+        if let Some(camera_distance) = &other.camera_distance {
+            self.camera_distance = Some(camera_distance.clone());
+        }
+        if let Some(camera_position) = &other.camera_position {
+            self.camera_position = Some(camera_position.clone());
+        }
+        if let Some(camera_target) = &other.camera_target {
+            self.camera_target = Some(camera_target.clone());
+        }
+        if let Some(light_preset) = &other.light_preset {
+            self.light_preset = Some(light_preset.clone());
+        }
+        if let Some(controls) = other.controls {
+            self.controls = Some(controls);
+        }
+        if let Some(rotate) = other.rotate {
+            self.rotate = Some(rotate);
+        }
+        if let Some(zoom) = other.zoom {
+            self.zoom = Some(zoom);
+        }
+        if let Some(pan) = other.pan {
+            self.pan = Some(pan);
+        }
+        if let Some(auto_rotate) = other.auto_rotate {
+            self.auto_rotate = Some(auto_rotate);
+        }
+        if let Some(auto_rotate_speed) = &other.auto_rotate_speed {
+            self.auto_rotate_speed = Some(auto_rotate_speed.clone());
+        }
+        if let Some(background) = &other.background {
+            self.background = Some(background.clone());
+        }
+        if let Some(loading) = &other.loading {
+            self.loading = Some(loading.clone());
+        }
+        if let Some(poster) = &other.poster {
+            self.poster = Some(poster.clone());
+        }
+        if let Some(convert) = &other.convert {
+            self.convert = Some(convert.clone());
+        }
+        if let Some(convert_force) = other.convert_force {
+            self.convert_force = Some(convert_force);
+        }
+        if let Some(convert_scale) = &other.convert_scale {
+            self.convert_scale = Some(convert_scale.clone());
+        }
+        if let Some(convert_up) = &other.convert_up {
+            self.convert_up = Some(convert_up.clone());
+        }
+        if let Some(convert_center) = other.convert_center {
+            self.convert_center = Some(convert_center);
+        }
+        if let Some(shadow) = other.shadow {
+            self.shadow = Some(shadow);
+        }
+        if let Some(grid) = other.grid {
+            self.grid = Some(grid);
+        }
+        if let Some(axes) = other.axes {
+            self.axes = Some(axes);
+        }
+    }
+
+    fn has_model_directives(&self) -> bool {
+        self.view.is_some()
+            || self.projection.is_some()
+            || self.fov.is_some()
+            || self.camera_yaw.is_some()
+            || self.camera_pitch.is_some()
+            || self.camera_distance.is_some()
+            || self.camera_position.is_some()
+            || self.camera_target.is_some()
+            || self.light_preset.is_some()
+            || self.controls.is_some()
+            || self.rotate.is_some()
+            || self.zoom.is_some()
+            || self.pan.is_some()
+            || self.auto_rotate.is_some()
+            || self.auto_rotate_speed.is_some()
+            || self.background.is_some()
+            || self.loading.is_some()
+            || self.poster.is_some()
+            || self.convert.is_some()
+            || self.convert_force.is_some()
+            || self.convert_scale.is_some()
+            || self.convert_up.is_some()
+            || self.convert_center.is_some()
+            || self.shadow.is_some()
+            || self.grid.is_some()
+            || self.axes.is_some()
+    }
+}
+
 impl KmarkSizeValue {
     fn is_page_fit(&self) -> bool {
         matches!(self, Self::PageFit | Self::PageFitContain)
@@ -6564,6 +6868,136 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.video.poster_time_seconds = Some(poster_time_seconds);
                 }
             }
+            "model_view" => {
+                if let Some(view) = parse_kmark_model_view_value(&value) {
+                    bundle.params.model.view = Some(view);
+                }
+            }
+            "model_projection" => {
+                if let Some(projection) = parse_kmark_model_projection_value(&value) {
+                    bundle.params.model.projection = Some(projection);
+                }
+            }
+            "model_fov" => {
+                if let Some(fov) = parse_kmark_model_number_value(&value, 10.0, 90.0) {
+                    bundle.params.model.fov = Some(fov);
+                }
+            }
+            "model_camera_yaw" => {
+                if let Some(camera_yaw) = parse_kmark_model_angle_value(&value) {
+                    bundle.params.model.camera_yaw = Some(camera_yaw);
+                }
+            }
+            "model_camera_pitch" => {
+                if let Some(camera_pitch) = parse_kmark_model_angle_value(&value) {
+                    bundle.params.model.camera_pitch = Some(camera_pitch);
+                }
+            }
+            "model_camera_distance" => {
+                if let Some(camera_distance) = parse_kmark_model_positive_number_value(&value) {
+                    bundle.params.model.camera_distance = Some(camera_distance);
+                }
+            }
+            "model_camera_position" => {
+                if let Some(camera_position) = parse_kmark_model_vector_value(&value) {
+                    bundle.params.model.camera_position = Some(camera_position);
+                }
+            }
+            "model_camera_target" => {
+                if let Some(camera_target) = parse_kmark_model_vector_value(&value) {
+                    bundle.params.model.camera_target = Some(camera_target);
+                }
+            }
+            "model_light_preset" => {
+                if let Some(light_preset) = parse_kmark_model_light_preset_value(&value) {
+                    bundle.params.model.light_preset = Some(light_preset);
+                }
+            }
+            "model_controls" => {
+                if let Some(controls) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.controls = Some(controls);
+                }
+            }
+            "model_rotate" => {
+                if let Some(rotate) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.rotate = Some(rotate);
+                }
+            }
+            "model_zoom" => {
+                if let Some(zoom) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.zoom = Some(zoom);
+                }
+            }
+            "model_pan" => {
+                if let Some(pan) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.pan = Some(pan);
+                }
+            }
+            "model_auto_rotate" => {
+                if let Some(auto_rotate) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.auto_rotate = Some(auto_rotate);
+                }
+            }
+            "model_auto_rotate_speed" => {
+                if let Some(auto_rotate_speed) = parse_kmark_model_positive_number_value(&value) {
+                    bundle.params.model.auto_rotate_speed = Some(auto_rotate_speed);
+                }
+            }
+            "model_bg" => {
+                if let Some(background) = parse_kmark_model_background_value(&value) {
+                    bundle.params.model.background = Some(background);
+                }
+            }
+            "model_loading" => {
+                if let Some(loading) = parse_kmark_model_loading_value(&value) {
+                    bundle.params.model.loading = Some(loading);
+                }
+            }
+            "model_poster" => {
+                if let Some(poster) = parse_kmark_video_poster_value(&value) {
+                    bundle.params.model.poster = Some(poster);
+                }
+            }
+            "model_convert" => {
+                if let Some(convert) = parse_kmark_model_convert_value(&value) {
+                    bundle.params.model.convert = Some(convert);
+                }
+            }
+            "model_convert_force" => {
+                if let Some(convert_force) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.convert_force = Some(convert_force);
+                }
+            }
+            "model_convert_scale" => {
+                if let Some(convert_scale) = parse_kmark_model_positive_number_value(&value) {
+                    bundle.params.model.convert_scale = Some(convert_scale);
+                }
+            }
+            "model_convert_up" => {
+                if let Some(convert_up) = parse_kmark_model_convert_up_value(&value) {
+                    bundle.params.model.convert_up = Some(convert_up);
+                }
+            }
+            "model_convert_center" => {
+                if let Some(convert_center) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.convert_center = Some(convert_center);
+                }
+            }
+            "model_shadow" => {
+                if let Some(shadow) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.shadow = Some(shadow);
+                }
+            }
+            "model_grid" => {
+                if let Some(grid) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.grid = Some(grid);
+                }
+            }
+            "model_axes" => {
+                if let Some(axes) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.axes = Some(axes);
+                }
+            }
             "color" => {
                 if let Some(color) = parse_kmark_color_value(&value) {
                     bundle.params.text.color = Some(color);
@@ -6839,6 +7273,110 @@ fn parse_kmark_video_poster_time_value(value: &str) -> Option<String> {
     };
 
     (seconds.is_finite() && seconds >= 0.0).then(|| seconds.to_string())
+}
+
+fn parse_kmark_model_view_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "front" | "back" | "left" | "right" | "top" | "bottom" | "iso" => {
+            Some(trim_kmark_quotes(value).trim().to_owned())
+        }
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_projection_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "perspective" | "orthographic" => Some(trim_kmark_quotes(value).trim().to_owned()),
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_light_preset_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "default" | "studio" | "flat" | "product" | "none" => {
+            Some(trim_kmark_quotes(value).trim().to_owned())
+        }
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_loading_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "lazy" | "eager" => Some(trim_kmark_quotes(value).trim().to_owned()),
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_convert_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "auto" | "never" | "force" => Some(trim_kmark_quotes(value).trim().to_owned()),
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_convert_up_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "auto" | "x" | "y" | "z" | "-x" | "-y" | "-z" => {
+            Some(trim_kmark_quotes(value).trim().to_owned())
+        }
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_background_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if trimmed == "transparent" {
+        return Some(trimmed.to_owned());
+    }
+
+    parse_kmark_color_value(value)
+}
+
+fn parse_kmark_model_angle_value(value: &str) -> Option<String> {
+    parse_kmark_model_finite_number_value(value)
+}
+
+fn parse_kmark_model_positive_number_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let number = trimmed.parse::<f64>().ok()?;
+
+    (number.is_finite() && number > 0.0).then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_model_number_value(value: &str, minimum: f64, maximum: f64) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let number = trimmed.parse::<f64>().ok()?;
+
+    (number.is_finite() && (minimum..=maximum).contains(&number)).then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_model_finite_number_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let number = trimmed.parse::<f64>().ok()?;
+
+    number.is_finite().then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_model_vector_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let parts = trimmed.split(',').collect::<Vec<_>>();
+
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let mut values = Vec::with_capacity(3);
+    for part in parts {
+        let value = part.trim();
+        let number = value.parse::<f64>().ok()?;
+        if !number.is_finite() {
+            return None;
+        }
+        values.push(value.to_owned());
+    }
+
+    Some(values.join(","))
 }
 
 fn parse_colon_video_time_seconds(value: &str) -> Option<f64> {
@@ -7190,6 +7728,68 @@ fn is_safe_url(url: &str) -> bool {
     !(normalized.starts_with("javascript:") || normalized.starts_with("data:"))
 }
 
+fn push_model_data_attrs(
+    html: &mut String,
+    model: &KmarkModelParams,
+    markdown_file_path: Option<&str>,
+) {
+    push_optional_model_data_attr(html, "view", model.view.as_deref());
+    push_optional_model_data_attr(html, "projection", model.projection.as_deref());
+    push_optional_model_data_attr(html, "fov", model.fov.as_deref());
+    push_optional_model_data_attr(html, "camera-yaw", model.camera_yaw.as_deref());
+    push_optional_model_data_attr(html, "camera-pitch", model.camera_pitch.as_deref());
+    push_optional_model_data_attr(html, "camera-distance", model.camera_distance.as_deref());
+    push_optional_model_data_attr(html, "camera-position", model.camera_position.as_deref());
+    push_optional_model_data_attr(html, "camera-target", model.camera_target.as_deref());
+    push_optional_model_data_attr(html, "light-preset", model.light_preset.as_deref());
+    push_optional_bool_model_data_attr(html, "controls", model.controls);
+    push_optional_bool_model_data_attr(html, "rotate", model.rotate);
+    push_optional_bool_model_data_attr(html, "zoom", model.zoom);
+    push_optional_bool_model_data_attr(html, "pan", model.pan);
+    push_optional_bool_model_data_attr(html, "auto-rotate", model.auto_rotate);
+    push_optional_model_data_attr(
+        html,
+        "auto-rotate-speed",
+        model.auto_rotate_speed.as_deref(),
+    );
+    push_optional_model_data_attr(html, "bg", model.background.as_deref());
+    push_optional_model_data_attr(html, "loading", model.loading.as_deref());
+    push_optional_model_data_attr(html, "convert", model.convert.as_deref());
+    push_optional_bool_model_data_attr(html, "convert-force", model.convert_force);
+    push_optional_model_data_attr(html, "convert-scale", model.convert_scale.as_deref());
+    push_optional_model_data_attr(html, "convert-up", model.convert_up.as_deref());
+    push_optional_bool_model_data_attr(html, "convert-center", model.convert_center);
+    push_optional_bool_model_data_attr(html, "shadow", model.shadow);
+    push_optional_bool_model_data_attr(html, "grid", model.grid);
+    push_optional_bool_model_data_attr(html, "axes", model.axes);
+
+    if let Some(poster) = model
+        .poster
+        .as_deref()
+        .and_then(|poster| resolve_image_destination_url(poster, markdown_file_path))
+    {
+        push_optional_model_data_attr(html, "poster", Some(&poster));
+    }
+}
+
+fn push_optional_model_data_attr(html: &mut String, key: &str, value: Option<&str>) {
+    let Some(value) = value else {
+        return;
+    };
+
+    html.push_str(" data-kmark-model-");
+    html.push_str(key);
+    html.push_str("=\"");
+    html.push_str(&escape_html(value));
+    html.push('"');
+}
+
+fn push_optional_bool_model_data_attr(html: &mut String, key: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        push_optional_model_data_attr(html, key, Some(if value { "true" } else { "false" }));
+    }
+}
+
 fn is_video_destination_url(url: &str) -> bool {
     let normalized = url.trim();
     let (path, _) = split_resource_path_and_suffix(normalized);
@@ -7201,6 +7801,59 @@ fn is_video_destination_url(url: &str) -> bool {
         extension.to_ascii_lowercase().as_str(),
         "mp4" | "webm" | "ogg" | "mov" | "m4v"
     )
+}
+
+fn is_model_destination_url(url: &str) -> bool {
+    model_destination_extension(url).is_some()
+}
+
+fn is_glb_model_destination_url(url: &str) -> bool {
+    model_destination_extension(url) == Some("glb")
+}
+
+fn model_destination_extension(url: &str) -> Option<&'static str> {
+    let normalized = url.trim();
+    let (path, _) = split_resource_path_and_suffix(normalized);
+    let (_, extension) = path.rsplit_once('.')?;
+
+    match extension.to_ascii_lowercase().as_str() {
+        "glb" => Some("glb"),
+        "gltf" => Some("gltf"),
+        "obj" => Some("obj"),
+        "stl" => Some("stl"),
+        "fbx" => Some("fbx"),
+        _ => None,
+    }
+}
+
+fn resolve_model_display_destination_url(
+    destination_url: &str,
+    markdown_file_path: Option<&str>,
+) -> Option<String> {
+    if is_glb_model_destination_url(destination_url) {
+        return resolve_image_destination_url(destination_url, markdown_file_path);
+    }
+
+    let converted_url = converted_model_destination_url(destination_url)?;
+    resolve_image_destination_url(&converted_url, markdown_file_path)
+}
+
+fn converted_model_destination_url(destination_url: &str) -> Option<String> {
+    let normalized = destination_url.trim();
+
+    if normalized.is_empty()
+        || is_remote_url(normalized)
+        || is_data_url(normalized)
+        || is_file_url(normalized)
+    {
+        return None;
+    }
+
+    let (resource_path, resource_suffix) = split_resource_path_and_suffix(normalized);
+    let extension_start = resource_path.rfind('.')?;
+    let stem = &resource_path[..extension_start];
+
+    (!stem.is_empty()).then(|| format!("{stem}_converted.glb{resource_suffix}"))
 }
 
 fn resolve_image_destination_url(
@@ -8983,9 +9636,9 @@ mod tests {
              ```mermaid\nflowchart TD\n  A --> B\n```",
         );
 
-        assert!(rendered_preview.html.contains(
-            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-height\""
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--sized-height\""));
         assert!(rendered_preview.html.contains(
             "style=\"height:100px;width:fit-content;max-width:100%;box-sizing:border-box;\""
         ));
@@ -9000,9 +9653,9 @@ mod tests {
              <!-- kmark } -->",
         );
 
-        assert!(rendered_preview.html.contains(
-            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-width\""
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--sized-width\""));
         assert!(rendered_preview.html.contains(
             "style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;\""
         ));
@@ -9019,9 +9672,9 @@ mod tests {
         assert!(rendered_preview.html.contains(
             "class=\"kmark-mermaid-block kmark-mermaid-block--sized-width kmark-mermaid-block--sized-height\""
         ));
-        assert!(rendered_preview.html.contains(
-            "style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""
-        ));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""));
     }
 
     #[test]
@@ -9665,6 +10318,38 @@ mod tests {
         assert!(rendered_preview.html.contains(
             "<video src=\"./demo.webm#chapter1\" controls preload=\"metadata\" data-source-line-start=\"2\" data-source-line-end=\"2\" data-kmark-video-source=\"./demo.webm#chapter1\" aria-label=\"movie\" data-kmark-video-alt=\"movie\"></video>"
         ));
+    }
+
+    #[test]
+    fn renders_markdown_image_model_extensions_as_model_viewers() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:600 model_view:front model_projection:orthographic model_controls:false model_convert_scale:0.01 -->\n![gear](./gear.obj)",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<div class=\"kmark-model-viewer\" role=\"img\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-source=\"./gear.obj\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-display-src=\"./gear_converted.glb\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-view=\"front\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-projection=\"orthographic\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-controls=\"false\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-convert-scale=\"0.01\""));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"width:600px;height:360px;\""));
     }
 
     #[test]
