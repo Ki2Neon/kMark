@@ -1,16 +1,20 @@
 export type KmarkScopePaletteKey =
-  | "cyan"
-  | "purple"
-  | "yellow"
-  | "emerald"
-  | "rose"
-  | "indigo"
-  | "orange"
-  | "teal"
-  | "lime"
-  | "fuchsia"
-  | "blue"
-  | "red";
+  | "tone-0"
+  | "tone-1"
+  | "tone-2"
+  | "tone-3"
+  | "tone-4"
+  | "tone-5"
+  | "tone-6"
+  | "tone-7"
+  | "tone-8"
+  | "tone-9"
+  | "tone-10"
+  | "tone-11"
+  | "tone-12"
+  | "tone-13"
+  | "tone-14"
+  | "tone-15";
 
 export type KmarkScopeRailShape = "start" | "middle" | "end" | "single";
 
@@ -54,18 +58,22 @@ type MarkdownFence = {
 };
 
 const PALETTE_KEYS = [
-  "cyan",
-  "purple",
-  "yellow",
-  "emerald",
-  "rose",
-  "indigo",
-  "orange",
-  "teal",
-  "lime",
-  "fuchsia",
-  "blue",
-  "red",
+  "tone-0",
+  "tone-1",
+  "tone-2",
+  "tone-3",
+  "tone-4",
+  "tone-5",
+  "tone-6",
+  "tone-7",
+  "tone-8",
+  "tone-9",
+  "tone-10",
+  "tone-11",
+  "tone-12",
+  "tone-13",
+  "tone-14",
+  "tone-15",
 ] as const satisfies readonly KmarkScopePaletteKey[];
 
 export function collectKmarkScopeDisplayLines(markdown: string): KmarkScopeDisplayDocument {
@@ -267,7 +275,7 @@ function parseDefineValue(content: string): string | null {
 }
 
 function resolveDepthPalette(depthIndex: number): KmarkScopePaletteKey {
-  return PALETTE_KEYS[depthIndex % PALETTE_KEYS.length] ?? "cyan";
+  return PALETTE_KEYS[depthIndex % PALETTE_KEYS.length] ?? "tone-0";
 }
 
 function resolveMarkdownFenceLine(line: string, activeFence: MarkdownFence | null): {

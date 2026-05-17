@@ -6,19 +6,21 @@ import {
   type KmarkScopeLineRail,
 } from "../core/collectKmarkScopeDisplayLines";
 
-const SCOPE_MAX_GUTTER_WIDTH_PX = 32;
-const SCOPE_HOOK_WIDTH_PX = 12;
-const SCOPE_RAIL_STEP_PX = 8;
-const SCOPE_RAIL_START_X_PX = 8;
-const SCOPE_RAIL_WIDTH_PX = 1;
-const SCOPE_MAX_VISIBLE_DEPTH_INDEX = 2;
+const SCOPE_MAX_GUTTER_WIDTH_PX = 68;
+const SCOPE_GUTTER_RIGHT_PADDING_PX = 3;
+const SCOPE_RAIL_STEP_PX = 4;
+const SCOPE_RAIL_START_X_PX = 3;
+const SCOPE_RAIL_WIDTH_PX = 2;
+const SCOPE_MAX_VISIBLE_DEPTH_INDEX = 15;
 
 const kmarkScopeDisplayPlugin = ViewPlugin.fromClass(class KmarkScopeDisplayPlugin {
+  gutterWidth: number;
   lineDisplaysByNumber: ReadonlyMap<number, KmarkScopeLineDisplay>;
 
   constructor(view: EditorView) {
     const displayDocument = collectKmarkScopeDisplayLines(view.state.doc.toString());
 
+    this.gutterWidth = resolveDocumentGutterWidth(displayDocument.lines);
     this.lineDisplaysByNumber = createLineDisplayMap(displayDocument.lines);
   }
 
@@ -29,6 +31,7 @@ const kmarkScopeDisplayPlugin = ViewPlugin.fromClass(class KmarkScopeDisplayPlug
 
     const displayDocument = collectKmarkScopeDisplayLines(update.state.doc.toString());
 
+    this.gutterWidth = resolveDocumentGutterWidth(displayDocument.lines);
     this.lineDisplaysByNumber = createLineDisplayMap(displayDocument.lines);
   }
 
@@ -52,7 +55,7 @@ const kmarkScopeGutter = gutter({
       return null;
     }
 
-    return new KmarkScopeGutterMarker(lineDisplay.rails);
+    return new KmarkScopeGutterMarker(lineDisplay.rails, plugin.gutterWidth);
   },
   lineMarkerChange(update) {
     return update.docChanged;
@@ -61,21 +64,23 @@ const kmarkScopeGutter = gutter({
 
 const kmarkScopeDisplayTheme = EditorView.baseTheme({
   "&": {
-    "--kmark-scope-line-cyan": "hsl(from var(--focus) h s l)",
-    "--kmark-scope-line-purple": "hsl(from var(--focus) calc(h + 30) s l)",
-    "--kmark-scope-line-yellow": "hsl(from var(--focus) calc(h + 60) s l)",
-    "--kmark-scope-line-emerald": "hsl(from var(--focus) calc(h + 90) s l)",
-    "--kmark-scope-line-rose": "hsl(from var(--focus) calc(h + 120) s l)",
-    "--kmark-scope-line-indigo": "hsl(from var(--focus) calc(h + 150) s l)",
-    "--kmark-scope-line-orange": "hsl(from var(--focus) calc(h + 180) s l)",
-    "--kmark-scope-line-teal": "hsl(from var(--focus) calc(h + 210) s l)",
-    "--kmark-scope-line-lime": "hsl(from var(--focus) calc(h + 240) s l)",
-    "--kmark-scope-line-fuchsia": "hsl(from var(--focus) calc(h + 270) s l)",
-    "--kmark-scope-line-blue": "hsl(from var(--focus) calc(h + 300) s l)",
-    "--kmark-scope-line-red": "hsl(from var(--focus) calc(h + 330) s l)",
-    "--kmark-scope-rail-w": "1px",
-    "--kmark-scope-hook-h": "1px",
-    "--kmark-scope-hook-w": "12px",
+    "--kmark-scope-line-tone-0": "hsl(from var(--focus) h s l)",
+    "--kmark-scope-line-tone-1": "hsl(from var(--focus) calc(h + 180) s l)",
+    "--kmark-scope-line-tone-2": "hsl(from var(--focus) calc(h + 90) s l)",
+    "--kmark-scope-line-tone-3": "hsl(from var(--focus) calc(h + 270) s l)",
+    "--kmark-scope-line-tone-4": "hsl(from var(--focus) calc(h + 45) s l)",
+    "--kmark-scope-line-tone-5": "hsl(from var(--focus) calc(h + 225) s l)",
+    "--kmark-scope-line-tone-6": "hsl(from var(--focus) calc(h + 135) s l)",
+    "--kmark-scope-line-tone-7": "hsl(from var(--focus) calc(h + 315) s l)",
+    "--kmark-scope-line-tone-8": "hsl(from var(--focus) calc(h + 30) s l)",
+    "--kmark-scope-line-tone-9": "hsl(from var(--focus) calc(h + 210) s l)",
+    "--kmark-scope-line-tone-10": "hsl(from var(--focus) calc(h + 120) s l)",
+    "--kmark-scope-line-tone-11": "hsl(from var(--focus) calc(h + 300) s l)",
+    "--kmark-scope-line-tone-12": "hsl(from var(--focus) calc(h + 60) s l)",
+    "--kmark-scope-line-tone-13": "hsl(from var(--focus) calc(h + 240) s l)",
+    "--kmark-scope-line-tone-14": "hsl(from var(--focus) calc(h + 150) s l)",
+    "--kmark-scope-line-tone-15": "hsl(from var(--focus) calc(h + 330) s l)",
+    "--kmark-scope-rail-w": "2px",
   },
   ".kmark-scope-gutter": {
     background: "transparent",
@@ -102,21 +107,11 @@ const kmarkScopeDisplayTheme = EditorView.baseTheme({
   ".kmark-scope-rail": {
     backgroundColor: "currentColor",
     bottom: "-1px",
-    borderRadius: "999px",
     left: "var(--kmark-scope-rail-x)",
     pointerEvents: "none",
     position: "absolute",
     top: "-1px",
     width: "var(--kmark-scope-rail-w)",
-  },
-  ".kmark-scope-rail::before, .kmark-scope-rail::after": {
-    backgroundColor: "currentColor",
-    borderRadius: "999px",
-    content: "\"\"",
-    height: "var(--kmark-scope-hook-h)",
-    left: "0",
-    position: "absolute",
-    width: "0",
   },
   ".kmark-scope-rail-start": {
     bottom: "-1px",
@@ -130,49 +125,53 @@ const kmarkScopeDisplayTheme = EditorView.baseTheme({
     bottom: "6px",
     top: "6px",
   },
-  ".kmark-scope-rail-start::before, .kmark-scope-rail-single::before": {
-    top: "0",
-    width: "var(--kmark-scope-hook-w-resolved, var(--kmark-scope-hook-w))",
+  ".kmark-scope-rail-tone-0": {
+    color: "var(--kmark-scope-line-tone-0)",
   },
-  ".kmark-scope-rail-end::after, .kmark-scope-rail-single::after": {
-    bottom: "0",
-    width: "var(--kmark-scope-hook-w-resolved, var(--kmark-scope-hook-w))",
+  ".kmark-scope-rail-tone-1": {
+    color: "var(--kmark-scope-line-tone-1)",
   },
-  ".kmark-scope-rail-cyan": {
-    color: "var(--kmark-scope-line-cyan)",
+  ".kmark-scope-rail-tone-2": {
+    color: "var(--kmark-scope-line-tone-2)",
   },
-  ".kmark-scope-rail-purple": {
-    color: "var(--kmark-scope-line-purple)",
+  ".kmark-scope-rail-tone-3": {
+    color: "var(--kmark-scope-line-tone-3)",
   },
-  ".kmark-scope-rail-yellow": {
-    color: "var(--kmark-scope-line-yellow)",
+  ".kmark-scope-rail-tone-4": {
+    color: "var(--kmark-scope-line-tone-4)",
   },
-  ".kmark-scope-rail-emerald": {
-    color: "var(--kmark-scope-line-emerald)",
+  ".kmark-scope-rail-tone-5": {
+    color: "var(--kmark-scope-line-tone-5)",
   },
-  ".kmark-scope-rail-rose": {
-    color: "var(--kmark-scope-line-rose)",
+  ".kmark-scope-rail-tone-6": {
+    color: "var(--kmark-scope-line-tone-6)",
   },
-  ".kmark-scope-rail-indigo": {
-    color: "var(--kmark-scope-line-indigo)",
+  ".kmark-scope-rail-tone-7": {
+    color: "var(--kmark-scope-line-tone-7)",
   },
-  ".kmark-scope-rail-orange": {
-    color: "var(--kmark-scope-line-orange)",
+  ".kmark-scope-rail-tone-8": {
+    color: "var(--kmark-scope-line-tone-8)",
   },
-  ".kmark-scope-rail-teal": {
-    color: "var(--kmark-scope-line-teal)",
+  ".kmark-scope-rail-tone-9": {
+    color: "var(--kmark-scope-line-tone-9)",
   },
-  ".kmark-scope-rail-lime": {
-    color: "var(--kmark-scope-line-lime)",
+  ".kmark-scope-rail-tone-10": {
+    color: "var(--kmark-scope-line-tone-10)",
   },
-  ".kmark-scope-rail-fuchsia": {
-    color: "var(--kmark-scope-line-fuchsia)",
+  ".kmark-scope-rail-tone-11": {
+    color: "var(--kmark-scope-line-tone-11)",
   },
-  ".kmark-scope-rail-blue": {
-    color: "var(--kmark-scope-line-blue)",
+  ".kmark-scope-rail-tone-12": {
+    color: "var(--kmark-scope-line-tone-12)",
   },
-  ".kmark-scope-rail-red": {
-    color: "var(--kmark-scope-line-red)",
+  ".kmark-scope-rail-tone-13": {
+    color: "var(--kmark-scope-line-tone-13)",
+  },
+  ".kmark-scope-rail-tone-14": {
+    color: "var(--kmark-scope-line-tone-14)",
+  },
+  ".kmark-scope-rail-tone-15": {
+    color: "var(--kmark-scope-line-tone-15)",
   },
 });
 
@@ -185,15 +184,17 @@ export function createCodeMirrorKmarkScopeDisplayExtension(): Extension {
 }
 
 class KmarkScopeGutterMarker extends GutterMarker {
+  readonly #gutterWidth: number;
   readonly #rails: readonly KmarkScopeLineRail[];
   readonly #signature: string;
 
-  constructor(rails: readonly KmarkScopeLineRail[]) {
+  constructor(rails: readonly KmarkScopeLineRail[], gutterWidth: number) {
     super();
+    this.#gutterWidth = gutterWidth;
     this.#rails = rails;
     this.#signature = rails.map((rail) => (
       `${rail.id}:${rail.paletteKey}:${rail.depthIndex}:${rail.shape}:${rail.displayName}`
-    )).join("|");
+    )).join("|") + `:${gutterWidth}`;
   }
 
   eq(other: GutterMarker): boolean {
@@ -202,12 +203,11 @@ class KmarkScopeGutterMarker extends GutterMarker {
 
   toDOM(): HTMLElement {
     const cell = document.createElement("div");
-    const cellWidth = resolveGutterCellWidth(this.#rails);
 
     cell.className = "kmark-scope-gutter-cell";
     cell.setAttribute("aria-hidden", "true");
-    cell.style.minWidth = `${cellWidth}px`;
-    cell.style.width = `${cellWidth}px`;
+    cell.style.minWidth = `${this.#gutterWidth}px`;
+    cell.style.width = `${this.#gutterWidth}px`;
 
     for (const rail of this.#rails) {
       cell.appendChild(createRailElement(rail));
@@ -221,11 +221,34 @@ function createLineDisplayMap(lines: readonly KmarkScopeLineDisplay[]): Readonly
   return new Map(lines.map((line) => [line.lineNumber, line]));
 }
 
+function resolveDocumentGutterWidth(lines: readonly KmarkScopeLineDisplay[]): number {
+  let maximumVisibleDepthIndex = -1;
+
+  for (const line of lines) {
+    for (const rail of line.rails) {
+      maximumVisibleDepthIndex = Math.max(
+        maximumVisibleDepthIndex,
+        Math.min(rail.depthIndex, SCOPE_MAX_VISIBLE_DEPTH_INDEX),
+      );
+    }
+  }
+
+  if (maximumVisibleDepthIndex < 0) {
+    return 0;
+  }
+
+  const rawWidth = SCOPE_RAIL_START_X_PX
+    + maximumVisibleDepthIndex * SCOPE_RAIL_STEP_PX
+    + SCOPE_RAIL_WIDTH_PX
+    + SCOPE_GUTTER_RIGHT_PADDING_PX;
+
+  return Math.min(SCOPE_MAX_GUTTER_WIDTH_PX, rawWidth);
+}
+
 function createRailElement(rail: KmarkScopeLineRail): HTMLElement {
   const element = document.createElement("span");
   const visibleDepthIndex = Math.min(rail.depthIndex, SCOPE_MAX_VISIBLE_DEPTH_INDEX);
   const railX = SCOPE_RAIL_START_X_PX + visibleDepthIndex * SCOPE_RAIL_STEP_PX;
-  const hookWidth = Math.max(0, Math.min(SCOPE_HOOK_WIDTH_PX, SCOPE_MAX_GUTTER_WIDTH_PX - railX));
 
   element.className = [
     "kmark-scope-rail",
@@ -233,20 +256,7 @@ function createRailElement(rail: KmarkScopeLineRail): HTMLElement {
     `kmark-scope-rail-${rail.paletteKey}`,
   ].join(" ");
   element.style.setProperty("--kmark-scope-rail-x", `${railX}px`);
-  element.style.setProperty("--kmark-scope-hook-w-resolved", `${hookWidth}px`);
   element.title = rail.displayName;
 
   return element;
-}
-
-function resolveGutterCellWidth(rails: readonly KmarkScopeLineRail[]): number {
-  const deepestVisibleDepthIndex = rails.reduce((currentDepthIndex, rail) => (
-    Math.max(currentDepthIndex, Math.min(rail.depthIndex, SCOPE_MAX_VISIBLE_DEPTH_INDEX))
-  ), 0);
-  const rawWidth = SCOPE_RAIL_START_X_PX
-    + deepestVisibleDepthIndex * SCOPE_RAIL_STEP_PX
-    + SCOPE_HOOK_WIDTH_PX
-    + SCOPE_RAIL_WIDTH_PX;
-
-  return Math.min(SCOPE_MAX_GUTTER_WIDTH_PX, rawWidth);
 }
