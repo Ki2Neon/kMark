@@ -32,6 +32,8 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
+import { getKmarkModelViewerViewpoint } from "../../adapters/browser/browserModelRenderer";
+import { saveModelViewpointToMarkdown } from "../../domain/modelViewpoint";
 import { type RecentFile } from "../../domain/recentFiles";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
@@ -209,11 +211,34 @@ export function MarkdownEditorScreen({
     layoutMode,
   });
   const isPreviewInteractionAvailable = isPreviewVisible && (layoutMode === "desktop" || mobileSection === "preview");
+  const handlePreviewModelViewpointSave = useCallback((modelViewer: HTMLElement) => {
+    const sourceLineStart = Number.parseInt(modelViewer.dataset.sourceLineStart ?? "", 10);
+    const viewpoint = getKmarkModelViewerViewpoint(modelViewer);
+
+    if (!Number.isFinite(sourceLineStart) || viewpoint === null) {
+      handleErrorRaise("3Dモデルの画角を保存できませんでした。");
+      return;
+    }
+
+    const saveResult = saveModelViewpointToMarkdown({
+      markdown: content,
+      modelSourceLineNumber: sourceLineStart + 1,
+      viewpoint,
+    });
+
+    if (saveResult === null) {
+      handleErrorRaise("3Dモデルの対応行を特定できませんでした。");
+      return;
+    }
+
+    handleContentChange(saveResult.markdown);
+  }, [content, handleContentChange, handleErrorRaise]);
   const {
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
     contextMenuStyle: previewContextMenuStyle,
     handleModelCameraReset: handlePreviewModelCameraReset,
+    handleModelViewpointSave: handlePreviewModelViewpointSaveRequest,
     handlePreviewContextMenu,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
@@ -222,6 +247,7 @@ export function MarkdownEditorScreen({
   } = usePreviewInteraction({
     displayMode: previewDisplayMode,
     isAvailable: isPreviewInteractionAvailable,
+    onModelViewpointSave: handlePreviewModelViewpointSave,
   });
 
   useEffect(() => {
@@ -725,6 +751,7 @@ export function MarkdownEditorScreen({
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
           onModelCameraReset={handlePreviewModelCameraReset}
+          onModelViewpointSave={handlePreviewModelViewpointSaveRequest}
           style={previewContextMenuStyle}
         />
       ) : null}

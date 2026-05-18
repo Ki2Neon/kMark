@@ -5,6 +5,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { OutlinePass } from "three/examples/jsm/postprocessing/OutlinePass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { type ModelViewpoint } from "../../domain/modelViewpoint";
 
 type ModelViewerCleanup = () => void;
 type ModelEdgeOverlay = {
@@ -280,6 +281,28 @@ export function resetKmarkModelViewerCamera(viewer: HTMLElement): boolean {
   state.controls?.update();
 
   return true;
+}
+
+export function getKmarkModelViewerViewpoint(viewer: HTMLElement): ModelViewpoint | null {
+  const state = mountedModelStates.get(viewer);
+
+  if (state === undefined) {
+    return null;
+  }
+
+  const snapshot = createModelCameraSnapshot(state);
+
+  if (snapshot === null) {
+    return null;
+  }
+
+  return {
+    fov: snapshot.fov,
+    position: snapshot.position,
+    projection: snapshot.projection,
+    target: snapshot.target,
+    zoom: snapshot.zoom,
+  };
 }
 
 function createModelCameraSnapshot(state: ModelRenderState): ModelCameraSnapshot | null {
@@ -745,12 +768,13 @@ function fitCameraToModel(
     const distance = Math.max(camera.position.distanceTo(target), radius);
     camera.near = Math.max(0.001, distance - (radius * 4));
     camera.far = Math.max(distance + (radius * 6), 1000);
-    camera.updateProjectionMatrix();
+    applyModelCameraZoom(viewer, camera);
     return;
   }
 
   fitOrthographicCamera(camera, bounds, target);
   lookAtModelTarget(camera, target);
+  applyModelCameraZoom(viewer, camera);
 }
 
 function computePerspectiveFitDistance(
@@ -1083,6 +1107,16 @@ function hasFiniteNumberDataset(value: string | undefined): boolean {
   }
 
   return Number.isFinite(Number(value));
+}
+
+function applyModelCameraZoom(
+  viewer: HTMLElement,
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
+): void {
+  const zoom = getNumberDataset(viewer.dataset.kmarkModelCameraZoom, camera.zoom);
+
+  camera.zoom = Number.isFinite(zoom) && zoom > 0 ? zoom : camera.zoom;
+  camera.updateProjectionMatrix();
 }
 
 function clampModelFov(value: number): number {

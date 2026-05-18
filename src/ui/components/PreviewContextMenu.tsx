@@ -6,6 +6,7 @@ type PreviewContextMenuProps = {
   readonly menuRef: RefObject<HTMLDivElement | null>;
   readonly onFit: () => void;
   readonly onModelCameraReset: () => void;
+  readonly onModelViewpointSave: () => void;
   readonly style?: CSSProperties;
 };
 
@@ -15,6 +16,7 @@ function PreviewContextMenuComponent({
   menuRef,
   onFit,
   onModelCameraReset,
+  onModelViewpointSave,
   style,
 }: PreviewContextMenuProps) {
   return (
@@ -29,9 +31,14 @@ function PreviewContextMenuComponent({
         Fit
       </button>
       {hasModelCameraTarget ? (
-        <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelCameraReset}>
-          Reset 3D View
-        </button>
+        <>
+          <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelViewpointSave}>
+            画角を保存
+          </button>
+          <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelCameraReset}>
+            Reset 3D View
+          </button>
+        </>
       ) : null}
     </div>
   );

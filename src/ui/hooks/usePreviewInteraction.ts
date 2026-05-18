@@ -18,13 +18,18 @@ type PreviewContextMenuState = {
 type UsePreviewInteractionOptions = {
   readonly displayMode: PreviewDisplayMode;
   readonly isAvailable?: boolean;
+  readonly onModelViewpointSave?: (modelViewer: HTMLElement) => void;
 };
 
 export function clampPreviewZoomScale(zoomScale: number): number {
   return Math.round(Math.min(MAX_PREVIEW_ZOOM_SCALE, Math.max(MIN_PREVIEW_ZOOM_SCALE, zoomScale)) * 100) / 100;
 }
 
-export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePreviewInteractionOptions) {
+export function usePreviewInteraction({
+  displayMode,
+  isAvailable = true,
+  onModelViewpointSave,
+}: UsePreviewInteractionOptions) {
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenuState] = useState<PreviewContextMenuState | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
@@ -58,12 +63,22 @@ export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePr
     closeContextMenu();
   }, [closeContextMenu, contextMenuState]);
 
+  const handleModelViewpointSave = useCallback(() => {
+    const modelViewer = contextMenuState?.modelViewer ?? null;
+
+    if (modelViewer !== null) {
+      onModelViewpointSave?.(modelViewer);
+    }
+
+    closeContextMenu();
+  }, [closeContextMenu, contextMenuState, onModelViewpointSave]);
+
   const handleZoomScaleChange = useCallback((nextZoomScale: number) => {
     setZoomScale(clampPreviewZoomScale(nextZoomScale));
   }, []);
 
   const handlePreviewContextMenu = useCallback((clientX: number, clientY: number, modelViewer: HTMLElement | null = null) => {
-    const itemCount = modelViewer === null ? 1 : 2;
+    const itemCount = modelViewer === null ? 1 : 3;
     const menuHeight = PREVIEW_CONTEXT_MENU_PADDING_PX + (PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX * itemCount);
     const nextX = Math.max(8, Math.min(clientX, window.innerWidth - PREVIEW_CONTEXT_MENU_WIDTH_PX - 8));
     const nextY = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
@@ -131,6 +146,7 @@ export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePr
     contextMenuStyle,
     handlePreviewContextMenu,
     handleModelCameraReset,
+    handleModelViewpointSave,
     handleZoomFit,
     handleZoomScaleChange,
     hasModelCameraTarget: contextMenuState?.modelViewer !== null && contextMenuState?.modelViewer !== undefined,
