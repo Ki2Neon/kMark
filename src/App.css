@@ -901,7 +901,7 @@ input:focus-visible,
 .preview-context-menu {
   position: fixed;
   z-index: 40;
-  min-width: 132px;
+  min-width: 168px;
   padding: 6px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1447,6 +1447,7 @@ input:focus-visible,
 .markdown-body .kmark-model-viewer {
   position: relative;
   display: inline-block;
+  box-sizing: border-box;
   min-width: 220px;
   height: 360px;
   overflow: hidden;
@@ -1454,6 +1455,13 @@ input:focus-visible,
   border-radius: 6px;
   background: color-mix(in srgb, var(--preview-text) 2.5%, var(--preview-surface));
   vertical-align: baseline;
+}
+
+.markdown-body .kmark-scope[style*="flex-direction:row"] > .kmark-model-viewer,
+.markdown-body .kmark-scope[style*="flex-direction:row"] > [style*="display:contents"] > .kmark-model-viewer {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
 }
 
 .markdown-body .kmark-model-canvas,

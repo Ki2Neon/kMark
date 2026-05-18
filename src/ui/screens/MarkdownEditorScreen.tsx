@@ -213,9 +213,11 @@ export function MarkdownEditorScreen({
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
     contextMenuStyle: previewContextMenuStyle,
+    handleModelCameraReset: handlePreviewModelCameraReset,
     handlePreviewContextMenu,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
+    hasModelCameraTarget: previewContextMenuHasModelCameraTarget,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
     displayMode: previewDisplayMode,
@@ -714,8 +716,10 @@ export function MarkdownEditorScreen({
       {previewContextMenuState !== null ? (
         <PreviewContextMenu
           ariaLabel="本体プレビューのコンテキストメニュー"
+          hasModelCameraTarget={previewContextMenuHasModelCameraTarget}
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
+          onModelCameraReset={handlePreviewModelCameraReset}
           style={previewContextMenuStyle}
         />
       ) : null}

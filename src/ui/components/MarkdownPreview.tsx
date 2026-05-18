@@ -1,5 +1,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
-import { prepareKmarkModelViewers } from "../../adapters/browser/browserModelRenderer";
+import {
+  createKmarkModelViewerScope,
+  persistKmarkModelViewerSnapshots,
+  preserveReusableKmarkModelViewers,
+  type ModelViewerScope,
+} from "../../adapters/browser/browserModelRenderer";
 import {
   A4_PAGE_WIDTH_MM,
   CSS_MM_TO_PX,
@@ -70,7 +75,7 @@ type MarkdownPreviewProps = {
   readonly maximumZoomScale?: number;
   readonly minimumZoomScale?: number;
   readonly onOpenExternalLink?: (url: string) => void;
-  readonly onPreviewContextMenu?: (clientX: number, clientY: number) => void;
+  readonly onPreviewContextMenu?: (clientX: number, clientY: number, modelViewer: HTMLElement | null) => void;
   readonly onSourceLineDoubleClick?: (lineNumber: number) => void;
   readonly onZoomScaleChange?: (zoomScale: number) => void;
   readonly pageHtmls?: readonly string[];
@@ -3410,9 +3415,24 @@ function restorePreviewVideoSnapshots(
 
 function applyPreviewSurfaceHtml(surface: HTMLElement, html: string): void {
   const videoSnapshots = collectPreviewVideoSnapshots(surface);
+  const template = document.createElement("template");
 
-  surface.innerHTML = html;
+  template.innerHTML = html;
+  persistKmarkModelViewerSnapshots(surface);
+  preserveReusableKmarkModelViewers(surface, template.content);
+  surface.replaceChildren(...Array.from(template.content.childNodes));
   restorePreviewVideoSnapshots(surface, videoSnapshots);
+}
+
+function syncPreviewSurfaceModelViewers(
+  surface: HTMLElement,
+  scopeRef: { current: ModelViewerScope | null },
+): void {
+  if (scopeRef.current === null) {
+    scopeRef.current = createKmarkModelViewerScope(surface);
+  }
+
+  scopeRef.current.sync();
 }
 
 function isPreviewSurfaceFullscreen(surface: HTMLElement): boolean {
@@ -3430,10 +3450,13 @@ function PreviewHtmlSurface({
 }: PreviewHtmlSurfaceProps) {
   const surfaceRef = useRef<HTMLElement | null>(null);
   const appliedHtmlRef = useRef<string | null>(null);
+  const modelViewerScopeRef = useRef<ModelViewerScope | null>(null);
   const pendingHtmlRef = useRef<string | null>(null);
 
   const handleSurfaceRef = useCallback((node: HTMLElement | null) => {
     if (surfaceRef.current !== node) {
+      modelViewerScopeRef.current?.dispose();
+      modelViewerScopeRef.current = null;
       appliedHtmlRef.current = null;
       pendingHtmlRef.current = null;
     }
@@ -3454,6 +3477,7 @@ function PreviewHtmlSurface({
     }
 
     applyPreviewSurfaceHtml(surface, html);
+    syncPreviewSurfaceModelViewers(surface, modelViewerScopeRef);
     appliedHtmlRef.current = html;
     pendingHtmlRef.current = null;
   }, [html]);
@@ -3468,6 +3492,7 @@ function PreviewHtmlSurface({
       }
 
       applyPreviewSurfaceHtml(surface, pendingHtml);
+      syncPreviewSurfaceModelViewers(surface, modelViewerScopeRef);
       appliedHtmlRef.current = pendingHtml;
       pendingHtmlRef.current = null;
     };
@@ -3477,6 +3502,13 @@ function PreviewHtmlSurface({
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
+  }, []);
+
+  useLayoutEffect(() => () => {
+    modelViewerScopeRef.current?.dispose();
+    modelViewerScopeRef.current = null;
+    appliedHtmlRef.current = null;
+    pendingHtmlRef.current = null;
   }, []);
 
   if (element === "main") {
@@ -3805,7 +3837,10 @@ function MarkdownPreviewComponent({
 
     clearViewportPan();
     event.preventDefault();
-    onPreviewContextMenu(event.clientX, event.clientY);
+    const eventTarget = resolveEventTargetElement(event.target);
+    const modelViewer = eventTarget?.closest<HTMLElement>(`.${KMARK_MODEL_VIEWER_CLASS_NAME}`) ?? null;
+
+    onPreviewContextMenu(event.clientX, event.clientY, modelViewer);
   }, [clearViewportPan, onPreviewContextMenu]);
 
   const normalizedZoomScale = useMemo(
@@ -3999,7 +4034,6 @@ function MarkdownPreviewComponent({
       previewViewport.querySelectorAll<HTMLVideoElement>("video[data-kmark-video-source]"),
     );
     const videoCleanups: Array<() => void> = [];
-    const cleanupModelViewers = prepareKmarkModelViewers(previewViewport);
     const handleVideoLoaded = (event: Event) => {
       if (event.currentTarget instanceof HTMLVideoElement) {
         syncKmarkVideoIntrinsicSize(event.currentTarget);
@@ -4033,7 +4067,6 @@ function MarkdownPreviewComponent({
     }
 
     return () => {
-      cleanupModelViewers();
       for (const cleanup of videoCleanups) {
         cleanup();
       }
