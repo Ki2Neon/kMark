@@ -3,7 +3,9 @@ import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
 import { useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
+import { PresentationWindowScreen } from "./ui/screens/PresentationWindowScreen";
 import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
+import { resolveBrowserPresentationSnapshotKeyFromUrl } from "./adapters/browser/browserPresentationWindowGateway";
 
 function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   if (typeof window === "undefined") {
@@ -13,6 +15,10 @@ function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   return new URLSearchParams(window.location.search).get("kmarkInitialDocument") === "new-untitled"
     ? "new-untitled"
     : "stored";
+}
+
+function detectPresentationSnapshotKey(): string | null {
+  return resolveBrowserPresentationSnapshotKeyFromUrl();
 }
 
 function App() {
@@ -54,6 +60,12 @@ function App() {
 
   if (!isThemeReady || !isEditorPreferencesReady) {
     return null;
+  }
+
+  const presentationSnapshotKey = detectPresentationSnapshotKey();
+
+  if (presentationSnapshotKey !== null) {
+    return <PresentationWindowScreen snapshotKey={presentationSnapshotKey} />;
   }
 
   return (

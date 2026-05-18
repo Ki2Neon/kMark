@@ -32,12 +32,23 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
+import { createBrowserPresentationWindowGateway } from "../../adapters/browser/browserPresentationWindowGateway";
+import { PresentationWindowController } from "../../application/presentationWindow/presentationWindowController";
 import { type RecentFile } from "../../domain/recentFiles";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
 const PREVIEW_CURSOR_FOLLOW_THROTTLE_MS = 80;
+
+function createPresentationWindowController(): PresentationWindowController {
+  return new PresentationWindowController({
+    clock: {
+      now: () => Date.now(),
+    },
+    gateway: createBrowserPresentationWindowGateway(),
+  });
+}
 
 type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
@@ -154,6 +165,11 @@ export function MarkdownEditorScreen({
   const lastPreviewCursorFollowAtRef = useRef(0);
   const pendingPreviewCursorLineRef = useRef<number | null>(null);
   const previewCursorFollowTimeoutRef = useRef<number | null>(null);
+  const presentationWindowControllerRef = useRef<PresentationWindowController | null>(null);
+
+  if (presentationWindowControllerRef.current === null) {
+    presentationWindowControllerRef.current = createPresentationWindowController();
+  }
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
   const [isEditFocused, setIsEditFocused] = useState(false);
@@ -305,6 +321,32 @@ export function MarkdownEditorScreen({
     closeDesktopMenu();
     void handlePrintDocument(previewDisplayMode);
   }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode]);
+
+  const handleRequestOpenPresentationWindow = useCallback(() => {
+    closeDesktopMenu();
+
+    void presentationWindowControllerRef.current?.open({
+      title: normalizedFileName,
+      displayMode: previewDisplayMode,
+      html: previewHtml,
+      pageHtmls: previewPageHtmls,
+      pages: previewPages,
+      defaultPageStyle: defaultPreviewPageStyle,
+      defaultTextStyle: defaultPreviewTextStyle,
+    }).catch((error) => {
+      handleErrorRaise(error instanceof Error ? error.message : "プレゼンウィンドウを開けませんでした。");
+    });
+  }, [
+    closeDesktopMenu,
+    defaultPreviewPageStyle,
+    defaultPreviewTextStyle,
+    handleErrorRaise,
+    normalizedFileName,
+    previewDisplayMode,
+    previewHtml,
+    previewPageHtmls,
+    previewPages,
+  ]);
 
   const handleRequestNew = useCallback(() => {
     if (!confirmDiscard()) {
@@ -525,6 +567,7 @@ export function MarkdownEditorScreen({
     onNewDocument: handleRequestNew,
     onOpenCurrentDocumentFolder: handleRequestOpenCurrentDocumentFolder,
     onOpenDocument: handleRequestOpen,
+    onOpenPresentationWindow: handleRequestOpenPresentationWindow,
     onOpenRecentFile: handleRequestOpenRecentFile,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,

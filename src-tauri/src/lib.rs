@@ -37,6 +37,7 @@ pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ICON_ID: &str = "main-tray";
 const TRAY_QUIT_MENU_ITEM_ID: &str = "tray-quit";
 const TRAY_UNTITLED_WINDOW_LABEL_PREFIX: &str = "tray-untitled";
+pub(crate) const PRESENTATION_WINDOW_LABEL_PREFIX: &str = "presentation-";
 const TRAY_UNTITLED_WINDOW_URL: &str = "index.html?kmarkInitialDocument=new-untitled";
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
 const APP_EXIT_REQUESTED_EVENT: &str = "app-exit-requested";
@@ -311,6 +312,10 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label().starts_with(PRESENTATION_WINDOW_LABEL_PREFIX) {
+                        return;
+                    }
+
                     if window.label() == MAIN_WINDOW_LABEL {
                         if let Err(error) = persist_window_state(window.app_handle(), window) {
                             eprintln!("failed to persist main window state: {error}");
@@ -463,6 +468,7 @@ pub fn run() {
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,
             commands::markdown_render::render_markdown_preview,
+            commands::presentation_window::open_presentation_window,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
             commands::recent_files::get_recent_files,

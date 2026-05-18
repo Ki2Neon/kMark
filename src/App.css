@@ -299,6 +299,39 @@ input:focus-visible,
   padding-top: var(--mobile-nav-height);
 }
 
+.presentation-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--preview-surface);
+}
+
+@supports (height: 100dvh) {
+  .presentation-shell {
+    min-height: 100dvh;
+  }
+}
+
+.presentation-shell--empty {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--surface);
+}
+
+.presentation-shell__empty {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.95rem;
+}
+
+.presentation-shell .section--preview,
+.presentation-shell .preview-section__body {
+  height: 100%;
+}
+
 .editor-shell__toast {
   position: fixed;
   left: 12px;

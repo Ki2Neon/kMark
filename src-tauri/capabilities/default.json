@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "tray-untitled-*"],
+  "windows": ["main", "tray-untitled-*", "presentation-*"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

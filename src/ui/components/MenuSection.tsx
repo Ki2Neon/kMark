@@ -51,6 +51,7 @@ type MenuSectionProps = {
   readonly onOpenCurrentDocumentFolder: () => void;
   readonly onOpenDocument: () => void;
   readonly onOpenRecentFile: (recentFile: RecentFile) => void;
+  readonly onOpenPresentationWindow: () => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
@@ -113,6 +114,7 @@ function MenuSectionComponent({
   onOpenCurrentDocumentFolder,
   onOpenDocument,
   onOpenRecentFile,
+  onOpenPresentationWindow,
   onOverwriteSaveDocument,
   onPrintDocument,
   onPreviewDisplayModeChange,
@@ -157,7 +159,17 @@ function MenuSectionComponent({
     "名前を付けて保存",
     "新規作成",
   );
-  const previewGroupMatched = matchesMenuSearch("プレビュー", "表示形式", "表示方法", "用紙", "paper", "配色", "preview");
+  const previewGroupMatched = matchesMenuSearch(
+    "プレビュー",
+    "表示形式",
+    "表示方法",
+    "用紙",
+    "paper",
+    "配色",
+    "preview",
+    "プレゼン",
+    "presentation",
+  );
   const previewVisibilityVisible = previewGroupMatched || matchesMenuSearch("表示", "非表示", "visible");
   const previewDisplayModeVisible =
     previewGroupMatched || matchesMenuSearch("表示形式", "用紙", "paper", "display format", "display mode");
@@ -545,6 +557,12 @@ function MenuSectionComponent({
             <h2 className="menu-section__group-title">プレビュー</h2>
             <p className="menu-section__group-description">表示形式と配色の設定</p>
           </div>
+          <div className="menu-section__actions" role="group" aria-label="プレビュー操作">
+            <button type="button" onClick={onOpenPresentationWindow}>
+              プレゼン
+            </button>
+          </div>
+
           {previewVisibilityVisible ? (
             <label className="menu-section__mode-switch">
               <span className="menu-section__mode-switch-meta">
