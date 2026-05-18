@@ -193,15 +193,25 @@ function getLine(document, lineNumber) {
 
 {
   const document = collectKmarkScopeDisplayLines([
-    "k{ quick_scope color:red",
+    "<!--k{ quick_scope color:red -->",
     "quick",
-    "k}",
+    "<!--k}-->",
   ].join("\n"));
   const contentLine = getLine(document, 2);
 
   assert.equal(contentLine.rails.length, 1);
   assert.equal(contentLine.rails[0].displayName, "quick_scope");
   assert.equal(contentLine.rails[0].paletteKey, "tone-0");
+}
+
+{
+  const document = collectKmarkScopeDisplayLines([
+    "k{ quick_scope color:red",
+    "quick",
+    "k}",
+  ].join("\n"));
+
+  assert.equal(document.lines.length, 0);
 }
 
 console.log("kmark scope display parser tests passed");
