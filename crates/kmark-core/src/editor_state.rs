@@ -117,20 +117,8 @@ pub fn create_blank_editor_state() -> EditorState {
 
 pub fn create_startup_editor_state(
     startup_edit_mode: StartupEditMode,
-    stored_edit: Option<&StoredEdit>,
+    _stored_edit: Option<&StoredEdit>,
 ) -> EditorState {
-    if startup_edit_mode == StartupEditMode::LastOpenedFile {
-        if let Some(stored_edit) = stored_edit {
-            return EditorState {
-                content: stored_edit.content().to_owned(),
-                file_name: ensure_markdown_file_name(stored_edit.file_name()),
-                is_dirty: false,
-                last_saved_at: stored_edit.saved_at(),
-                error_message: None,
-            };
-        }
-    }
-
     if startup_edit_mode == StartupEditMode::Blank {
         return create_blank_editor_state();
     }
@@ -235,15 +223,13 @@ mod tests {
     };
 
     #[test]
-    fn creates_startup_state_from_stored_edit() {
+    fn creates_startup_state_without_reopening_stored_edit() {
         let stored_edit =
             StoredEdit::new("notes", "hello", Some("C:\\notes.md".to_owned()), Some(7));
         let editor_state =
-            create_startup_editor_state(crate::StartupEditMode::LastOpenedFile, Some(&stored_edit));
+            create_startup_editor_state(crate::StartupEditMode::StartPage, Some(&stored_edit));
 
-        assert_eq!(editor_state.content(), "hello");
-        assert_eq!(editor_state.file_name(), "notes.md");
-        assert_eq!(editor_state.last_saved_at(), Some(7));
+        assert_eq!(editor_state, create_initial_editor_state());
     }
 
     #[test]

@@ -11,6 +11,7 @@ import { isTauri } from "../../runtime/runtime";
 type UseConfirmSaveOnExitOptions = {
   readonly enabled: boolean;
   readonly isDirty: boolean;
+  readonly onDiscardConfirmed?: (request: ExitRequestKind) => void;
   readonly onErrorRaise: (message: string) => void;
   readonly onSaveDocument: () => Promise<boolean>;
 };
@@ -32,6 +33,7 @@ function toExitErrorMessage(error: unknown): string {
 export function useConfirmSaveOnExit({
   enabled,
   isDirty,
+  onDiscardConfirmed,
   onErrorRaise,
   onSaveDocument,
 }: UseConfirmSaveOnExitOptions): ConfirmSaveOnExitState {
@@ -41,6 +43,7 @@ export function useConfirmSaveOnExit({
   const isDirtyRef = useRef(isDirty);
   const isSavingRef = useRef(isSaving);
   const onErrorRaiseRef = useRef(onErrorRaise);
+  const onDiscardConfirmedRef = useRef(onDiscardConfirmed);
   const onSaveDocumentRef = useRef(onSaveDocument);
   const pendingRequestRef = useRef<ExitRequestKind | null>(pendingRequest);
 
@@ -59,6 +62,10 @@ export function useConfirmSaveOnExit({
   useEffect(() => {
     onErrorRaiseRef.current = onErrorRaise;
   }, [onErrorRaise]);
+
+  useEffect(() => {
+    onDiscardConfirmedRef.current = onDiscardConfirmed;
+  }, [onDiscardConfirmed]);
 
   useEffect(() => {
     onSaveDocumentRef.current = onSaveDocument;
@@ -169,7 +176,9 @@ export function useConfirmSaveOnExit({
     }
 
     pendingRequestRef.current = null;
+    isDirtyRef.current = false;
     setPendingRequest(null);
+    onDiscardConfirmedRef.current?.(request);
     void completeExitRequest(request).catch((error) => {
       onErrorRaiseRef.current(toExitErrorMessage(error));
     });

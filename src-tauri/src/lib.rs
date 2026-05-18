@@ -21,7 +21,7 @@ use tauri::{
 };
 
 use infra::{
-    broadcast_command, load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
+    load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
     restore_window_state, FileSystemAssetRepository, FileSystemMarkdownDocumentRepository,
     InMemoryOpenRequestQueue, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,
