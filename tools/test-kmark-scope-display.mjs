@@ -52,6 +52,9 @@ function getLine(document, lineNumber) {
   assert.equal(contentLine.rails.length, 1);
   assert.equal(contentLine.rails[0].depthIndex, 0);
   assert.equal(contentLine.rails[0].paletteKey, "tone-0");
+  assert.equal(document.scopes.length, 1);
+  assert.equal(document.scopes[0].startLineNumber, 1);
+  assert.equal(document.scopes[0].endLineNumber, 3);
 }
 
 {
@@ -189,6 +192,21 @@ function getLine(document, lineNumber) {
   const singleLine = getLine(document, 1);
 
   assert.equal(singleLine.rails[0].shape, "single");
+  assert.equal(document.scopes[0].startLineNumber, 1);
+  assert.equal(document.scopes[0].endLineNumber, 1);
+}
+
+{
+  const document = collectKmarkScopeDisplayLines([
+    "<!--k{ quick_scope color:red -->",
+    "quick",
+    "<!--k}-->",
+  ].join("\n"));
+  const contentLine = getLine(document, 2);
+
+  assert.equal(contentLine.rails.length, 1);
+  assert.equal(contentLine.rails[0].displayName, "quick_scope");
+  assert.equal(contentLine.rails[0].paletteKey, "tone-0");
 }
 
 {
@@ -197,11 +215,8 @@ function getLine(document, lineNumber) {
     "quick",
     "k}",
   ].join("\n"));
-  const contentLine = getLine(document, 2);
 
-  assert.equal(contentLine.rails.length, 1);
-  assert.equal(contentLine.rails[0].displayName, "quick_scope");
-  assert.equal(contentLine.rails[0].paletteKey, "tone-0");
+  assert.equal(document.lines.length, 0);
 }
 
 console.log("kmark scope display parser tests passed");

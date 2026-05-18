@@ -38,8 +38,19 @@ export type KmarkScopeLineDisplay = {
   readonly rails: readonly KmarkScopeLineRail[];
 };
 
+export type KmarkScopeDisplayScope = {
+  readonly id: number;
+  readonly displayName: string;
+  readonly colorKey: string;
+  readonly paletteKey: KmarkScopePaletteKey;
+  readonly depthIndex: number;
+  readonly startLineNumber: number;
+  readonly endLineNumber: number;
+};
+
 export type KmarkScopeDisplayDocument = {
   readonly lines: readonly KmarkScopeLineDisplay[];
+  readonly scopes: readonly KmarkScopeDisplayScope[];
 };
 
 type ActiveScope = {
@@ -162,7 +173,10 @@ export function collectKmarkScopeDisplayLines(
     });
   }
 
-  return { lines: displays };
+  return {
+    lines: displays,
+    scopes: collectScopeDisplayRanges(displays),
+  };
 }
 
 function splitMarkdownLines(markdown: string): readonly string[] {
@@ -201,17 +215,42 @@ function mergeScopeStacks(left: readonly ActiveScope[], right: readonly ActiveSc
   return scopes;
 }
 
+function collectScopeDisplayRanges(displays: readonly KmarkScopeLineDisplay[]): readonly KmarkScopeDisplayScope[] {
+  const rangesByScopeId = new Map<number, KmarkScopeDisplayScope>();
+
+  displays.forEach((display) => {
+    display.rails.forEach((rail) => {
+      const currentRange = rangesByScopeId.get(rail.id);
+
+      if (currentRange === undefined) {
+        rangesByScopeId.set(rail.id, {
+          id: rail.id,
+          displayName: rail.displayName,
+          colorKey: rail.colorKey,
+          paletteKey: rail.paletteKey,
+          depthIndex: rail.depthIndex,
+          startLineNumber: display.lineNumber,
+          endLineNumber: display.lineNumber,
+        });
+        return;
+      }
+
+      rangesByScopeId.set(rail.id, {
+        ...currentRange,
+        endLineNumber: display.lineNumber,
+      });
+    });
+  });
+
+  return [...rangesByScopeId.values()].sort((left, right) => left.id - right.id);
+}
+
 function collectScopeLineMarkers(
   line: string,
   syntaxConfig: KmarkScopeSyntaxConfig,
 ): readonly ScopeLineMarker[] {
   const markers: ScopeLineMarker[] = [];
   let rest = line.trim();
-
-  const bareMarker = parseBareScopeLineMarker(rest, syntaxConfig);
-  if (bareMarker !== null) {
-    return [bareMarker];
-  }
 
   while (rest.length > 0) {
     const match = rest.match(/^<!--([\s\S]*?)-->/u);
@@ -238,27 +277,6 @@ function collectScopeLineMarkers(
   }
 
   return markers;
-}
-
-function parseBareScopeLineMarker(
-  line: string,
-  syntaxConfig: KmarkScopeSyntaxConfig,
-): ScopeLineMarker | null {
-  for (const directiveName of [...syntaxConfig.directiveNames].sort((left, right) => right.length - left.length)) {
-    if (!line.startsWith(directiveName)) {
-      continue;
-    }
-
-    const nextCharacter = line.charAt(directiveName.length);
-
-    if (nextCharacter.length > 0 && /^[A-Za-z0-9_-]$/u.test(nextCharacter)) {
-      continue;
-    }
-
-    return parseScopeLineMarker(line.slice(directiveName.length).trim());
-  }
-
-  return null;
 }
 
 function parseScopeLineMarker(directiveText: string): ScopeLineMarker | null {

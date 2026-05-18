@@ -1,4 +1,4 @@
-import { autocompletion, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, type Completion, type CompletionSource } from "@codemirror/autocomplete";
+import { autocompletion, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, startCompletion, type Completion, type CompletionSource } from "@codemirror/autocomplete";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorSelection, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
@@ -221,6 +221,168 @@ const MARKDOWN_SELECTION_WRAP_EXTENSION = EditorView.domEventHandlers({
     return true;
   },
 });
+
+type KmarkShortcutInsertion = {
+  readonly cursorOffset: number;
+  readonly shouldStartCompletion: boolean;
+  readonly text: string;
+};
+
+const EMPTY_LINE_COMMENT_INSERTION = "<!--  -->";
+const EMPTY_LINE_COMMENT_CURSOR_OFFSET = "<!-- ".length;
+const LINE_COMMENT_PREFIX = "<!-- ";
+const LINE_COMMENT_SUFFIX = " -->";
+const FULL_LINE_HTML_COMMENT_PATTERN = /^<!--\s?([\s\S]*?)\s?-->$/u;
+
+const KMARK_SHORTCUT_INSERTIONS: Record<"close" | "open" | "parameter", KmarkShortcutInsertion> = {
+  close: {
+    cursorOffset: "<!--k}-->".length,
+    shouldStartCompletion: false,
+    text: "<!--k}-->",
+  },
+  open: {
+    cursorOffset: "<!--k{ ".length,
+    shouldStartCompletion: true,
+    text: "<!--k{ -->",
+  },
+  parameter: {
+    cursorOffset: "<!--k ".length,
+    shouldStartCompletion: true,
+    text: "<!--k -->",
+  },
+};
+
+function resolveKmarkShortcutInsertion(event: KeyboardEvent): KmarkShortcutInsertion | null {
+  if (!event.shiftKey || event.altKey || !(event.ctrlKey || event.metaKey)) {
+    return null;
+  }
+
+  if (event.key === "{" || event.code === "BracketLeft") {
+    return KMARK_SHORTCUT_INSERTIONS.open;
+  }
+
+  if (event.key === "}" || event.code === "BracketRight") {
+    return KMARK_SHORTCUT_INSERTIONS.close;
+  }
+
+  if (event.key === "/" || event.key === "?" || event.code === "Slash") {
+    return KMARK_SHORTCUT_INSERTIONS.parameter;
+  }
+
+  return null;
+}
+
+function isCtrlSlashEvent(event: KeyboardEvent): boolean {
+  return !event.altKey
+    && !event.shiftKey
+    && (event.ctrlKey || event.metaKey)
+    && (event.key === "/" || event.code === "Slash");
+}
+
+function runLineCommentInsertion(view: EditorView): boolean {
+  if (view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty) {
+    return false;
+  }
+
+  const selection = view.state.selection.main;
+  const line = view.state.doc.lineAt(selection.head);
+  const indentLength = line.text.match(/^\s*/u)?.[0].length ?? 0;
+  const contentText = line.text.slice(indentLength).trimEnd();
+  const existingCommentMatch = FULL_LINE_HTML_COMMENT_PATTERN.exec(contentText);
+
+  if (existingCommentMatch !== null) {
+    const uncommentedText = existingCommentMatch[1] ?? "";
+    const nextSelection = EditorSelection.cursor(line.from + indentLength + uncommentedText.length);
+
+    view.dispatch({
+      changes: {
+        from: line.from + indentLength,
+        insert: uncommentedText,
+        to: line.to,
+      },
+      scrollIntoView: true,
+      selection: nextSelection,
+    });
+
+    return true;
+  }
+
+  if (line.text.trim().length > 0) {
+    const content = contentText;
+    const insertion = `${LINE_COMMENT_PREFIX}${content}${LINE_COMMENT_SUFFIX}`;
+    const nextSelection = EditorSelection.cursor(line.from + indentLength + LINE_COMMENT_PREFIX.length + content.length);
+
+    view.dispatch({
+      changes: {
+        from: line.from + indentLength,
+        insert: insertion,
+        to: line.to,
+      },
+      scrollIntoView: true,
+      selection: nextSelection,
+    });
+
+    return true;
+  }
+
+  const emptyLineIndentLength = line.text.length;
+  const nextSelection = EditorSelection.cursor(line.from + emptyLineIndentLength + EMPTY_LINE_COMMENT_CURSOR_OFFSET);
+
+  view.dispatch({
+    changes: {
+      from: line.from + emptyLineIndentLength,
+      insert: EMPTY_LINE_COMMENT_INSERTION,
+      to: line.to,
+    },
+    scrollIntoView: true,
+    selection: nextSelection,
+  });
+
+  return true;
+}
+
+function runKmarkShortcutInsertion(view: EditorView, insertion: KmarkShortcutInsertion): void {
+  const transaction = view.state.changeByRange((range) => ({
+    changes: {
+      from: range.from,
+      insert: insertion.text,
+      to: range.to,
+    },
+    range: EditorSelection.cursor(range.from + insertion.cursorOffset),
+  }));
+
+  view.dispatch({
+    ...transaction,
+    scrollIntoView: true,
+  });
+
+  if (insertion.shouldStartCompletion) {
+    startCompletion(view);
+  }
+}
+
+const KMARK_SHORTCUT_INSERTION_EXTENSION = Prec.highest(EditorView.domEventHandlers({
+  keydown: (event, view) => {
+    if (view.composing || event.isComposing) {
+      return false;
+    }
+
+    if (isCtrlSlashEvent(event) && runLineCommentInsertion(view)) {
+      event.preventDefault();
+      return true;
+    }
+
+    const insertion = resolveKmarkShortcutInsertion(event);
+
+    if (insertion === null) {
+      return false;
+    }
+
+    event.preventDefault();
+    runKmarkShortcutInsertion(view, insertion);
+    return true;
+  },
+}));
 
 function runMarkdownEnter(view: EditorView): boolean {
   if (view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty || isCompletionOrSnippetActive(view)) {
@@ -756,6 +918,7 @@ function DesktopMarkdownInputComponent({
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
       MARKDOWN_SELECTION_WRAP_EXTENSION,
+      KMARK_SHORTCUT_INSERTION_EXTENSION,
       autocompletion({
         activateOnTyping: true,
         override: [editorCompletionSource],
