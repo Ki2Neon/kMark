@@ -44,6 +44,11 @@ type ModelViewerScopeEntry = {
   cleanup: ModelViewerCleanup;
   snapshotKey: string;
 };
+export type ModelViewerScopeOptions = {
+  readonly forceEagerLoading?: boolean;
+  readonly persistCameraSnapshots?: boolean;
+  readonly restoreCameraSnapshots?: boolean;
+};
 export type ModelViewerScope = {
   dispose: () => void;
   sync: () => void;
@@ -75,8 +80,8 @@ const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
 const mountedModelStates = new WeakMap<HTMLElement, ModelRenderState>();
 const modelCameraSnapshots = new Map<string, ModelCameraSnapshot>();
 
-export function prepareKmarkModelViewers(root: HTMLElement): ModelViewerCleanup {
-  const scope = createKmarkModelViewerScope(root);
+export function prepareKmarkModelViewers(root: HTMLElement, options: ModelViewerScopeOptions = {}): ModelViewerCleanup {
+  const scope = createKmarkModelViewerScope(root, options);
   scope.sync();
 
   return () => {
@@ -84,13 +89,16 @@ export function prepareKmarkModelViewers(root: HTMLElement): ModelViewerCleanup 
   };
 }
 
-export function createKmarkModelViewerScope(root: HTMLElement): ModelViewerScope {
+export function createKmarkModelViewerScope(
+  root: HTMLElement,
+  options: ModelViewerScopeOptions = {},
+): ModelViewerScope {
   const entries = new Map<HTMLElement, ModelViewerScopeEntry>();
 
   return {
     dispose: () => {
       for (const [viewer, entry] of entries) {
-        persistKmarkModelViewerSnapshot(viewer, entry.snapshotKey);
+        maybePersistKmarkModelViewerSnapshot(viewer, entry.snapshotKey, options);
         entry.cleanup();
       }
       entries.clear();
@@ -104,7 +112,7 @@ export function createKmarkModelViewerScope(root: HTMLElement): ModelViewerScope
           continue;
         }
 
-        persistKmarkModelViewerSnapshot(viewer, entry.snapshotKey);
+        maybePersistKmarkModelViewerSnapshot(viewer, entry.snapshotKey, options);
         entry.cleanup();
         entries.delete(viewer);
       }
@@ -118,12 +126,12 @@ export function createKmarkModelViewerScope(root: HTMLElement): ModelViewerScope
         }
 
         if (currentEntry !== undefined) {
-          persistKmarkModelViewerSnapshot(viewer, currentEntry.snapshotKey);
+          maybePersistKmarkModelViewerSnapshot(viewer, currentEntry.snapshotKey, options);
           currentEntry.cleanup();
         }
 
         entries.set(viewer, {
-          cleanup: prepareKmarkModelViewer(viewer, snapshotKey),
+          cleanup: prepareKmarkModelViewer(viewer, snapshotKey, options),
           snapshotKey,
         });
       }
@@ -249,6 +257,19 @@ function persistKmarkModelViewerSnapshot(
   rememberModelCameraSnapshot(identityKey, snapshot);
 }
 
+function maybePersistKmarkModelViewerSnapshot(
+  viewer: HTMLElement,
+  snapshotKey: string,
+  options: ModelViewerScopeOptions,
+  identityKey = resolveKmarkModelViewerIdentityKey(viewer),
+): void {
+  if (options.persistCameraSnapshots === false) {
+    return;
+  }
+
+  persistKmarkModelViewerSnapshot(viewer, snapshotKey, identityKey);
+}
+
 function rememberModelCameraSnapshot(key: string, snapshot: ModelCameraSnapshot): void {
   modelCameraSnapshots.delete(key);
   modelCameraSnapshots.set(key, snapshot);
@@ -358,18 +379,22 @@ function vectorToTuple(vector: THREE.Vector3): readonly [number, number, number]
   return [vector.x, vector.y, vector.z];
 }
 
-function prepareKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelViewerCleanup {
+function prepareKmarkModelViewer(
+  viewer: HTMLElement,
+  snapshotKey: string,
+  options: ModelViewerScopeOptions,
+): ModelViewerCleanup {
   const loading = viewer.dataset.kmarkModelLoading ?? "lazy";
 
-  if (loading === "eager" || !("IntersectionObserver" in window)) {
-    return mountKmarkModelViewer(viewer, snapshotKey);
+  if (options.forceEagerLoading === true || loading === "eager" || !("IntersectionObserver" in window)) {
+    return mountKmarkModelViewer(viewer, snapshotKey, options);
   }
 
   let mountedCleanup: ModelViewerCleanup | null = null;
   const observer = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) {
       observer.disconnect();
-      mountedCleanup = mountKmarkModelViewer(viewer, snapshotKey);
+      mountedCleanup = mountKmarkModelViewer(viewer, snapshotKey, options);
     }
   }, { rootMargin: "160px" });
 
@@ -381,7 +406,11 @@ function prepareKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): Mode
   };
 }
 
-function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelViewerCleanup {
+function mountKmarkModelViewer(
+  viewer: HTMLElement,
+  snapshotKey: string,
+  options: ModelViewerScopeOptions,
+): ModelViewerCleanup {
   const source = viewer.dataset.kmarkModelDisplaySrc?.trim() ?? "";
   const identityKey = resolveKmarkModelViewerIdentityKey(viewer);
   const canvasRoot = viewer.querySelector<HTMLElement>(".kmark-model-canvas");
@@ -473,7 +502,9 @@ function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelV
     state.controls = configureControls(viewer, renderer.domElement, state.camera);
     state.keyboardMovement = configureViewerKeyboardMovement(renderer.domElement);
     resizeRenderer(viewer, renderer, state.camera, state);
-    restoreModelCameraSnapshot(state, modelCameraSnapshots.get(snapshotKey) ?? modelCameraSnapshots.get(identityKey));
+    if (options.restoreCameraSnapshots !== false) {
+      restoreModelCameraSnapshot(state, modelCameraSnapshots.get(snapshotKey) ?? modelCameraSnapshots.get(identityKey));
+    }
 
     viewer.dataset.kmarkModelState = "ready";
     if (status !== null) {
@@ -486,7 +517,7 @@ function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelV
   });
 
   return () => {
-    persistKmarkModelViewerSnapshot(viewer, snapshotKey, identityKey);
+    maybePersistKmarkModelViewerSnapshot(viewer, snapshotKey, options, identityKey);
     state.disposed = true;
     mountedModelStates.delete(viewer);
     resizeObserver.disconnect();
