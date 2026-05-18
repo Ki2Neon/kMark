@@ -38,7 +38,9 @@ type ModelRenderState = {
   modelRadius: number;
   outlinePass: OutlinePass | null;
   previousFrameMs: number;
+  renderer: THREE.WebGLRenderer | null;
   renderSizeKey: string;
+  scene: THREE.Scene | null;
 };
 type ModelViewerScopeEntry = {
   cleanup: ModelViewerCleanup;
@@ -47,6 +49,7 @@ type ModelViewerScopeEntry = {
 export type ModelViewerScopeOptions = {
   readonly forceEagerLoading?: boolean;
   readonly persistCameraSnapshots?: boolean;
+  readonly preserveDrawingBuffer?: boolean;
   readonly restoreCameraSnapshots?: boolean;
 };
 export type ModelViewerScope = {
@@ -87,6 +90,29 @@ export function prepareKmarkModelViewers(root: HTMLElement, options: ModelViewer
   return () => {
     scope.dispose();
   };
+}
+
+export function renderKmarkModelViewerNow(viewer: HTMLElement): boolean {
+  const state = mountedModelStates.get(viewer);
+
+  if (
+    state === undefined
+    || state.disposed
+    || state.scene === null
+    || state.renderer === null
+    || state.camera === null
+  ) {
+    return false;
+  }
+
+  const now = performance.now();
+  const deltaSeconds = Math.max(0, (now - state.previousFrameMs) / 1000);
+  state.previousFrameMs = now;
+  drawModelFrame(state.scene, state.renderer, state, viewer, deltaSeconds);
+  const gl = state.renderer.getContext();
+  gl.flush();
+  gl.finish();
+  return true;
 }
 
 export function createKmarkModelViewerScope(
@@ -425,7 +451,11 @@ function mountKmarkModelViewer(
   setModelStatus(status, "3Dモデルを読み込み中");
 
   const scene = new THREE.Scene();
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  const renderer = new THREE.WebGLRenderer({
+    alpha: true,
+    antialias: true,
+    preserveDrawingBuffer: options.preserveDrawingBuffer === true,
+  });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   canvasRoot.replaceChildren(renderer.domElement);
 
@@ -452,7 +482,9 @@ function mountKmarkModelViewer(
     modelRadius: 1,
     outlinePass: null,
     previousFrameMs: performance.now(),
+    renderer,
     renderSizeKey: "",
+    scene,
   };
   mountedModelStates.set(viewer, state);
 
@@ -548,6 +580,25 @@ function renderModelFrame(
   const deltaSeconds = Math.max(0, (now - state.previousFrameMs) / 1000);
   state.previousFrameMs = now;
 
+  drawModelFrame(scene, renderer, state, viewer, deltaSeconds);
+  state.animationFrame = window.requestAnimationFrame(() => {
+    renderModelFrame(scene, renderer, state, viewer);
+  });
+}
+
+function drawModelFrame(
+  scene: THREE.Scene,
+  renderer: THREE.WebGLRenderer,
+  state: ModelRenderState,
+  viewer: HTMLElement,
+  deltaSeconds: number,
+): void {
+  const camera = state.camera;
+
+  if (camera === null) {
+    return;
+  }
+
   if (getBooleanDataset(viewer.dataset.kmarkModelAutoRotate, false)) {
     const speed = getNumberDataset(viewer.dataset.kmarkModelAutoRotateSpeed, 1.0);
     if (state.controls !== null && state.controls.enabled) {
@@ -558,18 +609,16 @@ function renderModelFrame(
     }
   }
 
-  resizeRenderer(viewer, renderer, state.camera, state);
+  resizeRenderer(viewer, renderer, camera, state);
   applyKeyboardMovement(state, deltaSeconds);
   updateModelEdgeOverlay(viewer, state);
   state.controls?.update();
   if (state.composer !== null) {
     state.composer.render(deltaSeconds);
   } else {
-    renderer.render(scene, state.camera);
+    renderer.render(scene, camera);
   }
-  state.animationFrame = window.requestAnimationFrame(() => {
-    renderModelFrame(scene, renderer, state, viewer);
-  });
+  viewer.dataset.kmarkModelFrameState = "rendered";
 }
 
 function configureLighting(scene: THREE.Scene, preset: string): void {

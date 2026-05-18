@@ -1116,7 +1116,8 @@ function printA4MarkdownDocument(
     iframe.style.width = "100vw";
     iframe.style.height = "100vh";
     iframe.style.border = "0";
-    iframe.style.opacity = "0";
+    iframe.style.zIndex = "-1";
+    iframe.style.opacity = "1";
     iframe.style.pointerEvents = "none";
 
     let isSettled = false;
@@ -1244,7 +1245,8 @@ export function printMarkdownDocument(
     iframe.style.width = "100vw";
     iframe.style.height = "100vh";
     iframe.style.border = "0";
-    iframe.style.opacity = "0";
+    iframe.style.zIndex = "-1";
+    iframe.style.opacity = "1";
     iframe.style.pointerEvents = "none";
 
     let isSettled = false;
