@@ -212,6 +212,8 @@ export function MarkdownEditorScreen({
   });
   const isPreviewInteractionAvailable = isPreviewVisible && (layoutMode === "desktop" || mobileSection === "preview");
   const handlePreviewModelViewpointSave = useCallback((modelViewer: HTMLElement) => {
+    setIsEditFocused(false);
+
     const sourceLineStart = Number.parseInt(modelViewer.dataset.sourceLineStart ?? "", 10);
     const viewpoint = getKmarkModelViewerViewpoint(modelViewer);
 
@@ -239,7 +241,7 @@ export function MarkdownEditorScreen({
     contextMenuStyle: previewContextMenuStyle,
     handleModelCameraReset: handlePreviewModelCameraReset,
     handleModelViewpointSave: handlePreviewModelViewpointSaveRequest,
-    handlePreviewContextMenu,
+    handlePreviewContextMenu: handlePreviewInteractionContextMenu,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
     hasModelCameraTarget: previewContextMenuHasModelCameraTarget,
@@ -249,6 +251,14 @@ export function MarkdownEditorScreen({
     isAvailable: isPreviewInteractionAvailable,
     onModelViewpointSave: handlePreviewModelViewpointSave,
   });
+  const handlePreviewContextMenu = useCallback((
+    clientX: number,
+    clientY: number,
+    modelViewer: HTMLElement | null,
+  ) => {
+    setIsEditFocused(false);
+    handlePreviewInteractionContextMenu(clientX, clientY, modelViewer);
+  }, [handlePreviewInteractionContextMenu]);
 
   useEffect(() => {
     if (layoutMode !== "mobile") {

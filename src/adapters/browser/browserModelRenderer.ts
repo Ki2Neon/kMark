@@ -71,6 +71,17 @@ const MAX_MODEL_CAMERA_SNAPSHOTS = 160;
 const MODEL_VIEWER_REUSE_SEPARATOR = "\u0000";
 const MODEL_UP = new THREE.Vector3(0, 0, 1);
 const MODEL_KEYBOARD_MOVE_KEYS = new Set(["KeyA", "KeyD", "KeyE", "KeyQ", "KeyS", "KeyW"]);
+const MODEL_DEFAULT_PROJECTION = "perspective";
+const MODEL_CAMERA_DATA_ATTRIBUTE_NAMES = new Set([
+  "data-kmark-model-camera-distance",
+  "data-kmark-model-camera-pitch",
+  "data-kmark-model-camera-position",
+  "data-kmark-model-camera-target",
+  "data-kmark-model-camera-yaw",
+  "data-kmark-model-camera-zoom",
+  "data-kmark-model-fov",
+  "data-kmark-model-view",
+]);
 const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
   back: [180, 0],
   bottom: [0, -90],
@@ -211,6 +222,7 @@ function collectReusableKmarkModelViewers(root: ParentNode): Map<string, HTMLEle
 
 function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement): void {
   const modelState = target.dataset.kmarkModelState;
+  const cameraAttributeKey = getKmarkModelViewerCameraAttributeKey(target);
 
   for (const attribute of Array.from(target.attributes)) {
     if (attribute.name === "data-kmark-model-state") {
@@ -231,6 +243,24 @@ function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement
   if (modelState !== undefined) {
     target.dataset.kmarkModelState = modelState;
   }
+
+  if (cameraAttributeKey !== getKmarkModelViewerCameraAttributeKey(target)) {
+    applyKmarkModelViewerCameraParams(target);
+  }
+}
+
+function getKmarkModelViewerCameraAttributeKey(viewer: HTMLElement): string {
+  const cameraAttributes = Array.from(viewer.attributes)
+    .filter((attribute) => (
+      attribute.name === "data-kmark-model-projection"
+      || MODEL_CAMERA_DATA_ATTRIBUTE_NAMES.has(attribute.name)
+    ))
+    .map((attribute) => `${attribute.name}=${attribute.value}`)
+    .sort()
+    .join(MODEL_VIEWER_REUSE_SEPARATOR);
+
+  return `data-kmark-model-projection=${viewer.dataset.kmarkModelProjection?.trim() || MODEL_DEFAULT_PROJECTION}`
+    + `${MODEL_VIEWER_REUSE_SEPARATOR}${cameraAttributes}`;
 }
 
 function resolveKmarkModelViewerKey(viewer: HTMLElement, occurrenceCounts: Map<string, number>): string {
@@ -243,10 +273,13 @@ function resolveKmarkModelViewerKey(viewer: HTMLElement, occurrenceCounts: Map<s
 }
 
 function resolveKmarkModelViewerIdentityKey(viewer: HTMLElement): string {
+  const projection = viewer.dataset.kmarkModelProjection?.trim() || MODEL_DEFAULT_PROJECTION;
   const modelAttributes = Array.from(viewer.attributes)
     .filter((attribute) => (
       attribute.name.startsWith("data-kmark-model-")
       && attribute.name !== "data-kmark-model-state"
+      && attribute.name !== "data-kmark-model-projection"
+      && !MODEL_CAMERA_DATA_ATTRIBUTE_NAMES.has(attribute.name)
     ))
     .map((attribute) => `${attribute.name}=${attribute.value}`)
     .sort()
@@ -256,6 +289,7 @@ function resolveKmarkModelViewerIdentityKey(viewer: HTMLElement): string {
     viewer.getAttribute("role") ?? "",
     viewer.getAttribute("aria-label") ?? "",
     viewer.getAttribute("title") ?? "",
+    `data-kmark-model-projection=${projection}`,
     modelAttributes,
   ].join(MODEL_VIEWER_REUSE_SEPARATOR);
 
@@ -326,6 +360,31 @@ export function resetKmarkModelViewerCamera(viewer: HTMLElement): boolean {
   fitCameraToModel(viewer, state.camera, state.bounds);
   state.controls?.target.copy(target);
   state.controls?.update();
+
+  return true;
+}
+
+function applyKmarkModelViewerCameraParams(viewer: HTMLElement): boolean {
+  const state = mountedModelStates.get(viewer);
+
+  if (state === undefined || state.camera === null || state.bounds === null) {
+    return false;
+  }
+
+  const nextProjection = viewer.dataset.kmarkModelProjection?.trim() || MODEL_DEFAULT_PROJECTION;
+  const currentProjection = state.camera instanceof THREE.OrthographicCamera ? "orthographic" : "perspective";
+
+  if (nextProjection !== currentProjection) {
+    return false;
+  }
+
+  const target = parseVector3(viewer.dataset.kmarkModelCameraTarget) ?? new THREE.Vector3(0, 0, 0);
+
+  configureCameraPose(viewer, state.camera, Math.max(state.modelRadius, 0.5));
+  fitCameraToModel(viewer, state.camera, state.bounds);
+  state.controls?.target.copy(target);
+  state.controls?.update();
+  renderKmarkModelViewerNow(viewer);
 
   return true;
 }
