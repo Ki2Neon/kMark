@@ -87,23 +87,18 @@ export class EditorSessionController {
 
   async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
-    this.#currentDocumentFilePath = startupEditMode === "last-opened-file"
-      ? storedEdit?.filePath ?? null
-      : null;
+    this.#currentDocumentFilePath = null;
     this.#documentGateway.restoreDocumentReference(this.#currentDocumentFilePath);
 
     return {
-      initialState: this.#rules.createStartupState(startupEditMode, storedEdit),
-      shouldSkipInitialPersist: startupEditMode !== "last-opened-file" && storedEdit !== null,
+      initialState: this.#rules.createStartupState(startupEditMode, null),
+      shouldSkipInitialPersist: storedEdit !== null,
     };
   }
 
   async bootstrapNewUntitled(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
-    const startupState = this.#rules.createStartupState(
-      startupEditMode,
-      startupEditMode === "last-opened-file" ? storedEdit : null,
-    );
+    const startupState = this.#rules.createStartupState(startupEditMode, null);
 
     this.#currentDocumentFilePath = null;
     this.#documentGateway.restoreDocumentReference(null);

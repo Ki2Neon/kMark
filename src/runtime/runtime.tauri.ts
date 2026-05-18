@@ -1,5 +1,4 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { type RuntimeApi, type RuntimeDragDropEvent } from "./runtime";
@@ -16,7 +15,7 @@ export const runtimeTauri: RuntimeApi = {
   },
 
   listen<T>(eventName: string, callback: (payload: T) => void) {
-    return listen<T>(eventName, (event) => {
+    return getCurrentWindow().listen<T>(eventName, (event) => {
       callback(event.payload);
     });
   },

@@ -2,12 +2,23 @@ import { memo, type CSSProperties, type RefObject } from "react";
 
 type PreviewContextMenuProps = {
   readonly ariaLabel: string;
+  readonly hasModelCameraTarget: boolean;
   readonly menuRef: RefObject<HTMLDivElement | null>;
   readonly onFit: () => void;
+  readonly onModelCameraReset: () => void;
+  readonly onModelViewpointSave: () => void;
   readonly style?: CSSProperties;
 };
 
-function PreviewContextMenuComponent({ ariaLabel, menuRef, onFit, style }: PreviewContextMenuProps) {
+function PreviewContextMenuComponent({
+  ariaLabel,
+  hasModelCameraTarget,
+  menuRef,
+  onFit,
+  onModelCameraReset,
+  onModelViewpointSave,
+  style,
+}: PreviewContextMenuProps) {
   return (
     <div
       ref={menuRef}
@@ -19,6 +30,16 @@ function PreviewContextMenuComponent({ ariaLabel, menuRef, onFit, style }: Previ
       <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onFit}>
         Fit
       </button>
+      {hasModelCameraTarget ? (
+        <>
+          <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelViewpointSave}>
+            画角を保存
+          </button>
+          <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelCameraReset}>
+            Reset 3D View
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }

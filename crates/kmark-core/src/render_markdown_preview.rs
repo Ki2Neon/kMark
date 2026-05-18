@@ -297,6 +297,7 @@ struct KmarkModelParams {
     camera_distance: Option<String>,
     camera_position: Option<String>,
     camera_target: Option<String>,
+    camera_zoom: Option<String>,
     light_preset: Option<String>,
     controls: Option<bool>,
     rotate: Option<bool>,
@@ -6166,6 +6167,9 @@ impl KmarkModelParams {
         if let Some(camera_target) = &other.camera_target {
             self.camera_target = Some(camera_target.clone());
         }
+        if let Some(camera_zoom) = &other.camera_zoom {
+            self.camera_zoom = Some(camera_zoom.clone());
+        }
         if let Some(light_preset) = &other.light_preset {
             self.light_preset = Some(light_preset.clone());
         }
@@ -6231,6 +6235,7 @@ impl KmarkModelParams {
             || self.camera_distance.is_some()
             || self.camera_position.is_some()
             || self.camera_target.is_some()
+            || self.camera_zoom.is_some()
             || self.light_preset.is_some()
             || self.controls.is_some()
             || self.rotate.is_some()
@@ -7259,6 +7264,11 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.model.camera_target = Some(camera_target);
                 }
             }
+            "model_camera_zoom" => {
+                if let Some(camera_zoom) = parse_kmark_model_positive_number_value(&value) {
+                    bundle.params.model.camera_zoom = Some(camera_zoom);
+                }
+            }
             "model_light_preset" => {
                 if let Some(light_preset) = parse_kmark_model_light_preset_value(&value) {
                     bundle.params.model.light_preset = Some(light_preset);
@@ -8167,6 +8177,7 @@ fn push_model_data_attrs(
     push_optional_model_data_attr(html, "camera-distance", model.camera_distance.as_deref());
     push_optional_model_data_attr(html, "camera-position", model.camera_position.as_deref());
     push_optional_model_data_attr(html, "camera-target", model.camera_target.as_deref());
+    push_optional_model_data_attr(html, "camera-zoom", model.camera_zoom.as_deref());
     push_optional_model_data_attr(html, "light-preset", model.light_preset.as_deref());
     push_optional_bool_model_data_attr(html, "controls", model.controls);
     push_optional_bool_model_data_attr(html, "rotate", model.rotate);
@@ -10749,7 +10760,7 @@ mod tests {
     #[test]
     fn renders_markdown_image_model_extensions_as_model_viewers() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:600 model_view:front model_projection:orthographic model_controls:false model_convert_scale:0.01 -->\n![gear](./gear.obj)",
+            "<!-- kmark w:600 model_view:front model_projection:orthographic model_camera_position:1,2,3 model_camera_target:0,0,0 model_camera_zoom:1.5 model_controls:false model_convert_scale:0.01 -->\n![gear](./gear.obj)",
         );
 
         assert!(rendered_preview
@@ -10767,6 +10778,15 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-projection=\"orthographic\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-position=\"1,2,3\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-target=\"0,0,0\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-zoom=\"1.5\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-controls=\"false\""));

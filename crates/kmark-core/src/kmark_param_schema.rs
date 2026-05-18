@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 16;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 17;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -457,6 +457,39 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         priority: 90,
     },
     KmarkParamSpec {
+        name: "model_camera_position",
+        aliases: &[],
+        param_type: "vector3",
+        contexts: &["single", "model"],
+        values: &[],
+        insert_text: "model_camera_position:",
+        description: "3Dモデルカメラの視点位置をx,y,z形式で指定する",
+        examples: &["<!-- kmark model_camera_position:1,2,3 -->"],
+        priority: 90,
+    },
+    KmarkParamSpec {
+        name: "model_camera_target",
+        aliases: &[],
+        param_type: "vector3",
+        contexts: &["single", "model"],
+        values: &[],
+        insert_text: "model_camera_target:",
+        description: "3Dモデルカメラの注視点をx,y,z形式で指定する",
+        examples: &["<!-- kmark model_camera_target:0,0,0 -->"],
+        priority: 89,
+    },
+    KmarkParamSpec {
+        name: "model_camera_zoom",
+        aliases: &[],
+        param_type: "number",
+        contexts: &["single", "model"],
+        values: &[],
+        insert_text: "model_camera_zoom:",
+        description: "3Dモデルカメラのzoom倍率を指定する",
+        examples: &["<!-- kmark model_camera_zoom:1.5 -->"],
+        priority: 88,
+    },
+    KmarkParamSpec {
         name: "model_light_preset",
         aliases: &[],
         param_type: "enum",
@@ -465,7 +498,7 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         insert_text: "model_light_preset:",
         description: "3Dモデル照明presetを指定する",
         examples: &["<!-- kmark model_light_preset:studio -->"],
-        priority: 89,
+        priority: 87,
     },
     KmarkParamSpec {
         name: "model_controls",

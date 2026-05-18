@@ -32,6 +32,9 @@ type A4PrintPreviewPage = {
 type PrintMarkdownDocumentOptions =
   | StandardPrintMarkdownDocumentOptions
   | A4PrintMarkdownDocumentOptions;
+type PrintMarkdownDocumentRuntimeOptions = {
+  readonly preparePrintWindow?: (printWindow: Window) => Promise<(() => void) | void> | (() => void) | void;
+};
 
 const PRINT_DOCUMENT_LOAD_TIMEOUT_MS = 3000;
 const PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 2000;
@@ -386,10 +389,9 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
 
   .markdown-body .markdown-task-checkbox {
     display: block;
-    flex: 0 0 auto;
     width: 1.14em;
     height: 1.14em;
-    margin: 0.14em 0 0;
+    margin: 0;
     border: 0.16em solid #111111;
     background: #ffffff;
     border-radius: 0;
@@ -422,16 +424,28 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     visibility: hidden;
   }
 
-  .markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox) {
+  .markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox),
+  .markdown-body :is(ul, ol):has(> li > p:first-child > .markdown-task-checkbox) {
     padding-left: 0;
   }
 
-  .markdown-body li:has(> .markdown-task-checkbox) {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.68em;
+  .markdown-body li:has(> .markdown-task-checkbox),
+  .markdown-body li:has(> p:first-child > .markdown-task-checkbox) {
+    position: relative;
+    padding-left: 2.14em;
     list-style: none;
     min-height: 1.5em;
+  }
+
+  .markdown-body li:has(> p:first-child > .markdown-task-checkbox) > p:first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body li > .markdown-task-checkbox,
+  .markdown-body li > p:first-child > .markdown-task-checkbox {
+    position: absolute;
+    left: 0;
+    top: 0.14em;
   }
 
   .markdown-body blockquote {
@@ -1082,7 +1096,10 @@ function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pa
 </html>`;
 }
 
-function printA4MarkdownDocument(options: A4PrintMarkdownDocumentOptions): Promise<void> {
+function printA4MarkdownDocument(
+  options: A4PrintMarkdownDocumentOptions,
+  runtimeOptions: PrintMarkdownDocumentRuntimeOptions,
+): Promise<void> {
   const pages = getDisplayedPreviewA4Pages();
 
   if (pages.length === 0) {
@@ -1094,16 +1111,19 @@ function printA4MarkdownDocument(options: A4PrintMarkdownDocumentOptions): Promi
     iframe.setAttribute("aria-hidden", "true");
     iframe.tabIndex = -1;
     iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
+    iframe.style.left = "0";
+    iframe.style.top = "0";
+    iframe.style.width = "100vw";
+    iframe.style.height = "100vh";
     iframe.style.border = "0";
-    iframe.style.visibility = "hidden";
+    iframe.style.zIndex = "-1";
+    iframe.style.opacity = "1";
+    iframe.style.pointerEvents = "none";
 
     let isSettled = false;
     let loadTimeoutId: number | null = null;
     let fallbackTimeoutId: number | null = null;
+    let printWindowCleanup: (() => void) | null = null;
 
     const cleanup = () => {
       if (loadTimeoutId !== null) {
@@ -1114,6 +1134,8 @@ function printA4MarkdownDocument(options: A4PrintMarkdownDocumentOptions): Promi
         window.clearTimeout(fallbackTimeoutId);
       }
 
+      printWindowCleanup?.();
+      printWindowCleanup = null;
       iframe.onload = null;
       iframe.onerror = null;
       iframe.remove();
@@ -1141,21 +1163,37 @@ function printA4MarkdownDocument(options: A4PrintMarkdownDocumentOptions): Promi
         return;
       }
 
-      const finalizeSuccess = () => {
-        printWindow.removeEventListener("afterprint", finalizeSuccess);
-        finish(resolve);
+      if (loadTimeoutId !== null) {
+        window.clearTimeout(loadTimeoutId);
+        loadTimeoutId = null;
+      }
+
+      const prepareAndPrint = async () => {
+        try {
+          printWindowCleanup = await runtimeOptions.preparePrintWindow?.(printWindow) ?? null;
+        } catch (error) {
+          finish(() => reject(error instanceof Error ? error : new Error("A4印刷画面の準備に失敗しました。")));
+          return;
+        }
+
+        const finalizeSuccess = () => {
+          printWindow.removeEventListener("afterprint", finalizeSuccess);
+          finish(resolve);
+        };
+
+        printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
+        fallbackTimeoutId = window.setTimeout(finalizeSuccess, A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
+
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (error) {
+          printWindow.removeEventListener("afterprint", finalizeSuccess);
+          finish(() => reject(error instanceof Error ? error : new Error("印刷に失敗しました。")));
+        }
       };
 
-      printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
-      fallbackTimeoutId = window.setTimeout(finalizeSuccess, A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
-
-      try {
-        printWindow.focus();
-        printWindow.print();
-      } catch (error) {
-        printWindow.removeEventListener("afterprint", finalizeSuccess);
-        finish(() => reject(error instanceof Error ? error : new Error("印刷に失敗しました。")));
-      }
+      void prepareAndPrint();
     };
 
     loadTimeoutId = window.setTimeout(() => {
@@ -1185,13 +1223,16 @@ function createPrintDocumentMarkup(options: StandardPrintMarkdownDocumentOptions
 </html>`;
 }
 
-export function printMarkdownDocument(options: PrintMarkdownDocumentOptions): Promise<void> {
+export function printMarkdownDocument(
+  options: PrintMarkdownDocumentOptions,
+  runtimeOptions: PrintMarkdownDocumentRuntimeOptions = {},
+): Promise<void> {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return Promise.reject(new Error("この環境では印刷できません。"));
   }
 
   if (options.displayMode === "a4") {
-    return printA4MarkdownDocument(options);
+    return printA4MarkdownDocument(options, runtimeOptions);
   }
 
   return new Promise((resolve, reject) => {
@@ -1199,16 +1240,19 @@ export function printMarkdownDocument(options: PrintMarkdownDocumentOptions): Pr
     iframe.setAttribute("aria-hidden", "true");
     iframe.tabIndex = -1;
     iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
+    iframe.style.left = "0";
+    iframe.style.top = "0";
+    iframe.style.width = "100vw";
+    iframe.style.height = "100vh";
     iframe.style.border = "0";
-    iframe.style.visibility = "hidden";
+    iframe.style.zIndex = "-1";
+    iframe.style.opacity = "1";
+    iframe.style.pointerEvents = "none";
 
     let isSettled = false;
     let loadTimeoutId: number | null = null;
     let fallbackTimeoutId: number | null = null;
+    let printWindowCleanup: (() => void) | null = null;
 
     const cleanup = () => {
       if (loadTimeoutId !== null) {
@@ -1219,6 +1263,8 @@ export function printMarkdownDocument(options: PrintMarkdownDocumentOptions): Pr
         window.clearTimeout(fallbackTimeoutId);
       }
 
+      printWindowCleanup?.();
+      printWindowCleanup = null;
       iframe.onload = null;
       iframe.onerror = null;
       iframe.remove();
@@ -1246,20 +1292,36 @@ export function printMarkdownDocument(options: PrintMarkdownDocumentOptions): Pr
         return;
       }
 
-      const finalizeSuccess = () => {
-        finish(resolve);
+      if (loadTimeoutId !== null) {
+        window.clearTimeout(loadTimeoutId);
+        loadTimeoutId = null;
+      }
+
+      const prepareAndPrint = async () => {
+        try {
+          printWindowCleanup = await runtimeOptions.preparePrintWindow?.(printWindow) ?? null;
+        } catch (error) {
+          finish(() => reject(error instanceof Error ? error : new Error("印刷画面の準備に失敗しました。")));
+          return;
+        }
+
+        const finalizeSuccess = () => {
+          finish(resolve);
+        };
+
+        printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
+        fallbackTimeoutId = window.setTimeout(finalizeSuccess, PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
+
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (error) {
+          printWindow.removeEventListener("afterprint", finalizeSuccess);
+          finish(() => reject(error instanceof Error ? error : new Error("印刷に失敗しました。")));
+        }
       };
 
-      printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
-      fallbackTimeoutId = window.setTimeout(finalizeSuccess, PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
-
-      try {
-        printWindow.focus();
-        printWindow.print();
-      } catch (error) {
-        printWindow.removeEventListener("afterprint", finalizeSuccess);
-        finish(() => reject(error instanceof Error ? error : new Error("印刷に失敗しました。")));
-      }
+      void prepareAndPrint();
     };
 
     loadTimeoutId = window.setTimeout(() => {
