@@ -386,10 +386,9 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
 
   .markdown-body .markdown-task-checkbox {
     display: block;
-    flex: 0 0 auto;
     width: 1.14em;
     height: 1.14em;
-    margin: 0.14em 0 0;
+    margin: 0;
     border: 0.16em solid #111111;
     background: #ffffff;
     border-radius: 0;
@@ -422,16 +421,28 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     visibility: hidden;
   }
 
-  .markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox) {
+  .markdown-body :is(ul, ol):has(> li > .markdown-task-checkbox),
+  .markdown-body :is(ul, ol):has(> li > p:first-child > .markdown-task-checkbox) {
     padding-left: 0;
   }
 
-  .markdown-body li:has(> .markdown-task-checkbox) {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.68em;
+  .markdown-body li:has(> .markdown-task-checkbox),
+  .markdown-body li:has(> p:first-child > .markdown-task-checkbox) {
+    position: relative;
+    padding-left: 2.14em;
     list-style: none;
     min-height: 1.5em;
+  }
+
+  .markdown-body li:has(> p:first-child > .markdown-task-checkbox) > p:first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body li > .markdown-task-checkbox,
+  .markdown-body li > p:first-child > .markdown-task-checkbox {
+    position: absolute;
+    left: 0;
+    top: 0.14em;
   }
 
   .markdown-body blockquote {
