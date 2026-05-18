@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { resetKmarkModelViewerCamera } from "../../adapters/browser/browserModelRenderer";
 import { type PreviewDisplayMode } from "../../domain/preview";
 
-const PREVIEW_CONTEXT_MENU_WIDTH_PX = 132;
-const PREVIEW_CONTEXT_MENU_HEIGHT_PX = 52;
+const PREVIEW_CONTEXT_MENU_WIDTH_PX = 168;
+const PREVIEW_CONTEXT_MENU_PADDING_PX = 12;
+const PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 
 export const MIN_PREVIEW_ZOOM_SCALE = 0.05;
 export const MAX_PREVIEW_ZOOM_SCALE = 10;
 
 type PreviewContextMenuState = {
+  readonly modelViewer: HTMLElement | null;
   readonly x: number;
   readonly y: number;
 };
@@ -45,15 +48,27 @@ export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePr
     closeContextMenu();
   }, [closeContextMenu]);
 
+  const handleModelCameraReset = useCallback(() => {
+    const modelViewer = contextMenuState?.modelViewer ?? null;
+
+    if (modelViewer !== null) {
+      resetKmarkModelViewerCamera(modelViewer);
+    }
+
+    closeContextMenu();
+  }, [closeContextMenu, contextMenuState]);
+
   const handleZoomScaleChange = useCallback((nextZoomScale: number) => {
     setZoomScale(clampPreviewZoomScale(nextZoomScale));
   }, []);
 
-  const handlePreviewContextMenu = useCallback((clientX: number, clientY: number) => {
+  const handlePreviewContextMenu = useCallback((clientX: number, clientY: number, modelViewer: HTMLElement | null = null) => {
+    const itemCount = modelViewer === null ? 1 : 2;
+    const menuHeight = PREVIEW_CONTEXT_MENU_PADDING_PX + (PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX * itemCount);
     const nextX = Math.max(8, Math.min(clientX, window.innerWidth - PREVIEW_CONTEXT_MENU_WIDTH_PX - 8));
-    const nextY = Math.max(8, Math.min(clientY, window.innerHeight - PREVIEW_CONTEXT_MENU_HEIGHT_PX - 8));
+    const nextY = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
 
-    setContextMenuState({ x: nextX, y: nextY });
+    setContextMenuState({ modelViewer, x: nextX, y: nextY });
   }, []);
 
   useEffect(() => {
@@ -115,8 +130,10 @@ export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePr
     contextMenuState,
     contextMenuStyle,
     handlePreviewContextMenu,
+    handleModelCameraReset,
     handleZoomFit,
     handleZoomScaleChange,
+    hasModelCameraTarget: contextMenuState?.modelViewer !== null && contextMenuState?.modelViewer !== undefined,
     zoomScale,
   };
 }

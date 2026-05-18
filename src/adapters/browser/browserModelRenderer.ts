@@ -25,6 +25,7 @@ type ModelCameraSnapshot = {
 type ModelRenderState = {
   animationFrame: number | null;
   bounds: THREE.Box3 | null;
+  cameraIdentityKey: string;
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera | null;
   cameraSnapshotKey: string;
   composer: EffectComposer | null;
@@ -57,7 +58,7 @@ const MODEL_FEATURE_EDGE_THRESHOLD_DEGREES = 70;
 const MODEL_FEATURE_EDGE_MIN_SCREEN_SIZE_PX = 220;
 const MODEL_FEATURE_EDGE_FULL_SCREEN_SIZE_PX = 420;
 const MODEL_KEYBOARD_MOVE_SPEED = 0.9;
-const MAX_MODEL_CAMERA_SNAPSHOTS = 80;
+const MAX_MODEL_CAMERA_SNAPSHOTS = 160;
 const MODEL_VIEWER_REUSE_SEPARATOR = "\u0000";
 const MODEL_UP = new THREE.Vector3(0, 0, 1);
 const MODEL_KEYBOARD_MOVE_KEYS = new Set(["KeyA", "KeyD", "KeyE", "KeyQ", "KeyS", "KeyW"]);
@@ -150,7 +151,11 @@ export function persistKmarkModelViewerSnapshots(root: ParentNode): void {
   const occurrenceCounts = new Map<string, number>();
 
   for (const viewer of root.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR)) {
-    persistKmarkModelViewerSnapshot(viewer, resolveKmarkModelViewerKey(viewer, occurrenceCounts));
+    persistKmarkModelViewerSnapshot(
+      viewer,
+      resolveKmarkModelViewerKey(viewer, occurrenceCounts),
+      resolveKmarkModelViewerIdentityKey(viewer),
+    );
   }
 }
 
@@ -194,6 +199,15 @@ function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement
 }
 
 function resolveKmarkModelViewerKey(viewer: HTMLElement, occurrenceCounts: Map<string, number>): string {
+  const baseKey = resolveKmarkModelViewerIdentityKey(viewer);
+  const occurrence = occurrenceCounts.get(baseKey) ?? 0;
+
+  occurrenceCounts.set(baseKey, occurrence + 1);
+
+  return `${baseKey}${MODEL_VIEWER_REUSE_SEPARATOR}${occurrence}`;
+}
+
+function resolveKmarkModelViewerIdentityKey(viewer: HTMLElement): string {
   const modelAttributes = Array.from(viewer.attributes)
     .filter((attribute) => (
       attribute.name.startsWith("data-kmark-model-")
@@ -209,14 +223,15 @@ function resolveKmarkModelViewerKey(viewer: HTMLElement, occurrenceCounts: Map<s
     viewer.getAttribute("title") ?? "",
     modelAttributes,
   ].join(MODEL_VIEWER_REUSE_SEPARATOR);
-  const occurrence = occurrenceCounts.get(baseKey) ?? 0;
 
-  occurrenceCounts.set(baseKey, occurrence + 1);
-
-  return `${baseKey}${MODEL_VIEWER_REUSE_SEPARATOR}${occurrence}`;
+  return baseKey;
 }
 
-function persistKmarkModelViewerSnapshot(viewer: HTMLElement, snapshotKey: string): void {
+function persistKmarkModelViewerSnapshot(
+  viewer: HTMLElement,
+  snapshotKey: string,
+  identityKey = resolveKmarkModelViewerIdentityKey(viewer),
+): void {
   const state = mountedModelStates.get(viewer);
 
   if (state === undefined || state.cameraSnapshotKey !== snapshotKey) {
@@ -229,8 +244,13 @@ function persistKmarkModelViewerSnapshot(viewer: HTMLElement, snapshotKey: strin
     return;
   }
 
-  modelCameraSnapshots.delete(snapshotKey);
-  modelCameraSnapshots.set(snapshotKey, snapshot);
+  rememberModelCameraSnapshot(snapshotKey, snapshot);
+  rememberModelCameraSnapshot(identityKey, snapshot);
+}
+
+function rememberModelCameraSnapshot(key: string, snapshot: ModelCameraSnapshot): void {
+  modelCameraSnapshots.delete(key);
+  modelCameraSnapshots.set(key, snapshot);
 
   while (modelCameraSnapshots.size > MAX_MODEL_CAMERA_SNAPSHOTS) {
     const oldestKey = modelCameraSnapshots.keys().next().value;
@@ -241,6 +261,25 @@ function persistKmarkModelViewerSnapshot(viewer: HTMLElement, snapshotKey: strin
 
     modelCameraSnapshots.delete(oldestKey);
   }
+}
+
+export function resetKmarkModelViewerCamera(viewer: HTMLElement): boolean {
+  const state = mountedModelStates.get(viewer);
+
+  if (state === undefined || state.camera === null || state.bounds === null) {
+    return false;
+  }
+
+  const target = parseVector3(viewer.dataset.kmarkModelCameraTarget) ?? new THREE.Vector3(0, 0, 0);
+
+  modelCameraSnapshots.delete(state.cameraSnapshotKey);
+  modelCameraSnapshots.delete(state.cameraIdentityKey);
+  configureCameraPose(viewer, state.camera, Math.max(state.modelRadius, 0.5));
+  fitCameraToModel(viewer, state.camera, state.bounds);
+  state.controls?.target.copy(target);
+  state.controls?.update();
+
+  return true;
 }
 
 function createModelCameraSnapshot(state: ModelRenderState): ModelCameraSnapshot | null {
@@ -321,6 +360,7 @@ function prepareKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): Mode
 
 function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelViewerCleanup {
   const source = viewer.dataset.kmarkModelDisplaySrc?.trim() ?? "";
+  const identityKey = resolveKmarkModelViewerIdentityKey(viewer);
   const canvasRoot = viewer.querySelector<HTMLElement>(".kmark-model-canvas");
   const status = viewer.querySelector<HTMLElement>(".kmark-model-status");
 
@@ -349,6 +389,7 @@ function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelV
     animationFrame: null,
     bounds: null,
     camera: null,
+    cameraIdentityKey: identityKey,
     cameraSnapshotKey: snapshotKey,
     composer: null,
     controls: null,
@@ -409,7 +450,7 @@ function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelV
     state.controls = configureControls(viewer, renderer.domElement, state.camera);
     state.keyboardMovement = configureViewerKeyboardMovement(renderer.domElement);
     resizeRenderer(viewer, renderer, state.camera, state);
-    restoreModelCameraSnapshot(state, modelCameraSnapshots.get(snapshotKey));
+    restoreModelCameraSnapshot(state, modelCameraSnapshots.get(snapshotKey) ?? modelCameraSnapshots.get(identityKey));
 
     viewer.dataset.kmarkModelState = "ready";
     if (status !== null) {
@@ -422,7 +463,7 @@ function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelV
   });
 
   return () => {
-    persistKmarkModelViewerSnapshot(viewer, snapshotKey);
+    persistKmarkModelViewerSnapshot(viewer, snapshotKey, identityKey);
     state.disposed = true;
     mountedModelStates.delete(viewer);
     resizeObserver.disconnect();

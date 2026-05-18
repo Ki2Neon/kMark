@@ -75,7 +75,7 @@ type MarkdownPreviewProps = {
   readonly maximumZoomScale?: number;
   readonly minimumZoomScale?: number;
   readonly onOpenExternalLink?: (url: string) => void;
-  readonly onPreviewContextMenu?: (clientX: number, clientY: number) => void;
+  readonly onPreviewContextMenu?: (clientX: number, clientY: number, modelViewer: HTMLElement | null) => void;
   readonly onSourceLineDoubleClick?: (lineNumber: number) => void;
   readonly onZoomScaleChange?: (zoomScale: number) => void;
   readonly pageHtmls?: readonly string[];
@@ -3837,7 +3837,10 @@ function MarkdownPreviewComponent({
 
     clearViewportPan();
     event.preventDefault();
-    onPreviewContextMenu(event.clientX, event.clientY);
+    const eventTarget = resolveEventTargetElement(event.target);
+    const modelViewer = eventTarget?.closest<HTMLElement>(`.${KMARK_MODEL_VIEWER_CLASS_NAME}`) ?? null;
+
+    onPreviewContextMenu(event.clientX, event.clientY, modelViewer);
   }, [clearViewportPan, onPreviewContextMenu]);
 
   const normalizedZoomScale = useMemo(
