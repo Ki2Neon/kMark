@@ -7,11 +7,20 @@ import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand } from "./tauriCommand";
 
 const OPEN_PRESENTATION_WINDOW_COMMAND = "open_presentation_window";
+const GET_PRESENTATION_WINDOW_SNAPSHOT_COMMAND = "get_presentation_window_snapshot";
 const PRESENTATION_WINDOW_QUERY_KEY = "kmarkWindow";
 const PRESENTATION_WINDOW_QUERY_VALUE = "presentation";
 const PRESENTATION_SNAPSHOT_QUERY_KEY = "snapshotKey";
 const PRESENTATION_SNAPSHOT_STORAGE_PREFIX = "kmark:presentation:snapshot:";
 const PRESENTATION_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+type PresentationWindowGlobal = Window & typeof globalThis & {
+  readonly __KMARK_WINDOW_KIND__?: unknown;
+};
+
+export type PresentationWindowTarget = {
+  readonly snapshotKey: string | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -122,9 +131,13 @@ function createBrowserPresentationWindowUrl(snapshotKey: string): string {
   return url.toString();
 }
 
-export function resolvePresentationSnapshotKeyFromUrl(): string | null {
+export function resolvePresentationWindowTarget(): PresentationWindowTarget | null {
   if (typeof window === "undefined") {
     return null;
+  }
+
+  if ((window as PresentationWindowGlobal).__KMARK_WINDOW_KIND__ === PRESENTATION_WINDOW_QUERY_VALUE) {
+    return { snapshotKey: null };
   }
 
   const searchParams = new URLSearchParams(window.location.search);
@@ -135,7 +148,7 @@ export function resolvePresentationSnapshotKeyFromUrl(): string | null {
 
   const snapshotKey = searchParams.get(PRESENTATION_SNAPSHOT_QUERY_KEY)?.trim() ?? "";
 
-  return snapshotKey.length > 0 ? snapshotKey : null;
+  return snapshotKey.length > 0 ? { snapshotKey } : null;
 }
 
 export async function openPresentationWindow(snapshot: PresentationWindowSnapshot): Promise<void> {
@@ -143,22 +156,19 @@ export async function openPresentationWindow(snapshot: PresentationWindowSnapsho
     throw new Error("この環境ではプレゼンウィンドウを開けません。");
   }
 
-  const snapshotKey = createRandomSnapshotKey();
-
-  cleanupExpiredSnapshots(snapshot.createdAtEpochMs);
-  window.localStorage.setItem(getStorageKey(snapshotKey), JSON.stringify(snapshot));
-
   if (isTauri()) {
     await invokeTauriCommand<void>(
       OPEN_PRESENTATION_WINDOW_COMMAND,
-      {
-        snapshotKey,
-        title: snapshot.title,
-      },
+      { snapshot },
       "プレゼンウィンドウを開けませんでした。",
     );
     return;
   }
+
+  const snapshotKey = createRandomSnapshotKey();
+
+  cleanupExpiredSnapshots(snapshot.createdAtEpochMs);
+  window.localStorage.setItem(getStorageKey(snapshotKey), JSON.stringify(snapshot));
 
   const openedWindow = window.open(
     createBrowserPresentationWindowUrl(snapshotKey),
@@ -191,4 +201,14 @@ export function loadPresentationSnapshot(snapshotKey: string): PresentationWindo
   } catch {
     return null;
   }
+}
+
+export async function loadTauriPresentationSnapshot(): Promise<PresentationWindowSnapshot | null> {
+  const snapshot = await invokeTauriCommand<PresentationWindowSnapshot>(
+    GET_PRESENTATION_WINDOW_SNAPSHOT_COMMAND,
+    {},
+    "プレゼンデータを読込めませんでした。",
+  );
+
+  return isPresentationWindowSnapshot(snapshot) ? snapshot : null;
 }

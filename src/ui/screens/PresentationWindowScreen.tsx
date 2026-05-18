@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { type PresentationWindowSnapshot } from "../../application/presentationWindow/presentationWindowPorts";
 import { createBrowserPresentationWindowGateway } from "../../adapters/browser/browserPresentationWindowGateway";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 import { PresentationWindowController } from "../../application/presentationWindow/presentationWindowController";
@@ -8,7 +9,7 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { useWindowTitle } from "../hooks/useWindowTitle";
 
 type PresentationWindowScreenProps = {
-  readonly snapshotKey: string;
+  readonly snapshotKey: string | null;
 };
 
 function createPresentationWindowController(): PresentationWindowController {
@@ -22,12 +23,54 @@ function createPresentationWindowController(): PresentationWindowController {
 
 export function PresentationWindowScreen({ snapshotKey }: PresentationWindowScreenProps) {
   const controllerRef = useRef<PresentationWindowController | null>(null);
+  const [snapshotState, setSnapshotState] = useState<{
+    readonly isLoaded: boolean;
+    readonly snapshot: PresentationWindowSnapshot | null;
+  }>({
+    isLoaded: false,
+    snapshot: null,
+  });
 
   if (controllerRef.current === null) {
     controllerRef.current = createPresentationWindowController();
   }
 
-  const [snapshot] = useState(() => controllerRef.current?.load(snapshotKey) ?? null);
+  useEffect(() => {
+    let isDisposed = false;
+
+    setSnapshotState({
+      isLoaded: false,
+      snapshot: null,
+    });
+
+    void controllerRef.current?.load(snapshotKey)
+      .then((snapshot) => {
+        if (isDisposed) {
+          return;
+        }
+
+        setSnapshotState({
+          isLoaded: true,
+          snapshot,
+        });
+      })
+      .catch(() => {
+        if (isDisposed) {
+          return;
+        }
+
+        setSnapshotState({
+          isLoaded: true,
+          snapshot: null,
+        });
+      });
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [snapshotKey]);
+
+  const snapshot = snapshotState.snapshot;
   const {
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
@@ -50,10 +93,12 @@ export function PresentationWindowScreen({ snapshotKey }: PresentationWindowScre
     void openExternalLink(url);
   }, []);
 
-  if (snapshot === null) {
+  if (!snapshotState.isLoaded || snapshot === null) {
     return (
       <main className="presentation-shell presentation-shell--empty">
-        <p className="presentation-shell__empty">プレゼンデータなし</p>
+        <p className="presentation-shell__empty">
+          {snapshotState.isLoaded ? "プレゼンデータなし" : "読込中"}
+        </p>
       </main>
     );
   }

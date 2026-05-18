@@ -21,5 +21,5 @@ export type PresentationWindowSnapshot = {
 
 export type PresentationWindowGateway = {
   open(snapshot: PresentationWindowSnapshot): Promise<void>;
-  load(snapshotKey: string): PresentationWindowSnapshot | null;
+  load(snapshotKey: string | null): Promise<PresentationWindowSnapshot | null>;
 };

@@ -5,6 +5,7 @@ mod ports;
 mod usecase;
 
 use std::{
+    collections::HashMap,
     env,
     ffi::OsStr,
     path::PathBuf,
@@ -20,6 +21,7 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
+use dto::PresentationWindowSnapshotPayload;
 use infra::{
     load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
@@ -62,8 +64,10 @@ pub(crate) struct AppState {
     pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
     pub(crate) recent_files: Mutex<RecentFiles>,
+    pub(crate) presentation_window_snapshots: Mutex<HashMap<String, PresentationWindowSnapshotPayload>>,
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
+    pub(crate) next_presentation_window_sequence: AtomicU64,
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -313,6 +317,10 @@ pub fn run() {
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     if window.label().starts_with(PRESENTATION_WINDOW_LABEL_PREFIX) {
+                        commands::presentation_window::remove_presentation_window_snapshot(
+                            window.app_handle(),
+                            window.label(),
+                        );
                         return;
                     }
 
@@ -468,6 +476,7 @@ pub fn run() {
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,
             commands::markdown_render::render_markdown_preview,
+            commands::presentation_window::get_presentation_window_snapshot,
             commands::presentation_window::open_presentation_window,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,

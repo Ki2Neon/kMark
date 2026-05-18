@@ -5,7 +5,7 @@ import { useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
 import { PresentationWindowScreen } from "./ui/screens/PresentationWindowScreen";
 import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
-import { resolveBrowserPresentationSnapshotKeyFromUrl } from "./adapters/browser/browserPresentationWindowGateway";
+import { resolveBrowserPresentationWindowTarget } from "./adapters/browser/browserPresentationWindowGateway";
 
 function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   if (typeof window === "undefined") {
@@ -17,8 +17,8 @@ function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
     : "stored";
 }
 
-function detectPresentationSnapshotKey(): string | null {
-  return resolveBrowserPresentationSnapshotKeyFromUrl();
+function detectPresentationWindowTarget(): { readonly snapshotKey: string | null } | null {
+  return resolveBrowserPresentationWindowTarget();
 }
 
 function App() {
@@ -62,10 +62,10 @@ function App() {
     return null;
   }
 
-  const presentationSnapshotKey = detectPresentationSnapshotKey();
+  const presentationWindowTarget = detectPresentationWindowTarget();
 
-  if (presentationSnapshotKey !== null) {
-    return <PresentationWindowScreen snapshotKey={presentationSnapshotKey} />;
+  if (presentationWindowTarget !== null) {
+    return <PresentationWindowScreen snapshotKey={presentationWindowTarget.snapshotKey} />;
   }
 
   return (

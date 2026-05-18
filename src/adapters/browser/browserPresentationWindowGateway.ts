@@ -1,9 +1,11 @@
 import { type PresentationWindowGateway } from "../../application/presentationWindow/presentationWindowPorts";
 import {
   loadPresentationSnapshot,
+  loadTauriPresentationSnapshot,
   openPresentationWindow,
-  resolvePresentationSnapshotKeyFromUrl,
+  resolvePresentationWindowTarget,
 } from "../../infra/presentationWindow";
+import { isTauri } from "../../runtime/runtime";
 
 export function createBrowserPresentationWindowGateway(): PresentationWindowGateway {
   return {
@@ -11,12 +13,20 @@ export function createBrowserPresentationWindowGateway(): PresentationWindowGate
       await openPresentationWindow(snapshot);
     },
 
-    load(snapshotKey) {
+    async load(snapshotKey) {
+      if (isTauri()) {
+        return loadTauriPresentationSnapshot();
+      }
+
+      if (snapshotKey === null) {
+        return null;
+      }
+
       return loadPresentationSnapshot(snapshotKey);
     },
   };
 }
 
-export function resolveBrowserPresentationSnapshotKeyFromUrl(): string | null {
-  return resolvePresentationSnapshotKeyFromUrl();
+export function resolveBrowserPresentationWindowTarget(): { readonly snapshotKey: string | null } | null {
+  return resolvePresentationWindowTarget();
 }

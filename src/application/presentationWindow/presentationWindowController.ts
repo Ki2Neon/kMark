@@ -35,7 +35,7 @@ export class PresentationWindowController {
     });
   }
 
-  load(snapshotKey: string): PresentationWindowSnapshot | null {
+  load(snapshotKey: string | null): Promise<PresentationWindowSnapshot | null> {
     return this.#gateway.load(snapshotKey);
   }
 }
