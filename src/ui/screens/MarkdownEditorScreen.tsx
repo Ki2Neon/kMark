@@ -247,6 +247,11 @@ export function MarkdownEditorScreen({
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
     isDirty,
+    onDiscardConfirmed: (request) => {
+      if (request === "window-close") {
+        handleResetDocument();
+      }
+    },
     onErrorRaise: handleErrorRaise,
     onSaveDocument: handleOverwriteSaveDocument,
   });

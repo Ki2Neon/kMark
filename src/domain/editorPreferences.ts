@@ -1,6 +1,6 @@
 export type MultiCursorModifier = "alt" | "ctrlCmd";
 
-export type StartupEditMode = "start-page" | "blank" | "last-opened-file";
+export type StartupEditMode = "start-page" | "blank";
 
 export type AppFontId = string;
 
@@ -62,7 +62,6 @@ export const MULTI_CURSOR_MODIFIER_OPTIONS: readonly MultiCursorModifierOption[]
 export const STARTUP_EDIT_MODE_OPTIONS: readonly StartupEditModeOption[] = [
   { id: "start-page", label: "スタートページ" },
   { id: "blank", label: "無地" },
-  { id: "last-opened-file", label: "前回開いたファイル" },
 ] as const;
 
 export const APP_FONT_OPTIONS: readonly AppFontOption[] = [

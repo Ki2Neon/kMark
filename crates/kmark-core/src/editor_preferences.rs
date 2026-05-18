@@ -46,12 +46,11 @@ impl MultiCursorModifier {
 pub enum StartupEditMode {
     StartPage,
     Blank,
-    LastOpenedFile,
 }
 
 impl Default for StartupEditMode {
     fn default() -> Self {
-        Self::LastOpenedFile
+        Self::StartPage
     }
 }
 
@@ -60,7 +59,6 @@ impl StartupEditMode {
         match value {
             "start-page" => Some(Self::StartPage),
             "blank" => Some(Self::Blank),
-            "last-opened-file" => Some(Self::LastOpenedFile),
             _ => None,
         }
     }
@@ -69,7 +67,6 @@ impl StartupEditMode {
         match self {
             Self::StartPage => "start-page",
             Self::Blank => "blank",
-            Self::LastOpenedFile => "last-opened-file",
         }
     }
 }
@@ -95,7 +92,7 @@ impl Default for EditorPreferences {
             edit_font_size_px: DEFAULT_EDIT_FONT_SIZE_PX,
             multi_cursor_modifier: MultiCursorModifier::Alt,
             show_line_numbers: false,
-            startup_edit_mode: StartupEditMode::LastOpenedFile,
+            startup_edit_mode: StartupEditMode::StartPage,
             windows_startup_tray_resident_enabled: true,
         }
     }
@@ -349,7 +346,10 @@ fn resolve_known_font_family(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_app_font_family, resolve_edit_font_family, sanitize_font_preference};
+    use super::{
+        resolve_app_font_family, resolve_edit_font_family, sanitize_font_preference,
+        EditorPreferences, StartupEditMode,
+    };
 
     #[test]
     fn sanitizes_font_preference() {
@@ -366,5 +366,21 @@ mod tests {
             resolve_edit_font_family("JetBrains Mono"),
             "\"JetBrains Mono\", Consolas, monospace"
         );
+    }
+
+    #[test]
+    fn normalizes_legacy_last_opened_startup_mode_to_start_page() {
+        let preferences = EditorPreferences::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("last-opened-file"),
+            None,
+        );
+
+        assert_eq!(preferences.startup_edit_mode(), StartupEditMode::StartPage);
     }
 }
