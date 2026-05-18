@@ -1447,6 +1447,7 @@ input:focus-visible,
 .markdown-body .kmark-model-viewer {
   position: relative;
   display: inline-block;
+  box-sizing: border-box;
   min-width: 220px;
   height: 360px;
   overflow: hidden;

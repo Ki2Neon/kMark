@@ -14,10 +14,19 @@ type ModelKeyboardMovement = {
   dispose: () => void;
   pressedKeys: Set<string>;
 };
+type ModelCameraSnapshot = {
+  fov: number | null;
+  position: readonly [number, number, number];
+  projection: "orthographic" | "perspective";
+  target: readonly [number, number, number];
+  up: readonly [number, number, number];
+  zoom: number;
+};
 type ModelRenderState = {
   animationFrame: number | null;
   bounds: THREE.Box3 | null;
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera | null;
+  cameraSnapshotKey: string;
   composer: EffectComposer | null;
   controls: OrbitControls | null;
   disposed: boolean;
@@ -28,6 +37,14 @@ type ModelRenderState = {
   outlinePass: OutlinePass | null;
   previousFrameMs: number;
   renderSizeKey: string;
+};
+type ModelViewerScopeEntry = {
+  cleanup: ModelViewerCleanup;
+  snapshotKey: string;
+};
+export type ModelViewerScope = {
+  dispose: () => void;
+  sync: () => void;
 };
 
 const MODEL_VIEWER_SELECTOR = ".kmark-model-viewer[data-kmark-model-display-src]";
@@ -40,6 +57,8 @@ const MODEL_FEATURE_EDGE_THRESHOLD_DEGREES = 70;
 const MODEL_FEATURE_EDGE_MIN_SCREEN_SIZE_PX = 220;
 const MODEL_FEATURE_EDGE_FULL_SCREEN_SIZE_PX = 420;
 const MODEL_KEYBOARD_MOVE_SPEED = 0.9;
+const MAX_MODEL_CAMERA_SNAPSHOTS = 80;
+const MODEL_VIEWER_REUSE_SEPARATOR = "\u0000";
 const MODEL_UP = new THREE.Vector3(0, 0, 1);
 const MODEL_KEYBOARD_MOVE_KEYS = new Set(["KeyA", "KeyD", "KeyE", "KeyQ", "KeyS", "KeyW"]);
 const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
@@ -51,30 +70,244 @@ const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
   right: [90, 0],
   top: [0, 90],
 };
+const mountedModelStates = new WeakMap<HTMLElement, ModelRenderState>();
+const modelCameraSnapshots = new Map<string, ModelCameraSnapshot>();
 
 export function prepareKmarkModelViewers(root: HTMLElement): ModelViewerCleanup {
-  const viewers = Array.from(root.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR));
-  const cleanups = viewers.map((viewer) => prepareKmarkModelViewer(viewer));
+  const scope = createKmarkModelViewerScope(root);
+  scope.sync();
 
   return () => {
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
+    scope.dispose();
   };
 }
 
-function prepareKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
+export function createKmarkModelViewerScope(root: HTMLElement): ModelViewerScope {
+  const entries = new Map<HTMLElement, ModelViewerScopeEntry>();
+
+  return {
+    dispose: () => {
+      for (const [viewer, entry] of entries) {
+        persistKmarkModelViewerSnapshot(viewer, entry.snapshotKey);
+        entry.cleanup();
+      }
+      entries.clear();
+    },
+    sync: () => {
+      const occurrenceCounts = new Map<string, number>();
+      const currentViewers = new Set(Array.from(root.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR)));
+
+      for (const [viewer, entry] of entries) {
+        if (currentViewers.has(viewer)) {
+          continue;
+        }
+
+        persistKmarkModelViewerSnapshot(viewer, entry.snapshotKey);
+        entry.cleanup();
+        entries.delete(viewer);
+      }
+
+      for (const viewer of currentViewers) {
+        const snapshotKey = resolveKmarkModelViewerKey(viewer, occurrenceCounts);
+        const currentEntry = entries.get(viewer);
+
+        if (currentEntry?.snapshotKey === snapshotKey) {
+          continue;
+        }
+
+        if (currentEntry !== undefined) {
+          persistKmarkModelViewerSnapshot(viewer, currentEntry.snapshotKey);
+          currentEntry.cleanup();
+        }
+
+        entries.set(viewer, {
+          cleanup: prepareKmarkModelViewer(viewer, snapshotKey),
+          snapshotKey,
+        });
+      }
+    },
+  };
+}
+
+export function preserveReusableKmarkModelViewers(currentRoot: ParentNode, nextRoot: ParentNode): void {
+  const reusableViewers = collectReusableKmarkModelViewers(currentRoot);
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const nextViewer of nextRoot.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR)) {
+    const reuseKey = resolveKmarkModelViewerKey(nextViewer, occurrenceCounts);
+    const reusableViewer = reusableViewers.get(reuseKey)?.shift();
+
+    if (reusableViewer === undefined || !reusableViewer.isConnected) {
+      continue;
+    }
+
+    syncKmarkModelViewerAttributes(reusableViewer, nextViewer);
+    nextViewer.replaceWith(reusableViewer);
+  }
+}
+
+export function persistKmarkModelViewerSnapshots(root: ParentNode): void {
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const viewer of root.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR)) {
+    persistKmarkModelViewerSnapshot(viewer, resolveKmarkModelViewerKey(viewer, occurrenceCounts));
+  }
+}
+
+function collectReusableKmarkModelViewers(root: ParentNode): Map<string, HTMLElement[]> {
+  const reusableViewers = new Map<string, HTMLElement[]>();
+  const occurrenceCounts = new Map<string, number>();
+
+  for (const viewer of root.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR)) {
+    const reuseKey = resolveKmarkModelViewerKey(viewer, occurrenceCounts);
+    const viewers = reusableViewers.get(reuseKey) ?? [];
+
+    viewers.push(viewer);
+    reusableViewers.set(reuseKey, viewers);
+  }
+
+  return reusableViewers;
+}
+
+function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement): void {
+  const modelState = target.dataset.kmarkModelState;
+
+  for (const attribute of Array.from(target.attributes)) {
+    if (attribute.name === "data-kmark-model-state") {
+      continue;
+    }
+    if (!source.hasAttribute(attribute.name)) {
+      target.removeAttribute(attribute.name);
+    }
+  }
+
+  for (const attribute of Array.from(source.attributes)) {
+    if (attribute.name === "data-kmark-model-state") {
+      continue;
+    }
+    target.setAttribute(attribute.name, attribute.value);
+  }
+
+  if (modelState !== undefined) {
+    target.dataset.kmarkModelState = modelState;
+  }
+}
+
+function resolveKmarkModelViewerKey(viewer: HTMLElement, occurrenceCounts: Map<string, number>): string {
+  const modelAttributes = Array.from(viewer.attributes)
+    .filter((attribute) => (
+      attribute.name.startsWith("data-kmark-model-")
+      && attribute.name !== "data-kmark-model-state"
+    ))
+    .map((attribute) => `${attribute.name}=${attribute.value}`)
+    .sort()
+    .join(MODEL_VIEWER_REUSE_SEPARATOR);
+  const baseKey = [
+    viewer.tagName.toLowerCase(),
+    viewer.getAttribute("role") ?? "",
+    viewer.getAttribute("aria-label") ?? "",
+    viewer.getAttribute("title") ?? "",
+    modelAttributes,
+  ].join(MODEL_VIEWER_REUSE_SEPARATOR);
+  const occurrence = occurrenceCounts.get(baseKey) ?? 0;
+
+  occurrenceCounts.set(baseKey, occurrence + 1);
+
+  return `${baseKey}${MODEL_VIEWER_REUSE_SEPARATOR}${occurrence}`;
+}
+
+function persistKmarkModelViewerSnapshot(viewer: HTMLElement, snapshotKey: string): void {
+  const state = mountedModelStates.get(viewer);
+
+  if (state === undefined || state.cameraSnapshotKey !== snapshotKey) {
+    return;
+  }
+
+  const snapshot = createModelCameraSnapshot(state);
+
+  if (snapshot === null) {
+    return;
+  }
+
+  modelCameraSnapshots.delete(snapshotKey);
+  modelCameraSnapshots.set(snapshotKey, snapshot);
+
+  while (modelCameraSnapshots.size > MAX_MODEL_CAMERA_SNAPSHOTS) {
+    const oldestKey = modelCameraSnapshots.keys().next().value;
+
+    if (oldestKey === undefined) {
+      break;
+    }
+
+    modelCameraSnapshots.delete(oldestKey);
+  }
+}
+
+function createModelCameraSnapshot(state: ModelRenderState): ModelCameraSnapshot | null {
+  const camera = state.camera;
+
+  if (camera === null) {
+    return null;
+  }
+
+  const target = state.controls?.target ?? new THREE.Vector3(0, 0, 0);
+
+  return {
+    fov: camera instanceof THREE.PerspectiveCamera ? camera.fov : null,
+    position: vectorToTuple(camera.position),
+    projection: camera instanceof THREE.OrthographicCamera ? "orthographic" : "perspective",
+    target: vectorToTuple(target),
+    up: vectorToTuple(camera.up),
+    zoom: camera.zoom,
+  };
+}
+
+function restoreModelCameraSnapshot(
+  state: ModelRenderState,
+  snapshot: ModelCameraSnapshot | undefined,
+): void {
+  if (snapshot === undefined || state.camera === null) {
+    return;
+  }
+
+  const cameraProjection = state.camera instanceof THREE.OrthographicCamera ? "orthographic" : "perspective";
+
+  if (cameraProjection !== snapshot.projection) {
+    return;
+  }
+
+  state.camera.position.set(...snapshot.position);
+  state.camera.up.set(...snapshot.up);
+  state.camera.zoom = Number.isFinite(snapshot.zoom) && snapshot.zoom > 0 ? snapshot.zoom : 1;
+
+  if (state.camera instanceof THREE.PerspectiveCamera && snapshot.fov !== null) {
+    state.camera.fov = clampModelFov(snapshot.fov);
+  }
+
+  const target = new THREE.Vector3(...snapshot.target);
+
+  state.controls?.target.copy(target);
+  state.camera.lookAt(target);
+  state.camera.updateProjectionMatrix();
+  state.controls?.update();
+}
+
+function vectorToTuple(vector: THREE.Vector3): readonly [number, number, number] {
+  return [vector.x, vector.y, vector.z];
+}
+
+function prepareKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelViewerCleanup {
   const loading = viewer.dataset.kmarkModelLoading ?? "lazy";
 
   if (loading === "eager" || !("IntersectionObserver" in window)) {
-    return mountKmarkModelViewer(viewer);
+    return mountKmarkModelViewer(viewer, snapshotKey);
   }
 
   let mountedCleanup: ModelViewerCleanup | null = null;
   const observer = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) {
       observer.disconnect();
-      mountedCleanup = mountKmarkModelViewer(viewer);
+      mountedCleanup = mountKmarkModelViewer(viewer, snapshotKey);
     }
   }, { rootMargin: "160px" });
 
@@ -86,7 +319,7 @@ function prepareKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
   };
 }
 
-function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
+function mountKmarkModelViewer(viewer: HTMLElement, snapshotKey: string): ModelViewerCleanup {
   const source = viewer.dataset.kmarkModelDisplaySrc?.trim() ?? "";
   const canvasRoot = viewer.querySelector<HTMLElement>(".kmark-model-canvas");
   const status = viewer.querySelector<HTMLElement>(".kmark-model-status");
@@ -116,6 +349,7 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
     animationFrame: null,
     bounds: null,
     camera: null,
+    cameraSnapshotKey: snapshotKey,
     composer: null,
     controls: null,
     disposed: false,
@@ -127,12 +361,10 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
     previousFrameMs: performance.now(),
     renderSizeKey: "",
   };
+  mountedModelStates.set(viewer, state);
 
   const resizeObserver = new ResizeObserver(() => {
     resizeRenderer(viewer, renderer, state.camera, state);
-    if (state.camera !== null && state.bounds !== null) {
-      fitCameraToModel(viewer, state.camera, state.bounds);
-    }
   });
   resizeObserver.observe(viewer);
   resizeRenderer(viewer, renderer, state.camera, state);
@@ -177,7 +409,7 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
     state.controls = configureControls(viewer, renderer.domElement, state.camera);
     state.keyboardMovement = configureViewerKeyboardMovement(renderer.domElement);
     resizeRenderer(viewer, renderer, state.camera, state);
-    fitCameraToModel(viewer, state.camera, bounds);
+    restoreModelCameraSnapshot(state, modelCameraSnapshots.get(snapshotKey));
 
     viewer.dataset.kmarkModelState = "ready";
     if (status !== null) {
@@ -190,7 +422,9 @@ function mountKmarkModelViewer(viewer: HTMLElement): ModelViewerCleanup {
   });
 
   return () => {
+    persistKmarkModelViewerSnapshot(viewer, snapshotKey);
     state.disposed = true;
+    mountedModelStates.delete(viewer);
     resizeObserver.disconnect();
     if (state.animationFrame !== null) {
       window.cancelAnimationFrame(state.animationFrame);
@@ -229,9 +463,7 @@ function renderModelFrame(
     }
   }
 
-  if (resizeRenderer(viewer, renderer, state.camera, state) && state.bounds !== null) {
-    fitCameraToModel(viewer, state.camera, state.bounds);
-  }
+  resizeRenderer(viewer, renderer, state.camera, state);
   applyKeyboardMovement(state, deltaSeconds);
   updateModelEdgeOverlay(viewer, state);
   state.controls?.update();
