@@ -52,6 +52,9 @@ function getLine(document, lineNumber) {
   assert.equal(contentLine.rails.length, 1);
   assert.equal(contentLine.rails[0].depthIndex, 0);
   assert.equal(contentLine.rails[0].paletteKey, "tone-0");
+  assert.equal(document.scopes.length, 1);
+  assert.equal(document.scopes[0].startLineNumber, 1);
+  assert.equal(document.scopes[0].endLineNumber, 3);
 }
 
 {
@@ -189,6 +192,8 @@ function getLine(document, lineNumber) {
   const singleLine = getLine(document, 1);
 
   assert.equal(singleLine.rails[0].shape, "single");
+  assert.equal(document.scopes[0].startLineNumber, 1);
+  assert.equal(document.scopes[0].endLineNumber, 1);
 }
 
 {
