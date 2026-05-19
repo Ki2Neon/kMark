@@ -84,6 +84,7 @@ type MarkdownPreviewProps = {
   readonly onZoomScaleChange?: (zoomScale: number) => void;
   readonly pageHtmls?: readonly string[];
   readonly pages?: readonly RenderedPreviewPage[];
+  readonly pageTransitionFadeMs?: number;
   readonly previewFitMode?: PreviewFitMode;
   readonly suppressTextSelectionOnDoubleClick?: boolean;
   /** @deprecated Use activeSourceLineScrollMode. */
@@ -3732,6 +3733,7 @@ function MarkdownPreviewComponent({
   onZoomScaleChange,
   pageHtmls,
   pages,
+  pageTransitionFadeMs = 0,
   previewFitMode = "width",
   suppressTextSelectionOnDoubleClick = false,
   followActiveSourceLine = true,
@@ -3741,6 +3743,8 @@ function MarkdownPreviewComponent({
   const previewViewportRef = useRef<HTMLElement | null>(null);
   const activeA4PageIndexRef = useRef(0);
   const lastCursorTargetRef = useRef<HTMLElement | null>(null);
+  const pageTransitionAnimationRef = useRef<Animation | null>(null);
+  const pageTransitionOverlayRef = useRef<HTMLElement | null>(null);
   const pendingA4NavigationScrollRef = useRef(false);
   const pendingViewportZoomAnchorRef = useRef<{
     readonly previousDisplayScale: number;
@@ -3843,6 +3847,73 @@ function MarkdownPreviewComponent({
   }, [updateActiveA4PageIndexFromScroll]);
 
   const interactiveViewportNavigationEnabled = enableInteractiveViewportNavigation && onZoomScaleChange !== undefined;
+
+  const startPreviewPageTransitionFade = useCallback(() => {
+    const previewViewport = previewViewportRef.current;
+    const duration = Math.max(0, pageTransitionFadeMs);
+
+    if (previewViewport === null || duration <= 0) {
+      return;
+    }
+
+    const viewportRect = previewViewport.getBoundingClientRect();
+
+    if (viewportRect.width <= 0 || viewportRect.height <= 0) {
+      return;
+    }
+
+    pageTransitionAnimationRef.current?.cancel();
+    pageTransitionOverlayRef.current?.remove();
+
+    const overlay = previewViewport.cloneNode(true) as HTMLElement;
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.classList.add("preview-section__transition-overlay");
+    overlay.style.left = `${viewportRect.left}px`;
+    overlay.style.top = `${viewportRect.top}px`;
+    overlay.style.width = `${viewportRect.width}px`;
+    overlay.style.height = `${viewportRect.height}px`;
+    overlay.scrollLeft = previewViewport.scrollLeft;
+    overlay.scrollTop = previewViewport.scrollTop;
+    document.body.append(overlay);
+    overlay.scrollLeft = previewViewport.scrollLeft;
+    overlay.scrollTop = previewViewport.scrollTop;
+    pageTransitionOverlayRef.current = overlay;
+
+    const animation = overlay.animate(
+      [
+        { opacity: 1 },
+        { opacity: 0 },
+      ],
+      {
+        duration,
+        easing: "linear",
+      },
+    );
+    const cleanup = () => {
+      if (pageTransitionAnimationRef.current === animation) {
+        pageTransitionAnimationRef.current = null;
+      }
+
+      if (pageTransitionOverlayRef.current === overlay) {
+        pageTransitionOverlayRef.current = null;
+      }
+
+      overlay.remove();
+    };
+
+    pageTransitionAnimationRef.current = animation;
+    animation.onfinish = cleanup;
+    animation.oncancel = cleanup;
+  }, [pageTransitionFadeMs]);
+
+  useEffect(() => (
+    () => {
+      pageTransitionAnimationRef.current?.cancel();
+      pageTransitionAnimationRef.current = null;
+      pageTransitionOverlayRef.current?.remove();
+      pageTransitionOverlayRef.current = null;
+    }
+  ), []);
 
   const handlePreviewDoubleClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (onSourceLineDoubleClick === undefined) {
@@ -4438,6 +4509,7 @@ function MarkdownPreviewComponent({
         top: previewNavigationRequest.direction * Math.max(120, previewViewport.clientHeight * 0.85),
         behavior: "auto",
       });
+      startPreviewPageTransitionFade();
       return;
     }
 
@@ -4464,9 +4536,10 @@ function MarkdownPreviewComponent({
       return;
     }
 
+    startPreviewPageTransitionFade();
     pendingA4NavigationScrollRef.current = true;
     updateActiveA4PageIndex(nextPageIndex);
-  }, [displayMode, previewNavigationRequest, updateActiveA4PageIndex]);
+  }, [displayMode, previewNavigationRequest, startPreviewPageTransitionFade, updateActiveA4PageIndex]);
 
   useEffect(() => {
     const lastCursorTarget = lastCursorTargetRef.current;
@@ -4517,6 +4590,7 @@ function MarkdownPreviewComponent({
             );
 
             if (targetPageIndex !== currentPageIndex) {
+              startPreviewPageTransitionFade();
               pendingA4NavigationScrollRef.current = true;
             }
 
@@ -4571,6 +4645,7 @@ function MarkdownPreviewComponent({
     displayMode,
     html,
     resolvedActiveSourceLineScrollMode,
+    startPreviewPageTransitionFade,
     updateActiveA4PageIndex,
   ]);
 

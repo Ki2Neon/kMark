@@ -113,6 +113,9 @@ function isSubWindowState(value: unknown): value is SubWindowState {
     && isPreviewDisplayMode(value.displayMode)
     && typeof value.html === "string"
     && isStringArray(value.pageHtmls)
+    && typeof value.pageTransitionFadeMs === "number"
+    && Number.isInteger(value.pageTransitionFadeMs)
+    && value.pageTransitionFadeMs >= 0
     && Array.isArray(value.pages)
     && isPageStyle(value.defaultPageStyle)
     && isPreviewTextStyle(value.defaultTextStyle)

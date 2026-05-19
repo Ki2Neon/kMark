@@ -344,6 +344,11 @@ input:focus-visible,
   height: 0;
 }
 
+.subwindow-shell[data-fullscreen="true"][data-cursor-hidden="true"],
+.subwindow-shell[data-fullscreen="true"][data-cursor-hidden="true"] * {
+  cursor: none !important;
+}
+
 .editor-shell__toast {
   position: fixed;
   left: 12px;
@@ -941,6 +946,24 @@ input:focus-visible,
 .preview-section__body[data-panning="true"] * {
   cursor: grabbing;
   user-select: none;
+}
+
+.preview-section__transition-overlay {
+  position: fixed;
+  z-index: 35;
+  box-sizing: border-box;
+  margin: 0;
+  overflow: hidden !important;
+  pointer-events: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  contain: layout paint style;
+}
+
+.preview-section__transition-overlay::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .preview-context-menu {

@@ -14,6 +14,7 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { useWindowTitle } from "../hooks/useWindowTitle";
 
 const AUTO_SOURCE_OPTION_ID = "auto";
+const FULLSCREEN_CURSOR_IDLE_HIDE_MS = 1200;
 
 type SubWindowScreenProps = {
   readonly stateKey: string | null;
@@ -65,6 +66,7 @@ function resolveSourceMenuLabel(
 
 export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
   const controllerRef = useRef<SubWindowController | null>(null);
+  const fullscreenCursorHideTimeoutRef = useRef<number | null>(null);
   const navigationRequestIdRef = useRef(0);
   const [selection, setSelection] = useState<SubWindowSelection>({ mode: "auto" });
   const [sourcesSnapshot, setSourcesSnapshot] = useState<SubWindowSourcesSnapshot>(EMPTY_SOURCE_SNAPSHOT);
@@ -74,6 +76,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     state: null,
   });
   const [previewNavigationRequest, setPreviewNavigationRequest] = useState<PreviewNavigationRequest | null>(null);
+  const [isFullscreenCursorVisible, setIsFullscreenCursorVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   if (controllerRef.current === null) {
@@ -123,6 +126,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     isAvailable: true,
   });
   const title = state === null ? "Subwindow - kMark" : `${state.title} - サブウィンドウ - kMark`;
+  const isFullscreenCursorHidden = isFullscreen && !isFullscreenCursorVisible && previewContextMenuState === null;
 
   useWindowTitle(title);
 
@@ -244,6 +248,47 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     };
   }, []);
 
+  useEffect(() => {
+    const clearCursorHideTimeout = () => {
+      if (fullscreenCursorHideTimeoutRef.current === null) {
+        return;
+      }
+
+      window.clearTimeout(fullscreenCursorHideTimeoutRef.current);
+      fullscreenCursorHideTimeoutRef.current = null;
+    };
+
+    if (!isFullscreen || previewContextMenuState !== null) {
+      clearCursorHideTimeout();
+      setIsFullscreenCursorVisible(true);
+      return clearCursorHideTimeout;
+    }
+
+    const scheduleCursorHide = () => {
+      clearCursorHideTimeout();
+      fullscreenCursorHideTimeoutRef.current = window.setTimeout(() => {
+        setIsFullscreenCursorVisible(false);
+        fullscreenCursorHideTimeoutRef.current = null;
+      }, FULLSCREEN_CURSOR_IDLE_HIDE_MS);
+    };
+    const showCursor = () => {
+      setIsFullscreenCursorVisible(true);
+      scheduleCursorHide();
+    };
+
+    showCursor();
+    window.addEventListener("mousemove", showCursor);
+    window.addEventListener("pointermove", showCursor);
+    window.addEventListener("mousedown", showCursor);
+
+    return () => {
+      clearCursorHideTimeout();
+      window.removeEventListener("mousemove", showCursor);
+      window.removeEventListener("pointermove", showCursor);
+      window.removeEventListener("mousedown", showCursor);
+    };
+  }, [isFullscreen, previewContextMenuState]);
+
   const handlePreviewExternalLinkOpen = useCallback((url: string) => {
     void openExternalLink(url);
   }, []);
@@ -340,6 +385,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     return (
       <main
         className="subwindow-shell subwindow-shell--empty"
+        data-cursor-hidden={isFullscreenCursorHidden ? "true" : "false"}
         data-fullscreen={isFullscreen ? "true" : "false"}
         onContextMenu={handleShellContextMenu}
       >
@@ -352,7 +398,11 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
   }
 
   return (
-    <main className="subwindow-shell" data-fullscreen={isFullscreen ? "true" : "false"}>
+    <main
+      className="subwindow-shell"
+      data-cursor-hidden={isFullscreenCursorHidden ? "true" : "false"}
+      data-fullscreen={isFullscreen ? "true" : "false"}
+    >
       <MarkdownPreview
         activeSourceLine={state.activeSourceLine}
         activeSourceLineScrollMode="page"
@@ -369,6 +419,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
         defaultTextStyle={state.defaultTextStyle}
         pageHtmls={state.pageHtmls}
         pages={state.pages}
+        pageTransitionFadeMs={state.pageTransitionFadeMs}
         previewFitMode={previewFitMode}
         previewNavigationRequest={previewNavigationRequest}
         suppressTextSelectionOnDoubleClick

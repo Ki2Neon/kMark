@@ -25,6 +25,7 @@ pub struct SubWindowStatePayload {
     pub display_mode: String,
     pub html: String,
     pub page_htmls: Vec<String>,
+    pub page_transition_fade_ms: u32,
     pub pages: Vec<RenderedPagePayload>,
     pub default_page_style: PageStylePayload,
     pub default_text_style: PreviewTextStylePayload,

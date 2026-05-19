@@ -35,6 +35,7 @@ import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
+import { DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS } from "../../application/subWindow/subWindowPorts";
 import { type RecentFile } from "../../domain/recentFiles";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
@@ -176,6 +177,7 @@ export function MarkdownEditorScreen({
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
+  const [subWindowPageTransitionFadeMs, setSubWindowPageTransitionFadeMs] = useState(DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS);
   const [subWindowSourceId, setSubWindowSourceId] = useState<string | null>(null);
   const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
   const blurActiveElement = useCallback(() => {
@@ -273,6 +275,7 @@ export function MarkdownEditorScreen({
     displayMode: previewDisplayMode,
     html: previewHtml,
     pageHtmls: previewPageHtmls,
+    pageTransitionFadeMs: subWindowPageTransitionFadeMs,
     pages: previewPages,
     title: normalizedFileName,
   }), [
@@ -284,6 +287,7 @@ export function MarkdownEditorScreen({
     previewHtml,
     previewPageHtmls,
     previewPages,
+    subWindowPageTransitionFadeMs,
   ]);
   const subWindowStateRequestRef = useRef(subWindowStateRequest);
 
@@ -701,12 +705,14 @@ export function MarkdownEditorScreen({
     onSaveDocumentAs: handleRequestSaveAs,
     onShowLineNumbersChange,
     onStartupEditModeChange,
+    onSubWindowPageTransitionFadeMsChange: setSubWindowPageTransitionFadeMs,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
     recentFiles,
     previewUsesAppThemeColors,
     showLineNumbers,
     startupEditMode,
+    subWindowPageTransitionFadeMs,
     windowsStartupTrayResidentEnabled,
   };
 
