@@ -417,7 +417,12 @@ export function MarkdownEditorScreen({
     }
 
     const activateSource = () => {
-      void subWindowControllerRef.current?.activateSource(subWindowSourceId).catch(() => {});
+      void subWindowControllerRef.current?.publishSourceState(
+        subWindowSourceId,
+        subWindowStateRequestRef.current,
+      ).then(() => (
+        subWindowControllerRef.current?.activateSource(subWindowSourceId)
+      )).catch(() => {});
     };
 
     if (document.hasFocus()) {
@@ -435,7 +440,12 @@ export function MarkdownEditorScreen({
     closeDesktopMenu();
 
     if (subWindowSourceId !== null) {
-      void subWindowControllerRef.current?.activateSource(subWindowSourceId).catch(() => {});
+      void subWindowControllerRef.current?.publishSourceState(
+        subWindowSourceId,
+        subWindowStateRequestRef.current,
+      ).then(() => (
+        subWindowControllerRef.current?.activateSource(subWindowSourceId)
+      )).catch(() => {});
     }
 
     void subWindowControllerRef.current?.open().catch((error) => {
