@@ -4299,6 +4299,10 @@ impl<'a> HtmlEmitter<'a> {
             &context.block_decoration
         };
 
+        if should_flatten_image_paragraph {
+            self.remove_soft_breaks(&context.soft_break_ranges);
+        }
+
         if !decoration.is_empty() {
             self.patch_tag_attributes(
                 context.open_tag_start,
@@ -4307,7 +4311,6 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         if should_flatten_image_paragraph {
-            self.remove_soft_breaks(&context.soft_break_ranges);
             self.patch_tag_style(context.open_tag_start, "display:contents");
         }
 
@@ -10998,6 +11001,24 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-camera-position=\"43.790344,27.062223,69.488736\""));
+    }
+
+    #[test]
+    fn flattens_saved_model_viewpoint_row_with_multibyte_model_path() {
+        let rendered_preview = render_markdown_preview(
+            "<!--k{ layout:row -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n![1](3x3フック-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:56.209225,58.217715,44.846884 model_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:194.335673,194.335673,158.674412 model_camera_target:0,0,0 -->\n![](poop_shooter-Body.stl)\n<!--k}-->",
+        );
+
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<span class=\"kmark-model-viewer\""),
+            3
+        );
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "3Dモデルを読み込み中"),
+            3
+        );
+        assert!(!rendered_preview.html.contains("<br />"));
+        assert!(rendered_preview.html.contains("3x3フック-Body.stl"));
     }
 
     #[test]
