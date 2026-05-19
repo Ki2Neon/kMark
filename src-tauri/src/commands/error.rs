@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::infra::JsonStateStoreError;
+use crate::infra::{JsonStateStoreError, SubWindowRegistryError};
 use kmark_core::MarkdownDocumentError;
 
 #[derive(Debug, Clone, Serialize)]
@@ -114,17 +114,51 @@ impl From<JsonStateStoreError> for CommandErrorPayload {
                 scope,
                 path,
                 source,
-            } => {
-                Self::with_detail(
-                    &format!("{scope}_deserialize_failed"),
-                    format!("failed to parse {scope}: {path}"),
-                    source.to_string(),
-                )
-            }
+            } => Self::with_detail(
+                &format!("{scope}_deserialize_failed"),
+                format!("failed to parse {scope}: {path}"),
+                source.to_string(),
+            ),
             JsonStateStoreError::SerializeState { scope, source } => Self::with_detail(
                 &format!("{scope}_serialize_failed"),
                 format!("failed to serialize {scope}"),
                 source.to_string(),
+            ),
+        }
+    }
+}
+
+impl From<SubWindowRegistryError> for CommandErrorPayload {
+    fn from(error: SubWindowRegistryError) -> Self {
+        match error {
+            SubWindowRegistryError::ResolveAppConfigDir { source } => Self::with_detail(
+                "subwindow_registry_dir_unavailable",
+                "failed to resolve subwindow registry path",
+                source.to_string(),
+            ),
+            SubWindowRegistryError::Io {
+                operation,
+                path,
+                source,
+            } => Self::with_detail(
+                "subwindow_registry_io_failed",
+                format!("failed to {operation} subwindow registry path: {path}"),
+                source.to_string(),
+            ),
+            SubWindowRegistryError::Serialize { source } => Self::with_detail(
+                "subwindow_registry_serialize_failed",
+                "failed to serialize subwindow registry",
+                source.to_string(),
+            ),
+            SubWindowRegistryError::Deserialize { path, source } => Self::with_detail(
+                "subwindow_registry_deserialize_failed",
+                format!("failed to deserialize subwindow registry file: {path}"),
+                source.to_string(),
+            ),
+            SubWindowRegistryError::SourceNotFound { source_id } => Self::with_detail(
+                "subwindow_source_not_found",
+                "subwindow source not found",
+                source_id,
             ),
         }
     }

@@ -861,7 +861,7 @@ fn collect_markdown_events(content: &str) -> Vec<OwnedEvent> {
         .into_offset_iter()
         .map(|(event, range)| OwnedEvent {
             event: event.into_static(),
-            range,
+            range: normalize_source_range(parser_content.as_ref(), range),
             source_line_range: None,
         })
         .collect()
@@ -913,6 +913,7 @@ fn push_preprocessed_event_with_inline_directives(
     let mut text_start = event.range.start;
     let mut text_cursor = 0usize;
     let text = text.as_ref();
+    let source = source_slice(markdown.content.as_str(), event.range.clone());
 
     while let Some(directive) = markdown.kmark_directives.get(*directive_index) {
         if !directive.is_inline || directive.offset > event.range.end {
@@ -923,7 +924,8 @@ fn push_preprocessed_event_with_inline_directives(
             break;
         }
 
-        let split_offset = directive.offset - event.range.start;
+        let source_split_offset = directive.offset - event.range.start;
+        let split_offset = resolve_text_event_split_offset(source, text, source_split_offset);
         if split_offset > text_cursor && split_offset <= text.len() {
             events.push(OwnedEvent {
                 event: Event::Text(text[text_cursor..split_offset].to_owned().into()),
@@ -945,6 +947,149 @@ fn push_preprocessed_event_with_inline_directives(
             source_line_range: event.source_line_range,
         });
     }
+}
+
+fn resolve_text_event_split_offset(source: &str, text: &str, source_offset: usize) -> usize {
+    let target_source_offset = previous_char_boundary(source, source_offset);
+    let mut source_cursor = 0usize;
+    let mut text_cursor = 0usize;
+
+    while source_cursor < target_source_offset
+        && source_cursor < source.len()
+        && text_cursor < text.len()
+    {
+        if let Some((source_end, text_value)) = parse_source_entity_at(source, source_cursor) {
+            if text[text_cursor..].starts_with(text_value.as_str()) {
+                if target_source_offset < source_end {
+                    return text_cursor;
+                }
+                source_cursor = source_end;
+                text_cursor += text_value.len();
+                continue;
+            }
+        }
+
+        if let Some((source_end, text_value)) =
+            parse_source_backslash_escape_at(source, source_cursor)
+        {
+            if text[text_cursor..].starts_with(text_value) {
+                if target_source_offset < source_end {
+                    return text_cursor;
+                }
+                source_cursor = source_end;
+                text_cursor += text_value.len_utf8();
+                continue;
+            }
+        }
+
+        let Some(source_character) = source[source_cursor..].chars().next() else {
+            break;
+        };
+        let Some(text_character) = text[text_cursor..].chars().next() else {
+            break;
+        };
+
+        if source_character != text_character {
+            return previous_char_boundary(text, target_source_offset.min(text.len()));
+        }
+
+        let next_source_cursor = source_cursor + source_character.len_utf8();
+        if target_source_offset < next_source_cursor {
+            return text_cursor;
+        }
+
+        source_cursor = next_source_cursor;
+        text_cursor += text_character.len_utf8();
+    }
+
+    if source_cursor >= target_source_offset {
+        return text_cursor;
+    }
+
+    previous_char_boundary(text, target_source_offset.min(text.len()))
+}
+
+fn previous_char_boundary(value: &str, offset: usize) -> usize {
+    let mut boundary = offset.min(value.len());
+
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+
+    boundary
+}
+
+fn next_char_boundary(value: &str, offset: usize) -> usize {
+    let mut boundary = offset.min(value.len());
+
+    while boundary < value.len() && !value.is_char_boundary(boundary) {
+        boundary += 1;
+    }
+
+    boundary
+}
+
+fn normalize_source_range(value: &str, range: Range<usize>) -> Range<usize> {
+    let start = previous_char_boundary(value, range.start);
+    let end = next_char_boundary(value, range.end).max(start);
+
+    start..end
+}
+
+fn source_slice(value: &str, range: Range<usize>) -> &str {
+    value
+        .get(normalize_source_range(value, range))
+        .unwrap_or_default()
+}
+
+fn parse_source_backslash_escape_at(source: &str, cursor: usize) -> Option<(usize, char)> {
+    let rest = source.get(cursor..)?;
+    let after_slash = rest.strip_prefix('\\')?;
+    let character = after_slash.chars().next()?;
+
+    if !character.is_ascii_punctuation() {
+        return None;
+    }
+
+    Some((cursor + '\\'.len_utf8() + character.len_utf8(), character))
+}
+
+fn parse_source_entity_at(source: &str, cursor: usize) -> Option<(usize, String)> {
+    let rest = source.get(cursor..)?;
+
+    if !rest.starts_with('&') {
+        return None;
+    }
+
+    let semicolon_offset = rest.find(';')?;
+    let entity = &rest[1..semicolon_offset];
+    let decoded = decode_markdown_entity(entity)?;
+
+    Some((cursor + semicolon_offset + ';'.len_utf8(), decoded))
+}
+
+fn decode_markdown_entity(entity: &str) -> Option<String> {
+    match entity {
+        "amp" => return Some("&".to_owned()),
+        "apos" => return Some("'".to_owned()),
+        "gt" => return Some(">".to_owned()),
+        "lt" => return Some("<".to_owned()),
+        "quot" => return Some("\"".to_owned()),
+        _ => {}
+    }
+
+    let codepoint = if let Some(hex) = entity
+        .strip_prefix("#x")
+        .or_else(|| entity.strip_prefix("#X"))
+    {
+        u32::from_str_radix(hex, 16).ok()?
+    } else if let Some(decimal) = entity.strip_prefix('#') {
+        decimal.parse::<u32>().ok()?
+    } else {
+        return None;
+    };
+
+    char::from_u32(codepoint).map(|character| character.to_string())
 }
 
 fn is_block_start_event(event: &Event<'static>) -> bool {
@@ -1491,7 +1636,7 @@ fn discard_pending_kmark_params_if_gap_is_incompatible_for_heading_numbers(
         return;
     }
 
-    let gap = &content[pending.end_offset..next_offset];
+    let gap = source_slice(content, pending.end_offset..next_offset);
 
     if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
         *pending_kmark_params = None;
@@ -3096,7 +3241,7 @@ impl<'a> HtmlEmitter<'a> {
         };
 
         let mut html = format!(
-            "<div class=\"kmark-model-viewer\" role=\"img\"{} data-kmark-model-source=\"{}\" data-kmark-model-display-src=\"{}\" data-kmark-model-format=\"{}\"",
+            "<span class=\"kmark-model-viewer\" role=\"img\"{} data-kmark-model-source=\"{}\" data-kmark-model-display-src=\"{}\" data-kmark-model-format=\"{}\"",
             image_context.source_line_attributes,
             escape_html(source_url),
             escape_html(&display_url),
@@ -3121,13 +3266,13 @@ impl<'a> HtmlEmitter<'a> {
             html.push('"');
         }
         push_model_data_attrs(&mut html, &image_context.model, self.markdown_file_path);
-        html.push_str("><div class=\"kmark-model-canvas\" aria-hidden=\"true\"></div><div class=\"kmark-model-status\" aria-live=\"polite\">3Dモデルを読み込み中</div></div>");
+        html.push_str("><span class=\"kmark-model-canvas\" aria-hidden=\"true\"></span><span class=\"kmark-model-status\" aria-live=\"polite\">3Dモデルを読み込み中</span></span>");
         self.push_raw(&html);
     }
 
     fn push_model_error(&mut self, image_context: &ImageContext, title: &str, details: &[String]) {
         let mut html = format!(
-            "<div class=\"kmark-model-error\" role=\"alert\"{}",
+            "<span class=\"kmark-model-error\" role=\"alert\"{}",
             image_context.source_line_attributes,
         );
         if let Some(style) = &image_context.style {
@@ -3135,20 +3280,19 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(style));
             html.push('"');
         }
-        html.push_str("><div class=\"kmark-model-error__title\">");
-        html.push_str(&escape_html(title));
-        html.push_str("</div>");
+        html.push('>');
+        push_model_error_span(&mut html, "kmark-model-error__title", title);
         if !image_context.alt_text.is_empty() {
-            html.push_str("<div>説明: ");
-            html.push_str(&escape_html(&image_context.alt_text));
-            html.push_str("</div>");
+            push_model_error_span(
+                &mut html,
+                "kmark-model-error__detail",
+                &format!("説明: {}", image_context.alt_text),
+            );
         }
         for detail in details {
-            html.push_str("<div>");
-            html.push_str(&escape_html(detail));
-            html.push_str("</div>");
+            push_model_error_span(&mut html, "kmark-model-error__detail", detail);
         }
-        html.push_str("</div>");
+        html.push_str("</span>");
         self.push_raw(&html);
     }
 
@@ -3659,7 +3803,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        let gap = &self.content[pending.end_offset..range.start];
+        let gap = source_slice(self.content, pending.end_offset..range.start);
 
         if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
             self.pending_kmark_params = None;
@@ -3693,7 +3837,7 @@ impl<'a> HtmlEmitter<'a> {
             return;
         }
 
-        let gap = &self.content[pending.end_offset..next_offset];
+        let gap = source_slice(self.content, pending.end_offset..next_offset);
 
         if !gap.chars().all(char::is_whitespace) || contains_pending_kmark_break_gap(gap) {
             self.pending_kmark_params = None;
@@ -6368,6 +6512,8 @@ fn parse_callout_start(
 }
 
 fn first_line_span_in_range(content: &str, range: Range<usize>) -> Option<MarkdownLineSpan> {
+    let range = normalize_source_range(content, range);
+
     if range.start >= range.end || range.start >= content.len() {
         return None;
     }
@@ -8207,6 +8353,14 @@ fn push_model_data_attrs(
     {
         push_optional_model_data_attr(html, "poster", Some(&poster));
     }
+}
+
+fn push_model_error_span(html: &mut String, class_name: &str, text: &str) {
+    html.push_str("<span class=\"");
+    html.push_str(class_name);
+    html.push_str("\">");
+    html.push_str(&escape_html(text));
+    html.push_str("</span>");
 }
 
 fn push_optional_model_data_attr(html: &mut String, key: &str, value: Option<&str>) {
@@ -10765,7 +10919,7 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("<div class=\"kmark-model-viewer\" role=\"img\""));
+            .contains("<span class=\"kmark-model-viewer\" role=\"img\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-source=\"./gear.obj\""));
@@ -10796,6 +10950,54 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("style=\"width:600px;height:360px;\""));
+    }
+
+    #[test]
+    fn renders_saved_model_viewpoint_before_multibyte_model_alt_text() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark model_projection:perspective model_fov:45 model_camera_position:1,2,3 model_camera_target:0,0,0 model_camera_zoom:1.5 -->\n![基板写真](./gear.obj)",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-source=\"./gear.obj\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-projection=\"perspective\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-position=\"1,2,3\""));
+        assert!(rendered_preview.html.contains("aria-label=\"基板写真\""));
+    }
+
+    #[test]
+    fn renders_adjacent_saved_model_viewpoints_in_row_scope_as_model_viewers() {
+        let rendered_preview = render_markdown_preview(
+            "<!--k{ layout:row h:page_fit-->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:35.285322,37.122039,67.685516 model_camera_target:0,0,0 -->\n![](PG9_spacer-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:43.790344,27.062223,69.488736 model_camera_target:0,0,0 -->\n![](MG_BKACK_2_kari-Body.stl)\n\n<!--k}-->",
+        );
+
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<span class=\"kmark-model-viewer\""),
+            2
+        );
+        assert!(!rendered_preview
+            .html
+            .contains("<div class=\"kmark-model-viewer\""));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"display:flex;flex-direction:row;\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-source=\"PG9_spacer-Body.stl\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-source=\"MG_BKACK_2_kari-Body.stl\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-position=\"35.285322,37.122039,67.685516\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-position=\"43.790344,27.062223,69.488736\""));
     }
 
     #[test]
@@ -10880,6 +11082,28 @@ mod tests {
         assert_eq!(
             rendered_preview.html,
             "<p data-source-line-start=\"0\" data-source-line-end=\"0\">これは<span class=\"kmark-inline\" style=\"color:red;\">赤色</span>です。</p>"
+        );
+    }
+
+    #[test]
+    fn renders_inline_kmark_after_escaped_marker_and_multibyte_text() {
+        let rendered_preview =
+            render_markdown_preview("これは\\*<!-- k { color:red -->重要<!-- } -->です。");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">これは*<span class=\"kmark-inline\" style=\"color:red;\">重要</span>です。</p>"
+        );
+    }
+
+    #[test]
+    fn renders_inline_kmark_after_entity_and_multibyte_text() {
+        let rendered_preview =
+            render_markdown_preview("これは&amp;<!-- k { color:red -->重要<!-- } -->です。");
+
+        assert_eq!(
+            rendered_preview.html,
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">これは&amp;<span class=\"kmark-inline\" style=\"color:red;\">重要</span>です。</p>"
         );
     }
 

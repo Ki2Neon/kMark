@@ -23,6 +23,10 @@ import {
 } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
+import {
+  MAX_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
+  MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
+} from "../../application/subWindow/subWindowPorts";
 
 type MenuSectionProps = {
   readonly appFontId: AppFontId;
@@ -39,6 +43,7 @@ type MenuSectionProps = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
+  readonly subWindowPageTransitionFadeMs: number;
   readonly windowsStartupTrayResidentEnabled: boolean;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
@@ -51,6 +56,7 @@ type MenuSectionProps = {
   readonly onOpenCurrentDocumentFolder: () => void;
   readonly onOpenDocument: () => void;
   readonly onOpenRecentFile: (recentFile: RecentFile) => void;
+  readonly onOpenSubWindow: () => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
@@ -59,13 +65,14 @@ type MenuSectionProps = {
   readonly onSaveDocumentAs: () => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
   readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
+  readonly onSubWindowPageTransitionFadeMsChange: (pageTransitionFadeMs: number) => void;
   readonly onWindowsStartupTrayResidentChange: (windowsStartupTrayResidentEnabled: boolean) => void;
 };
 
 const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
 const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 
-type NumberDraftField = "edit-font-size" | "system-font-size";
+type NumberDraftField = "edit-font-size" | "subwindow-page-transition-fade" | "system-font-size";
 type MenuPanel = "root" | "recent-files";
 
 function normalizeMenuSearchValue(value: string): string {
@@ -101,6 +108,7 @@ function MenuSectionComponent({
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
+  subWindowPageTransitionFadeMs,
   windowsStartupTrayResidentEnabled,
   onAppFontChange,
   onAppThemeChange,
@@ -113,6 +121,7 @@ function MenuSectionComponent({
   onOpenCurrentDocumentFolder,
   onOpenDocument,
   onOpenRecentFile,
+  onOpenSubWindow,
   onOverwriteSaveDocument,
   onPrintDocument,
   onPreviewDisplayModeChange,
@@ -121,6 +130,7 @@ function MenuSectionComponent({
   onSaveDocumentAs,
   onShowLineNumbersChange,
   onStartupEditModeChange,
+  onSubWindowPageTransitionFadeMsChange,
   onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
   const [menuPanel, setMenuPanel] = useState<MenuPanel>("root");
@@ -128,6 +138,7 @@ function MenuSectionComponent({
   const [appFontDraft, setAppFontDraft] = useState(appFontId);
   const [editFontDraft, setEditFontDraft] = useState(editFontId);
   const [editFontSizeDraft, setEditFontSizeDraft] = useState(() => String(editFontSizePx));
+  const [subWindowPageTransitionFadeDraft, setSubWindowPageTransitionFadeDraft] = useState(() => String(subWindowPageTransitionFadeMs));
   const [systemFontSizeDraft, setSystemFontSizeDraft] = useState(() => String(systemFontSizePx));
   const [focusedFontField, setFocusedFontField] = useState<"app" | "edit" | null>(null);
   const [focusedNumberField, setFocusedNumberField] = useState<NumberDraftField | null>(null);
@@ -157,12 +168,28 @@ function MenuSectionComponent({
     "名前を付けて保存",
     "新規作成",
   );
-  const previewGroupMatched = matchesMenuSearch("プレビュー", "表示形式", "表示方法", "用紙", "paper", "配色", "preview");
+  const previewGroupMatched = matchesMenuSearch(
+    "プレビュー",
+    "表示形式",
+    "表示方法",
+    "用紙",
+    "paper",
+    "配色",
+    "preview",
+    "サブウィンドウ",
+    "subwindow",
+    "フェード",
+    "fade",
+    "transition",
+  );
   const previewVisibilityVisible = previewGroupMatched || matchesMenuSearch("表示", "非表示", "visible");
   const previewDisplayModeVisible =
     previewGroupMatched || matchesMenuSearch("表示形式", "用紙", "paper", "display format", "display mode");
   const previewColorVisible = previewGroupMatched || matchesMenuSearch("配色", "固定色", "アプリテーマ色", "color");
-  const previewGroupVisible = previewVisibilityVisible || previewDisplayModeVisible || previewColorVisible;
+  const subWindowPageTransitionFadeVisible =
+    previewGroupMatched || matchesMenuSearch("サブウィンドウ", "フェード", "fade", "transition", "ms");
+  const previewGroupVisible =
+    previewVisibilityVisible || previewDisplayModeVisible || previewColorVisible || subWindowPageTransitionFadeVisible;
   const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
   const showLineNumbersVisible = editGroupMatched || matchesMenuSearch("行番号", "line number");
   const editFontSizeVisible = editGroupMatched || matchesMenuSearch("エディタフォントサイズ", "font size", "editor");
@@ -206,6 +233,12 @@ function MenuSectionComponent({
       setEditFontSizeDraft(String(editFontSizePx));
     }
   }, [editFontSizePx, focusedNumberField]);
+
+  useEffect(() => {
+    if (focusedNumberField !== "subwindow-page-transition-fade") {
+      setSubWindowPageTransitionFadeDraft(String(subWindowPageTransitionFadeMs));
+    }
+  }, [focusedNumberField, subWindowPageTransitionFadeMs]);
 
   useEffect(() => {
     if (focusedNumberField !== "system-font-size") {
@@ -364,6 +397,10 @@ function MenuSectionComponent({
     setSystemFontSizeDraft(event.currentTarget.value);
   };
 
+  const handleSubWindowPageTransitionFadeInput = (event: ChangeEvent<HTMLInputElement>) => {
+    setSubWindowPageTransitionFadeDraft(event.currentTarget.value);
+  };
+
   const commitSystemFontSizeDraft = () => {
     const parsedSystemFontSizePx = parseIntegerDraft(systemFontSizeDraft);
 
@@ -377,8 +414,29 @@ function MenuSectionComponent({
     onSystemFontSizeChange(nextSystemFontSizePx);
   };
 
+  const commitSubWindowPageTransitionFadeDraft = () => {
+    const parsedFadeMs = parseIntegerDraft(subWindowPageTransitionFadeDraft);
+
+    if (parsedFadeMs === null) {
+      setSubWindowPageTransitionFadeDraft(String(subWindowPageTransitionFadeMs));
+      return;
+    }
+
+    const nextFadeMs = clampInteger(
+      parsedFadeMs,
+      MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
+      MAX_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
+    );
+    setSubWindowPageTransitionFadeDraft(String(nextFadeMs));
+    onSubWindowPageTransitionFadeMsChange(nextFadeMs);
+  };
+
   const handleEditFontSizeFocus = () => {
     setFocusedNumberField("edit-font-size");
+  };
+
+  const handleSubWindowPageTransitionFadeFocus = () => {
+    setFocusedNumberField("subwindow-page-transition-fade");
   };
 
   const handleSystemFontSizeFocus = () => {
@@ -392,6 +450,15 @@ function MenuSectionComponent({
       return;
     }
     commitEditFontSizeDraft();
+  };
+
+  const handleSubWindowPageTransitionFadeBlur = () => {
+    setFocusedNumberField(null);
+    if (discardNextNumberBlurRef.current) {
+      discardNextNumberBlurRef.current = false;
+      return;
+    }
+    commitSubWindowPageTransitionFadeDraft();
   };
 
   const handleSystemFontSizeBlur = () => {
@@ -412,6 +479,19 @@ function MenuSectionComponent({
     if (event.key === "Escape") {
       discardNextNumberBlurRef.current = true;
       setEditFontSizeDraft(String(editFontSizePx));
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleSubWindowPageTransitionFadeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      discardNextNumberBlurRef.current = true;
+      setSubWindowPageTransitionFadeDraft(String(subWindowPageTransitionFadeMs));
       event.currentTarget.blur();
     }
   };
@@ -545,6 +625,32 @@ function MenuSectionComponent({
             <h2 className="menu-section__group-title">プレビュー</h2>
             <p className="menu-section__group-description">表示形式と配色の設定</p>
           </div>
+          <div className="menu-section__actions" role="group" aria-label="プレビュー操作">
+            <button type="button" onClick={onOpenSubWindow}>
+              サブウィンドウを開く
+            </button>
+          </div>
+
+          {subWindowPageTransitionFadeVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">サブウィンドウ fade ms</span>
+              <input
+                type="number"
+                value={subWindowPageTransitionFadeDraft}
+                min={MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS}
+                max={MAX_SUB_WINDOW_PAGE_TRANSITION_FADE_MS}
+                step={1}
+                inputMode="numeric"
+                onChange={handleSubWindowPageTransitionFadeInput}
+                onBlur={handleSubWindowPageTransitionFadeBlur}
+                onFocus={handleSubWindowPageTransitionFadeFocus}
+                onKeyDown={handleSubWindowPageTransitionFadeKeyDown}
+                aria-label="サブウィンドウのページ遷移フェード時間 ms"
+                className="menu-section__select"
+              />
+            </label>
+          ) : null}
+
           {previewVisibilityVisible ? (
             <label className="menu-section__mode-switch">
               <span className="menu-section__mode-switch-meta">

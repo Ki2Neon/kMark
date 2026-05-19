@@ -23,10 +23,13 @@ export type RuntimeDragDropEvent = {
 
 export type RuntimeApi = {
   readonly kind: "browser" | "tauri";
+  closeWindow(): Promise<void>;
   convertFileSrc(filePath: string): string;
   invoke<T>(command: string, args: Record<string, unknown>): Promise<T>;
+  isFullscreen(): Promise<boolean>;
   listen<T>(eventName: string, callback: (payload: T) => void): Promise<RuntimeUnlisten>;
   onDragDropEvent(callback: (event: RuntimeDragDropEvent) => void): Promise<RuntimeUnlisten>;
+  setFullscreen(isFullscreen: boolean): Promise<void>;
   setWindowTitle(title: string): Promise<void>;
 };
 
@@ -64,11 +67,23 @@ export async function invokeRuntimeCommand<T>(
   return (await loadRuntime()).invoke<T>(command, args);
 }
 
+export async function closeRuntimeWindow(): Promise<void> {
+  await (await loadRuntime()).closeWindow();
+}
+
 export async function listenRuntimeEvent<T>(
   eventName: string,
   callback: (payload: T) => void,
 ): Promise<RuntimeUnlisten> {
   return (await loadRuntime()).listen<T>(eventName, callback);
+}
+
+export async function isRuntimeFullscreen(): Promise<boolean> {
+  return (await loadRuntime()).isFullscreen();
+}
+
+export async function setRuntimeFullscreen(isFullscreen: boolean): Promise<void> {
+  await (await loadRuntime()).setFullscreen(isFullscreen);
 }
 
 export async function convertRuntimeFileSrc(filePath: string): Promise<string> {

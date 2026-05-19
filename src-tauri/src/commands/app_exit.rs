@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use tauri::{AppHandle, Runtime, State, Window};
+use tauri::{AppHandle, Manager, Runtime, State, Window};
 
 use super::error::CommandErrorPayload;
 use crate::{
@@ -14,6 +14,11 @@ pub fn complete_window_close<R: Runtime>(
     state: State<'_, AppState>,
 ) -> Result<(), CommandErrorPayload> {
     if window.label() == MAIN_WINDOW_LABEL && !state.should_exit.load(Ordering::SeqCst) {
+        super::sub_window::remove_sub_window_source_for_window_label(
+            window.app_handle(),
+            window.label(),
+        );
+
         return window.hide().map_err(|error| {
             CommandErrorPayload::with_detail(
                 "window_hide_failed",
@@ -22,6 +27,11 @@ pub fn complete_window_close<R: Runtime>(
             )
         });
     }
+
+    super::sub_window::remove_sub_window_source_for_window_label(
+        window.app_handle(),
+        window.label(),
+    );
 
     window.destroy().map_err(|error| {
         CommandErrorPayload::with_detail(

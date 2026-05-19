@@ -7,6 +7,12 @@ function unsupportedTauriRuntime(): never {
 export const runtimeBrowser: RuntimeApi = {
   kind: "browser",
 
+  async closeWindow() {
+    if (typeof window !== "undefined") {
+      window.close();
+    }
+  },
+
   convertFileSrc(filePath) {
     return filePath;
   },
@@ -15,12 +21,34 @@ export const runtimeBrowser: RuntimeApi = {
     unsupportedTauriRuntime();
   },
 
+  async isFullscreen() {
+    return typeof document !== "undefined" && document.fullscreenElement !== null;
+  },
+
   async listen() {
     return () => {};
   },
 
   async onDragDropEvent() {
     return () => {};
+  },
+
+  async setFullscreen(isFullscreen) {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    if (isFullscreen) {
+      if (document.fullscreenElement === null) {
+        await document.documentElement.requestFullscreen();
+      }
+
+      return;
+    }
+
+    if (document.fullscreenElement !== null) {
+      await document.exitFullscreen();
+    }
   },
 
   async setWindowTitle(title) {

@@ -43,8 +43,21 @@ type NormalizedRenderedMarkdownPreviewPayload = {
   readonly defaultTextStyle: PreviewTextStyle;
 };
 
-const MEDIA_TAG_PATTERN = /<(?:img|video|div)\b[^>]*>/giu;
-const FILE_MEDIA_ATTRIBUTE_PATTERN = /(\s(?:src|poster|data-kmark-model-source|data-kmark-model-display-src|data-kmark-model-poster)=")(file:[^"]+)(")/giu;
+const FILE_MEDIA_ATTRIBUTE_NAME_PATTERN = [
+  "src",
+  "poster",
+  "data-kmark-model-source",
+  "data-kmark-model-display-src",
+  "data-kmark-model-poster",
+].join("|");
+const FILE_MEDIA_ATTRIBUTE_PATTERN = new RegExp(
+  `(\\s(?:${FILE_MEDIA_ATTRIBUTE_NAME_PATTERN})=")(file:[^"]+)(")`,
+  "giu",
+);
+const FILE_MEDIA_TAG_PATTERN = new RegExp(
+  `<[^>]*\\s(?:${FILE_MEDIA_ATTRIBUTE_NAME_PATTERN})="file:[^"]+"[^>]*>`,
+  "giu",
+);
 
 type FileUrlParts = {
   readonly hash: string;
@@ -144,7 +157,7 @@ async function normalizePreviewHtmlMediaSources(html: string): Promise<string> {
   }
 
   const replacements = await Promise.all(
-    Array.from(html.matchAll(MEDIA_TAG_PATTERN), async (match) => {
+    Array.from(html.matchAll(FILE_MEDIA_TAG_PATTERN), async (match) => {
       const [raw] = match;
       return {
         index: match.index ?? 0,
