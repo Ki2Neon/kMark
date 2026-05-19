@@ -17,9 +17,11 @@ pub struct RenderedMarkdownPreviewPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PresentationWindowSnapshotPayload {
+pub struct SubWindowStatePayload {
     pub version: u32,
-    pub created_at_epoch_ms: u64,
+    pub revision: u64,
+    pub updated_at_epoch_ms: u64,
+    pub mode: String,
     pub title: String,
     pub display_mode: String,
     pub html: String,
@@ -27,6 +29,7 @@ pub struct PresentationWindowSnapshotPayload {
     pub pages: Vec<RenderedPagePayload>,
     pub default_page_style: PageStylePayload,
     pub default_text_style: PreviewTextStylePayload,
+    pub active_source_line: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

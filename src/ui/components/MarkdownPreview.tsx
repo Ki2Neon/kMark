@@ -80,7 +80,13 @@ type MarkdownPreviewProps = {
   readonly onZoomScaleChange?: (zoomScale: number) => void;
   readonly pageHtmls?: readonly string[];
   readonly pages?: readonly RenderedPreviewPage[];
+  readonly previewNavigationRequest?: PreviewNavigationRequest | null;
   readonly zoomScale?: number;
+};
+
+export type PreviewNavigationRequest = {
+  readonly direction: -1 | 1;
+  readonly requestId: number;
 };
 
 type PreviewBlockInfo = {
@@ -3681,6 +3687,7 @@ function MarkdownPreviewComponent({
   onZoomScaleChange,
   pageHtmls,
   pages,
+  previewNavigationRequest = null,
   zoomScale = 1,
 }: MarkdownPreviewProps) {
   const previewViewportRef = useRef<HTMLElement | null>(null);
@@ -4257,6 +4264,59 @@ function MarkdownPreviewComponent({
 
     clearViewportPan();
   }, [clearViewportPan, enableInteractiveViewportNavigation]);
+
+  useEffect(() => {
+    if (previewNavigationRequest === null) {
+      return;
+    }
+
+    const previewViewport = previewViewportRef.current;
+
+    if (previewViewport === null) {
+      return;
+    }
+
+    if (displayMode !== "a4") {
+      previewViewport.scrollBy({
+        top: previewNavigationRequest.direction * Math.max(120, previewViewport.clientHeight * 0.85),
+        behavior: "auto",
+      });
+      return;
+    }
+
+    const previewPages = Array.from(
+      previewViewport.querySelectorAll<HTMLElement>(".preview-section__page-scale"),
+    );
+
+    if (previewPages.length === 0) {
+      return;
+    }
+
+    const viewportRect = previewViewport.getBoundingClientRect();
+    const viewportCenterY = viewportRect.top + (viewportRect.height / 2);
+    const currentPageIndex = previewPages.reduce((nearestIndex, previewPage, index) => {
+      const nearestRect = previewPages[nearestIndex].getBoundingClientRect();
+      const previewPageRect = previewPage.getBoundingClientRect();
+      const nearestDistance = Math.abs(
+        nearestRect.top + (nearestRect.height / 2) - viewportCenterY,
+      );
+      const previewPageDistance = Math.abs(
+        previewPageRect.top + (previewPageRect.height / 2) - viewportCenterY,
+      );
+
+      return previewPageDistance < nearestDistance ? index : nearestIndex;
+    }, 0);
+    const nextPageIndex = clamp(
+      currentPageIndex + previewNavigationRequest.direction,
+      0,
+      previewPages.length - 1,
+    );
+
+    previewViewport.scrollTo({
+      top: Math.max(0, previewPages[nextPageIndex].offsetTop - 16),
+      behavior: "auto",
+    });
+  }, [displayMode, previewNavigationRequest]);
 
   useEffect(() => {
     const lastCursorTarget = lastCursorTargetRef.current;

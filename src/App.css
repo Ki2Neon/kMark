@@ -299,7 +299,7 @@ input:focus-visible,
   padding-top: var(--mobile-nav-height);
 }
 
-.presentation-shell {
+.subwindow-shell {
   display: flex;
   width: 100%;
   height: 100%;
@@ -309,26 +309,26 @@ input:focus-visible,
 }
 
 @supports (height: 100dvh) {
-  .presentation-shell {
+  .subwindow-shell {
     min-height: 100dvh;
   }
 }
 
-.presentation-shell--empty {
+.subwindow-shell--empty {
   display: grid;
   place-items: center;
   padding: 24px;
   background: var(--surface);
 }
 
-.presentation-shell__empty {
+.subwindow-shell__empty {
   margin: 0;
   color: var(--text-soft);
   font-size: 0.95rem;
 }
 
-.presentation-shell .section--preview,
-.presentation-shell .preview-section__body {
+.subwindow-shell .section--preview,
+.subwindow-shell .preview-section__body {
   height: 100%;
 }
 

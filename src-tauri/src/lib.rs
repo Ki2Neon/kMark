@@ -21,7 +21,7 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
-use dto::PresentationWindowSnapshotPayload;
+use dto::SubWindowStatePayload;
 use infra::{
     load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
@@ -39,7 +39,7 @@ pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ICON_ID: &str = "main-tray";
 const TRAY_QUIT_MENU_ITEM_ID: &str = "tray-quit";
 const TRAY_UNTITLED_WINDOW_LABEL_PREFIX: &str = "tray-untitled";
-pub(crate) const PRESENTATION_WINDOW_LABEL_PREFIX: &str = "presentation-";
+pub(crate) const SUB_WINDOW_LABEL_PREFIX: &str = "subwindow-";
 const TRAY_UNTITLED_WINDOW_URL: &str = "index.html?kmarkInitialDocument=new-untitled";
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
 const APP_EXIT_REQUESTED_EVENT: &str = "app-exit-requested";
@@ -64,10 +64,10 @@ pub(crate) struct AppState {
     pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
     pub(crate) recent_files: Mutex<RecentFiles>,
-    pub(crate) presentation_window_snapshots: Mutex<HashMap<String, PresentationWindowSnapshotPayload>>,
+    pub(crate) sub_window_states: Mutex<HashMap<String, SubWindowStatePayload>>,
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
-    pub(crate) next_presentation_window_sequence: AtomicU64,
+    pub(crate) next_sub_window_sequence: AtomicU64,
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -316,8 +316,8 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    if window.label().starts_with(PRESENTATION_WINDOW_LABEL_PREFIX) {
-                        commands::presentation_window::remove_presentation_window_snapshot(
+                    if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
+                        commands::sub_window::remove_sub_window_state(
                             window.app_handle(),
                             window.label(),
                         );
@@ -476,12 +476,13 @@ pub fn run() {
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,
             commands::markdown_render::render_markdown_preview,
-            commands::presentation_window::get_presentation_window_snapshot,
-            commands::presentation_window::open_presentation_window,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
             commands::recent_files::get_recent_files,
             commands::recent_files::record_recent_file,
+            commands::sub_window::get_sub_window_state,
+            commands::sub_window::open_sub_window,
+            commands::sub_window::publish_sub_window_state,
             commands::file_open::read_markdown_document_at_path,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,

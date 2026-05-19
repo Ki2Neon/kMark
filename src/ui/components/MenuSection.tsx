@@ -22,6 +22,7 @@ import {
   type PreviewDisplayMode,
 } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
+import { type SubWindowMode } from "../../domain/subWindow";
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
 
 type MenuSectionProps = {
@@ -39,6 +40,7 @@ type MenuSectionProps = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
+  readonly subWindowMode: SubWindowMode;
   readonly windowsStartupTrayResidentEnabled: boolean;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
@@ -51,7 +53,7 @@ type MenuSectionProps = {
   readonly onOpenCurrentDocumentFolder: () => void;
   readonly onOpenDocument: () => void;
   readonly onOpenRecentFile: (recentFile: RecentFile) => void;
-  readonly onOpenPresentationWindow: () => void;
+  readonly onOpenSubWindow: () => void;
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
@@ -60,6 +62,7 @@ type MenuSectionProps = {
   readonly onSaveDocumentAs: () => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
   readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
+  readonly onSubWindowModeChange: (subWindowMode: SubWindowMode) => void;
   readonly onWindowsStartupTrayResidentChange: (windowsStartupTrayResidentEnabled: boolean) => void;
 };
 
@@ -102,6 +105,7 @@ function MenuSectionComponent({
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
+  subWindowMode,
   windowsStartupTrayResidentEnabled,
   onAppFontChange,
   onAppThemeChange,
@@ -114,7 +118,7 @@ function MenuSectionComponent({
   onOpenCurrentDocumentFolder,
   onOpenDocument,
   onOpenRecentFile,
-  onOpenPresentationWindow,
+  onOpenSubWindow,
   onOverwriteSaveDocument,
   onPrintDocument,
   onPreviewDisplayModeChange,
@@ -123,6 +127,7 @@ function MenuSectionComponent({
   onSaveDocumentAs,
   onShowLineNumbersChange,
   onStartupEditModeChange,
+  onSubWindowModeChange,
   onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
   const [menuPanel, setMenuPanel] = useState<MenuPanel>("root");
@@ -169,6 +174,8 @@ function MenuSectionComponent({
     "preview",
     "プレゼン",
     "presentation",
+    "サブウィンドウ",
+    "subwindow",
   );
   const previewVisibilityVisible = previewGroupMatched || matchesMenuSearch("表示", "非表示", "visible");
   const previewDisplayModeVisible =
@@ -281,6 +288,10 @@ function MenuSectionComponent({
 
   const handlePreviewDisplayModeSwitch = (event: ChangeEvent<HTMLInputElement>) => {
     onPreviewDisplayModeChange(event.currentTarget.checked ? "a4" : "standard");
+  };
+
+  const handleSubWindowModeSwitch = (event: ChangeEvent<HTMLInputElement>) => {
+    onSubWindowModeChange(event.currentTarget.checked ? "presentation" : "preview-sync");
   };
 
   const handlePreviewUsesAppThemeColorsSwitch = (event: ChangeEvent<HTMLInputElement>) => {
@@ -558,10 +569,40 @@ function MenuSectionComponent({
             <p className="menu-section__group-description">表示形式と配色の設定</p>
           </div>
           <div className="menu-section__actions" role="group" aria-label="プレビュー操作">
-            <button type="button" onClick={onOpenPresentationWindow}>
-              プレゼン
+            <button type="button" onClick={onOpenSubWindow}>
+              サブウィンドウを開く
             </button>
           </div>
+
+          <label className="menu-section__mode-switch">
+            <span className="menu-section__mode-switch-meta">
+              <span className="menu-section__field-label">サブウィンドウ</span>
+            </span>
+            <span className="menu-section__mode-switch-values">
+              <span
+                className={
+                  subWindowMode === "preview-sync" ? "menu-section__mode-label is-active" : "menu-section__mode-label"
+                }
+              >
+                プレビュー同期
+              </span>
+              <input
+                type="checkbox"
+                className="menu-section__switch-input"
+                checked={subWindowMode === "presentation"}
+                onChange={handleSubWindowModeSwitch}
+                aria-label="サブウィンドウの表示モードを切り替え"
+              />
+              <span className="menu-section__switch" aria-hidden="true" />
+              <span
+                className={
+                  subWindowMode === "presentation" ? "menu-section__mode-label is-active" : "menu-section__mode-label"
+                }
+              >
+                プレゼン
+              </span>
+            </span>
+          </label>
 
           {previewVisibilityVisible ? (
             <label className="menu-section__mode-switch">

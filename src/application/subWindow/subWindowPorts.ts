@@ -1,0 +1,39 @@
+import {
+  type PageStyle,
+  type PreviewDisplayMode,
+  type PreviewTextStyle,
+  type RenderedPreviewPage,
+} from "../../domain/preview";
+import { type SubWindowMode } from "../../domain/subWindow";
+
+export const SUB_WINDOW_STATE_VERSION = 1;
+
+export type SubWindowState = {
+  readonly version: typeof SUB_WINDOW_STATE_VERSION;
+  readonly revision: number;
+  readonly updatedAtEpochMs: number;
+  readonly mode: SubWindowMode;
+  readonly title: string;
+  readonly displayMode: PreviewDisplayMode;
+  readonly html: string;
+  readonly pageHtmls: readonly string[];
+  readonly pages: readonly RenderedPreviewPage[];
+  readonly defaultPageStyle: PageStyle;
+  readonly defaultTextStyle: PreviewTextStyle;
+  readonly activeSourceLine: number | null;
+};
+
+export type SubWindowStateRequest = Omit<
+  SubWindowState,
+  "revision" | "updatedAtEpochMs" | "version"
+>;
+
+export type SubWindowGateway = {
+  open(state: SubWindowState): Promise<void>;
+  load(stateKey: string | null): Promise<SubWindowState | null>;
+  listen(
+    stateKey: string | null,
+    callback: (state: SubWindowState) => void,
+  ): Promise<() => void>;
+  publish(state: SubWindowState): Promise<void>;
+};

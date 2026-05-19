@@ -16,7 +16,9 @@ type PreviewContextMenuState = {
 };
 
 type UsePreviewInteractionOptions = {
+  readonly contextMenuExtraItemCount?: number;
   readonly displayMode: PreviewDisplayMode;
+  readonly includeModelCameraMenuItem?: boolean;
   readonly isAvailable?: boolean;
 };
 
@@ -24,7 +26,12 @@ export function clampPreviewZoomScale(zoomScale: number): number {
   return Math.round(Math.min(MAX_PREVIEW_ZOOM_SCALE, Math.max(MIN_PREVIEW_ZOOM_SCALE, zoomScale)) * 100) / 100;
 }
 
-export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePreviewInteractionOptions) {
+export function usePreviewInteraction({
+  contextMenuExtraItemCount = 0,
+  displayMode,
+  includeModelCameraMenuItem = true,
+  isAvailable = true,
+}: UsePreviewInteractionOptions) {
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenuState] = useState<PreviewContextMenuState | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
@@ -63,13 +70,15 @@ export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePr
   }, []);
 
   const handlePreviewContextMenu = useCallback((clientX: number, clientY: number, modelViewer: HTMLElement | null = null) => {
-    const itemCount = modelViewer === null ? 1 : 2;
+    const itemCount = 1
+      + (includeModelCameraMenuItem && modelViewer !== null ? 1 : 0)
+      + contextMenuExtraItemCount;
     const menuHeight = PREVIEW_CONTEXT_MENU_PADDING_PX + (PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX * itemCount);
     const nextX = Math.max(8, Math.min(clientX, window.innerWidth - PREVIEW_CONTEXT_MENU_WIDTH_PX - 8));
     const nextY = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
 
     setContextMenuState({ modelViewer, x: nextX, y: nextY });
-  }, []);
+  }, [contextMenuExtraItemCount, includeModelCameraMenuItem]);
 
   useEffect(() => {
     if (displayMode !== "a4") {
@@ -133,7 +142,10 @@ export function usePreviewInteraction({ displayMode, isAvailable = true }: UsePr
     handleModelCameraReset,
     handleZoomFit,
     handleZoomScaleChange,
-    hasModelCameraTarget: contextMenuState?.modelViewer !== null && contextMenuState?.modelViewer !== undefined,
+    hasModelCameraTarget:
+      includeModelCameraMenuItem
+      && contextMenuState?.modelViewer !== null
+      && contextMenuState?.modelViewer !== undefined,
     zoomScale,
   };
 }

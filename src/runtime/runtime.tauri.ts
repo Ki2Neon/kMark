@@ -14,6 +14,10 @@ export const runtimeTauri: RuntimeApi = {
     return invoke<T>(command, args);
   },
 
+  isFullscreen() {
+    return getCurrentWindow().isFullscreen();
+  },
+
   listen<T>(eventName: string, callback: (payload: T) => void) {
     return getCurrentWindow().listen<T>(eventName, (event) => {
       callback(event.payload);
@@ -24,6 +28,10 @@ export const runtimeTauri: RuntimeApi = {
     return getCurrentWebview().onDragDropEvent((event) => {
       callback(event as RuntimeDragDropEvent);
     });
+  },
+
+  async setFullscreen(isFullscreen) {
+    await getCurrentWindow().setFullscreen(isFullscreen);
   },
 
   async setWindowTitle(title) {

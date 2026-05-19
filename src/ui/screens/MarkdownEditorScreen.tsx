@@ -2,6 +2,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -32,21 +33,22 @@ import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction }
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
-import { createBrowserPresentationWindowGateway } from "../../adapters/browser/browserPresentationWindowGateway";
-import { PresentationWindowController } from "../../application/presentationWindow/presentationWindowController";
+import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
+import { SubWindowController } from "../../application/subWindow/subWindowController";
 import { type RecentFile } from "../../domain/recentFiles";
+import { DEFAULT_SUB_WINDOW_MODE, type SubWindowMode } from "../../domain/subWindow";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
 const PREVIEW_CURSOR_FOLLOW_THROTTLE_MS = 80;
 
-function createPresentationWindowController(): PresentationWindowController {
-  return new PresentationWindowController({
+function createSubWindowController(): SubWindowController {
+  return new SubWindowController({
     clock: {
       now: () => Date.now(),
     },
-    gateway: createBrowserPresentationWindowGateway(),
+    gateway: createBrowserSubWindowGateway(),
   });
 }
 
@@ -165,13 +167,15 @@ export function MarkdownEditorScreen({
   const lastPreviewCursorFollowAtRef = useRef(0);
   const pendingPreviewCursorLineRef = useRef<number | null>(null);
   const previewCursorFollowTimeoutRef = useRef<number | null>(null);
-  const presentationWindowControllerRef = useRef<PresentationWindowController | null>(null);
+  const subWindowControllerRef = useRef<SubWindowController | null>(null);
+  const hasOpenedSubWindowRef = useRef(false);
 
-  if (presentationWindowControllerRef.current === null) {
-    presentationWindowControllerRef.current = createPresentationWindowController();
+  if (subWindowControllerRef.current === null) {
+    subWindowControllerRef.current = createSubWindowController();
   }
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
+  const [subWindowMode, setSubWindowMode] = useState<SubWindowMode>(DEFAULT_SUB_WINDOW_MODE);
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
@@ -261,6 +265,27 @@ export function MarkdownEditorScreen({
   }, [errorMessage, handleErrorClear]);
 
   const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
+  const subWindowStateRequest = useMemo(() => ({
+    activeSourceLine: previewHighlightSourceLine,
+    defaultPageStyle: defaultPreviewPageStyle,
+    defaultTextStyle: defaultPreviewTextStyle,
+    displayMode: previewDisplayMode,
+    html: previewHtml,
+    mode: subWindowMode,
+    pageHtmls: previewPageHtmls,
+    pages: previewPages,
+    title: normalizedFileName,
+  }), [
+    defaultPreviewPageStyle,
+    defaultPreviewTextStyle,
+    normalizedFileName,
+    previewDisplayMode,
+    previewHighlightSourceLine,
+    previewHtml,
+    previewPageHtmls,
+    previewPages,
+    subWindowMode,
+  ]);
   useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
@@ -322,30 +347,25 @@ export function MarkdownEditorScreen({
     void handlePrintDocument(previewDisplayMode);
   }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode]);
 
-  const handleRequestOpenPresentationWindow = useCallback(() => {
-    closeDesktopMenu();
+  useEffect(() => {
+    if (!isEditorReady || !hasOpenedSubWindowRef.current) {
+      return;
+    }
 
-    void presentationWindowControllerRef.current?.open({
-      title: normalizedFileName,
-      displayMode: previewDisplayMode,
-      html: previewHtml,
-      pageHtmls: previewPageHtmls,
-      pages: previewPages,
-      defaultPageStyle: defaultPreviewPageStyle,
-      defaultTextStyle: defaultPreviewTextStyle,
-    }).catch((error) => {
-      handleErrorRaise(error instanceof Error ? error.message : "プレゼンウィンドウを開けませんでした。");
+    void subWindowControllerRef.current?.publish(subWindowStateRequest).catch(() => {});
+  }, [isEditorReady, subWindowStateRequest]);
+
+  const handleRequestOpenSubWindow = useCallback(() => {
+    closeDesktopMenu();
+    hasOpenedSubWindowRef.current = true;
+
+    void subWindowControllerRef.current?.open(subWindowStateRequest).catch((error) => {
+      handleErrorRaise(error instanceof Error ? error.message : "サブウィンドウを開けませんでした。");
     });
   }, [
     closeDesktopMenu,
-    defaultPreviewPageStyle,
-    defaultPreviewTextStyle,
     handleErrorRaise,
-    normalizedFileName,
-    previewDisplayMode,
-    previewHtml,
-    previewPageHtmls,
-    previewPages,
+    subWindowStateRequest,
   ]);
 
   const handleRequestNew = useCallback(() => {
@@ -567,7 +587,7 @@ export function MarkdownEditorScreen({
     onNewDocument: handleRequestNew,
     onOpenCurrentDocumentFolder: handleRequestOpenCurrentDocumentFolder,
     onOpenDocument: handleRequestOpen,
-    onOpenPresentationWindow: handleRequestOpenPresentationWindow,
+    onOpenSubWindow: handleRequestOpenSubWindow,
     onOpenRecentFile: handleRequestOpenRecentFile,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,
@@ -577,12 +597,14 @@ export function MarkdownEditorScreen({
     onSaveDocumentAs: handleRequestSaveAs,
     onShowLineNumbersChange,
     onStartupEditModeChange,
+    onSubWindowModeChange: setSubWindowMode,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
     recentFiles,
     previewUsesAppThemeColors,
     showLineNumbers,
     startupEditMode,
+    subWindowMode,
     windowsStartupTrayResidentEnabled,
   };
 

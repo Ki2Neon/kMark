@@ -3,9 +3,9 @@ import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
 import { useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
-import { PresentationWindowScreen } from "./ui/screens/PresentationWindowScreen";
+import { SubWindowScreen } from "./ui/screens/SubWindowScreen";
 import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
-import { resolveBrowserPresentationWindowTarget } from "./adapters/browser/browserPresentationWindowGateway";
+import { resolveBrowserSubWindowTarget } from "./adapters/browser/browserSubWindowGateway";
 
 function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   if (typeof window === "undefined") {
@@ -17,8 +17,8 @@ function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
     : "stored";
 }
 
-function detectPresentationWindowTarget(): { readonly snapshotKey: string | null } | null {
-  return resolveBrowserPresentationWindowTarget();
+function detectSubWindowTarget(): { readonly stateKey: string | null } | null {
+  return resolveBrowserSubWindowTarget();
 }
 
 function App() {
@@ -62,10 +62,10 @@ function App() {
     return null;
   }
 
-  const presentationWindowTarget = detectPresentationWindowTarget();
+  const subWindowTarget = detectSubWindowTarget();
 
-  if (presentationWindowTarget !== null) {
-    return <PresentationWindowScreen snapshotKey={presentationWindowTarget.snapshotKey} />;
+  if (subWindowTarget !== null) {
+    return <SubWindowScreen stateKey={subWindowTarget.stateKey} />;
   }
 
   return (
