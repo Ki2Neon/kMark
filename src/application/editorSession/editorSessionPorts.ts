@@ -30,6 +30,17 @@ export type ImportMarkdownAssetsRequest = {
   readonly droppedFilePaths: readonly string[];
 };
 
+export type MarkdownAssetDataFile = {
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly bytes: readonly number[];
+};
+
+export type ImportMarkdownAssetDataRequest = {
+  readonly markdownFilePath: string;
+  readonly files: readonly MarkdownAssetDataFile[];
+};
+
 export type PrintMarkdownDocumentRequest =
   | {
     readonly displayMode: "standard";
@@ -87,7 +98,8 @@ export type MarkdownDocumentGateway = {
 };
 
 export type MarkdownAssetImporter = {
-  importAssets(request: ImportMarkdownAssetsRequest): Promise<readonly ImportedMarkdownAsset[]>;
+  importAssetData(request: ImportMarkdownAssetDataRequest): Promise<readonly ImportedMarkdownAsset[]>;
+  importAssetFiles(request: ImportMarkdownAssetsRequest): Promise<readonly ImportedMarkdownAsset[]>;
 };
 
 export type MarkdownDocumentPrinter = {

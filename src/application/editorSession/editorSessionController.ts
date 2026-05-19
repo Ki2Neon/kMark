@@ -9,6 +9,7 @@ import {
   type DraftStore,
   type EditorStateRules,
   type LoadedMarkdownDocument,
+  type MarkdownAssetDataFile,
   type MarkdownAssetImporter,
   type MarkdownDocumentGateway,
   type MarkdownDocumentPrinter,
@@ -216,9 +217,24 @@ export class EditorSessionController {
       throw new Error("アセットを取り込むには、先にMarkdownファイルを保存してください。");
     }
 
-    const importedAssets = await this.#assetImporter.importAssets({
+    const importedAssets = await this.#assetImporter.importAssetFiles({
       markdownFilePath: this.#currentDocumentFilePath,
       droppedFilePaths,
+    });
+
+    return importedAssets
+      .map((asset) => asset.markdownText)
+      .join("\n\n");
+  }
+
+  async importPastedAssets(files: readonly MarkdownAssetDataFile[]): Promise<string> {
+    if (this.#currentDocumentFilePath === null) {
+      throw new Error("アセットを取り込むには、先にMarkdownファイルを保存してください。");
+    }
+
+    const importedAssets = await this.#assetImporter.importAssetData({
+      markdownFilePath: this.#currentDocumentFilePath,
+      files,
     });
 
     return importedAssets

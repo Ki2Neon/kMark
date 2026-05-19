@@ -12,6 +12,7 @@ import {
   toEditorSessionErrorMessage,
   type EditorSessionStore,
 } from "../../application/editorSession/editorSessionController";
+import { type MarkdownAssetDataFile } from "../../application/editorSession/editorSessionPorts";
 import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
@@ -317,6 +318,15 @@ export function useMarkdownEditor(
     }
   }, [controller, store]);
 
+  const handleImportPastedAssets = useCallback(async (files: readonly MarkdownAssetDataFile[]) => {
+    try {
+      return await controller.importPastedAssets(files);
+    } catch (error) {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+      return null;
+    }
+  }, [controller, store]);
+
   const handleResetDocument = useCallback(() => {
     controller.resetDocument(store);
   }, [controller, store]);
@@ -357,6 +367,7 @@ export function useMarkdownEditor(
     handleErrorClear,
     handleErrorRaise,
     handleImportDroppedAssets,
+    handleImportPastedAssets,
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,

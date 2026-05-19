@@ -20,6 +20,7 @@ type MarkdownInputProps = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
+  readonly onAssetPaste?: (files: readonly PastedMarkdownAssetFile[]) => Promise<string | null>;
   readonly onContentChange: (content: string) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
@@ -28,6 +29,12 @@ type MarkdownInputProps = {
     readonly requestId: number;
   } | null;
   readonly showMobileInputHelperBar?: boolean;
+};
+
+export type PastedMarkdownAssetFile = {
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly bytes: readonly number[];
 };
 
 function MarkdownInputComponent({
@@ -39,6 +46,7 @@ function MarkdownInputComponent({
   multiCursorModifier,
   showLineNumbers,
   onAssetDrop,
+  onAssetPaste,
   onContentChange,
   onCursorLineChange,
   onFocusChange,
@@ -58,6 +66,7 @@ function MarkdownInputComponent({
             multiCursorModifier={multiCursorModifier}
             showLineNumbers={showLineNumbers}
             onAssetDrop={onAssetDrop}
+            onAssetPaste={onAssetPaste}
             onContentChange={onContentChange}
             onCursorLineChange={onCursorLineChange}
             onFocusChange={onFocusChange}

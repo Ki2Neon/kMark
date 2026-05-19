@@ -13,6 +13,7 @@ use crate::ports::AssetRepository;
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "ogg", "mov", "m4v"];
 const MODEL_EXTENSIONS: &[&str] = &["glb", "gltf", "obj", "stl", "fbx"];
+const CLIPBOARD_FALLBACK_FILE_STEM: &str = "clipboard-asset";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportedAssetKind {
@@ -28,6 +29,20 @@ pub struct ImportedMarkdownAsset {
     pub relative_path: String,
     pub markdown_text: String,
     pub asset_kind: ImportedAssetKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownAssetData {
+    pub file_name: String,
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+}
+
+struct ValidMarkdownAssetData<'a> {
+    file_name: OsString,
+    source_name: String,
+    bytes: &'a [u8],
+    asset_kind: ImportedAssetKind,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +69,12 @@ pub enum ImportMarkdownAssetsError {
         destination_path: String,
         source: io::Error,
     },
+    #[error("failed to write pasted asset {file_name} to {destination_path}: {source}")]
+    WriteFailed {
+        file_name: String,
+        destination_path: String,
+        source: io::Error,
+    },
 }
 
 pub fn import_markdown_assets<R>(
@@ -71,6 +92,24 @@ where
     valid_source_paths
         .iter()
         .map(|source_path| import_one_asset(repository, &markdown_directory, source_path))
+        .collect()
+}
+
+pub fn import_markdown_asset_data<R>(
+    repository: &R,
+    markdown_file_path: &Path,
+    files: &[MarkdownAssetData],
+) -> Result<Vec<ImportedMarkdownAsset>, ImportMarkdownAssetsError>
+where
+    R: AssetRepository,
+{
+    validate_markdown_path(repository, markdown_file_path)?;
+    let markdown_directory = resolve_markdown_directory(repository, markdown_file_path)?;
+    let valid_files = validate_asset_data_files(files)?;
+
+    valid_files
+        .iter()
+        .map(|file| import_one_asset_data(repository, &markdown_directory, file))
         .collect()
 }
 
@@ -154,6 +193,28 @@ where
     Ok(valid_paths)
 }
 
+fn validate_asset_data_files(
+    files: &[MarkdownAssetData],
+) -> Result<Vec<ValidMarkdownAssetData<'_>>, ImportMarkdownAssetsError> {
+    let mut valid_files = Vec::with_capacity(files.len());
+
+    for file in files {
+        let file_name = normalize_asset_data_file_name(&file.file_name, &file.mime_type)?;
+        let asset_kind = imported_asset_kind_for_path(Path::new(&file_name)).ok_or_else(|| {
+            ImportMarkdownAssetsError::UnsupportedAssetType(file.file_name.clone())
+        })?;
+
+        valid_files.push(ValidMarkdownAssetData {
+            file_name,
+            source_name: file.file_name.clone(),
+            bytes: &file.bytes,
+            asset_kind,
+        });
+    }
+
+    Ok(valid_files)
+}
+
 fn import_one_asset<R>(
     repository: &R,
     markdown_directory: &Path,
@@ -194,6 +255,32 @@ where
     })
 }
 
+fn import_one_asset_data<R>(
+    repository: &R,
+    markdown_directory: &Path,
+    file: &ValidMarkdownAssetData<'_>,
+) -> Result<ImportedMarkdownAsset, ImportMarkdownAssetsError>
+where
+    R: AssetRepository,
+{
+    let copied_path = write_to_non_conflicting_path(
+        repository,
+        file.bytes,
+        markdown_directory,
+        &file.file_name,
+        &file.source_name,
+    )?;
+    let relative_path = to_markdown_relative_path(markdown_directory, &copied_path);
+
+    Ok(ImportedMarkdownAsset {
+        original_path: PathBuf::from(&file.source_name),
+        copied_path,
+        relative_path: relative_path.clone(),
+        markdown_text: format!("![]({})", markdown_destination(&relative_path)),
+        asset_kind: file.asset_kind.clone(),
+    })
+}
+
 fn copy_to_non_conflicting_path<R>(
     repository: &R,
     source_path: &Path,
@@ -225,6 +312,46 @@ where
             Err(source) => {
                 return Err(ImportMarkdownAssetsError::CopyFailed {
                     source_path: display_path(source_path),
+                    destination_path: display_path(&candidate_path),
+                    source,
+                });
+            }
+        }
+    }
+}
+
+fn write_to_non_conflicting_path<R>(
+    repository: &R,
+    bytes: &[u8],
+    destination_directory: &Path,
+    file_name: &OsStr,
+    source_name: &str,
+) -> Result<PathBuf, ImportMarkdownAssetsError>
+where
+    R: AssetRepository,
+{
+    let mut index = 0_u32;
+
+    loop {
+        let candidate_path = numbered_destination_path(destination_directory, file_name, index);
+
+        if repository.exists(&candidate_path) {
+            index = index.checked_add(1).ok_or_else(|| {
+                ImportMarkdownAssetsError::DestinationNameExhausted(source_name.to_owned())
+            })?;
+            continue;
+        }
+
+        match repository.write_new_file(&candidate_path, bytes) {
+            Ok(()) => return Ok(candidate_path),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                index = index.checked_add(1).ok_or_else(|| {
+                    ImportMarkdownAssetsError::DestinationNameExhausted(source_name.to_owned())
+                })?;
+            }
+            Err(source) => {
+                return Err(ImportMarkdownAssetsError::WriteFailed {
+                    file_name: source_name.to_owned(),
                     destination_path: display_path(&candidate_path),
                     source,
                 });
@@ -314,6 +441,61 @@ fn imported_asset_kind_for_path(path: &Path) -> Option<ImportedAssetKind> {
     }
 
     None
+}
+
+fn normalize_asset_data_file_name(
+    file_name: &str,
+    mime_type: &str,
+) -> Result<OsString, ImportMarkdownAssetsError> {
+    let trimmed_file_name = file_name.trim();
+    let source_file_name = if trimmed_file_name.is_empty() {
+        CLIPBOARD_FALLBACK_FILE_STEM
+    } else {
+        trimmed_file_name
+    };
+    let source_path = Path::new(source_file_name);
+    let file_name = source_path.file_name().ok_or_else(|| {
+        ImportMarkdownAssetsError::InvalidDroppedFileName(source_file_name.to_owned())
+    })?;
+
+    if file_name.is_empty() {
+        return Err(ImportMarkdownAssetsError::InvalidDroppedFileName(
+            source_file_name.to_owned(),
+        ));
+    }
+
+    let mut normalized_file_name = OsString::from(file_name);
+
+    if Path::new(&normalized_file_name).extension().is_none() {
+        if let Some(extension) = asset_extension_for_mime_type(mime_type) {
+            normalized_file_name.push(".");
+            normalized_file_name.push(extension);
+        }
+    }
+
+    Ok(normalized_file_name)
+}
+
+fn asset_extension_for_mime_type(mime_type: &str) -> Option<&'static str> {
+    match mime_type.trim().to_ascii_lowercase().as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
+        "image/bmp" => Some("bmp"),
+        "video/mp4" => Some("mp4"),
+        "video/webm" => Some("webm"),
+        "video/ogg" => Some("ogg"),
+        "video/quicktime" => Some("mov"),
+        "video/x-m4v" => Some("m4v"),
+        "model/gltf-binary" => Some("glb"),
+        "model/gltf+json" => Some("gltf"),
+        "model/obj" | "text/plain+obj" => Some("obj"),
+        "model/stl" | "application/vnd.ms-pki.stl" => Some("stl"),
+        "model/fbx" => Some("fbx"),
+        _ => None,
+    }
 }
 
 fn copy_related_asset_files<R>(
@@ -579,7 +761,10 @@ mod tests {
 
     use crate::infra::FileSystemAssetRepository;
 
-    use super::{import_markdown_assets, is_image_path, is_video_path, ImportedAssetKind};
+    use super::{
+        import_markdown_asset_data, import_markdown_assets, is_image_path, is_video_path,
+        ImportedAssetKind, MarkdownAssetData,
+    };
 
     #[test]
     fn copies_image_next_to_markdown_and_returns_image_markdown() {
@@ -636,6 +821,57 @@ mod tests {
         assert_eq!(
             fs::read(project.join("demo.mp4")).expect("failed to read copied video"),
             b"video"
+        );
+    }
+
+    #[test]
+    fn writes_pasted_image_next_to_markdown_and_returns_image_markdown() {
+        let sandbox = create_temp_test_directory();
+        let markdown_path = sandbox.join("note.md");
+        fs::write(&markdown_path, "# note").expect("failed to write markdown");
+
+        let imported = import_markdown_asset_data(
+            &FileSystemAssetRepository,
+            &markdown_path,
+            &[MarkdownAssetData {
+                file_name: "pasted.png".to_owned(),
+                mime_type: "image/png".to_owned(),
+                bytes: b"image".to_vec(),
+            }],
+        )
+        .expect("asset data import should succeed");
+
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].relative_path, "pasted.png");
+        assert_eq!(imported[0].markdown_text, "![](pasted.png)");
+        assert_eq!(imported[0].asset_kind, ImportedAssetKind::Image);
+        assert_eq!(
+            fs::read(sandbox.join("pasted.png")).expect("failed to read pasted image"),
+            b"image"
+        );
+    }
+
+    #[test]
+    fn adds_extension_from_clipboard_mime_type_when_file_name_has_no_extension() {
+        let sandbox = create_temp_test_directory();
+        let markdown_path = sandbox.join("note.md");
+        fs::write(&markdown_path, "# note").expect("failed to write markdown");
+
+        let imported = import_markdown_asset_data(
+            &FileSystemAssetRepository,
+            &markdown_path,
+            &[MarkdownAssetData {
+                file_name: "clipboard-asset".to_owned(),
+                mime_type: "image/png".to_owned(),
+                bytes: b"image".to_vec(),
+            }],
+        )
+        .expect("asset data import should succeed");
+
+        assert_eq!(imported[0].relative_path, "clipboard-asset.png");
+        assert_eq!(
+            fs::read(sandbox.join("clipboard-asset.png")).expect("failed to read pasted image"),
+            b"image"
         );
     }
 
