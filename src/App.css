@@ -1438,7 +1438,6 @@ input:focus-visible,
 
 .markdown-body img,
 .markdown-body video,
-.markdown-body .kmark-model-viewer,
 .markdown-body .kmark-model-error {
   max-width: 100%;
   box-sizing: content-box;
@@ -1448,6 +1447,7 @@ input:focus-visible,
   position: relative;
   display: inline-block;
   box-sizing: border-box;
+  max-width: 100%;
   min-width: 220px;
   height: 360px;
   overflow: hidden;
@@ -1517,8 +1517,13 @@ input:focus-visible,
 }
 
 .markdown-body .kmark-model-error__title {
+  display: block;
   margin-bottom: 0.35em;
   font-weight: 700;
+}
+
+.markdown-body .kmark-model-error__detail {
+  display: block;
 }
 
 .markdown-body video[poster] {

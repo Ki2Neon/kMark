@@ -34,6 +34,7 @@ const KMARK_VIDEO_FRAME_CLASS_NAME = "kmark-video-frame";
 const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
 const KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME = "kmark-video-poster-image";
 const KMARK_MODEL_VIEWER_CLASS_NAME = "kmark-model-viewer";
+const KMARK_MODEL_ERROR_CLASS_NAME = "kmark-model-error";
 const PREVIEW_INTERACTIVE_ELEMENT_SELECTOR = `a, button, input, textarea, select, video, .${KMARK_MODEL_VIEWER_CLASS_NAME}`;
 const KMARK_VIDEO_FAILED_STATE = "failed";
 const KMARK_VIDEO_POSTER_IMAGE_HIDDEN_STATE = "hidden";
@@ -49,6 +50,10 @@ const A4_PAGINATION_OVERFLOW_TOLERANCE_PX = 1;
 const A4_PAGINATION_SOURCE_SEPARATOR = "\x1f";
 const A4_PAGINATION_HEADING_TAG_NAMES = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 const A4_PAGINATION_INLINE_SPLIT_TAG_NAMES = new Set(["a", "abbr", "b", "cite", "del", "em", "i", "ins", "mark", "small", "span", "strong", "sub", "sup", "u"]);
+const A4_PAGINATION_ATOMIC_INLINE_CLASS_NAMES = new Set([
+  KMARK_MODEL_VIEWER_CLASS_NAME,
+  KMARK_MODEL_ERROR_CLASS_NAME,
+]);
 const A4_PAGE_VALIGN_VALUES = new Set(["top", "center", "bottom"]);
 const A4_PAGINATION_CJK_TEXT_PATTERN = /[\u3040-\u30ff\u3400-\u9fff]/u;
 const A4_PAGINATION_LONG_TEXT_TOKEN_LENGTH = 24;
@@ -1023,7 +1028,19 @@ function splitA4PaginationText(text: string): readonly Node[] {
 }
 
 function isA4PaginationSplittableInlineElement(node: Node): node is HTMLElement {
-  return node instanceof HTMLElement && A4_PAGINATION_INLINE_SPLIT_TAG_NAMES.has(node.tagName.toLowerCase());
+  return node instanceof HTMLElement
+    && A4_PAGINATION_INLINE_SPLIT_TAG_NAMES.has(node.tagName.toLowerCase())
+    && !hasAnyClassName(node, A4_PAGINATION_ATOMIC_INLINE_CLASS_NAMES);
+}
+
+function hasAnyClassName(element: HTMLElement, classNames: ReadonlySet<string>): boolean {
+  for (const className of classNames) {
+    if (element.classList.contains(className)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function getA4InlinePaginationUnits(element: HTMLElement): readonly Node[] {

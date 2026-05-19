@@ -3241,7 +3241,7 @@ impl<'a> HtmlEmitter<'a> {
         };
 
         let mut html = format!(
-            "<div class=\"kmark-model-viewer\" role=\"img\"{} data-kmark-model-source=\"{}\" data-kmark-model-display-src=\"{}\" data-kmark-model-format=\"{}\"",
+            "<span class=\"kmark-model-viewer\" role=\"img\"{} data-kmark-model-source=\"{}\" data-kmark-model-display-src=\"{}\" data-kmark-model-format=\"{}\"",
             image_context.source_line_attributes,
             escape_html(source_url),
             escape_html(&display_url),
@@ -3266,13 +3266,13 @@ impl<'a> HtmlEmitter<'a> {
             html.push('"');
         }
         push_model_data_attrs(&mut html, &image_context.model, self.markdown_file_path);
-        html.push_str("><div class=\"kmark-model-canvas\" aria-hidden=\"true\"></div><div class=\"kmark-model-status\" aria-live=\"polite\">3Dモデルを読み込み中</div></div>");
+        html.push_str("><span class=\"kmark-model-canvas\" aria-hidden=\"true\"></span><span class=\"kmark-model-status\" aria-live=\"polite\">3Dモデルを読み込み中</span></span>");
         self.push_raw(&html);
     }
 
     fn push_model_error(&mut self, image_context: &ImageContext, title: &str, details: &[String]) {
         let mut html = format!(
-            "<div class=\"kmark-model-error\" role=\"alert\"{}",
+            "<span class=\"kmark-model-error\" role=\"alert\"{}",
             image_context.source_line_attributes,
         );
         if let Some(style) = &image_context.style {
@@ -3280,20 +3280,19 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(style));
             html.push('"');
         }
-        html.push_str("><div class=\"kmark-model-error__title\">");
-        html.push_str(&escape_html(title));
-        html.push_str("</div>");
+        html.push('>');
+        push_model_error_span(&mut html, "kmark-model-error__title", title);
         if !image_context.alt_text.is_empty() {
-            html.push_str("<div>説明: ");
-            html.push_str(&escape_html(&image_context.alt_text));
-            html.push_str("</div>");
+            push_model_error_span(
+                &mut html,
+                "kmark-model-error__detail",
+                &format!("説明: {}", image_context.alt_text),
+            );
         }
         for detail in details {
-            html.push_str("<div>");
-            html.push_str(&escape_html(detail));
-            html.push_str("</div>");
+            push_model_error_span(&mut html, "kmark-model-error__detail", detail);
         }
-        html.push_str("</div>");
+        html.push_str("</span>");
         self.push_raw(&html);
     }
 
@@ -8356,6 +8355,14 @@ fn push_model_data_attrs(
     }
 }
 
+fn push_model_error_span(html: &mut String, class_name: &str, text: &str) {
+    html.push_str("<span class=\"");
+    html.push_str(class_name);
+    html.push_str("\">");
+    html.push_str(&escape_html(text));
+    html.push_str("</span>");
+}
+
 fn push_optional_model_data_attr(html: &mut String, key: &str, value: Option<&str>) {
     let Some(value) = value else {
         return;
@@ -10912,7 +10919,7 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("<div class=\"kmark-model-viewer\" role=\"img\""));
+            .contains("<span class=\"kmark-model-viewer\" role=\"img\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-source=\"./gear.obj\""));
@@ -10961,6 +10968,36 @@ mod tests {
             .html
             .contains("data-kmark-model-camera-position=\"1,2,3\""));
         assert!(rendered_preview.html.contains("aria-label=\"基板写真\""));
+    }
+
+    #[test]
+    fn renders_adjacent_saved_model_viewpoints_in_row_scope_as_model_viewers() {
+        let rendered_preview = render_markdown_preview(
+            "<!--k{ layout:row h:page_fit-->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:35.285322,37.122039,67.685516 model_camera_target:0,0,0 -->\n![](PG9_spacer-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:43.790344,27.062223,69.488736 model_camera_target:0,0,0 -->\n![](MG_BKACK_2_kari-Body.stl)\n\n<!--k}-->",
+        );
+
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<span class=\"kmark-model-viewer\""),
+            2
+        );
+        assert!(!rendered_preview
+            .html
+            .contains("<div class=\"kmark-model-viewer\""));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"display:flex;flex-direction:row;\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-source=\"PG9_spacer-Body.stl\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-source=\"MG_BKACK_2_kari-Body.stl\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-position=\"35.285322,37.122039,67.685516\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-camera-position=\"43.790344,27.062223,69.488736\""));
     }
 
     #[test]
