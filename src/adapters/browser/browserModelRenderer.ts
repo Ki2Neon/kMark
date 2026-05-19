@@ -82,6 +82,10 @@ const MODEL_CAMERA_DATA_ATTRIBUTE_NAMES = new Set([
   "data-kmark-model-fov",
   "data-kmark-model-view",
 ]);
+const MODEL_RUNTIME_DATA_ATTRIBUTE_NAMES = new Set([
+  "data-kmark-model-frame-state",
+  "data-kmark-model-state",
+]);
 const CAMERA_VIEW_ANGLES: Record<string, readonly [number, number]> = {
   back: [180, 0],
   bottom: [0, -90],
@@ -222,10 +226,11 @@ function collectReusableKmarkModelViewers(root: ParentNode): Map<string, HTMLEle
 
 function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement): void {
   const modelState = target.dataset.kmarkModelState;
+  const modelFrameState = target.dataset.kmarkModelFrameState;
   const cameraAttributeKey = getKmarkModelViewerCameraAttributeKey(target);
 
   for (const attribute of Array.from(target.attributes)) {
-    if (attribute.name === "data-kmark-model-state") {
+    if (MODEL_RUNTIME_DATA_ATTRIBUTE_NAMES.has(attribute.name)) {
       continue;
     }
     if (!source.hasAttribute(attribute.name)) {
@@ -234,7 +239,7 @@ function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement
   }
 
   for (const attribute of Array.from(source.attributes)) {
-    if (attribute.name === "data-kmark-model-state") {
+    if (MODEL_RUNTIME_DATA_ATTRIBUTE_NAMES.has(attribute.name)) {
       continue;
     }
     target.setAttribute(attribute.name, attribute.value);
@@ -242,6 +247,9 @@ function syncKmarkModelViewerAttributes(target: HTMLElement, source: HTMLElement
 
   if (modelState !== undefined) {
     target.dataset.kmarkModelState = modelState;
+  }
+  if (modelFrameState !== undefined) {
+    target.dataset.kmarkModelFrameState = modelFrameState;
   }
 
   if (cameraAttributeKey !== getKmarkModelViewerCameraAttributeKey(target)) {
@@ -277,8 +285,8 @@ function resolveKmarkModelViewerIdentityKey(viewer: HTMLElement): string {
   const modelAttributes = Array.from(viewer.attributes)
     .filter((attribute) => (
       attribute.name.startsWith("data-kmark-model-")
-      && attribute.name !== "data-kmark-model-state"
       && attribute.name !== "data-kmark-model-projection"
+      && !MODEL_RUNTIME_DATA_ATTRIBUTE_NAMES.has(attribute.name)
       && !MODEL_CAMERA_DATA_ATTRIBUTE_NAMES.has(attribute.name)
     ))
     .map((attribute) => `${attribute.name}=${attribute.value}`)
