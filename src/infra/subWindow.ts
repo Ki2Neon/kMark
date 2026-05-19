@@ -1,5 +1,6 @@
 import {
   SUB_WINDOW_STATE_VERSION,
+  type SubWindowSourceLineSelectionRequest,
   type SubWindowState,
 } from "../application/subWindow/subWindowPorts";
 import { isPreviewDisplayMode } from "../domain/preview";
@@ -9,12 +10,15 @@ import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 const OPEN_SUB_WINDOW_COMMAND = "open_sub_window";
 const GET_SUB_WINDOW_STATE_COMMAND = "get_sub_window_state";
 const PUBLISH_SUB_WINDOW_STATE_COMMAND = "publish_sub_window_state";
+const REQUEST_SUB_WINDOW_SOURCE_LINE_SELECTION_COMMAND = "request_sub_window_source_line_selection";
 const SUB_WINDOW_STATE_UPDATED_EVENT = "subwindow-state-updated";
+const SUB_WINDOW_SOURCE_LINE_SELECTION_REQUESTED_EVENT = "subwindow-source-line-selection-requested";
 const SUB_WINDOW_QUERY_KEY = "kmarkWindow";
 const SUB_WINDOW_QUERY_VALUE = "subwindow";
 const SUB_WINDOW_STATE_QUERY_KEY = "stateKey";
 const SUB_WINDOW_STATE_STORAGE_PREFIX = "kmark:subwindow:state:";
 const SUB_WINDOW_STATE_CHANNEL_NAME = "kmark:subwindow:state";
+const SUB_WINDOW_SOURCE_LINE_SELECTION_CHANNEL_NAME = "kmark:subwindow:source-line-selection";
 const SUB_WINDOW_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 type SubWindowGlobal = Window & typeof globalThis & {
@@ -23,6 +27,11 @@ type SubWindowGlobal = Window & typeof globalThis & {
 
 type SubWindowStateMessage = {
   readonly type: "state-updated";
+};
+
+type SubWindowSourceLineSelectionMessage = {
+  readonly request: SubWindowSourceLineSelectionRequest;
+  readonly type: "source-line-selection-requested";
 };
 
 export type SubWindowTarget = {
@@ -85,6 +94,27 @@ function isSubWindowState(value: unknown): value is SubWindowState {
         && Number.isFinite(value.activeSourceLine)
       )
     );
+}
+
+function isSubWindowSourceLineSelectionRequest(value: unknown): value is SubWindowSourceLineSelectionRequest {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return typeof value.lineNumber === "number"
+    && Number.isInteger(value.lineNumber)
+    && value.lineNumber > 0
+    && typeof value.requestId === "number"
+    && Number.isInteger(value.requestId)
+    && value.requestId > 0
+    && typeof value.requestedAtEpochMs === "number"
+    && Number.isFinite(value.requestedAtEpochMs);
+}
+
+function isSubWindowSourceLineSelectionMessage(value: unknown): value is SubWindowSourceLineSelectionMessage {
+  return isRecord(value)
+    && value.type === "source-line-selection-requested"
+    && isSubWindowSourceLineSelectionRequest(value.request);
 }
 
 function getStorageKey(stateKey: string): string {
@@ -157,6 +187,27 @@ function publishBrowserStateUpdated(): void {
 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(`${SUB_WINDOW_STATE_CHANNEL_NAME}:ping`, `${Date.now()}`);
+  }
+}
+
+function publishBrowserSourceLineSelectionRequest(request: SubWindowSourceLineSelectionRequest): void {
+  const message = {
+    request,
+    type: "source-line-selection-requested",
+  } satisfies SubWindowSourceLineSelectionMessage;
+
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(SUB_WINDOW_SOURCE_LINE_SELECTION_CHANNEL_NAME);
+    channel.postMessage(message);
+    channel.close();
+    return;
+  }
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(
+      SUB_WINDOW_SOURCE_LINE_SELECTION_CHANNEL_NAME,
+      JSON.stringify(message),
+    );
   }
 }
 
@@ -269,6 +320,25 @@ export async function publishSubWindowState(state: SubWindowState): Promise<void
   publishBrowserStateUpdated();
 }
 
+export async function requestSubWindowSourceLineSelection(
+  request: SubWindowSourceLineSelectionRequest,
+): Promise<void> {
+  if (isTauri()) {
+    await invokeTauriCommand<void>(
+      REQUEST_SUB_WINDOW_SOURCE_LINE_SELECTION_COMMAND,
+      { request },
+      "サブウィンドウから編集行を選択できませんでした。",
+    );
+    return;
+  }
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  publishBrowserSourceLineSelectionRequest(request);
+}
+
 export async function listenForSubWindowStateChanged(
   stateKey: string | null,
   callback: (state: SubWindowState) => void,
@@ -311,6 +381,60 @@ export async function listenForSubWindowStateChanged(
   const handleStorage = (event: StorageEvent) => {
     if (event.key === storageKey || event.key === pingKey) {
       handleStateUpdated();
+    }
+  };
+
+  window.addEventListener("storage", handleStorage);
+
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
+export async function listenForSubWindowSourceLineSelection(
+  callback: (request: SubWindowSourceLineSelectionRequest) => void,
+): Promise<() => void> {
+  if (isTauri()) {
+    return listenTauriEvent<SubWindowSourceLineSelectionRequest>(
+      SUB_WINDOW_SOURCE_LINE_SELECTION_REQUESTED_EVENT,
+      (request) => {
+        if (isSubWindowSourceLineSelectionRequest(request)) {
+          callback(request);
+        }
+      },
+    );
+  }
+
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const handleMessage = (value: unknown) => {
+    if (isSubWindowSourceLineSelectionMessage(value)) {
+      callback(value.request);
+    }
+  };
+
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(SUB_WINDOW_SOURCE_LINE_SELECTION_CHANNEL_NAME);
+    channel.addEventListener("message", (event: MessageEvent<unknown>) => {
+      handleMessage(event.data);
+    });
+
+    return () => {
+      channel.close();
+    };
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== SUB_WINDOW_SOURCE_LINE_SELECTION_CHANNEL_NAME || event.newValue === null) {
+      return;
+    }
+
+    try {
+      handleMessage(JSON.parse(event.newValue) as unknown);
+    } catch {
+      return;
     }
   };
 

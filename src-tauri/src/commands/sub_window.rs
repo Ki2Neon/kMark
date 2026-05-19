@@ -1,10 +1,15 @@
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use super::error::CommandErrorPayload;
-use crate::{dto::SubWindowStatePayload, AppState, SUB_WINDOW_LABEL_PREFIX};
+use crate::{
+    dto::{SubWindowSourceLineSelectionRequestPayload, SubWindowStatePayload},
+    AppState, MAIN_WINDOW_LABEL, SUB_WINDOW_LABEL_PREFIX,
+};
 
 const SUB_WINDOW_URL: &str = "index.html";
 const SUB_WINDOW_STATE_UPDATED_EVENT: &str = "subwindow-state-updated";
+const SUB_WINDOW_SOURCE_LINE_SELECTION_REQUESTED_EVENT: &str =
+    "subwindow-source-line-selection-requested";
 const SUB_WINDOW_INIT_SCRIPT: &str = r#"
   window.__KMARK_WINDOW_KIND__ = "subwindow";
 "#;
@@ -105,6 +110,43 @@ pub fn publish_sub_window_state(
             }
         }
     }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn request_sub_window_source_line_selection(
+    app: AppHandle,
+    window: WebviewWindow,
+    request: SubWindowSourceLineSelectionRequestPayload,
+) -> Result<(), CommandErrorPayload> {
+    let label = window.label();
+
+    if !label.starts_with(SUB_WINDOW_LABEL_PREFIX) {
+        return Err(CommandErrorPayload::with_detail(
+            "not_subwindow",
+            "current window is not a subwindow",
+            label,
+        ));
+    }
+
+    let main_window = app.get_webview_window(MAIN_WINDOW_LABEL).ok_or_else(|| {
+        CommandErrorPayload::with_detail(
+            "main_window_not_found",
+            "main window not found",
+            MAIN_WINDOW_LABEL,
+        )
+    })?;
+
+    main_window
+        .emit(SUB_WINDOW_SOURCE_LINE_SELECTION_REQUESTED_EVENT, &request)
+        .map_err(|source| {
+            CommandErrorPayload::with_detail(
+                "subwindow_source_line_selection_emit_failed",
+                "failed to request source line selection from subwindow",
+                source.to_string(),
+            )
+        })?;
 
     Ok(())
 }

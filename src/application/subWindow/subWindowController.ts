@@ -1,6 +1,7 @@
 import {
   SUB_WINDOW_STATE_VERSION,
   type SubWindowGateway,
+  type SubWindowSourceLineSelectionRequest,
   type SubWindowState,
   type SubWindowStateRequest,
 } from "./subWindowPorts";
@@ -18,6 +19,7 @@ export class SubWindowController {
   readonly #clock: SubWindowClock;
   readonly #gateway: SubWindowGateway;
   #nextRevision = 0;
+  #nextSourceLineSelectionRequestId = 0;
 
   constructor(dependencies: SubWindowControllerDependencies) {
     this.#clock = dependencies.clock;
@@ -36,11 +38,27 @@ export class SubWindowController {
     return this.#gateway.publish(this.#createState(request));
   }
 
+  requestSourceLineSelection(lineNumber: number): Promise<void> {
+    this.#nextSourceLineSelectionRequestId += 1;
+
+    return this.#gateway.requestSourceLineSelection({
+      lineNumber,
+      requestId: this.#nextSourceLineSelectionRequestId,
+      requestedAtEpochMs: this.#clock.now(),
+    });
+  }
+
   subscribe(
     stateKey: string | null,
     callback: (state: SubWindowState) => void,
   ): Promise<() => void> {
     return this.#gateway.listen(stateKey, callback);
+  }
+
+  subscribeSourceLineSelection(
+    callback: (request: SubWindowSourceLineSelectionRequest) => void,
+  ): Promise<() => void> {
+    return this.#gateway.listenSourceLineSelection(callback);
   }
 
   #createState(request: SubWindowStateRequest): SubWindowState {

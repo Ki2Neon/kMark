@@ -129,6 +129,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
     contextMenuExtraItemCount: 1 + (state?.displayMode === "a4" ? 1 : 0),
     displayMode: state?.displayMode ?? "standard",
     includeModelCameraMenuItem: false,
+    initialFitMode: "page",
     isAvailable: state !== null,
   });
   const title = state === null ? "Subwindow - kMark" : `${state.title} - サブウィンドウ - kMark`;
@@ -155,6 +156,10 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
       direction,
       requestId: navigationRequestIdRef.current,
     });
+  }, []);
+
+  const handlePreviewSourceLineDoubleClick = useCallback((lineNumber: number) => {
+    void controllerRef.current?.requestSourceLineSelection(lineNumber).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -206,6 +211,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
     <main className="subwindow-shell">
       <MarkdownPreview
         activeSourceLine={state.activeSourceLine}
+        activeSourceLineScrollMode="page"
         displayMode={state.displayMode}
         enableInteractiveViewportNavigation
         html={state.html}
@@ -213,10 +219,10 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
         minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
         onOpenExternalLink={handlePreviewExternalLinkOpen}
         onPreviewContextMenu={handlePreviewContextMenu}
+        onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
         onZoomScaleChange={handlePreviewZoomScaleChange}
         defaultPageStyle={state.defaultPageStyle}
         defaultTextStyle={state.defaultTextStyle}
-        followActiveSourceLine={false}
         pageHtmls={state.pageHtmls}
         pages={state.pages}
         previewFitMode={previewFitMode}

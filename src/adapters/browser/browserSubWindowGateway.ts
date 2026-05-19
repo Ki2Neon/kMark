@@ -1,10 +1,12 @@
 import { type SubWindowGateway } from "../../application/subWindow/subWindowPorts";
 import {
   listenForSubWindowStateChanged,
+  listenForSubWindowSourceLineSelection,
   loadSubWindowState,
   loadTauriSubWindowState,
   openSubWindow,
   publishSubWindowState,
+  requestSubWindowSourceLineSelection,
   resolveSubWindowTarget,
 } from "../../infra/subWindow";
 import { isTauri } from "../../runtime/runtime";
@@ -33,6 +35,14 @@ export function createBrowserSubWindowGateway(): SubWindowGateway {
 
     async publish(state) {
       await publishSubWindowState(state);
+    },
+
+    async requestSourceLineSelection(request) {
+      await requestSubWindowSourceLineSelection(request);
+    },
+
+    async listenSourceLineSelection(callback) {
+      return listenForSubWindowSourceLineSelection(callback);
     },
   };
 }

@@ -483,6 +483,7 @@ pub fn run() {
             commands::sub_window::get_sub_window_state,
             commands::sub_window::open_sub_window,
             commands::sub_window::publish_sub_window_state,
+            commands::sub_window::request_sub_window_source_line_selection,
             commands::file_open::read_markdown_document_at_path,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,

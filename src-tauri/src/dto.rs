@@ -33,6 +33,14 @@ pub struct SubWindowStatePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubWindowSourceLineSelectionRequestPayload {
+    pub line_number: u32,
+    pub request_id: u64,
+    pub requested_at_epoch_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RenderedPagePayload {
     pub html: String,
     pub page_style: PageStylePayload,

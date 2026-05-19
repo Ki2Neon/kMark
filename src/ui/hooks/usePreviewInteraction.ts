@@ -21,6 +21,7 @@ type UsePreviewInteractionOptions = {
   readonly contextMenuExtraItemCount?: number;
   readonly displayMode: PreviewDisplayMode;
   readonly includeModelCameraMenuItem?: boolean;
+  readonly initialFitMode?: PreviewFitMode;
   readonly isAvailable?: boolean;
 };
 
@@ -32,12 +33,13 @@ export function usePreviewInteraction({
   contextMenuExtraItemCount = 0,
   displayMode,
   includeModelCameraMenuItem = true,
+  initialFitMode = "width",
   isAvailable = true,
 }: UsePreviewInteractionOptions) {
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenuState] = useState<PreviewContextMenuState | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
-  const [fitMode, setFitMode] = useState<PreviewFitMode>("width");
+  const [fitMode, setFitMode] = useState<PreviewFitMode>(initialFitMode);
 
   const contextMenuStyle = useMemo<CSSProperties | undefined>(
     () => (contextMenuState === null

@@ -66,9 +66,11 @@ const A4_TOC_INDENT_STEP_EM = 1.25;
 
 type PreviewTableFitMode = "auto" | "off" | "shrink";
 type PreviewFitMode = "width" | "page";
+type ActiveSourceLineScrollMode = "center" | "none" | "page";
 
 type MarkdownPreviewProps = {
   readonly activeSourceLine?: number | null;
+  readonly activeSourceLineScrollMode?: ActiveSourceLineScrollMode;
   readonly defaultPageStyle?: PageStyle;
   readonly defaultTextStyle?: PreviewTextStyle;
   readonly displayMode: PreviewDisplayMode;
@@ -83,6 +85,7 @@ type MarkdownPreviewProps = {
   readonly pageHtmls?: readonly string[];
   readonly pages?: readonly RenderedPreviewPage[];
   readonly previewFitMode?: PreviewFitMode;
+  /** @deprecated Use activeSourceLineScrollMode. */
   readonly followActiveSourceLine?: boolean;
   readonly previewNavigationRequest?: PreviewNavigationRequest | null;
   readonly zoomScale?: number;
@@ -3714,6 +3717,7 @@ function syncKmarkVideoIntrinsicSize(video: HTMLVideoElement): void {
 
 function MarkdownPreviewComponent({
   activeSourceLine = null,
+  activeSourceLineScrollMode,
   defaultPageStyle = DEFAULT_PAGE_STYLE,
   defaultTextStyle = DEFAULT_PREVIEW_TEXT_STYLE,
   displayMode,
@@ -3796,6 +3800,8 @@ function MarkdownPreviewComponent({
     () => currentPreviewPages.map((page) => page.html),
     [currentPreviewPages],
   );
+  const resolvedActiveSourceLineScrollMode = activeSourceLineScrollMode
+    ?? (followActiveSourceLine ? "center" : "none");
 
   const clearViewportPan = useCallback((previewViewport?: HTMLElement) => {
     const viewport = previewViewport ?? previewViewportRef.current;
@@ -4420,10 +4426,8 @@ function MarkdownPreviewComponent({
       return;
     }
 
-    const resolvedCurrentPageIndex = findNearestA4PreviewPageIndex(previewViewport, previewPages)
-      ?? activeA4PageIndexRef.current;
     const currentPageIndex = clamp(
-      resolvedCurrentPageIndex,
+      activeA4PageIndexRef.current,
       0,
       previewPages.length - 1,
     );
@@ -4470,7 +4474,36 @@ function MarkdownPreviewComponent({
     nextCursorTarget.classList.add(PREVIEW_CURSOR_TARGET_CLASS_NAME);
     lastCursorTargetRef.current = nextCursorTarget;
 
-    if (!followActiveSourceLine) {
+    if (resolvedActiveSourceLineScrollMode === "none") {
+      return () => {
+        nextCursorTarget.classList.remove(PREVIEW_CURSOR_TARGET_CLASS_NAME);
+      };
+    }
+
+    if (resolvedActiveSourceLineScrollMode === "page") {
+      if (displayMode === "a4") {
+        const previewPage = nextCursorTarget.closest<HTMLElement>(".preview-section__page-scale");
+
+        if (previewPage !== null) {
+          const previewPages = getA4PreviewPageElements(previewViewport);
+          const targetPageIndex = previewPages.indexOf(previewPage);
+
+          if (targetPageIndex >= 0) {
+            const currentPageIndex = clamp(
+              activeA4PageIndexRef.current,
+              0,
+              Math.max(0, previewPages.length - 1),
+            );
+
+            if (targetPageIndex !== currentPageIndex) {
+              pendingA4NavigationScrollRef.current = true;
+            }
+
+            updateActiveA4PageIndex(targetPageIndex);
+          }
+        }
+      }
+
       return () => {
         nextCursorTarget.classList.remove(PREVIEW_CURSOR_TARGET_CLASS_NAME);
       };
@@ -4510,7 +4543,15 @@ function MarkdownPreviewComponent({
     return () => {
       nextCursorTarget.classList.remove(PREVIEW_CURSOR_TARGET_CLASS_NAME);
     };
-  }, [activeSourceLine, currentDisplayScale, currentPreviewPageHtmls, followActiveSourceLine, html]);
+  }, [
+    activeSourceLine,
+    currentDisplayScale,
+    currentPreviewPageHtmls,
+    displayMode,
+    html,
+    resolvedActiveSourceLineScrollMode,
+    updateActiveA4PageIndex,
+  ]);
 
   if (displayMode === "a4") {
     return (

@@ -469,6 +469,35 @@ export function MarkdownEditorScreen({
     }
   }, [clearPendingPreviewCursorFollow, layoutMode, requestMobileSection]);
 
+  useEffect(() => {
+    if (!isEditorReady) {
+      return;
+    }
+
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void subWindowControllerRef.current?.subscribeSourceLineSelection((request) => {
+      if (isDisposed) {
+        return;
+      }
+
+      handlePreviewSourceLineDoubleClick(request.lineNumber);
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    }).catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      unlisten?.();
+    };
+  }, [handlePreviewSourceLineDoubleClick, isEditorReady]);
+
   useEffect(() => (
     () => {
       clearPendingPreviewCursorFollow();

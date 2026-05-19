@@ -26,6 +26,12 @@ export type SubWindowStateRequest = Omit<
   "revision" | "updatedAtEpochMs" | "version"
 >;
 
+export type SubWindowSourceLineSelectionRequest = {
+  readonly lineNumber: number;
+  readonly requestId: number;
+  readonly requestedAtEpochMs: number;
+};
+
 export type SubWindowGateway = {
   open(state: SubWindowState): Promise<void>;
   load(stateKey: string | null): Promise<SubWindowState | null>;
@@ -34,4 +40,8 @@ export type SubWindowGateway = {
     callback: (state: SubWindowState) => void,
   ): Promise<() => void>;
   publish(state: SubWindowState): Promise<void>;
+  requestSourceLineSelection(request: SubWindowSourceLineSelectionRequest): Promise<void>;
+  listenSourceLineSelection(
+    callback: (request: SubWindowSourceLineSelectionRequest) => void,
+  ): Promise<() => void>;
 };
