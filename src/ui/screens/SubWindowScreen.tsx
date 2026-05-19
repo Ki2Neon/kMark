@@ -119,16 +119,14 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
     contextMenuStyle: previewContextMenuStyle,
-    handleModelCameraReset: handlePreviewModelCameraReset,
     handlePreviewContextMenu,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
-    hasModelCameraTarget: previewContextMenuHasModelCameraTarget,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
-    contextMenuExtraItemCount: state?.mode === "presentation" ? 1 : 0,
+    contextMenuExtraItemCount: 1,
     displayMode: state?.displayMode ?? "standard",
-    includeModelCameraMenuItem: state?.mode === "presentation",
+    includeModelCameraMenuItem: false,
     isAvailable: state !== null,
   });
   const title = state === null ? "Subwindow - kMark" : `${state.title} - サブウィンドウ - kMark`;
@@ -149,7 +147,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
       .catch(() => {});
   }, [isFullscreen]);
 
-  const requestPresentationNavigation = useCallback((direction: -1 | 1) => {
+  const requestPreviewNavigation = useCallback((direction: -1 | 1) => {
     navigationRequestIdRef.current += 1;
     setPreviewNavigationRequest({
       direction,
@@ -158,19 +156,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
   }, []);
 
   useEffect(() => {
-    if (state?.mode === "presentation" || !isFullscreen) {
-      return;
-    }
-
-    void setRuntimeFullscreen(false)
-      .then(() => {
-        setIsFullscreen(false);
-      })
-      .catch(() => {});
-  }, [isFullscreen, state?.mode]);
-
-  useEffect(() => {
-    if (state?.mode !== "presentation") {
+    if (state === null) {
       return;
     }
 
@@ -181,13 +167,13 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
 
       if (event.key === "ArrowRight" || event.key === "ArrowDown") {
         event.preventDefault();
-        requestPresentationNavigation(1);
+        requestPreviewNavigation(1);
         return;
       }
 
       if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
         event.preventDefault();
-        requestPresentationNavigation(-1);
+        requestPreviewNavigation(-1);
         return;
       }
 
@@ -202,7 +188,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handleFullscreenToggle, requestPresentationNavigation, state?.mode]);
+  }, [handleFullscreenToggle, requestPreviewNavigation, state]);
 
   if (!stateLoadState.isLoaded || state === null) {
     return (
@@ -214,12 +200,10 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
     );
   }
 
-  const isPresentationMode = state.mode === "presentation";
-
   return (
-    <main className="subwindow-shell" data-mode={state.mode}>
+    <main className="subwindow-shell">
       <MarkdownPreview
-        activeSourceLine={state.mode === "preview-sync" ? state.activeSourceLine : null}
+        activeSourceLine={state.activeSourceLine}
         displayMode={state.displayMode}
         enableInteractiveViewportNavigation
         html={state.html}
@@ -232,7 +216,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
         defaultTextStyle={state.defaultTextStyle}
         pageHtmls={state.pageHtmls}
         pages={state.pages}
-        previewNavigationRequest={isPresentationMode ? previewNavigationRequest : null}
+        previewNavigationRequest={previewNavigationRequest}
         zoomScale={previewZoomScale}
       />
 
@@ -240,11 +224,10 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
         <PreviewContextMenu
           ariaLabel="サブウィンドウプレビューのコンテキストメニュー"
           fullscreenLabel={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          hasModelCameraTarget={isPresentationMode && previewContextMenuHasModelCameraTarget}
+          hasModelCameraTarget={false}
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
-          onFullscreenToggle={isPresentationMode ? handleFullscreenToggle : undefined}
-          onModelCameraReset={handlePreviewModelCameraReset}
+          onFullscreenToggle={handleFullscreenToggle}
           style={previewContextMenuStyle}
         />
       ) : null}

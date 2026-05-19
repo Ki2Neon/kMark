@@ -21,7 +21,6 @@ pub struct SubWindowStatePayload {
     pub version: u32,
     pub revision: u64,
     pub updated_at_epoch_ms: u64,
-    pub mode: String,
     pub title: String,
     pub display_mode: String,
     pub html: String,

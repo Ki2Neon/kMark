@@ -4,15 +4,13 @@ import {
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../../domain/preview";
-import { type SubWindowMode } from "../../domain/subWindow";
 
-export const SUB_WINDOW_STATE_VERSION = 1;
+export const SUB_WINDOW_STATE_VERSION = 2;
 
 export type SubWindowState = {
   readonly version: typeof SUB_WINDOW_STATE_VERSION;
   readonly revision: number;
   readonly updatedAtEpochMs: number;
-  readonly mode: SubWindowMode;
   readonly title: string;
   readonly displayMode: PreviewDisplayMode;
   readonly html: string;

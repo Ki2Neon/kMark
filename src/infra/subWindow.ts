@@ -3,7 +3,6 @@ import {
   type SubWindowState,
 } from "../application/subWindow/subWindowPorts";
 import { isPreviewDisplayMode } from "../domain/preview";
-import { isSubWindowMode } from "../domain/subWindow";
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 
@@ -71,8 +70,6 @@ function isSubWindowState(value: unknown): value is SubWindowState {
     && Number.isFinite(value.revision)
     && typeof value.updatedAtEpochMs === "number"
     && Number.isFinite(value.updatedAtEpochMs)
-    && typeof value.mode === "string"
-    && isSubWindowMode(value.mode)
     && typeof value.title === "string"
     && typeof value.displayMode === "string"
     && isPreviewDisplayMode(value.displayMode)

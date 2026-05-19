@@ -36,7 +36,6 @@ import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpen
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
 import { type RecentFile } from "../../domain/recentFiles";
-import { DEFAULT_SUB_WINDOW_MODE, type SubWindowMode } from "../../domain/subWindow";
 
 const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain";
 const DESKTOP_MENU_TRANSITION_MS = 60;
@@ -175,7 +174,6 @@ export function MarkdownEditorScreen({
   }
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
-  const [subWindowMode, setSubWindowMode] = useState<SubWindowMode>(DEFAULT_SUB_WINDOW_MODE);
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
@@ -271,7 +269,6 @@ export function MarkdownEditorScreen({
     defaultTextStyle: defaultPreviewTextStyle,
     displayMode: previewDisplayMode,
     html: previewHtml,
-    mode: subWindowMode,
     pageHtmls: previewPageHtmls,
     pages: previewPages,
     title: normalizedFileName,
@@ -284,7 +281,6 @@ export function MarkdownEditorScreen({
     previewHtml,
     previewPageHtmls,
     previewPages,
-    subWindowMode,
   ]);
   useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
   const confirmSaveOnExit = useConfirmSaveOnExit({
@@ -597,14 +593,12 @@ export function MarkdownEditorScreen({
     onSaveDocumentAs: handleRequestSaveAs,
     onShowLineNumbersChange,
     onStartupEditModeChange,
-    onSubWindowModeChange: setSubWindowMode,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
     recentFiles,
     previewUsesAppThemeColors,
     showLineNumbers,
     startupEditMode,
-    subWindowMode,
     windowsStartupTrayResidentEnabled,
   };
 

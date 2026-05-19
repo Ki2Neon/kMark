@@ -7,7 +7,7 @@ type PreviewContextMenuProps = {
   readonly menuRef: RefObject<HTMLDivElement | null>;
   readonly onFit: () => void;
   readonly onFullscreenToggle?: () => void;
-  readonly onModelCameraReset: () => void;
+  readonly onModelCameraReset?: () => void;
   readonly style?: CSSProperties;
 };
 
@@ -37,7 +37,7 @@ function PreviewContextMenuComponent({
           {fullscreenLabel}
         </button>
       )}
-      {hasModelCameraTarget ? (
+      {hasModelCameraTarget && onModelCameraReset !== undefined ? (
         <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelCameraReset}>
           Reset 3D View
         </button>
