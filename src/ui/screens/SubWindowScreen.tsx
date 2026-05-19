@@ -112,16 +112,19 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
     contextMenuStyle: previewContextMenuStyle,
+    handleAllModelCamerasReset,
+    handleModelCameraReset,
     handlePreviewContextMenu,
     handleZoomFullFit: handlePreviewZoomFullFit,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
+    hasModelCameraTarget,
+    hasModelCameraTargets,
     fitMode: previewFitMode,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
     contextMenuExtraItemCount: 1 + (state?.displayMode === "a4" ? 1 : 0) + sourceOptions.length,
     displayMode: state?.displayMode ?? "standard",
-    includeModelCameraMenuItem: false,
     initialFitMode: "page",
     isAvailable: true,
   });
@@ -370,11 +373,14 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     <PreviewContextMenu
       ariaLabel="サブウィンドウプレビューのコンテキストメニュー"
       fullscreenLabel={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-      hasModelCameraTarget={false}
+      hasModelCameraTarget={hasModelCameraTarget}
+      hasModelCameraTargets={hasModelCameraTargets}
       menuRef={previewContextMenuRef}
+      onAllModelCamerasReset={handleAllModelCamerasReset}
       onFit={handlePreviewZoomFit}
       onFullFit={state?.displayMode === "a4" ? handlePreviewZoomFullFit : undefined}
       onFullscreenToggle={handleFullscreenToggle}
+      onModelCameraReset={handleModelCameraReset}
       onSourceSelect={handleSourceSelect}
       sourceOptions={sourceOptions}
       style={previewContextMenuStyle}

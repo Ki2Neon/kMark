@@ -372,6 +372,28 @@ export function resetKmarkModelViewerCamera(viewer: HTMLElement): boolean {
   return true;
 }
 
+export function resetAllKmarkModelViewerCameras(root: ParentNode): number {
+  const occurrenceCounts = new Map<string, number>();
+  let resetCount = 0;
+
+  for (const viewer of root.querySelectorAll<HTMLElement>(MODEL_VIEWER_SELECTOR)) {
+    const snapshotKey = resolveKmarkModelViewerKey(viewer, occurrenceCounts);
+    const identityKey = resolveKmarkModelViewerIdentityKey(viewer);
+
+    modelCameraSnapshots.delete(snapshotKey);
+    modelCameraSnapshots.delete(identityKey);
+    if (resetKmarkModelViewerCamera(viewer)) {
+      resetCount += 1;
+    }
+  }
+
+  return resetCount;
+}
+
+export function hasKmarkModelViewers(root: ParentNode): boolean {
+  return root.querySelector(MODEL_VIEWER_SELECTOR) !== null;
+}
+
 function applyKmarkModelViewerCameraParams(viewer: HTMLElement): boolean {
   const state = mountedModelStates.get(viewer);
 

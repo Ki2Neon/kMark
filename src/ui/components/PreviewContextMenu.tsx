@@ -10,7 +10,9 @@ type PreviewContextMenuProps = {
   readonly ariaLabel: string;
   readonly fullscreenLabel?: string;
   readonly hasModelCameraTarget: boolean;
+  readonly hasModelCameraTargets: boolean;
   readonly menuRef: RefObject<HTMLDivElement | null>;
+  readonly onAllModelCamerasReset?: () => void;
   readonly onFit: () => void;
   readonly onFullFit?: () => void;
   readonly onFullscreenToggle?: () => void;
@@ -25,7 +27,9 @@ function PreviewContextMenuComponent({
   ariaLabel,
   fullscreenLabel = "Fullscreen",
   hasModelCameraTarget,
+  hasModelCameraTargets,
   menuRef,
+  onAllModelCamerasReset,
   onFit,
   onFullFit,
   onFullscreenToggle,
@@ -76,7 +80,12 @@ function PreviewContextMenuComponent({
       ) : null}
       {hasModelCameraTarget && onModelCameraReset !== undefined ? (
         <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onModelCameraReset}>
-          Reset 3D View
+          3D: Reset View
+        </button>
+      ) : null}
+      {hasModelCameraTargets && onAllModelCamerasReset !== undefined ? (
+        <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onAllModelCamerasReset}>
+          3D: Reset All Views
         </button>
       ) : null}
     </div>
