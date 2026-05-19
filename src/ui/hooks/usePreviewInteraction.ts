@@ -9,6 +9,8 @@ const PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 export const MIN_PREVIEW_ZOOM_SCALE = 0.05;
 export const MAX_PREVIEW_ZOOM_SCALE = 10;
 
+export type PreviewFitMode = "width" | "page";
+
 type PreviewContextMenuState = {
   readonly modelViewer: HTMLElement | null;
   readonly x: number;
@@ -35,6 +37,7 @@ export function usePreviewInteraction({
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenuState] = useState<PreviewContextMenuState | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
+  const [fitMode, setFitMode] = useState<PreviewFitMode>("width");
 
   const contextMenuStyle = useMemo<CSSProperties | undefined>(
     () => (contextMenuState === null
@@ -51,6 +54,13 @@ export function usePreviewInteraction({
   }, []);
 
   const handleZoomFit = useCallback(() => {
+    setFitMode("width");
+    setZoomScale(1);
+    closeContextMenu();
+  }, [closeContextMenu]);
+
+  const handleZoomFullFit = useCallback(() => {
+    setFitMode("page");
     setZoomScale(1);
     closeContextMenu();
   }, [closeContextMenu]);
@@ -141,11 +151,13 @@ export function usePreviewInteraction({
     handlePreviewContextMenu,
     handleModelCameraReset,
     handleZoomFit,
+    handleZoomFullFit,
     handleZoomScaleChange,
     hasModelCameraTarget:
       includeModelCameraMenuItem
       && contextMenuState?.modelViewer !== null
       && contextMenuState?.modelViewer !== undefined,
+    fitMode,
     zoomScale,
   };
 }

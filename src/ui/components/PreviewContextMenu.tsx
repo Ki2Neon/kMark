@@ -6,6 +6,7 @@ type PreviewContextMenuProps = {
   readonly hasModelCameraTarget: boolean;
   readonly menuRef: RefObject<HTMLDivElement | null>;
   readonly onFit: () => void;
+  readonly onFullFit?: () => void;
   readonly onFullscreenToggle?: () => void;
   readonly onModelCameraReset?: () => void;
   readonly style?: CSSProperties;
@@ -17,6 +18,7 @@ function PreviewContextMenuComponent({
   hasModelCameraTarget,
   menuRef,
   onFit,
+  onFullFit,
   onFullscreenToggle,
   onModelCameraReset,
   style,
@@ -32,6 +34,11 @@ function PreviewContextMenuComponent({
       <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onFit}>
         Fit
       </button>
+      {onFullFit === undefined ? null : (
+        <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onFullFit}>
+          Fit All
+        </button>
+      )}
       {onFullscreenToggle === undefined ? null : (
         <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onFullscreenToggle}>
           {fullscreenLabel}

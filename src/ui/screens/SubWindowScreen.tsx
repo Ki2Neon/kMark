@@ -120,11 +120,13 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
     contextMenuState: previewContextMenuState,
     contextMenuStyle: previewContextMenuStyle,
     handlePreviewContextMenu,
+    handleZoomFullFit: handlePreviewZoomFullFit,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
+    fitMode: previewFitMode,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
-    contextMenuExtraItemCount: 1,
+    contextMenuExtraItemCount: 1 + (state?.displayMode === "a4" ? 1 : 0),
     displayMode: state?.displayMode ?? "standard",
     includeModelCameraMenuItem: false,
     isAvailable: state !== null,
@@ -214,8 +216,10 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
         onZoomScaleChange={handlePreviewZoomScaleChange}
         defaultPageStyle={state.defaultPageStyle}
         defaultTextStyle={state.defaultTextStyle}
+        followActiveSourceLine={false}
         pageHtmls={state.pageHtmls}
         pages={state.pages}
+        previewFitMode={previewFitMode}
         previewNavigationRequest={previewNavigationRequest}
         zoomScale={previewZoomScale}
       />
@@ -227,6 +231,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
           hasModelCameraTarget={false}
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
+          onFullFit={state.displayMode === "a4" ? handlePreviewZoomFullFit : undefined}
           onFullscreenToggle={handleFullscreenToggle}
           style={previewContextMenuStyle}
         />

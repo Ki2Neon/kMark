@@ -233,11 +233,14 @@ export function MarkdownEditorScreen({
     contextMenuStyle: previewContextMenuStyle,
     handleModelCameraReset: handlePreviewModelCameraReset,
     handlePreviewContextMenu,
+    handleZoomFullFit: handlePreviewZoomFullFit,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
     hasModelCameraTarget: previewContextMenuHasModelCameraTarget,
+    fitMode: previewFitMode,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
+    contextMenuExtraItemCount: previewDisplayMode === "a4" ? 1 : 0,
     displayMode: previewDisplayMode,
     isAvailable: isPreviewInteractionAvailable,
   });
@@ -687,6 +690,7 @@ export function MarkdownEditorScreen({
                     defaultTextStyle={defaultPreviewTextStyle}
                     pageHtmls={previewPageHtmls}
                     pages={previewPages}
+                    previewFitMode={previewFitMode}
                     zoomScale={previewZoomScale}
                   />
                 </div>
@@ -754,6 +758,7 @@ export function MarkdownEditorScreen({
                       defaultTextStyle={defaultPreviewTextStyle}
                       pageHtmls={previewPageHtmls}
                       pages={previewPages}
+                      previewFitMode={previewFitMode}
                       zoomScale={previewZoomScale}
                     />
                   )}
@@ -783,6 +788,7 @@ export function MarkdownEditorScreen({
           hasModelCameraTarget={previewContextMenuHasModelCameraTarget}
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
+          onFullFit={previewDisplayMode === "a4" ? handlePreviewZoomFullFit : undefined}
           onModelCameraReset={handlePreviewModelCameraReset}
           style={previewContextMenuStyle}
         />
