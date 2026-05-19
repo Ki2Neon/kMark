@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { resetKmarkModelViewerCamera } from "../../adapters/browser/browserModelRenderer";
 import { type PreviewDisplayMode } from "../../domain/preview";
 
-const PREVIEW_CONTEXT_MENU_WIDTH_PX = 168;
+const PREVIEW_CONTEXT_MENU_WIDTH_PX = 260;
 const PREVIEW_CONTEXT_MENU_PADDING_PX = 12;
 const PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 
 export const MIN_PREVIEW_ZOOM_SCALE = 0.05;
 export const MAX_PREVIEW_ZOOM_SCALE = 10;
+
+export type PreviewFitMode = "width" | "page";
 
 type PreviewContextMenuState = {
   readonly modelViewer: HTMLElement | null;
@@ -16,7 +18,10 @@ type PreviewContextMenuState = {
 };
 
 type UsePreviewInteractionOptions = {
+  readonly contextMenuExtraItemCount?: number;
   readonly displayMode: PreviewDisplayMode;
+  readonly includeModelCameraMenuItem?: boolean;
+  readonly initialFitMode?: PreviewFitMode;
   readonly isAvailable?: boolean;
   readonly onModelViewpointSave?: (modelViewer: HTMLElement) => void;
 };
@@ -26,13 +31,17 @@ export function clampPreviewZoomScale(zoomScale: number): number {
 }
 
 export function usePreviewInteraction({
+  contextMenuExtraItemCount = 0,
   displayMode,
+  includeModelCameraMenuItem = true,
+  initialFitMode = "width",
   isAvailable = true,
   onModelViewpointSave,
 }: UsePreviewInteractionOptions) {
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuState, setContextMenuState] = useState<PreviewContextMenuState | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
+  const [fitMode, setFitMode] = useState<PreviewFitMode>(initialFitMode);
 
   const contextMenuStyle = useMemo<CSSProperties | undefined>(
     () => (contextMenuState === null
@@ -49,6 +58,13 @@ export function usePreviewInteraction({
   }, []);
 
   const handleZoomFit = useCallback(() => {
+    setFitMode("width");
+    setZoomScale(1);
+    closeContextMenu();
+  }, [closeContextMenu]);
+
+  const handleZoomFullFit = useCallback(() => {
+    setFitMode("page");
     setZoomScale(1);
     closeContextMenu();
   }, [closeContextMenu]);
@@ -78,13 +94,18 @@ export function usePreviewInteraction({
   }, []);
 
   const handlePreviewContextMenu = useCallback((clientX: number, clientY: number, modelViewer: HTMLElement | null = null) => {
-    const itemCount = modelViewer === null ? 1 : 3;
+    const modelMenuItemCount = includeModelCameraMenuItem && modelViewer !== null
+      ? 1 + (onModelViewpointSave === undefined ? 0 : 1)
+      : 0;
+    const itemCount = 1
+      + modelMenuItemCount
+      + contextMenuExtraItemCount;
     const menuHeight = PREVIEW_CONTEXT_MENU_PADDING_PX + (PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX * itemCount);
     const nextX = Math.max(8, Math.min(clientX, window.innerWidth - PREVIEW_CONTEXT_MENU_WIDTH_PX - 8));
     const nextY = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
 
     setContextMenuState({ modelViewer, x: nextX, y: nextY });
-  }, []);
+  }, [contextMenuExtraItemCount, includeModelCameraMenuItem, onModelViewpointSave]);
 
   useEffect(() => {
     if (displayMode !== "a4") {
@@ -141,6 +162,7 @@ export function usePreviewInteraction({
   }, [closeContextMenu, contextMenuState]);
 
   return {
+    closeContextMenu,
     contextMenuRef,
     contextMenuState,
     contextMenuStyle,
@@ -148,8 +170,13 @@ export function usePreviewInteraction({
     handleModelCameraReset,
     handleModelViewpointSave,
     handleZoomFit,
+    handleZoomFullFit,
     handleZoomScaleChange,
-    hasModelCameraTarget: contextMenuState?.modelViewer !== null && contextMenuState?.modelViewer !== undefined,
+    hasModelCameraTarget:
+      includeModelCameraMenuItem
+      && contextMenuState?.modelViewer !== null
+      && contextMenuState?.modelViewer !== undefined,
+    fitMode,
     zoomScale,
   };
 }

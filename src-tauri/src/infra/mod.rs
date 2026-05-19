@@ -7,6 +7,7 @@ mod in_memory_open_request_queue;
 mod json_state_store;
 mod preview_preferences_store;
 mod recent_files_store;
+mod sub_window_registry;
 mod theme_preferences_store;
 mod tray_coordinator;
 mod window_state;
@@ -22,6 +23,14 @@ pub(crate) use in_memory_open_request_queue::InMemoryOpenRequestQueue;
 pub(crate) use json_state_store::JsonStateStoreError;
 pub(crate) use preview_preferences_store::{load_preview_preferences, persist_preview_preferences};
 pub(crate) use recent_files_store::{load_recent_files, persist_recent_files};
+pub(crate) use sub_window_registry::{
+    activate_sub_window_registry_source, get_sub_window_registry_source_state,
+    get_sub_window_registry_sources, publish_sub_window_registry_source_state,
+    push_sub_window_registry_line_selection_request, register_sub_window_registry_source,
+    remove_sub_window_registry_source, take_sub_window_registry_line_selection_requests,
+    touch_sub_window_registry_sources, SubWindowRegistryError,
+    SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL,
+};
 pub(crate) use theme_preferences_store::{load_theme_preferences, persist_theme_preferences};
 pub(crate) use tray_coordinator::{
     broadcast_command, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,

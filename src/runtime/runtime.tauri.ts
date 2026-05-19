@@ -6,12 +6,20 @@ import { type RuntimeApi, type RuntimeDragDropEvent } from "./runtime";
 export const runtimeTauri: RuntimeApi = {
   kind: "tauri",
 
+  async closeWindow() {
+    await getCurrentWindow().close();
+  },
+
   convertFileSrc(filePath) {
     return convertFileSrc(filePath);
   },
 
   invoke<T>(command: string, args: Record<string, unknown>) {
     return invoke<T>(command, args);
+  },
+
+  isFullscreen() {
+    return getCurrentWindow().isFullscreen();
   },
 
   listen<T>(eventName: string, callback: (payload: T) => void) {
@@ -24,6 +32,10 @@ export const runtimeTauri: RuntimeApi = {
     return getCurrentWebview().onDragDropEvent((event) => {
       callback(event as RuntimeDragDropEvent);
     });
+  },
+
+  async setFullscreen(isFullscreen) {
+    await getCurrentWindow().setFullscreen(isFullscreen);
   },
 
   async setWindowTitle(title) {

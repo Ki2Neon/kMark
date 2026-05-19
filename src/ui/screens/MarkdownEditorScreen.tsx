@@ -2,6 +2,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -33,6 +34,9 @@ import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 import { getKmarkModelViewerViewpoint } from "../../adapters/browser/browserModelRenderer";
+import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
+import { SubWindowController } from "../../application/subWindow/subWindowController";
+import { DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS } from "../../application/subWindow/subWindowPorts";
 import { saveModelViewpointToMarkdown } from "../../domain/modelViewpoint";
 import { type RecentFile } from "../../domain/recentFiles";
 
@@ -40,6 +44,15 @@ const ACCEPTED_MARKDOWN_FILES = ".md,.markdown,.mdown,.mkd,.txt,text/markdown,te
 const DESKTOP_MENU_TRANSITION_MS = 60;
 const ERROR_TOAST_DURATION_MS = 2400;
 const PREVIEW_CURSOR_FOLLOW_THROTTLE_MS = 80;
+
+function createSubWindowController(): SubWindowController {
+  return new SubWindowController({
+    clock: {
+      now: () => Date.now(),
+    },
+    gateway: createBrowserSubWindowGateway(),
+  });
+}
 
 type MarkdownEditorScreenProps = {
   readonly appFontId: AppFontId;
@@ -156,11 +169,18 @@ export function MarkdownEditorScreen({
   const lastPreviewCursorFollowAtRef = useRef(0);
   const pendingPreviewCursorLineRef = useRef<number | null>(null);
   const previewCursorFollowTimeoutRef = useRef<number | null>(null);
+  const subWindowControllerRef = useRef<SubWindowController | null>(null);
+
+  if (subWindowControllerRef.current === null) {
+    subWindowControllerRef.current = createSubWindowController();
+  }
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
+  const [subWindowPageTransitionFadeMs, setSubWindowPageTransitionFadeMs] = useState(DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS);
+  const [subWindowSourceId, setSubWindowSourceId] = useState<string | null>(null);
   const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
   const blurActiveElement = useCallback(() => {
     const activeElement = document.activeElement;
@@ -242,11 +262,14 @@ export function MarkdownEditorScreen({
     handleModelCameraReset: handlePreviewModelCameraReset,
     handleModelViewpointSave: handlePreviewModelViewpointSaveRequest,
     handlePreviewContextMenu: handlePreviewInteractionContextMenu,
+    handleZoomFullFit: handlePreviewZoomFullFit,
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
     hasModelCameraTarget: previewContextMenuHasModelCameraTarget,
+    fitMode: previewFitMode,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
+    contextMenuExtraItemCount: previewDisplayMode === "a4" ? 1 : 0,
     displayMode: previewDisplayMode,
     isAvailable: isPreviewInteractionAvailable,
     onModelViewpointSave: handlePreviewModelViewpointSave,
@@ -281,6 +304,33 @@ export function MarkdownEditorScreen({
   }, [errorMessage, handleErrorClear]);
 
   const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
+  const subWindowStateRequest = useMemo(() => ({
+    activeSourceLine: previewHighlightSourceLine,
+    defaultPageStyle: defaultPreviewPageStyle,
+    defaultTextStyle: defaultPreviewTextStyle,
+    displayMode: previewDisplayMode,
+    html: previewHtml,
+    pageHtmls: previewPageHtmls,
+    pageTransitionFadeMs: subWindowPageTransitionFadeMs,
+    pages: previewPages,
+    title: normalizedFileName,
+  }), [
+    defaultPreviewPageStyle,
+    defaultPreviewTextStyle,
+    normalizedFileName,
+    previewDisplayMode,
+    previewHighlightSourceLine,
+    previewHtml,
+    previewPageHtmls,
+    previewPages,
+    subWindowPageTransitionFadeMs,
+  ]);
+  const subWindowStateRequestRef = useRef(subWindowStateRequest);
+
+  useEffect(() => {
+    subWindowStateRequestRef.current = subWindowStateRequest;
+  }, [subWindowStateRequest]);
+
   useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
@@ -341,6 +391,107 @@ export function MarkdownEditorScreen({
     closeDesktopMenu();
     void handlePrintDocument(previewDisplayMode);
   }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode]);
+
+  useEffect(() => {
+    if (!isEditorReady) {
+      return;
+    }
+
+    let isDisposed = false;
+    let registeredSourceId: string | null = null;
+
+    void subWindowControllerRef.current?.registerSource(subWindowStateRequestRef.current)
+      .then((sourceId) => {
+        if (isDisposed) {
+          void subWindowControllerRef.current?.unregisterSource(sourceId).catch(() => {});
+          return;
+        }
+
+        registeredSourceId = sourceId;
+        setSubWindowSourceId(sourceId);
+        void subWindowControllerRef.current?.activateSource(sourceId).catch(() => {});
+      })
+      .catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      setSubWindowSourceId(null);
+
+      if (registeredSourceId !== null) {
+        void subWindowControllerRef.current?.unregisterSource(registeredSourceId).catch(() => {});
+      }
+    };
+  }, [isEditorReady]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    void subWindowControllerRef.current?.publishSourceState(subWindowSourceId, subWindowStateRequest).catch(() => {});
+  }, [isEditorReady, subWindowSourceId, subWindowStateRequest]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    const unregisterSource = () => {
+      void subWindowControllerRef.current?.unregisterSource(subWindowSourceId).catch(() => {});
+    };
+
+    window.addEventListener("beforeunload", unregisterSource);
+
+    return () => {
+      window.removeEventListener("beforeunload", unregisterSource);
+    };
+  }, [isEditorReady, subWindowSourceId]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    const activateSource = () => {
+      void subWindowControllerRef.current?.publishSourceState(
+        subWindowSourceId,
+        subWindowStateRequestRef.current,
+      ).then(() => (
+        subWindowControllerRef.current?.activateSource(subWindowSourceId)
+      )).catch(() => {});
+    };
+
+    if (document.hasFocus()) {
+      activateSource();
+    }
+
+    window.addEventListener("focus", activateSource);
+
+    return () => {
+      window.removeEventListener("focus", activateSource);
+    };
+  }, [isEditorReady, subWindowSourceId]);
+
+  const handleRequestOpenSubWindow = useCallback(() => {
+    closeDesktopMenu();
+
+    if (subWindowSourceId !== null) {
+      void subWindowControllerRef.current?.publishSourceState(
+        subWindowSourceId,
+        subWindowStateRequestRef.current,
+      ).then(() => (
+        subWindowControllerRef.current?.activateSource(subWindowSourceId)
+      )).catch(() => {});
+    }
+
+    void subWindowControllerRef.current?.open().catch((error) => {
+      handleErrorRaise(error instanceof Error ? error.message : "サブウィンドウを開けませんでした。");
+    });
+  }, [
+    closeDesktopMenu,
+    handleErrorRaise,
+    subWindowSourceId,
+  ]);
 
   const handleRequestNew = useCallback(() => {
     if (!confirmDiscard()) {
@@ -443,6 +594,35 @@ export function MarkdownEditorScreen({
       requestMobileSection("edit");
     }
   }, [clearPendingPreviewCursorFollow, layoutMode, requestMobileSection]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void subWindowControllerRef.current?.subscribeSourceLineSelection((request) => {
+      if (isDisposed || request.sourceId !== subWindowSourceId) {
+        return;
+      }
+
+      handlePreviewSourceLineDoubleClick(request.lineNumber);
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    }).catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      unlisten?.();
+    };
+  }, [handlePreviewSourceLineDoubleClick, isEditorReady, subWindowSourceId]);
 
   useEffect(() => (
     () => {
@@ -561,6 +741,7 @@ export function MarkdownEditorScreen({
     onNewDocument: handleRequestNew,
     onOpenCurrentDocumentFolder: handleRequestOpenCurrentDocumentFolder,
     onOpenDocument: handleRequestOpen,
+    onOpenSubWindow: handleRequestOpenSubWindow,
     onOpenRecentFile: handleRequestOpenRecentFile,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
     onPreviewDisplayModeChange,
@@ -570,12 +751,14 @@ export function MarkdownEditorScreen({
     onSaveDocumentAs: handleRequestSaveAs,
     onShowLineNumbersChange,
     onStartupEditModeChange,
+    onSubWindowPageTransitionFadeMsChange: setSubWindowPageTransitionFadeMs,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
     recentFiles,
     previewUsesAppThemeColors,
     showLineNumbers,
     startupEditMode,
+    subWindowPageTransitionFadeMs,
     windowsStartupTrayResidentEnabled,
   };
 
@@ -664,6 +847,7 @@ export function MarkdownEditorScreen({
                     defaultTextStyle={defaultPreviewTextStyle}
                     pageHtmls={previewPageHtmls}
                     pages={previewPages}
+                    previewFitMode={previewFitMode}
                     zoomScale={previewZoomScale}
                   />
                 </div>
@@ -731,6 +915,7 @@ export function MarkdownEditorScreen({
                       defaultTextStyle={defaultPreviewTextStyle}
                       pageHtmls={previewPageHtmls}
                       pages={previewPages}
+                      previewFitMode={previewFitMode}
                       zoomScale={previewZoomScale}
                     />
                   )}
@@ -760,6 +945,7 @@ export function MarkdownEditorScreen({
           hasModelCameraTarget={previewContextMenuHasModelCameraTarget}
           menuRef={previewContextMenuRef}
           onFit={handlePreviewZoomFit}
+          onFullFit={previewDisplayMode === "a4" ? handlePreviewZoomFullFit : undefined}
           onModelCameraReset={handlePreviewModelCameraReset}
           onModelViewpointSave={handlePreviewModelViewpointSaveRequest}
           style={previewContextMenuStyle}

@@ -17,6 +17,75 @@ pub struct RenderedMarkdownPreviewPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubWindowStatePayload {
+    pub version: u32,
+    pub revision: u64,
+    pub updated_at_epoch_ms: u64,
+    pub title: String,
+    pub display_mode: String,
+    pub html: String,
+    pub page_htmls: Vec<String>,
+    pub page_transition_fade_ms: u32,
+    pub pages: Vec<RenderedPagePayload>,
+    pub default_page_style: PageStylePayload,
+    pub default_text_style: PreviewTextStylePayload,
+    pub active_source_line: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowSourceLineSelectionRequestPayload {
+    pub line_number: u32,
+    pub request_id: u64,
+    pub requested_at_epoch_ms: u64,
+    pub source_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterSubWindowSourceResponsePayload {
+    pub source_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowSelectionPayload {
+    pub mode: String,
+    pub source_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowSourceSummaryPayload {
+    pub id: String,
+    pub is_active: bool,
+    pub title: String,
+    pub updated_at_epoch_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowSourcesSnapshotPayload {
+    pub active_source_id: Option<String>,
+    pub sources: Vec<SubWindowSourceSummaryPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowResolvedSourceStatePayload {
+    pub source_id: Option<String>,
+    pub state: Option<SubWindowStatePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowSourceStateChangedPayload {
+    pub source_id: String,
+    pub state: SubWindowStatePayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RenderedPagePayload {
     pub html: String,
     pub page_style: PageStylePayload,

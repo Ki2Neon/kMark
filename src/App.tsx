@@ -3,7 +3,9 @@ import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
 import { useAppShell } from "./ui/hooks/useAppShell";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
+import { SubWindowScreen } from "./ui/screens/SubWindowScreen";
 import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
+import { resolveBrowserSubWindowTarget } from "./adapters/browser/browserSubWindowGateway";
 
 function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   if (typeof window === "undefined") {
@@ -13,6 +15,10 @@ function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   return new URLSearchParams(window.location.search).get("kmarkInitialDocument") === "new-untitled"
     ? "new-untitled"
     : "stored";
+}
+
+function detectSubWindowTarget(): { readonly stateKey: string | null } | null {
+  return resolveBrowserSubWindowTarget();
 }
 
 function App() {
@@ -54,6 +60,12 @@ function App() {
 
   if (!isThemeReady || !isEditorPreferencesReady) {
     return null;
+  }
+
+  const subWindowTarget = detectSubWindowTarget();
+
+  if (subWindowTarget !== null) {
+    return <SubWindowScreen stateKey={subWindowTarget.stateKey} />;
   }
 
   return (
