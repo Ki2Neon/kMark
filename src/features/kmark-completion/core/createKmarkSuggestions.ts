@@ -69,7 +69,7 @@ const IMAGE_SNIPPET_PRIORITY: ReadonlyMap<string, number> = new Map([
 
 const PAGE_PARAM_PRIORITY: ReadonlyMap<string, number> = new Map([
   ["page_size", 500],
-  ["orientation", 490],
+  ["page_direction", 490],
   ["page_font_size", 480],
   ["page_font_family", 475],
   ["page_heading_font_family", 472],

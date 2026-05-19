@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 17,
+  "schemaVersion": 18,
   "params": [
     {
       "name": "align",
@@ -720,21 +720,21 @@
       "aliases": [],
       "type": "enum",
       "contexts": ["page", "scope"],
-      "values": ["A3", "A4", "A5", "B4", "B5", "Letter", "Legal", "custom"],
+      "values": ["A3", "A4", "A5", "B4", "B5", "Letter", "Legal", "16:9", "4:3", "1:1", "custom"],
       "insertText": "page_size:",
       "description": "ページサイズを指定する",
-      "examples": ["<!-- kmark { page_size:A4 } -->"],
+      "examples": ["<!-- kmark { page_size:A4 } -->", "<!-- kmark { page_size:16:9 } -->"],
       "priority": 100
     },
     {
-      "name": "orientation",
-      "aliases": ["page_orientation"],
+      "name": "page_direction",
+      "aliases": [],
       "type": "enum",
       "contexts": ["page", "scope"],
-      "values": ["portrait", "landscape"],
-      "insertText": "orientation:",
+      "values": ["vertical", "horizontal"],
+      "insertText": "page_direction:",
       "description": "ページの向きを指定する",
-      "examples": ["<!-- kmark { orientation:landscape } -->"],
+      "examples": ["<!-- kmark { page_direction:horizontal } -->"],
       "priority": 95
     },
     {

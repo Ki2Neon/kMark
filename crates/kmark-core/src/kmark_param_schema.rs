@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 17;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 18;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -805,21 +805,24 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         aliases: &[],
         param_type: "enum",
         contexts: &["page", "scope"],
-        values: &["A3", "A4", "A5", "B4", "B5", "Letter", "Legal", "custom"],
+        values: &[
+            "A3", "A4", "A5", "B4", "B5", "Letter", "Legal", "16:9", "4:3", "1:1",
+            "custom",
+        ],
         insert_text: "page_size:",
         description: "ページサイズを指定する",
-        examples: &["<!-- kmark { page_size:A4 } -->"],
+        examples: &["<!-- kmark { page_size:A4 } -->", "<!-- kmark { page_size:16:9 } -->"],
         priority: 100,
     },
     KmarkParamSpec {
-        name: "orientation",
-        aliases: &["page_orientation"],
+        name: "page_direction",
+        aliases: &[],
         param_type: "enum",
         contexts: &["page", "scope"],
-        values: &["portrait", "landscape"],
-        insert_text: "orientation:",
+        values: &["vertical", "horizontal"],
+        insert_text: "page_direction:",
         description: "ページの向きを指定する",
-        examples: &["<!-- kmark { orientation:landscape } -->"],
+        examples: &["<!-- kmark { page_direction:horizontal } -->"],
         priority: 95,
     },
     KmarkParamSpec {
