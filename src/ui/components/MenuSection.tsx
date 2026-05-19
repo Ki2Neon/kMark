@@ -27,6 +27,7 @@ import {
   MAX_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
   MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
 } from "../../application/subWindow/subWindowPorts";
+import { MenuIcon } from "./MenuIcon";
 
 type MenuSectionProps = {
   readonly appFontId: AppFontId;
@@ -540,7 +541,8 @@ function MenuSectionComponent({
       <section className="section section--menu menu-section" aria-label="最近開いたファイル">
         <div className="menu-section__stack-header">
           <button type="button" className="menu-section__back-button" onClick={handleRootPanelReturn}>
-            戻る
+            <MenuIcon name="arrow-left" />
+            <span>戻る</span>
           </button>
           <div className="menu-section__stack-title-block">
             <h2 className="menu-section__stack-title">最近開いたファイル</h2>
@@ -559,8 +561,11 @@ function MenuSectionComponent({
                   title={recentFile.filePath}
                   onClick={() => onOpenRecentFile(recentFile)}
                 >
-                  <span className="menu-section__recent-file-name">{recentFile.fileName}</span>
-                  <span className="menu-section__recent-file-path">{recentFile.filePath}</span>
+                  <MenuIcon name="document" />
+                  <span className="menu-section__recent-item-text">
+                    <span className="menu-section__recent-file-name">{recentFile.fileName}</span>
+                    <span className="menu-section__recent-file-path">{recentFile.filePath}</span>
+                  </span>
                 </button>
               </li>
             ))}
@@ -591,29 +596,36 @@ function MenuSectionComponent({
           </div>
           <div className="menu-section__actions" role="group" aria-label="ファイル操作">
             <button type="button" onClick={onOpenDocument}>
-              開く
+              <MenuIcon name="open-file" />
+              <span>開く</span>
             </button>
             <button type="button" onClick={onOverwriteSaveDocument}>
-              上書き保存
+              <MenuIcon name="save" />
+              <span>上書き保存</span>
             </button>
             <button type="button" onClick={onSaveDocumentAs}>
-              名前を付けて保存
+              <MenuIcon name="save-as" />
+              <span>名前を付けて保存</span>
             </button>
             <button type="button" onClick={onNewDocument}>
-              新規作成
+              <MenuIcon name="new-file" />
+              <span>新規作成</span>
             </button>
             <button type="button" onClick={onPrintDocument}>
-              印刷
+              <MenuIcon name="print" />
+              <span>印刷</span>
             </button>
             <button type="button" className="menu-section__action-spaced" onClick={handleRecentFilesOpen}>
-              最近開いたファイル
+              <MenuIcon name="history" />
+              <span>最近開いたファイル</span>
             </button>
             <button
               type="button"
               className="menu-section__action-spaced"
               onClick={onOpenCurrentDocumentFolder}
             >
-              .mdのフォルダーを開く
+              <MenuIcon name="folder" />
+              <span>.mdのフォルダーを開く</span>
             </button>
           </div>
         </div>
@@ -627,7 +639,8 @@ function MenuSectionComponent({
           </div>
           <div className="menu-section__actions" role="group" aria-label="プレビュー操作">
             <button type="button" onClick={onOpenSubWindow}>
-              サブウィンドウを開く
+              <MenuIcon name="subwindow" />
+              <span>サブウィンドウを開く</span>
             </button>
           </div>
 

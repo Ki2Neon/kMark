@@ -434,6 +434,24 @@ function scrollPreviewToA4Page(previewViewport: HTMLElement, previewPage: HTMLEl
   });
 }
 
+function resolveA4ZoomAnchorElement(
+  previewViewport: HTMLElement,
+  eventTarget: EventTarget | null,
+  clientX: number,
+  clientY: number,
+): HTMLElement | null {
+  const targetElement = resolveEventTargetElement(eventTarget);
+  const targetPage = targetElement?.closest<HTMLElement>(".preview-section__page-frame") ?? null;
+
+  if (targetPage !== null && previewViewport.contains(targetPage)) {
+    return targetPage;
+  }
+
+  return Array.from(previewViewport.querySelectorAll<HTMLElement>(".preview-section__page-frame"))
+    .find((previewPage) => isPointInsideRect(previewPage.getBoundingClientRect(), clientX, clientY))
+    ?? null;
+}
+
 function resolveEventTargetElement(eventTarget: EventTarget | null): HTMLElement | null {
   if (eventTarget instanceof HTMLElement) {
     return eventTarget;
@@ -3769,6 +3787,9 @@ function MarkdownPreviewComponent({
   const pageTransitionOverlayRef = useRef<HTMLElement | null>(null);
   const pendingA4NavigationScrollRef = useRef(false);
   const pendingViewportZoomAnchorRef = useRef<{
+    readonly anchorElement: HTMLElement | null;
+    readonly anchorElementOffsetX: number;
+    readonly anchorElementOffsetY: number;
     readonly previousDisplayScale: number;
     readonly nextDisplayScale: number;
     readonly scrollLeft: number;
@@ -4359,20 +4380,47 @@ function MarkdownPreviewComponent({
 
     pendingViewportZoomAnchorRef.current = null;
 
-    const contentAnchorX = (pendingViewportZoomAnchor.scrollLeft + pendingViewportZoomAnchor.viewportOffsetX) / pendingViewportZoomAnchor.previousDisplayScale;
-    const contentAnchorY = (pendingViewportZoomAnchor.scrollTop + pendingViewportZoomAnchor.viewportOffsetY) / pendingViewportZoomAnchor.previousDisplayScale;
     const maxScrollLeft = Math.max(0, previewViewport.scrollWidth - previewViewport.clientWidth);
     const maxScrollTop = Math.max(0, previewViewport.scrollHeight - previewViewport.clientHeight);
-    const nextScrollLeft = clamp(
-      (contentAnchorX * pendingViewportZoomAnchor.nextDisplayScale) - pendingViewportZoomAnchor.viewportOffsetX,
-      0,
-      maxScrollLeft,
-    );
-    const nextScrollTop = clamp(
-      (contentAnchorY * pendingViewportZoomAnchor.nextDisplayScale) - pendingViewportZoomAnchor.viewportOffsetY,
-      0,
-      maxScrollTop,
-    );
+    const viewportRect = previewViewport.getBoundingClientRect();
+    const anchorElement = pendingViewportZoomAnchor.anchorElement;
+    let nextScrollLeft: number;
+    let nextScrollTop: number;
+
+    if (anchorElement !== null && anchorElement.isConnected && previewViewport.contains(anchorElement)) {
+      const anchorRect = anchorElement.getBoundingClientRect();
+      const anchorClientX = anchorRect.left
+        + (pendingViewportZoomAnchor.anchorElementOffsetX * pendingViewportZoomAnchor.nextDisplayScale);
+      const anchorClientY = anchorRect.top
+        + (pendingViewportZoomAnchor.anchorElementOffsetY * pendingViewportZoomAnchor.nextDisplayScale);
+
+      nextScrollLeft = clamp(
+        previewViewport.scrollLeft + anchorClientX - viewportRect.left - pendingViewportZoomAnchor.viewportOffsetX,
+        0,
+        maxScrollLeft,
+      );
+      nextScrollTop = clamp(
+        previewViewport.scrollTop + anchorClientY - viewportRect.top - pendingViewportZoomAnchor.viewportOffsetY,
+        0,
+        maxScrollTop,
+      );
+    } else {
+      const contentAnchorX = (pendingViewportZoomAnchor.scrollLeft + pendingViewportZoomAnchor.viewportOffsetX)
+        / pendingViewportZoomAnchor.previousDisplayScale;
+      const contentAnchorY = (pendingViewportZoomAnchor.scrollTop + pendingViewportZoomAnchor.viewportOffsetY)
+        / pendingViewportZoomAnchor.previousDisplayScale;
+
+      nextScrollLeft = clamp(
+        (contentAnchorX * pendingViewportZoomAnchor.nextDisplayScale) - pendingViewportZoomAnchor.viewportOffsetX,
+        0,
+        maxScrollLeft,
+      );
+      nextScrollTop = clamp(
+        (contentAnchorY * pendingViewportZoomAnchor.nextDisplayScale) - pendingViewportZoomAnchor.viewportOffsetY,
+        0,
+        maxScrollTop,
+      );
+    }
 
     previewViewport.scrollTo({
       left: nextScrollLeft,
@@ -4430,11 +4478,18 @@ function MarkdownPreviewComponent({
 
     const previewViewport = event.currentTarget;
     const previewViewportRect = previewViewport.getBoundingClientRect();
+    const anchorElement = displayMode === "a4"
+      ? resolveA4ZoomAnchorElement(previewViewport, event.target, event.clientX, event.clientY)
+      : null;
+    const anchorElementRect = anchorElement?.getBoundingClientRect() ?? null;
     const nextDisplayScale = displayMode === "a4"
       ? Math.max(MIN_A4_SCALE, a4FitScale * nextZoomScale)
       : nextZoomScale;
 
     pendingViewportZoomAnchorRef.current = {
+      anchorElement,
+      anchorElementOffsetX: anchorElementRect === null ? 0 : (event.clientX - anchorElementRect.left) / currentDisplayScale,
+      anchorElementOffsetY: anchorElementRect === null ? 0 : (event.clientY - anchorElementRect.top) / currentDisplayScale,
       previousDisplayScale: currentDisplayScale,
       nextDisplayScale,
       scrollLeft: previewViewport.scrollLeft,
