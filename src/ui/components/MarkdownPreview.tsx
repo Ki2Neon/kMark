@@ -85,6 +85,7 @@ type MarkdownPreviewProps = {
   readonly pageHtmls?: readonly string[];
   readonly pages?: readonly RenderedPreviewPage[];
   readonly previewFitMode?: PreviewFitMode;
+  readonly suppressTextSelectionOnDoubleClick?: boolean;
   /** @deprecated Use activeSourceLineScrollMode. */
   readonly followActiveSourceLine?: boolean;
   readonly previewNavigationRequest?: PreviewNavigationRequest | null;
@@ -3732,6 +3733,7 @@ function MarkdownPreviewComponent({
   pageHtmls,
   pages,
   previewFitMode = "width",
+  suppressTextSelectionOnDoubleClick = false,
   followActiveSourceLine = true,
   previewNavigationRequest = null,
   zoomScale = 1,
@@ -3880,8 +3882,27 @@ function MarkdownPreviewComponent({
       return;
     }
 
+    if (suppressTextSelectionOnDoubleClick) {
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+    }
+
     onSourceLineDoubleClick(sourceLine);
-  }, [onSourceLineDoubleClick]);
+  }, [onSourceLineDoubleClick, suppressTextSelectionOnDoubleClick]);
+
+  const handlePreviewMouseDown = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    if (!suppressTextSelectionOnDoubleClick || event.detail < 2) {
+      return;
+    }
+
+    const eventTarget = resolveEventTargetElement(event.target);
+
+    if (eventTarget?.closest(PREVIEW_INTERACTIVE_ELEMENT_SELECTOR) !== null) {
+      return;
+    }
+
+    event.preventDefault();
+  }, [suppressTextSelectionOnDoubleClick]);
 
   const handlePreviewClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (onOpenExternalLink === undefined) {
@@ -4564,6 +4585,7 @@ function MarkdownPreviewComponent({
           onClick={handlePreviewClick}
           onContextMenu={handlePreviewContextMenu}
           onDoubleClick={handlePreviewDoubleClick}
+          onMouseDown={handlePreviewMouseDown}
           onPointerCancel={handlePreviewPointerEnd}
           onPointerDown={handlePreviewPointerDown}
           onPointerMove={handlePreviewPointerMove}
@@ -4613,6 +4635,7 @@ function MarkdownPreviewComponent({
         onClick={handlePreviewClick}
         onContextMenu={handlePreviewContextMenu}
         onDoubleClick={handlePreviewDoubleClick}
+        onMouseDown={handlePreviewMouseDown}
         onPointerCancel={handlePreviewPointerEnd}
         onPointerDown={handlePreviewPointerDown}
         onPointerMove={handlePreviewPointerMove}

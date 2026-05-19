@@ -208,7 +208,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
   }
 
   return (
-    <main className="subwindow-shell">
+    <main className="subwindow-shell" data-fullscreen={isFullscreen ? "true" : "false"}>
       <MarkdownPreview
         activeSourceLine={state.activeSourceLine}
         activeSourceLineScrollMode="page"
@@ -227,6 +227,7 @@ export function SubWindowScreen({ stateKey }: SubWindowScreenProps) {
         pages={state.pages}
         previewFitMode={previewFitMode}
         previewNavigationRequest={previewNavigationRequest}
+        suppressTextSelectionOnDoubleClick
         zoomScale={previewZoomScale}
       />
 

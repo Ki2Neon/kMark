@@ -332,6 +332,18 @@ input:focus-visible,
   height: 100%;
 }
 
+.subwindow-shell[data-fullscreen="true"] .preview-section__body {
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.subwindow-shell[data-fullscreen="true"] .preview-section__body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .editor-shell__toast {
   position: fixed;
   left: 12px;
