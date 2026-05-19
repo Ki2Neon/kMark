@@ -51,17 +51,17 @@ export const KMARK_SNIPPET_SPECS: readonly KmarkSnippetSpec[] = [
     priority: 95,
   },
   {
-    label: "page A4 portrait",
+    label: "page A4 vertical",
     description: "A4縦ページ設定を作成する",
     contexts: ["page", "scope"],
-    insertText: "{ page_size:A4 orientation:portrait page_font_size:${1:12pt} page_margin:${2:20mm} }",
+    insertText: "{ page_size:A4 page_direction:vertical page_font_size:${1:12pt} page_margin:${2:20mm} }",
     priority: 100,
   },
   {
-    label: "page A4 landscape",
+    label: "page A4 horizontal",
     description: "A4横ページ設定を作成する",
     contexts: ["page", "scope"],
-    insertText: "{ page_size:A4 orientation:landscape page_font_size:${1:12pt} page_margin:${2:15mm} }",
+    insertText: "{ page_size:A4 page_direction:horizontal page_font_size:${1:12pt} page_margin:${2:15mm} }",
     priority: 100,
   },
   {

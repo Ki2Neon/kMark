@@ -531,6 +531,9 @@ enum KmarkBlockEnd {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PageSizePreset {
+    Ratio16x9,
+    Ratio4x3,
+    Ratio1x1,
     A3,
     A4,
     A5,
@@ -4299,6 +4302,10 @@ impl<'a> HtmlEmitter<'a> {
             &context.block_decoration
         };
 
+        if should_flatten_image_paragraph {
+            self.remove_soft_breaks(&context.soft_break_ranges);
+        }
+
         if !decoration.is_empty() {
             self.patch_tag_attributes(
                 context.open_tag_start,
@@ -4307,7 +4314,6 @@ impl<'a> HtmlEmitter<'a> {
         }
 
         if should_flatten_image_paragraph {
-            self.remove_soft_breaks(&context.soft_break_ranges);
             self.patch_tag_style(context.open_tag_start, "display:contents");
         }
 
@@ -4378,8 +4384,17 @@ impl<'a> HtmlEmitter<'a> {
 
         if let Some(style_offset) = tag_content.find("style=\"") {
             let value_start = open_tag_start + style_offset + "style=\"".len();
+            let Some(relative_value_end) = self.html[value_start..tag_end_offset].find('"') else {
+                return;
+            };
+            let value_end = value_start + relative_value_end;
+            let prefix = if self.html[value_start..value_end].trim_end().ends_with(';') {
+                ""
+            } else {
+                ";"
+            };
             self.html
-                .insert_str(value_start, &format!("{};", escape_html(style_rule)));
+                .insert_str(value_end, &format!("{prefix}{};", escape_html(style_rule)));
             return;
         }
 
@@ -5614,6 +5629,9 @@ impl PageGeometryBasis {
     fn apply(&mut self, directive: &PartialPageDirective) {
         if let Some(page_size) = directive.page_size {
             self.page_size = page_size;
+            if page_size.has_landscape_default() && directive.page_orientation.is_none() {
+                self.page_orientation = PageOrientation::Landscape;
+            }
             if directive.page_width.is_none() || directive.page_height.is_none() {
                 self.page_width = None;
                 self.page_height = None;
@@ -5647,8 +5665,15 @@ impl PageGeometryBasis {
 }
 
 impl PageSizePreset {
+    fn has_landscape_default(self) -> bool {
+        matches!(self, Self::Ratio16x9 | Self::Ratio4x3)
+    }
+
     fn portrait_size(self) -> (CssLength, CssLength) {
         match self {
+            Self::Ratio16x9 => (CssLength::new("187mm"), CssLength::new("333mm")),
+            Self::Ratio4x3 => (CssLength::new("216mm"), CssLength::new("288mm")),
+            Self::Ratio1x1 => (CssLength::new("250mm"), CssLength::new("250mm")),
             Self::A3 => (CssLength::new("297mm"), CssLength::new("420mm")),
             Self::A4 | Self::Custom => (CssLength::new("210mm"), CssLength::new("297mm")),
             Self::A5 => (CssLength::new("148mm"), CssLength::new("210mm")),
@@ -6686,7 +6711,7 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
                     directive.page_size = Some(page_size);
                 }
             }
-            "page_orientation" | "orientation" => {
+            "page_direction" => {
                 if let Some(page_orientation) = parse_kmark_page_orientation_value(value) {
                     directive.page_orientation = Some(page_orientation);
                 }
@@ -6946,6 +6971,9 @@ fn parse_kmark_page_directive_tokens(input: &str) -> Option<PartialPageDirective
 
 fn parse_kmark_page_size_value(value: &str) -> Option<PageSizePreset> {
     match value.trim().to_ascii_lowercase().as_str() {
+        "16:9" => Some(PageSizePreset::Ratio16x9),
+        "4:3" => Some(PageSizePreset::Ratio4x3),
+        "1:1" => Some(PageSizePreset::Ratio1x1),
         "a3" => Some(PageSizePreset::A3),
         "a4" => Some(PageSizePreset::A4),
         "a5" => Some(PageSizePreset::A5),
@@ -6959,9 +6987,9 @@ fn parse_kmark_page_size_value(value: &str) -> Option<PageSizePreset> {
 }
 
 fn parse_kmark_page_orientation_value(value: &str) -> Option<PageOrientation> {
-    match value.trim() {
-        "portrait" => Some(PageOrientation::Portrait),
-        "landscape" => Some(PageOrientation::Landscape),
+    match value.trim().to_ascii_lowercase().as_str() {
+        "vertical" => Some(PageOrientation::Portrait),
+        "horizontal" => Some(PageOrientation::Landscape),
         _ => None,
     }
 }
@@ -9383,10 +9411,10 @@ mod tests {
     #[test]
     fn applies_unclosed_scope_page_settings_and_nested_overrides() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 page_orientation:portrait page_margin:12mm page_font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_direction:vertical page_margin:12mm page_font_size:11pt -->\n\
              # 1\n\
              <!-- --- -->\n\
-             <!-- kmark { page_orientation:landscape page_font_size:9pt page_margin:8mm -->\n\
+             <!-- kmark { page_direction:horizontal page_font_size:9pt page_margin:8mm -->\n\
              # 2\n\
              <!-- kmark } -->\n\
              # 3",
@@ -9516,7 +9544,7 @@ mod tests {
     #[test]
     fn accepts_page_directives_used_by_completion() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 orientation:landscape page_margin:15mm page_font_size:12pt } -->\n\
+            "<!-- kmark { page_size:A4 page_direction:horizontal page_margin:15mm page_font_size:12pt } -->\n\
              # Alias",
         );
 
@@ -9532,6 +9560,68 @@ mod tests {
         assert_eq!(
             rendered_preview.pages[0].text_style.font_size.as_str(),
             "12pt"
+        );
+    }
+
+    #[test]
+    fn accepts_page_direction() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { page_size:A4 page_direction:horizontal } -->\n\
+             # Horizontal\n\
+             <!-- --- -->\n\
+             <!-- kmark page_direction:vertical -->\n\
+             # Vertical",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 2);
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "297mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.height.as_str(),
+            "210mm"
+        );
+        assert_eq!(rendered_preview.pages[1].page_style.width.as_str(), "210mm");
+        assert_eq!(
+            rendered_preview.pages[1].page_style.height.as_str(),
+            "297mm"
+        );
+    }
+
+    #[test]
+    fn applies_ratio_page_size_presets() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark { page_size:16:9 page_margin:8mm } -->\n\
+             # Wide\n\
+             <!-- --- -->\n\
+             <!-- kmark { page_size:4:3 } -->\n\
+             # Classic\n\
+             <!-- --- -->\n\
+             <!-- kmark { page_size:1:1 } -->\n\
+             # Square\n\
+             <!-- --- -->\n\
+             <!-- kmark { page_size:16:9 page_direction:vertical } -->\n\
+             # Tall",
+        );
+
+        assert_eq!(rendered_preview.pages.len(), 4);
+        assert_eq!(rendered_preview.pages[0].page_style.width.as_str(), "333mm");
+        assert_eq!(
+            rendered_preview.pages[0].page_style.height.as_str(),
+            "187mm"
+        );
+        assert_eq!(rendered_preview.pages[1].page_style.width.as_str(), "288mm");
+        assert_eq!(
+            rendered_preview.pages[1].page_style.height.as_str(),
+            "216mm"
+        );
+        assert_eq!(rendered_preview.pages[2].page_style.width.as_str(), "250mm");
+        assert_eq!(
+            rendered_preview.pages[2].page_style.height.as_str(),
+            "250mm"
+        );
+        assert_eq!(rendered_preview.pages[3].page_style.width.as_str(), "187mm");
+        assert_eq!(
+            rendered_preview.pages[3].page_style.height.as_str(),
+            "333mm"
         );
     }
 
@@ -9993,7 +10083,7 @@ mod tests {
     fn applies_separated_page_directives_to_following_scope() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark page_size:A5 -->\n\
-             <!-- kmark page_orientation:landscape -->\n\
+             <!-- kmark page_direction:horizontal -->\n\
              <!-- kmark page_width:120mm -->\n\
              <!-- kmark page_height:90mm -->\n\
              <!-- kmark page_margin:12mm -->\n\
@@ -10114,9 +10204,9 @@ mod tests {
     #[test]
     fn splits_pages_when_scope_page_style_starts_and_ends() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_size:A4 page_orientation:portrait page_font_size:11pt -->\n\
+            "<!-- kmark { page_size:A4 page_direction:vertical page_font_size:11pt -->\n\
              # Normal\n\
-             <!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->\n\
+             <!-- kmark { page_direction:horizontal page_font_size:9pt align:center -->\n\
              # Wide\n\
              <!-- kmark } -->\n\
              # Back",
@@ -10146,7 +10236,7 @@ mod tests {
     #[test]
     fn keeps_scope_page_style_and_block_decoration_across_explicit_page_break() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark { page_orientation:landscape page_font_size:9pt align:center -->\n\
+            "<!-- kmark { page_direction:horizontal page_font_size:9pt align:center -->\n\
              # Wide 1\n\
              <!-- --- -->\n\
              # Wide 2\n\
@@ -10998,6 +11088,46 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-camera-position=\"43.790344,27.062223,69.488736\""));
+    }
+
+    #[test]
+    fn flattens_saved_model_viewpoint_row_with_multibyte_model_path() {
+        let rendered_preview = render_markdown_preview(
+            "<!--k{ layout:row -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n![1](3x3フック-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:56.209225,58.217715,44.846884 model_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:194.335673,194.335673,158.674412 model_camera_target:0,0,0 -->\n![](poop_shooter-Body.stl)\n<!--k}-->",
+        );
+
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<span class=\"kmark-model-viewer\""),
+            3
+        );
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "3Dモデルを読み込み中"),
+            3
+        );
+        assert!(!rendered_preview.html.contains("<br />"));
+        assert!(rendered_preview.html.contains("3x3フック-Body.stl"));
+    }
+
+    #[test]
+    fn keeps_blank_separated_model_viewpoint_row_paragraphs_flattened() {
+        let rendered_preview = render_markdown_preview(
+            "<!--k{ layout:row -->\n\n![](3x3フック-Body.stl)\n\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:68.978587,-4.058121,61.526485 model_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n\n![](poop_shooter-Body.stl)\n\n<!--k}-->",
+        );
+
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<span class=\"kmark-model-viewer\""),
+            3
+        );
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<p data-source-line-start="),
+            3
+        );
+        assert!(!rendered_preview
+            .html
+            .contains("style=\"display:contents;display:flex"));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"display:flex;flex-direction:row;display:contents;\""));
     }
 
     #[test]

@@ -13,8 +13,7 @@ export type ParsedKmarkDirectiveFragment = {
 
 const PAGE_PARAM_NAMES = new Set([
   "page_size",
-  "orientation",
-  "page_orientation",
+  "page_direction",
   "page_width",
   "page_height",
   "page_margin",

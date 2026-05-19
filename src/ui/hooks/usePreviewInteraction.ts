@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { resetKmarkModelViewerCamera } from "../../adapters/browser/browserModelRenderer";
+import {
+  hasKmarkModelViewers,
+  resetAllKmarkModelViewerCameras,
+  resetKmarkModelViewerCamera,
+} from "../../adapters/browser/browserModelRenderer";
 import { type PreviewDisplayMode } from "../../domain/preview";
 
-const PREVIEW_CONTEXT_MENU_WIDTH_PX = 260;
+const PREVIEW_CONTEXT_MENU_WIDTH_PX = 320;
 const PREVIEW_CONTEXT_MENU_PADDING_PX = 12;
 const PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 
@@ -12,7 +16,9 @@ export const MAX_PREVIEW_ZOOM_SCALE = 10;
 export type PreviewFitMode = "width" | "page";
 
 type PreviewContextMenuState = {
+  readonly hasModelCameraTargets: boolean;
   readonly modelViewer: HTMLElement | null;
+  readonly modelViewerRoot: HTMLElement | null;
   readonly x: number;
   readonly y: number;
 };
@@ -79,6 +85,16 @@ export function usePreviewInteraction({
     closeContextMenu();
   }, [closeContextMenu, contextMenuState]);
 
+  const handleAllModelCamerasReset = useCallback(() => {
+    const modelViewerRoot = contextMenuState?.modelViewerRoot ?? null;
+
+    if (modelViewerRoot !== null) {
+      resetAllKmarkModelViewerCameras(modelViewerRoot);
+    }
+
+    closeContextMenu();
+  }, [closeContextMenu, contextMenuState]);
+
   const handleModelViewpointSave = useCallback(() => {
     const modelViewer = contextMenuState?.modelViewer ?? null;
 
@@ -93,18 +109,28 @@ export function usePreviewInteraction({
     setZoomScale(clampPreviewZoomScale(nextZoomScale));
   }, []);
 
-  const handlePreviewContextMenu = useCallback((clientX: number, clientY: number, modelViewer: HTMLElement | null = null) => {
+  const handlePreviewContextMenu = useCallback((
+    clientX: number,
+    clientY: number,
+    modelViewer: HTMLElement | null = null,
+    modelViewerRoot: HTMLElement | null = null,
+  ) => {
+    const hasModelCameraTargets = includeModelCameraMenuItem
+      && modelViewerRoot !== null
+      && hasKmarkModelViewers(modelViewerRoot);
     const modelMenuItemCount = includeModelCameraMenuItem && modelViewer !== null
       ? 1 + (onModelViewpointSave === undefined ? 0 : 1)
       : 0;
+    const allModelMenuItemCount = hasModelCameraTargets ? 1 : 0;
     const itemCount = 1
       + modelMenuItemCount
+      + allModelMenuItemCount
       + contextMenuExtraItemCount;
     const menuHeight = PREVIEW_CONTEXT_MENU_PADDING_PX + (PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX * itemCount);
     const nextX = Math.max(8, Math.min(clientX, window.innerWidth - PREVIEW_CONTEXT_MENU_WIDTH_PX - 8));
     const nextY = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
 
-    setContextMenuState({ modelViewer, x: nextX, y: nextY });
+    setContextMenuState({ hasModelCameraTargets, modelViewer, modelViewerRoot, x: nextX, y: nextY });
   }, [contextMenuExtraItemCount, includeModelCameraMenuItem, onModelViewpointSave]);
 
   useEffect(() => {
@@ -166,6 +192,7 @@ export function usePreviewInteraction({
     contextMenuRef,
     contextMenuState,
     contextMenuStyle,
+    handleAllModelCamerasReset,
     handlePreviewContextMenu,
     handleModelCameraReset,
     handleModelViewpointSave,
@@ -176,6 +203,9 @@ export function usePreviewInteraction({
       includeModelCameraMenuItem
       && contextMenuState?.modelViewer !== null
       && contextMenuState?.modelViewer !== undefined,
+    hasModelCameraTargets:
+      includeModelCameraMenuItem
+      && contextMenuState?.hasModelCameraTargets === true,
     fitMode,
     zoomScale,
   };

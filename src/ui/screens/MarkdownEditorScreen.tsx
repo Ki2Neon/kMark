@@ -259,6 +259,7 @@ export function MarkdownEditorScreen({
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
     contextMenuStyle: previewContextMenuStyle,
+    handleAllModelCamerasReset: handlePreviewAllModelCamerasReset,
     handleModelCameraReset: handlePreviewModelCameraReset,
     handleModelViewpointSave: handlePreviewModelViewpointSaveRequest,
     handlePreviewContextMenu: handlePreviewInteractionContextMenu,
@@ -266,6 +267,7 @@ export function MarkdownEditorScreen({
     handleZoomFit: handlePreviewZoomFit,
     handleZoomScaleChange: handlePreviewZoomScaleChange,
     hasModelCameraTarget: previewContextMenuHasModelCameraTarget,
+    hasModelCameraTargets: previewContextMenuHasModelCameraTargets,
     fitMode: previewFitMode,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
@@ -278,9 +280,10 @@ export function MarkdownEditorScreen({
     clientX: number,
     clientY: number,
     modelViewer: HTMLElement | null,
+    modelViewerRoot: HTMLElement,
   ) => {
     setIsEditFocused(false);
-    handlePreviewInteractionContextMenu(clientX, clientY, modelViewer);
+    handlePreviewInteractionContextMenu(clientX, clientY, modelViewer, modelViewerRoot);
   }, [handlePreviewInteractionContextMenu]);
 
   useEffect(() => {
@@ -943,7 +946,9 @@ export function MarkdownEditorScreen({
         <PreviewContextMenu
           ariaLabel="本体プレビューのコンテキストメニュー"
           hasModelCameraTarget={previewContextMenuHasModelCameraTarget}
+          hasModelCameraTargets={previewContextMenuHasModelCameraTargets}
           menuRef={previewContextMenuRef}
+          onAllModelCamerasReset={handlePreviewAllModelCamerasReset}
           onFit={handlePreviewZoomFit}
           onFullFit={previewDisplayMode === "a4" ? handlePreviewZoomFullFit : undefined}
           onModelCameraReset={handlePreviewModelCameraReset}

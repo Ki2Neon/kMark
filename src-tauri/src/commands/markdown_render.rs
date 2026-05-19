@@ -69,6 +69,37 @@ mod tests {
             .contains("data-kmark-model-camera-position=\"1,2,3\""));
     }
 
+    #[test]
+    fn tauri_command_renders_saved_model_viewpoints_in_three_column_scope() {
+        let sandbox = create_temp_test_directory();
+        let markdown_path = sandbox.join("test_3d.md");
+        fs::write(&markdown_path, "# note").expect("failed to create markdown");
+        for file_name in [
+            "3x3フック-Body.stl",
+            "dcdcps_buckle-Body.stl",
+            "poop_shooter-Body.stl",
+        ] {
+            fs::write(
+                sandbox.join(file_name),
+                "solid a\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid a\n",
+            )
+            .expect("failed to create model");
+        }
+
+        let payload = render_markdown_preview_payload(
+            "<!--k{ layout:row -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n![1](3x3フック-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:56.209225,58.217715,44.846884 model_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:194.335673,194.335673,158.674412 model_camera_target:0,0,0 -->\n![](poop_shooter-Body.stl)\n<!--k}-->".to_owned(),
+            Some(markdown_path.to_string_lossy().into_owned()),
+        );
+
+        assert_eq!(
+            payload
+                .html
+                .matches("<span class=\"kmark-model-viewer\"")
+                .count(),
+            3
+        );
+    }
+
     fn create_temp_test_directory() -> std::path::PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)

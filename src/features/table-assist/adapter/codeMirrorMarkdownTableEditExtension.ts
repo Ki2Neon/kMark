@@ -58,6 +58,7 @@ type TableContextMenuState = {
 
 type TableContextMenuItem = {
   readonly disabled?: boolean;
+  readonly icon: string;
   readonly label: string;
   readonly run: (view: EditorView) => boolean;
 };
@@ -205,58 +206,65 @@ function createEditorContextMenu(view: EditorView, activeCell: ActiveTableCell |
   const groups: (readonly TableContextMenuItem[])[] = [];
 
   if (activeCell === null) {
-    groups.push([{ label: "表を追加", run: insertMarkdownTable }]);
+    groups.push([{ icon: "+", label: "表を追加", run: insertMarkdownTable }]);
   }
 
   if (activeCell !== null) {
     groups.push([
-      { label: "上に行を追加", run: (targetView) => insertTableRow(targetView, "above") },
-      { label: "下に行を追加", run: (targetView) => insertTableRow(targetView, "below") },
-      { label: "行を削除", run: deleteTableRow, disabled: activeCell.row.kind === "header" },
+      { icon: "↑", label: "上に行を追加", run: (targetView) => insertTableRow(targetView, "above") },
+      { icon: "↓", label: "下に行を追加", run: (targetView) => insertTableRow(targetView, "below") },
+      { icon: "−", label: "行を削除", run: deleteTableRow, disabled: activeCell.row.kind === "header" },
       {
         disabled: activeCell.row.kind === "header" || activeCell.rowIndex <= 1,
+        icon: "↑",
         label: "行を上へ移動",
         run: (targetView) => moveTableRow(targetView, "up"),
       },
       {
         disabled: activeCell.row.kind === "header" || activeCell.rowIndex >= activeCell.table.rows.length - 1,
+        icon: "↓",
         label: "行を下へ移動",
         run: (targetView) => moveTableRow(targetView, "down"),
       },
     ]);
     groups.push([
-      { label: "左に列を追加", run: (targetView) => insertTableColumn(targetView, "left") },
-      { label: "右に列を追加", run: (targetView) => insertTableColumn(targetView, "right") },
+      { icon: "←", label: "左に列を追加", run: (targetView) => insertTableColumn(targetView, "left") },
+      { icon: "→", label: "右に列を追加", run: (targetView) => insertTableColumn(targetView, "right") },
       {
         disabled: activeCell.table.columnCount <= 1,
+        icon: "−",
         label: "列を削除",
         run: deleteTableColumn,
       },
       {
         disabled: activeCell.columnIndex <= 0,
+        icon: "←",
         label: "列を左へ移動",
         run: (targetView) => moveTableColumn(targetView, "left"),
       },
       {
         disabled: activeCell.columnIndex >= activeCell.table.columnCount - 1,
+        icon: "→",
         label: "列を右へ移動",
         run: (targetView) => moveTableColumn(targetView, "right"),
       },
     ]);
     groups.push([
-      { label: "左寄せ", run: (targetView) => setTableColumnAlignment(targetView, "left") },
-      { label: "中央寄せ", run: (targetView) => setTableColumnAlignment(targetView, "center") },
-      { label: "右寄せ", run: (targetView) => setTableColumnAlignment(targetView, "right") },
+      { icon: "L", label: "左寄せ", run: (targetView) => setTableColumnAlignment(targetView, "left") },
+      { icon: "C", label: "中央寄せ", run: (targetView) => setTableColumnAlignment(targetView, "center") },
+      { icon: "R", label: "右寄せ", run: (targetView) => setTableColumnAlignment(targetView, "right") },
     ]);
     groups.push([
       {
         disabled: !canMergeSelectedTableCells(view.state),
+        icon: "□",
         label: "セル結合",
         run: mergeSelectedTableCells,
       },
       {
         disabled: activeCell.row.kind === "header"
           || findMergeRegionContainingCell(activeCell.table, activeCell.rowIndex, activeCell.columnIndex) === null,
+        icon: "◇",
         label: "結合解除",
         run: splitMergedTableCell,
       },
@@ -273,7 +281,14 @@ function createEditorContextMenu(view: EditorView, activeCell: ActiveTableCell |
       button.className = "cm-markdownTableContextMenu__item";
       button.disabled = item.disabled === true;
       button.role = "menuitem";
-      button.textContent = item.label;
+      const icon = ownerDocument.createElement("span");
+      icon.className = "cm-markdownTableContextMenu__icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = item.icon;
+      const label = ownerDocument.createElement("span");
+      label.className = "cm-markdownTableContextMenu__label";
+      label.textContent = item.label;
+      button.replaceChildren(icon, label);
       button.addEventListener("mousedown", (mouseEvent) => {
         mouseEvent.preventDefault();
       });
@@ -1461,11 +1476,27 @@ const markdownTableContextMenuTheme = EditorView.theme({
     borderRadius: "4px",
     color: "var(--text)",
     cursor: "pointer",
-    display: "block",
+    display: "grid",
     font: "inherit",
+    gap: "8px",
+    gridTemplateColumns: "18px minmax(0, 1fr)",
+    alignItems: "center",
     padding: "6px 10px",
     textAlign: "left",
     width: "100%",
+  },
+  ".cm-markdownTableContextMenu__icon": {
+    color: "var(--text-soft)",
+    fontSize: "0.9em",
+    fontWeight: "700",
+    lineHeight: "1",
+    textAlign: "center",
+  },
+  ".cm-markdownTableContextMenu__label": {
+    minWidth: "0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   ".cm-markdownTableContextMenu__item:hover, .cm-markdownTableContextMenu__item:focus-visible": {
     backgroundColor: "color-mix(in srgb, var(--focus) 16%, transparent)",
