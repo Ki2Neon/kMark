@@ -4381,8 +4381,17 @@ impl<'a> HtmlEmitter<'a> {
 
         if let Some(style_offset) = tag_content.find("style=\"") {
             let value_start = open_tag_start + style_offset + "style=\"".len();
+            let Some(relative_value_end) = self.html[value_start..tag_end_offset].find('"') else {
+                return;
+            };
+            let value_end = value_start + relative_value_end;
+            let prefix = if self.html[value_start..value_end].trim_end().ends_with(';') {
+                ""
+            } else {
+                ";"
+            };
             self.html
-                .insert_str(value_start, &format!("{};", escape_html(style_rule)));
+                .insert_str(value_end, &format!("{prefix}{};", escape_html(style_rule)));
             return;
         }
 
@@ -11019,6 +11028,28 @@ mod tests {
         );
         assert!(!rendered_preview.html.contains("<br />"));
         assert!(rendered_preview.html.contains("3x3フック-Body.stl"));
+    }
+
+    #[test]
+    fn keeps_blank_separated_model_viewpoint_row_paragraphs_flattened() {
+        let rendered_preview = render_markdown_preview(
+            "<!--k{ layout:row -->\n\n![](3x3フック-Body.stl)\n\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:68.978587,-4.058121,61.526485 model_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n\n![](poop_shooter-Body.stl)\n\n<!--k}-->",
+        );
+
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<span class=\"kmark-model-viewer\""),
+            3
+        );
+        assert_eq!(
+            count_occurrences(&rendered_preview.html, "<p data-source-line-start="),
+            3
+        );
+        assert!(!rendered_preview
+            .html
+            .contains("style=\"display:contents;display:flex"));
+        assert!(rendered_preview
+            .html
+            .contains("style=\"display:flex;flex-direction:row;display:contents;\""));
     }
 
     #[test]
