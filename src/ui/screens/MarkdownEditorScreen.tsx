@@ -162,6 +162,7 @@ export function MarkdownEditorScreen({
     handleErrorClear,
     handleErrorRaise,
     handleImportDroppedAssets,
+    handleImportPastedAssets,
   } = useMarkdownEditor(startupEditMode, { initialDocumentMode });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -808,6 +809,7 @@ export function MarkdownEditorScreen({
                 multiCursorModifier={multiCursorModifier}
                 showLineNumbers={showLineNumbers}
                 onAssetDrop={handleImportDroppedAssets}
+                onAssetPaste={handleImportPastedAssets}
                 onContentChange={handleContentChange}
                 onCursorLineChange={handleEditCursorLineChange}
                 onFocusChange={handleEditFocusChange}
@@ -896,6 +898,7 @@ export function MarkdownEditorScreen({
                       multiCursorModifier={multiCursorModifier}
                       showLineNumbers={showLineNumbers}
                       onAssetDrop={handleImportDroppedAssets}
+                      onAssetPaste={handleImportPastedAssets}
                       onContentChange={handleContentChange}
                       onCursorLineChange={handleEditCursorLineChange}
                       onFocusChange={handleEditFocusChange}

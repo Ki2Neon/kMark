@@ -10,7 +10,8 @@ mod write_markdown_document;
 pub use collect_markdown_file_paths::collect_markdown_file_paths;
 pub use enqueue_markdown_open_requests::enqueue_markdown_open_requests;
 pub use import_markdown_assets::{
-    import_markdown_assets, ImportMarkdownAssetsError, ImportedAssetKind, ImportedMarkdownAsset,
+    import_markdown_asset_data, import_markdown_assets, ImportMarkdownAssetsError,
+    ImportedAssetKind, ImportedMarkdownAsset, MarkdownAssetData,
 };
 pub use list_markdown_path_suggestions::{
     list_markdown_path_suggestions, MarkdownPathSuggestion, MarkdownPathSuggestionEntryKind,

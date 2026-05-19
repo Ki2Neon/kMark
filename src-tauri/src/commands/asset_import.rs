@@ -6,10 +6,10 @@ use tauri::State;
 use super::error::CommandErrorPayload;
 use crate::{
     usecase::{
-        import_markdown_assets,
+        import_markdown_asset_data as import_markdown_asset_data_usecase, import_markdown_assets,
         list_markdown_path_suggestions as list_markdown_path_suggestions_usecase,
-        ImportMarkdownAssetsError, ImportedAssetKind, MarkdownPathSuggestionEntryKind,
-        MarkdownPathSuggestionFilter,
+        ImportMarkdownAssetsError, ImportedAssetKind, MarkdownAssetData,
+        MarkdownPathSuggestionEntryKind, MarkdownPathSuggestionFilter,
     },
     AppState,
 };
@@ -22,6 +22,14 @@ pub struct ImportedMarkdownAssetPayload {
     relative_path: String,
     markdown_text: String,
     asset_kind: ImportedAssetKindPayload,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownAssetDataPayload {
+    file_name: String,
+    mime_type: String,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,6 +116,16 @@ impl From<crate::usecase::ImportedMarkdownAsset> for ImportedMarkdownAssetPayloa
     }
 }
 
+impl From<MarkdownAssetDataPayload> for MarkdownAssetData {
+    fn from(payload: MarkdownAssetDataPayload) -> Self {
+        Self {
+            file_name: payload.file_name,
+            mime_type: payload.mime_type,
+            bytes: payload.bytes,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn import_markdown_asset_files(
     state: State<'_, AppState>,
@@ -121,6 +139,20 @@ pub fn import_markdown_asset_files(
         .collect::<Vec<_>>();
 
     import_markdown_assets(&state.asset_repository, &markdown_path, &dropped_paths)
+        .map(|assets| assets.into_iter().map(Into::into).collect())
+        .map_err(CommandErrorPayload::from)
+}
+
+#[tauri::command]
+pub fn import_markdown_asset_data(
+    state: State<'_, AppState>,
+    markdown_file_path: String,
+    files: Vec<MarkdownAssetDataPayload>,
+) -> Result<Vec<ImportedMarkdownAssetPayload>, CommandErrorPayload> {
+    let markdown_path = PathBuf::from(markdown_file_path);
+    let files = files.into_iter().map(Into::into).collect::<Vec<_>>();
+
+    import_markdown_asset_data_usecase(&state.asset_repository, &markdown_path, &files)
         .map(|assets| assets.into_iter().map(Into::into).collect())
         .map_err(CommandErrorPayload::from)
 }
@@ -174,7 +206,7 @@ impl From<ImportMarkdownAssetsError> for CommandErrorPayload {
             ),
             ImportMarkdownAssetsError::UnsupportedAssetType(path) => Self::with_detail(
                 "unsupported_asset_type",
-                "現在ドロップできるアセットは画像、動画、3Dモデルファイルのみです。",
+                "現在取り込めるアセットは画像、動画、3Dモデルファイルのみです。",
                 path,
             ),
             ImportMarkdownAssetsError::InvalidDroppedFileName(path) => Self::with_detail(
@@ -198,6 +230,15 @@ impl From<ImportMarkdownAssetsError> for CommandErrorPayload {
                     file_name_or_path(&source_path)
                 ),
                 format!("{source_path} -> {destination_path}: {source}"),
+            ),
+            ImportMarkdownAssetsError::WriteFailed {
+                file_name,
+                destination_path,
+                source,
+            } => Self::with_detail(
+                "asset_write_failed",
+                format!("アセットの書き込みに失敗しました: {file_name}"),
+                format!("{destination_path}: {source}"),
             ),
         }
     }

@@ -41,6 +41,21 @@ impl AssetRepository for FileSystemAssetRepository {
         has_same_stream_content(&mut left_file, &mut right_file)
     }
 
+    fn write_new_file(&self, destination: &Path, bytes: &[u8]) -> io::Result<()> {
+        let mut destination_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        let result = destination_file.write_all(bytes);
+        drop(destination_file);
+
+        if result.is_err() {
+            let _ = fs::remove_file(destination);
+        }
+
+        result
+    }
+
     fn exists(&self, path: &Path) -> bool {
         path.exists()
     }

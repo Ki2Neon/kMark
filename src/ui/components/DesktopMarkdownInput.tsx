@@ -123,6 +123,52 @@ const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
 const KMARK_SCOPE_DISPLAY_EXTENSION = createCodeMirrorKmarkScopeDisplayExtension();
 const MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION = createCodeMirrorMarkdownTableAutoFormatExtension();
 const MARKDOWN_TABLE_EDIT_EXTENSION = createCodeMirrorMarkdownTableEditExtension();
+const SUPPORTED_CLIPBOARD_ASSET_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "mp4",
+  "webm",
+  "ogg",
+  "mov",
+  "m4v",
+  "glb",
+  "gltf",
+  "obj",
+  "stl",
+  "fbx",
+]);
+const CLIPBOARD_ASSET_EXTENSION_BY_MIME_TYPE: Readonly<Record<string, string>> = {
+  "application/vnd.ms-pki.stl": "stl",
+  "image/bmp": "bmp",
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/svg+xml": "svg",
+  "image/webp": "webp",
+  "model/fbx": "fbx",
+  "model/gltf+json": "gltf",
+  "model/gltf-binary": "glb",
+  "model/obj": "obj",
+  "model/stl": "stl",
+  "video/mp4": "mp4",
+  "video/ogg": "ogg",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/x-m4v": "m4v",
+};
+const CLIPBOARD_FALLBACK_FILE_STEM = "clipboard-asset";
+
+type PastedMarkdownAssetFile = {
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly bytes: readonly number[];
+};
 
 function isDarkEditorTheme(appThemeId: AppThemeId): boolean {
   return !(appThemeId === "vscode-light" || appThemeId === "github-light" || appThemeId === "paper");
@@ -130,6 +176,70 @@ function isDarkEditorTheme(appThemeId: AppThemeId): boolean {
 
 function usesMetaKeyForCtrlCmd(): boolean {
   return /Mac|iPhone|iPad/u.test(window.navigator.platform);
+}
+
+function getFileNameExtension(fileName: string): string | null {
+  const extensionMatch = fileName.match(/\.([^./\\]+)$/u);
+
+  return extensionMatch?.[1]?.toLowerCase() ?? null;
+}
+
+function inferClipboardAssetExtension(mimeType: string): string | null {
+  const normalizedMimeType = mimeType.trim().toLowerCase();
+
+  return CLIPBOARD_ASSET_EXTENSION_BY_MIME_TYPE[normalizedMimeType] ?? null;
+}
+
+function isSupportedClipboardAssetFile(file: File): boolean {
+  const extension = getFileNameExtension(file.name);
+
+  return (extension !== null && SUPPORTED_CLIPBOARD_ASSET_EXTENSIONS.has(extension))
+    || inferClipboardAssetExtension(file.type) !== null;
+}
+
+function collectClipboardAssetFiles(clipboardData: DataTransfer): readonly File[] {
+  const directFiles = Array.from(clipboardData.files).filter(isSupportedClipboardAssetFile);
+
+  if (directFiles.length > 0) {
+    return directFiles;
+  }
+
+  return Array.from(clipboardData.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null && isSupportedClipboardAssetFile(file));
+}
+
+function createClipboardAssetFileName(file: File, index: number): string {
+  const rawName = file.name.trim();
+  const baseName = rawName.length > 0
+    ? rawName.split(/[/\\]/u).filter((part) => part.length > 0).pop() ?? rawName
+    : `${CLIPBOARD_FALLBACK_FILE_STEM}-${index + 1}`;
+  const extension = getFileNameExtension(baseName);
+
+  if (extension !== null && SUPPORTED_CLIPBOARD_ASSET_EXTENSIONS.has(extension)) {
+    return baseName;
+  }
+
+  const inferredExtension = inferClipboardAssetExtension(file.type);
+
+  if (inferredExtension === null) {
+    return baseName;
+  }
+
+  return `${baseName}.${inferredExtension}`;
+}
+
+async function createPastedMarkdownAssetFiles(files: readonly File[]): Promise<readonly PastedMarkdownAssetFile[]> {
+  return Promise.all(files.map(async (file, index) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    return {
+      fileName: createClipboardAssetFileName(file, index),
+      mimeType: file.type,
+      bytes: Array.from(bytes),
+    };
+  }));
 }
 
 function getCursorLineNumber(view: EditorView): number {
@@ -529,6 +639,17 @@ function insertDroppedAssetMarkdown(view: EditorView, lineNumber: number, markdo
   });
 }
 
+function insertPastedAssetMarkdown(view: EditorView, selection: EditorSelection, markdownText: string): void {
+  view.focus();
+  view.dispatch({
+    selection: createBoundedEditorSelection(view, selection),
+  });
+  view.dispatch({
+    ...view.state.replaceSelection(markdownText),
+    scrollIntoView: true,
+  });
+}
+
 type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly blurOnEscapeWhenSelectionEmpty?: boolean;
@@ -538,6 +659,7 @@ type DesktopMarkdownInputProps = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
+  readonly onAssetPaste?: (files: readonly PastedMarkdownAssetFile[]) => Promise<string | null>;
   readonly onContentChange: (content: string) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
@@ -557,6 +679,7 @@ function DesktopMarkdownInputComponent({
   multiCursorModifier,
   showLineNumbers,
   onAssetDrop,
+  onAssetPaste,
   onContentChange,
   onCursorLineChange,
   onFocusChange,
@@ -800,6 +923,44 @@ function DesktopMarkdownInputComponent({
     };
   }, [handleTauriDragDropEvent, onAssetDrop]);
 
+  const assetPasteExtension = useMemo<Extension>(() => EditorView.domEventHandlers({
+    paste(event, view) {
+      if (onAssetPaste === undefined || event.clipboardData === null) {
+        return false;
+      }
+
+      const files = collectClipboardAssetFiles(event.clipboardData);
+
+      if (files.length === 0) {
+        return false;
+      }
+
+      event.preventDefault();
+
+      const pasteSelection = view.state.selection;
+
+      void createPastedMarkdownAssetFiles(files)
+        .then((pastedFiles) => onAssetPaste(pastedFiles))
+        .then((markdownText) => {
+          const currentEditor = editorRef.current;
+
+          if (
+            currentEditor === null
+            || currentEditor !== view
+            || markdownText === null
+            || markdownText.length === 0
+          ) {
+            return;
+          }
+
+          insertPastedAssetMarkdown(currentEditor, pasteSelection, markdownText);
+        })
+        .catch(() => {});
+
+      return true;
+    },
+  }), [onAssetPaste]);
+
   const editorTheme = useMemo(() => EditorView.theme({
     "&": {
       backgroundColor: "transparent",
@@ -915,6 +1076,7 @@ function DesktopMarkdownInputComponent({
       MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       KMARK_SCOPE_DISPLAY_EXTENSION,
+      Prec.highest(assetPasteExtension),
       EditorView.lineWrapping,
       EDITOR_CONTENT_ATTRIBUTES,
       MARKDOWN_SELECTION_WRAP_EXTENSION,
@@ -934,7 +1096,7 @@ function DesktopMarkdownInputComponent({
       )),
       editorTheme,
     ];
-  }, [blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, multiCursorModifier, showLineNumbers]);
+  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, multiCursorModifier, showLineNumbers]);
 
   return (
     <>
