@@ -21,13 +21,12 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
-use dto::SubWindowStatePayload;
 use infra::{
     load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
     restore_window_state, FileSystemAssetRepository, FileSystemMarkdownDocumentRepository,
     InMemoryOpenRequestQueue, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,
-    TRAY_COORDINATOR_POLL_INTERVAL,
+    SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL, TRAY_COORDINATOR_POLL_INTERVAL,
 };
 use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RecentFiles, StoredEdit,
@@ -64,7 +63,7 @@ pub(crate) struct AppState {
     pub(crate) editor_draft: Mutex<Option<StoredEdit>>,
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
     pub(crate) recent_files: Mutex<RecentFiles>,
-    pub(crate) sub_window_states: Mutex<HashMap<String, SubWindowStatePayload>>,
+    pub(crate) sub_window_sources: Mutex<HashMap<String, dto::SubWindowStatePayload>>,
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
     pub(crate) next_sub_window_sequence: AtomicU64,
@@ -91,21 +90,16 @@ fn should_start_hidden() -> bool {
         .any(|arg| arg == OsStr::new(AUTOSTART_HIDDEN_ARG))
 }
 
-fn create_new_untitled_window<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> tauri::Result<()> {
+fn create_new_untitled_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let label = next_untitled_window_label(app);
-    let window = WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::App(TRAY_UNTITLED_WINDOW_URL.into()),
-    )
-    .title("untitled.md - kMark")
-    .inner_size(1280.0, 860.0)
-    .min_inner_size(50.0, 50.0)
-    .visible(true)
-    .focused(true)
-    .build()?;
+    let window =
+        WebviewWindowBuilder::new(app, label, WebviewUrl::App(TRAY_UNTITLED_WINDOW_URL.into()))
+            .title("untitled.md - kMark")
+            .inner_size(1280.0, 860.0)
+            .min_inner_size(50.0, 50.0)
+            .visible(true)
+            .focused(true)
+            .build()?;
 
     let _ = window.set_focus();
 
@@ -289,6 +283,24 @@ fn start_tray_coordinator<R: tauri::Runtime + 'static>(
     Ok(())
 }
 
+fn start_sub_window_registry_worker<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) {
+    let worker_app = app.clone();
+
+    std::thread::spawn(move || loop {
+        if worker_app
+            .state::<AppState>()
+            .should_exit
+            .load(Ordering::SeqCst)
+        {
+            break;
+        }
+
+        commands::sub_window::heartbeat_sub_window_sources(&worker_app);
+
+        std::thread::sleep(SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default().manage(AppState::default());
@@ -304,48 +316,70 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_dialog::init());
 
     let builder = builder
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::Resized(_) => {
-                    if window.label() != MAIN_WINDOW_LABEL {
-                        return;
-                    }
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Resized(_) => {
+                if window.label() != MAIN_WINDOW_LABEL {
+                    return;
+                }
 
+                if let Err(error) = persist_window_state(window.app_handle(), window) {
+                    eprintln!("failed to persist main window state: {error}");
+                }
+            }
+            tauri::WindowEvent::Focused(true) => {
+                if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
+                    return;
+                }
+
+                if let Err(error) =
+                    commands::sub_window::set_active_sub_window_source_for_window_label(
+                        window.app_handle(),
+                        window.label(),
+                    )
+                {
+                    eprintln!("failed to activate subwindow source: {}", error.message());
+                }
+            }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
+                    commands::sub_window::remove_sub_window_state(
+                        window.app_handle(),
+                        window.label(),
+                    );
+                    return;
+                }
+
+                if window.label() == MAIN_WINDOW_LABEL {
                     if let Err(error) = persist_window_state(window.app_handle(), window) {
                         eprintln!("failed to persist main window state: {error}");
                     }
                 }
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
-                        commands::sub_window::remove_sub_window_state(
-                            window.app_handle(),
-                            window.label(),
-                        );
-                        return;
-                    }
 
-                    if window.label() == MAIN_WINDOW_LABEL {
-                        if let Err(error) = persist_window_state(window.app_handle(), window) {
-                            eprintln!("failed to persist main window state: {error}");
-                        }
-                    }
-
-                    if !window
-                        .app_handle()
-                        .state::<AppState>()
-                        .should_exit
-                        .load(Ordering::SeqCst)
+                if !window
+                    .app_handle()
+                    .state::<AppState>()
+                    .should_exit
+                    .load(Ordering::SeqCst)
+                {
+                    api.prevent_close();
+                    if let Err(error) =
+                        window.emit_to(window.label(), WINDOW_CLOSE_REQUESTED_EVENT, ())
                     {
-                        api.prevent_close();
-                        if let Err(error) =
-                            window.emit_to(window.label(), WINDOW_CLOSE_REQUESTED_EVENT, ())
-                        {
-                            eprintln!("failed to request window close confirmation: {error}");
-                        }
+                        eprintln!("failed to request window close confirmation: {error}");
                     }
                 }
-                _ => {}
             }
+            tauri::WindowEvent::Destroyed => {
+                if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
+                    return;
+                }
+
+                commands::sub_window::remove_sub_window_source_for_window_label(
+                    window.app_handle(),
+                    window.label(),
+                );
+            }
+            _ => {}
         })
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -452,6 +486,8 @@ pub fn run() {
             #[cfg(desktop)]
             start_tray_coordinator(&app_handle)?;
 
+            start_sub_window_registry_worker(&app_handle);
+
             handle_startup_markdown_open_requests(&app_handle);
 
             if !should_start_hidden() {
@@ -480,10 +516,15 @@ pub fn run() {
             commands::preview_preferences::set_preview_preferences,
             commands::recent_files::get_recent_files,
             commands::recent_files::record_recent_file,
-            commands::sub_window::get_sub_window_state,
+            commands::sub_window::activate_sub_window_source,
+            commands::sub_window::get_sub_window_source_state,
+            commands::sub_window::get_sub_window_sources,
             commands::sub_window::open_sub_window,
-            commands::sub_window::publish_sub_window_state,
+            commands::sub_window::publish_sub_window_source_state,
+            commands::sub_window::register_sub_window_source,
             commands::sub_window::request_sub_window_source_line_selection,
+            commands::sub_window::take_sub_window_source_line_selection_requests,
+            commands::sub_window::unregister_sub_window_source,
             commands::file_open::read_markdown_document_at_path,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,

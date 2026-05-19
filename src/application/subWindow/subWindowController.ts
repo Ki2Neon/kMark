@@ -1,6 +1,10 @@
 import {
   SUB_WINDOW_STATE_VERSION,
   type SubWindowGateway,
+  type SubWindowResolvedSourceState,
+  type SubWindowSelection,
+  type SubWindowSourceStateChanged,
+  type SubWindowSourcesSnapshot,
   type SubWindowSourceLineSelectionRequest,
   type SubWindowState,
   type SubWindowStateRequest,
@@ -26,39 +30,61 @@ export class SubWindowController {
     this.#gateway = dependencies.gateway;
   }
 
-  async open(request: SubWindowStateRequest): Promise<void> {
-    await this.#gateway.open(this.#createState(request));
+  activateSource(sourceId: string): Promise<void> {
+    return this.#gateway.activateSource(sourceId);
   }
 
-  load(stateKey: string | null): Promise<SubWindowState | null> {
-    return this.#gateway.load(stateKey);
+  getSources(): Promise<SubWindowSourcesSnapshot> {
+    return this.#gateway.getSources();
   }
 
-  publish(request: SubWindowStateRequest): Promise<void> {
-    return this.#gateway.publish(this.#createState(request));
+  getSourceState(selection: SubWindowSelection): Promise<SubWindowResolvedSourceState> {
+    return this.#gateway.getSourceState(selection);
   }
 
-  requestSourceLineSelection(lineNumber: number): Promise<void> {
+  listenSourceStateChanged(
+    callback: (change: SubWindowSourceStateChanged) => void,
+  ): Promise<() => void> {
+    return this.#gateway.listenSourceStateChanged(callback);
+  }
+
+  listenSourcesChanged(
+    callback: (snapshot: SubWindowSourcesSnapshot) => void,
+  ): Promise<() => void> {
+    return this.#gateway.listenSourcesChanged(callback);
+  }
+
+  async open(): Promise<void> {
+    await this.#gateway.open();
+  }
+
+  publishSourceState(sourceId: string, request: SubWindowStateRequest): Promise<void> {
+    return this.#gateway.publishSourceState(sourceId, this.#createState(request));
+  }
+
+  registerSource(request: SubWindowStateRequest): Promise<string> {
+    return this.#gateway.registerSource(this.#createState(request));
+  }
+
+  requestSourceLineSelection(sourceId: string, lineNumber: number): Promise<void> {
     this.#nextSourceLineSelectionRequestId += 1;
 
     return this.#gateway.requestSourceLineSelection({
       lineNumber,
       requestId: this.#nextSourceLineSelectionRequestId,
       requestedAtEpochMs: this.#clock.now(),
+      sourceId,
     });
-  }
-
-  subscribe(
-    stateKey: string | null,
-    callback: (state: SubWindowState) => void,
-  ): Promise<() => void> {
-    return this.#gateway.listen(stateKey, callback);
   }
 
   subscribeSourceLineSelection(
     callback: (request: SubWindowSourceLineSelectionRequest) => void,
   ): Promise<() => void> {
     return this.#gateway.listenSourceLineSelection(callback);
+  }
+
+  unregisterSource(sourceId: string): Promise<void> {
+    return this.#gateway.unregisterSource(sourceId);
   }
 
   #createState(request: SubWindowStateRequest): SubWindowState {

@@ -23,6 +23,7 @@ export type RuntimeDragDropEvent = {
 
 export type RuntimeApi = {
   readonly kind: "browser" | "tauri";
+  closeWindow(): Promise<void>;
   convertFileSrc(filePath: string): string;
   invoke<T>(command: string, args: Record<string, unknown>): Promise<T>;
   isFullscreen(): Promise<boolean>;
@@ -64,6 +65,10 @@ export async function invokeRuntimeCommand<T>(
   args: Record<string, unknown>,
 ): Promise<T> {
   return (await loadRuntime()).invoke<T>(command, args);
+}
+
+export async function closeRuntimeWindow(): Promise<void> {
+  await (await loadRuntime()).closeWindow();
 }
 
 export async function listenRuntimeEvent<T>(

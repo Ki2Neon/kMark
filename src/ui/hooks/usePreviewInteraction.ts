@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { resetKmarkModelViewerCamera } from "../../adapters/browser/browserModelRenderer";
 import { type PreviewDisplayMode } from "../../domain/preview";
 
-const PREVIEW_CONTEXT_MENU_WIDTH_PX = 168;
+const PREVIEW_CONTEXT_MENU_WIDTH_PX = 260;
 const PREVIEW_CONTEXT_MENU_PADDING_PX = 12;
 const PREVIEW_CONTEXT_MENU_ITEM_HEIGHT_PX = 34;
 
@@ -147,6 +147,7 @@ export function usePreviewInteraction({
   }, [closeContextMenu, contextMenuState]);
 
   return {
+    closeContextMenu,
     contextMenuRef,
     contextMenuState,
     contextMenuStyle,

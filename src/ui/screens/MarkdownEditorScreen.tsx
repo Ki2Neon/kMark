@@ -167,7 +167,6 @@ export function MarkdownEditorScreen({
   const pendingPreviewCursorLineRef = useRef<number | null>(null);
   const previewCursorFollowTimeoutRef = useRef<number | null>(null);
   const subWindowControllerRef = useRef<SubWindowController | null>(null);
-  const hasOpenedSubWindowRef = useRef(false);
 
   if (subWindowControllerRef.current === null) {
     subWindowControllerRef.current = createSubWindowController();
@@ -177,6 +176,7 @@ export function MarkdownEditorScreen({
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
+  const [subWindowSourceId, setSubWindowSourceId] = useState<string | null>(null);
   const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
   const blurActiveElement = useCallback(() => {
     const activeElement = document.activeElement;
@@ -285,6 +285,12 @@ export function MarkdownEditorScreen({
     previewPageHtmls,
     previewPages,
   ]);
+  const subWindowStateRequestRef = useRef(subWindowStateRequest);
+
+  useEffect(() => {
+    subWindowStateRequestRef.current = subWindowStateRequest;
+  }, [subWindowStateRequest]);
+
   useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
@@ -347,24 +353,94 @@ export function MarkdownEditorScreen({
   }, [closeDesktopMenu, handlePrintDocument, previewDisplayMode]);
 
   useEffect(() => {
-    if (!isEditorReady || !hasOpenedSubWindowRef.current) {
+    if (!isEditorReady) {
       return;
     }
 
-    void subWindowControllerRef.current?.publish(subWindowStateRequest).catch(() => {});
-  }, [isEditorReady, subWindowStateRequest]);
+    let isDisposed = false;
+    let registeredSourceId: string | null = null;
+
+    void subWindowControllerRef.current?.registerSource(subWindowStateRequestRef.current)
+      .then((sourceId) => {
+        if (isDisposed) {
+          void subWindowControllerRef.current?.unregisterSource(sourceId).catch(() => {});
+          return;
+        }
+
+        registeredSourceId = sourceId;
+        setSubWindowSourceId(sourceId);
+        void subWindowControllerRef.current?.activateSource(sourceId).catch(() => {});
+      })
+      .catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      setSubWindowSourceId(null);
+
+      if (registeredSourceId !== null) {
+        void subWindowControllerRef.current?.unregisterSource(registeredSourceId).catch(() => {});
+      }
+    };
+  }, [isEditorReady]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    void subWindowControllerRef.current?.publishSourceState(subWindowSourceId, subWindowStateRequest).catch(() => {});
+  }, [isEditorReady, subWindowSourceId, subWindowStateRequest]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    const unregisterSource = () => {
+      void subWindowControllerRef.current?.unregisterSource(subWindowSourceId).catch(() => {});
+    };
+
+    window.addEventListener("beforeunload", unregisterSource);
+
+    return () => {
+      window.removeEventListener("beforeunload", unregisterSource);
+    };
+  }, [isEditorReady, subWindowSourceId]);
+
+  useEffect(() => {
+    if (!isEditorReady || subWindowSourceId === null) {
+      return;
+    }
+
+    const activateSource = () => {
+      void subWindowControllerRef.current?.activateSource(subWindowSourceId).catch(() => {});
+    };
+
+    if (document.hasFocus()) {
+      activateSource();
+    }
+
+    window.addEventListener("focus", activateSource);
+
+    return () => {
+      window.removeEventListener("focus", activateSource);
+    };
+  }, [isEditorReady, subWindowSourceId]);
 
   const handleRequestOpenSubWindow = useCallback(() => {
     closeDesktopMenu();
-    hasOpenedSubWindowRef.current = true;
 
-    void subWindowControllerRef.current?.open(subWindowStateRequest).catch((error) => {
+    if (subWindowSourceId !== null) {
+      void subWindowControllerRef.current?.activateSource(subWindowSourceId).catch(() => {});
+    }
+
+    void subWindowControllerRef.current?.open().catch((error) => {
       handleErrorRaise(error instanceof Error ? error.message : "サブウィンドウを開けませんでした。");
     });
   }, [
     closeDesktopMenu,
     handleErrorRaise,
-    subWindowStateRequest,
+    subWindowSourceId,
   ]);
 
   const handleRequestNew = useCallback(() => {
@@ -470,7 +546,7 @@ export function MarkdownEditorScreen({
   }, [clearPendingPreviewCursorFollow, layoutMode, requestMobileSection]);
 
   useEffect(() => {
-    if (!isEditorReady) {
+    if (!isEditorReady || subWindowSourceId === null) {
       return;
     }
 
@@ -478,7 +554,7 @@ export function MarkdownEditorScreen({
     let unlisten: (() => void) | null = null;
 
     void subWindowControllerRef.current?.subscribeSourceLineSelection((request) => {
-      if (isDisposed) {
+      if (isDisposed || request.sourceId !== subWindowSourceId) {
         return;
       }
 
@@ -496,7 +572,7 @@ export function MarkdownEditorScreen({
       isDisposed = true;
       unlisten?.();
     };
-  }, [handlePreviewSourceLineDoubleClick, isEditorReady]);
+  }, [handlePreviewSourceLineDoubleClick, isEditorReady, subWindowSourceId]);
 
   useEffect(() => (
     () => {

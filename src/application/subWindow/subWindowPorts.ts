@@ -26,22 +26,60 @@ export type SubWindowStateRequest = Omit<
   "revision" | "updatedAtEpochMs" | "version"
 >;
 
+export type SubWindowSelection =
+  | {
+    readonly mode: "auto";
+  }
+  | {
+    readonly mode: "source";
+    readonly sourceId: string;
+  };
+
+export type SubWindowSourceSummary = {
+  readonly id: string;
+  readonly isActive: boolean;
+  readonly title: string;
+  readonly updatedAtEpochMs: number;
+};
+
+export type SubWindowSourcesSnapshot = {
+  readonly activeSourceId: string | null;
+  readonly sources: readonly SubWindowSourceSummary[];
+};
+
+export type SubWindowResolvedSourceState = {
+  readonly sourceId: string | null;
+  readonly state: SubWindowState | null;
+};
+
+export type SubWindowSourceStateChanged = {
+  readonly sourceId: string;
+  readonly state: SubWindowState;
+};
+
 export type SubWindowSourceLineSelectionRequest = {
   readonly lineNumber: number;
   readonly requestId: number;
   readonly requestedAtEpochMs: number;
+  readonly sourceId: string;
 };
 
 export type SubWindowGateway = {
-  open(state: SubWindowState): Promise<void>;
-  load(stateKey: string | null): Promise<SubWindowState | null>;
-  listen(
-    stateKey: string | null,
-    callback: (state: SubWindowState) => void,
+  activateSource(sourceId: string): Promise<void>;
+  getSources(): Promise<SubWindowSourcesSnapshot>;
+  getSourceState(selection: SubWindowSelection): Promise<SubWindowResolvedSourceState>;
+  listenSourceStateChanged(
+    callback: (change: SubWindowSourceStateChanged) => void,
   ): Promise<() => void>;
-  publish(state: SubWindowState): Promise<void>;
+  listenSourcesChanged(
+    callback: (snapshot: SubWindowSourcesSnapshot) => void,
+  ): Promise<() => void>;
+  open(): Promise<void>;
+  publishSourceState(sourceId: string, state: SubWindowState): Promise<void>;
+  registerSource(state: SubWindowState): Promise<string>;
   requestSourceLineSelection(request: SubWindowSourceLineSelectionRequest): Promise<void>;
   listenSourceLineSelection(
     callback: (request: SubWindowSourceLineSelectionRequest) => void,
   ): Promise<() => void>;
+  unregisterSource(sourceId: string): Promise<void>;
 };

@@ -6,6 +6,10 @@ import { type RuntimeApi, type RuntimeDragDropEvent } from "./runtime";
 export const runtimeTauri: RuntimeApi = {
   kind: "tauri",
 
+  async closeWindow() {
+    await getCurrentWindow().close();
+  },
+
   convertFileSrc(filePath) {
     return convertFileSrc(filePath);
   },

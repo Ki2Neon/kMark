@@ -1,40 +1,51 @@
 import { type SubWindowGateway } from "../../application/subWindow/subWindowPorts";
 import {
-  listenForSubWindowStateChanged,
+  activateSubWindowSource,
+  getSubWindowSources,
+  getSubWindowSourceState,
+  listenForSubWindowSourcesChanged,
+  listenForSubWindowSourceStateChanged,
   listenForSubWindowSourceLineSelection,
-  loadSubWindowState,
-  loadTauriSubWindowState,
   openSubWindow,
-  publishSubWindowState,
+  publishSubWindowSourceState,
+  registerSubWindowSource,
   requestSubWindowSourceLineSelection,
   resolveSubWindowTarget,
+  unregisterSubWindowSource,
 } from "../../infra/subWindow";
-import { isTauri } from "../../runtime/runtime";
 
 export function createBrowserSubWindowGateway(): SubWindowGateway {
   return {
-    async open(state) {
-      await openSubWindow(state);
+    async activateSource(sourceId) {
+      await activateSubWindowSource(sourceId);
     },
 
-    async load(stateKey) {
-      if (isTauri()) {
-        return loadTauriSubWindowState();
-      }
-
-      if (stateKey === null) {
-        return null;
-      }
-
-      return loadSubWindowState(stateKey);
+    async getSources() {
+      return getSubWindowSources();
     },
 
-    async listen(stateKey, callback) {
-      return listenForSubWindowStateChanged(stateKey, callback);
+    async getSourceState(selection) {
+      return getSubWindowSourceState(selection);
     },
 
-    async publish(state) {
-      await publishSubWindowState(state);
+    async listenSourceStateChanged(callback) {
+      return listenForSubWindowSourceStateChanged(callback);
+    },
+
+    async listenSourcesChanged(callback) {
+      return listenForSubWindowSourcesChanged(callback);
+    },
+
+    async open() {
+      await openSubWindow();
+    },
+
+    async publishSourceState(sourceId, state) {
+      await publishSubWindowSourceState(sourceId, state);
+    },
+
+    async registerSource(state) {
+      return registerSubWindowSource(state);
     },
 
     async requestSourceLineSelection(request) {
@@ -43,6 +54,10 @@ export function createBrowserSubWindowGateway(): SubWindowGateway {
 
     async listenSourceLineSelection(callback) {
       return listenForSubWindowSourceLineSelection(callback);
+    },
+
+    async unregisterSource(sourceId) {
+      await unregisterSubWindowSource(sourceId);
     },
   };
 }

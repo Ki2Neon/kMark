@@ -1,5 +1,11 @@
 import { memo, type CSSProperties, type RefObject } from "react";
 
+export type PreviewContextMenuSourceOption = {
+  readonly id: string;
+  readonly isSelected: boolean;
+  readonly label: string;
+};
+
 type PreviewContextMenuProps = {
   readonly ariaLabel: string;
   readonly fullscreenLabel?: string;
@@ -9,6 +15,8 @@ type PreviewContextMenuProps = {
   readonly onFullFit?: () => void;
   readonly onFullscreenToggle?: () => void;
   readonly onModelCameraReset?: () => void;
+  readonly onSourceSelect?: (sourceOptionId: string) => void;
+  readonly sourceOptions?: readonly PreviewContextMenuSourceOption[];
   readonly style?: CSSProperties;
 };
 
@@ -21,6 +29,8 @@ function PreviewContextMenuComponent({
   onFullFit,
   onFullscreenToggle,
   onModelCameraReset,
+  onSourceSelect,
+  sourceOptions = [],
   style,
 }: PreviewContextMenuProps) {
   return (
@@ -31,6 +41,19 @@ function PreviewContextMenuComponent({
       aria-label={ariaLabel}
       style={style}
     >
+      {sourceOptions.map((sourceOption) => (
+        <button
+          key={sourceOption.id}
+          type="button"
+          className="preview-context-menu__item preview-context-menu__item--source"
+          role="menuitemradio"
+          aria-checked={sourceOption.isSelected}
+          onClick={() => onSourceSelect?.(sourceOption.id)}
+        >
+          {sourceOption.isSelected ? "✓ " : ""}
+          {sourceOption.label}
+        </button>
+      ))}
       <button type="button" className="preview-context-menu__item" role="menuitem" onClick={onFit}>
         Fit
       </button>

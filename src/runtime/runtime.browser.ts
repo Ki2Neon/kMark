@@ -7,6 +7,12 @@ function unsupportedTauriRuntime(): never {
 export const runtimeBrowser: RuntimeApi = {
   kind: "browser",
 
+  async closeWindow() {
+    if (typeof window !== "undefined") {
+      window.close();
+    }
+  },
+
   convertFileSrc(filePath) {
     return filePath;
   },
