@@ -268,13 +268,13 @@ flowchart TD
 
 | Parameter | 使用者視点 | 値 | 例 | 注意 |
 | --- | --- | --- | --- | --- |
-| `turn_table` | model本体を常時回転 | boolean | `turn_table:true` | cameraではなくmodelを回転 |
-| `turn_table_speed` | 回転速度 | number | `turn_table_speed:1` | rad/s |
-| `turn_table_axis` | 回転軸 | `x` `y` `z` `-x` `-y` `-z` | `turn_table_axis:z` | 未指定時 `z` |
+| `3d_turn_table` | model本体を常時回転 | boolean | `3d_turn_table:true` | cameraではなくmodelを回転 |
+| `3d_turn_table_speed` | 回転速度 | number | `3d_turn_table_speed:0.5` | rad/s 未指定時 `0.5` |
+| `3d_turn_table_axis` | 回転軸 | `x` `y` `z` `-x` `-y` `-z` | `3d_turn_table_axis:z` | 未指定時 `z` |
 
 - 対象記法: `![]()`
 - 3D判定: extension `.glb` `.gltf` `.obj` `.stl` `.fbx`
-- alias: `model_turn_table` `model_turn_table_speed` `model_turn_table_axis`
+- 操作: modelをつかむと回転停止 画角resetで回転再開
 
 ## Text Parameters
 
