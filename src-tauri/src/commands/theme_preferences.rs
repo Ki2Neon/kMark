@@ -1,11 +1,7 @@
 use tauri::{AppHandle, Emitter, Runtime, State};
 
 use super::error::CommandErrorPayload;
-use crate::{
-    dto::ThemePreferencesPayload,
-    infra::persist_theme_preferences,
-    AppState,
-};
+use crate::{dto::ThemePreferencesPayload, infra::persist_theme_preferences, AppState};
 use kmark_core::ThemePreferences;
 
 pub const THEME_PREFERENCES_UPDATED_EVENT: &str = "theme-preferences-updated";

@@ -1,11 +1,7 @@
 use tauri::{AppHandle, Runtime, State};
 
 use super::error::CommandErrorPayload;
-use crate::{
-    dto::EditorDraftPayload,
-    infra::persist_editor_draft,
-    AppState,
-};
+use crate::{dto::EditorDraftPayload, infra::persist_editor_draft, AppState};
 use kmark_core::StoredEdit;
 
 #[tauri::command]

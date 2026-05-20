@@ -3,7 +3,10 @@ use tauri::{AppHandle, Runtime};
 use crate::dto::EditorPreferencesPayload;
 use kmark_core::EditorPreferences;
 
-use super::{json_state_store::{load_json_state, persist_json_state}, JsonStateStoreError};
+use super::{
+    json_state_store::{load_json_state, persist_json_state},
+    JsonStateStoreError,
+};
 
 const EDITOR_PREFERENCES_SCOPE: &str = "editor_preferences";
 const EDITOR_PREFERENCES_FILE_NAME: &str = "editor-preferences.json";

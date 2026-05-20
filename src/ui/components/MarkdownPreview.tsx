@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent as ReactFormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent, type WheelEvent as ReactWheelEvent } from "react";
 import {
   createKmarkModelViewerScope,
   persistKmarkModelViewerSnapshots,
@@ -64,7 +64,7 @@ const A4_PAGE_FIT_HEIGHT_VARIABLE = "--kmark-page-fit-height";
 const A4_PAGE_FIT_CONTAIN_STYLE_FRAGMENT = "--kmark-page-fit-contain-";
 const A4_PAGE_FIT_CONTAIN_WIDTH_VARIABLE = "--kmark-page-fit-contain-width";
 const A4_PAGE_FIT_CONTAIN_HEIGHT_VARIABLE = "--kmark-page-fit-contain-height";
-const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
+const URL_SCHEME_PATTERN = /^([a-z][a-z0-9+.-]*):/iu;
 const A4_TOC_ITEM_HEADER_LABEL = "項目名";
 const A4_TOC_PAGE_HEADER_LABEL = "ページ番号";
 const A4_TOC_INDENT_STEP_EM = 1.25;
@@ -644,11 +644,64 @@ function resolveDoubleClickSourceLine(
 function resolveExternalLink(anchor: HTMLAnchorElement): string | null {
   const href = anchor.getAttribute("href")?.trim() ?? "";
 
-  if (href.length === 0 || href.startsWith("#") || !EXTERNAL_LINK_SCHEME_PATTERN.test(href)) {
+  if (href.length === 0 || href.startsWith("#")) {
     return null;
   }
 
-  return href;
+  const scheme = URL_SCHEME_PATTERN.exec(href)?.[1]?.toLocaleLowerCase("en-US") ?? "";
+
+  if (scheme !== "http" && scheme !== "https") {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(href);
+
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+      ? parsedUrl.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolvePreviewHashTargetId(anchor: HTMLAnchorElement): string | null {
+  const href = anchor.getAttribute("href")?.trim() ?? "";
+
+  if (!href.startsWith("#") || href.length <= 1) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(href.slice(1));
+  } catch {
+    return href.slice(1);
+  }
+}
+
+function scrollPreviewHashTarget(previewViewport: HTMLElement, targetId: string): void {
+  for (const element of previewViewport.querySelectorAll<HTMLElement>("[id]")) {
+    if (element.id !== targetId) {
+      continue;
+    }
+
+    element.scrollIntoView({ block: "start", behavior: "auto" });
+    return;
+  }
+}
+
+function hardenPreviewSurfaceNavigation(surface: HTMLElement): void {
+  for (const form of surface.querySelectorAll<HTMLFormElement>("form")) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  }
+
+  for (const anchor of surface.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    anchor.removeAttribute("target");
+    anchor.setAttribute("rel", "noreferrer noopener");
+  }
 }
 
 function getTableAvailableWidth(table: HTMLTableElement): number {
@@ -3512,6 +3565,7 @@ function applyPreviewSurfaceHtml(surface: HTMLElement, html: string): void {
   persistKmarkModelViewerSnapshots(surface);
   preserveReusableKmarkModelViewers(surface, template.content);
   surface.replaceChildren(...Array.from(template.content.childNodes));
+  hardenPreviewSurfaceNavigation(surface);
   restorePreviewVideoSnapshots(surface, videoSnapshots);
 }
 
@@ -4019,10 +4073,6 @@ function MarkdownPreviewComponent({
   }, [suppressTextSelectionOnDoubleClick]);
 
   const handlePreviewClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
-    if (onOpenExternalLink === undefined) {
-      return;
-    }
-
     const eventTarget = resolveEventTargetElement(event.target);
 
     if (eventTarget === null) {
@@ -4035,15 +4085,30 @@ function MarkdownPreviewComponent({
       return;
     }
 
-    const externalLink = resolveExternalLink(anchor);
+    const hashTargetId = resolvePreviewHashTargetId(anchor);
 
-    if (externalLink === null) {
+    if (hashTargetId !== null) {
+      event.preventDefault();
+      scrollPreviewHashTarget(event.currentTarget, hashTargetId);
       return;
     }
 
     event.preventDefault();
+    event.stopPropagation();
+
+    const externalLink = resolveExternalLink(anchor);
+
+    if (externalLink === null || onOpenExternalLink === undefined) {
+      return;
+    }
+
     onOpenExternalLink(externalLink);
   }, [onOpenExternalLink]);
+
+  const handlePreviewSubmit = useCallback((event: ReactFormEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
 
   const handlePreviewContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (onPreviewContextMenu === undefined) {
@@ -4734,6 +4799,7 @@ function MarkdownPreviewComponent({
           className="preview-section__body preview-section__body--a4"
           data-interactive-pan={enableInteractiveViewportNavigation ? "true" : "false"}
           data-panning={isViewportPanning ? "true" : "false"}
+          onAuxClick={handlePreviewClick}
           onClick={handlePreviewClick}
           onContextMenu={handlePreviewContextMenu}
           onDoubleClick={handlePreviewDoubleClick}
@@ -4743,6 +4809,7 @@ function MarkdownPreviewComponent({
           onPointerMove={handlePreviewPointerMove}
           onPointerUp={handlePreviewPointerEnd}
           onScroll={handlePreviewScroll}
+          onSubmit={handlePreviewSubmit}
           onWheel={handlePreviewWheel}
         >
           <div className="preview-section__page-stack">
@@ -4784,6 +4851,7 @@ function MarkdownPreviewComponent({
         className="preview-section__body"
         data-interactive-pan={enableInteractiveViewportNavigation ? "true" : "false"}
         data-panning={isViewportPanning ? "true" : "false"}
+        onAuxClick={handlePreviewClick}
         onClick={handlePreviewClick}
         onContextMenu={handlePreviewContextMenu}
         onDoubleClick={handlePreviewDoubleClick}
@@ -4792,6 +4860,7 @@ function MarkdownPreviewComponent({
         onPointerDown={handlePreviewPointerDown}
         onPointerMove={handlePreviewPointerMove}
         onPointerUp={handlePreviewPointerEnd}
+        onSubmit={handlePreviewSubmit}
         onWheel={handlePreviewWheel}
       >
         <PreviewHtmlSurface

@@ -3,7 +3,10 @@ use tauri::{AppHandle, Runtime};
 use crate::dto::PreviewPreferencesPayload;
 use kmark_core::PreviewPreferences;
 
-use super::{json_state_store::{load_json_state, persist_json_state}, JsonStateStoreError};
+use super::{
+    json_state_store::{load_json_state, persist_json_state},
+    JsonStateStoreError,
+};
 
 const PREVIEW_PREFERENCES_SCOPE: &str = "preview_preferences";
 const PREVIEW_PREFERENCES_FILE_NAME: &str = "preview-preferences.json";
