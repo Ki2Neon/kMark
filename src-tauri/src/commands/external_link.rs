@@ -97,10 +97,12 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
   const TRANSPARENT_BACKGROUND = "rgba(0, 0, 0, 0)";
   const DEFAULT_REVEAL_BACKGROUND = "#fff";
   const BACKGROUND_ELEMENT_ID = "kmark-sandbox-browser-background";
+  const FULLSCREEN_TARGET_ATTRIBUTE = "data-kmark-sandbox-browser-fullscreen-target";
   const REVEAL_TRANSITION = `opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1)`;
   let zoomScale = 1;
   let zoomElement = null;
   let backgroundElement = null;
+  let internalFullscreenElement = null;
   let revealRestoreTimeoutId = null;
 
   const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
@@ -204,6 +206,98 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
       }
     }, Math.max(0, FADE_MS + REVEAL_BACKGROUND_RESTORE_DELAY_MS));
   };
+  const dispatchFullscreenChange = () => {
+    const doc = window.document;
+
+    for (const eventName of ["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"]) {
+      try {
+        doc.dispatchEvent(new Event(eventName));
+      } catch (_) {}
+    }
+  };
+  const clearInternalFullscreenTarget = () => {
+    if (internalFullscreenElement !== null) {
+      try {
+        internalFullscreenElement.removeAttribute(FULLSCREEN_TARGET_ATTRIBUTE);
+      } catch (_) {}
+    }
+
+    internalFullscreenElement = null;
+    window.document.documentElement.removeAttribute("data-kmark-sandbox-browser-fullscreen");
+  };
+  const exitInternalFullscreen = () => {
+    if (internalFullscreenElement === null) {
+      return Promise.resolve();
+    }
+
+    clearInternalFullscreenTarget();
+    dispatchFullscreenChange();
+    return Promise.resolve();
+  };
+  const enterInternalFullscreen = (element) => {
+    if (!(element instanceof Element)) {
+      return Promise.reject(new TypeError("fullscreen target is not an element"));
+    }
+
+    if (internalFullscreenElement !== element) {
+      clearInternalFullscreenTarget();
+    }
+
+    internalFullscreenElement = element;
+    window.document.documentElement.setAttribute("data-kmark-sandbox-browser-fullscreen", "true");
+    element.setAttribute(FULLSCREEN_TARGET_ATTRIBUTE, "true");
+    dispatchFullscreenChange();
+    return Promise.resolve();
+  };
+  const installInternalFullscreenApi = () => {
+    const doc = window.document;
+
+    const defineDocumentGetter = (name, getter) => {
+      try {
+        Object.defineProperty(doc, name, {
+          configurable: true,
+          get: getter,
+        });
+      } catch (_) {}
+    };
+
+    defineDocumentGetter("fullscreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("webkitFullscreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("mozFullScreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("msFullscreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("fullscreenEnabled", () => true);
+    defineDocumentGetter("webkitFullscreenEnabled", () => true);
+    defineDocumentGetter("mozFullScreenEnabled", () => true);
+    defineDocumentGetter("msFullscreenEnabled", () => true);
+
+    try {
+      doc.exitFullscreen = exitInternalFullscreen;
+      doc.webkitExitFullscreen = exitInternalFullscreen;
+      doc.mozCancelFullScreen = exitInternalFullscreen;
+      doc.msExitFullscreen = exitInternalFullscreen;
+    } catch (_) {}
+
+    try {
+      const elementPrototype = window.Element?.prototype;
+      if (elementPrototype !== undefined) {
+        elementPrototype.requestFullscreen = function requestFullscreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.webkitRequestFullscreen = function webkitRequestFullscreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.webkitRequestFullScreen = function webkitRequestFullScreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.mozRequestFullScreen = function mozRequestFullScreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.msRequestFullscreen = function msRequestFullscreen() {
+          return enterInternalFullscreen(this);
+        };
+      }
+    } catch (_) {}
+  };
   const prepareReveal = () => {
     try {
       const doc = window.document;
@@ -275,7 +369,14 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
         html,
         body {
           scrollbar-color: transparent transparent !important;
-          transition: scrollbar-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
+          scrollbar-width: none !important;
+          -ms-overflow-style: none !important;
+        }
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+          display: none !important;
+          width: 0 !important;
+          height: 0 !important;
         }
         html[data-kmark-sandbox-reveal="pending"] {
           opacity: 0 !important;
@@ -304,27 +405,23 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
         html[data-kmark-sandbox-closing="true"] {
           opacity: 0 !important;
         }
-        html[data-kmark-sandbox-reveal="visible"],
-        html[data-kmark-sandbox-reveal="visible"] body {
-          scrollbar-color: rgba(148, 163, 184, .55) transparent !important;
+        html[data-kmark-sandbox-browser-fullscreen="true"],
+        html[data-kmark-sandbox-browser-fullscreen="true"] body {
+          overflow: hidden !important;
         }
-        html::-webkit-scrollbar-thumb,
-        body::-webkit-scrollbar-thumb {
-          background-color: transparent !important;
-          transition: background-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
-        }
-        html::-webkit-scrollbar-track,
-        body::-webkit-scrollbar-track {
-          background-color: transparent !important;
-          transition: background-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
-        }
-        html[data-kmark-sandbox-reveal="visible"]::-webkit-scrollbar-thumb,
-        html[data-kmark-sandbox-reveal="visible"] body::-webkit-scrollbar-thumb {
-          background-color: rgba(148, 163, 184, .55) !important;
-        }
-        html[data-kmark-sandbox-closing="true"]::-webkit-scrollbar-thumb,
-        html[data-kmark-sandbox-closing="true"] body::-webkit-scrollbar-thumb {
-          background-color: transparent !important;
+        html[data-kmark-sandbox-browser-fullscreen="true"] [${FULLSCREEN_TARGET_ATTRIBUTE}="true"] {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 2147483646 !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          max-width: none !important;
+          max-height: none !important;
+          min-width: 0 !important;
+          min-height: 0 !important;
+          margin: 0 !important;
+          transform: none !important;
+          background: #000 !important;
         }
         #kmark-sandbox-browser-zoom {
           position: fixed;
@@ -433,6 +530,7 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     ensureUi();
     const root = window.document.documentElement;
 
+    void exitInternalFullscreen();
     clearRevealRestoreTimeout();
     syncRevealBackground();
     holdCanvasBackground();
@@ -480,6 +578,13 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      if (internalFullscreenElement !== null) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void exitInternalFullscreen();
+        return;
+      }
+
       requestClose(event);
       return;
     }
@@ -518,6 +623,7 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     setZoom(zoomScale + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
   }, { capture: true, passive: false });
 
+  installInternalFullscreenApi();
   prepareReveal();
   ensureUi();
   bridge({ type: "zoom", zoom: 1 });

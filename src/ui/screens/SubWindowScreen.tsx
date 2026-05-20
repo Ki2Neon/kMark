@@ -20,6 +20,7 @@ import {
 } from "../../adapters/browser/browserSubWindowExternalBrowser";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
 import {
+  DEFAULT_SUB_WINDOW_BROWSER_FADE_MS,
   type SubWindowResolvedSourceState,
   type SubWindowSelection,
   type SubWindowSourcesSnapshot,
@@ -382,6 +383,8 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
       >
         {usesNativeBrowser ? null : (
           <iframe
+            allow="fullscreen"
+            allowFullScreen
             className="subwindow-browser-frame"
             referrerPolicy="no-referrer"
             sandbox={SUB_WINDOW_BROWSER_IFRAME_SANDBOX}
@@ -740,7 +743,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
   const browserOverlay = browserUrl === null ? null : (
     <SubWindowBrowserOverlay
       key={browserUrl}
-      fadeMs={state?.pageTransitionFadeMs ?? 0}
+      fadeMs={state?.browserFadeMs ?? DEFAULT_SUB_WINDOW_BROWSER_FADE_MS}
       url={browserUrl}
       onCloseComplete={handleBrowserCloseComplete}
     />
