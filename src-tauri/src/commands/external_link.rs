@@ -1,6 +1,6 @@
 use std::{fs, io::ErrorKind, path::PathBuf, sync::atomic::Ordering, thread, time::Duration};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse},
     AppHandle, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url, Webview,
@@ -26,6 +26,15 @@ const SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE: f64 = 1.0;
 #[serde(rename_all = "camelCase")]
 pub struct OpenSubWindowExternalBrowserResponsePayload {
     browser_id: String,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowBrowserBoundsPayload {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 #[tauri::command]
@@ -175,6 +184,37 @@ pub async fn close_sub_window_external_browser(
         CommandErrorPayload::with_detail(
             "subwindow_browser_task_failed",
             "failed to run subwindow browser close task",
+            source.to_string(),
+        )
+    })?
+}
+
+#[tauri::command]
+pub async fn resize_sub_window_external_browser(
+    app: AppHandle,
+    window: Window,
+    webview: Webview,
+    browser_id: String,
+    bounds: SubWindowBrowserBoundsPayload,
+) -> Result<(), CommandErrorPayload> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_sub_window_browser_host(&window, &webview)?;
+        let bounds = validate_sub_window_browser_bounds(bounds)?;
+        let browser_webview = resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
+
+        browser_webview.set_bounds(bounds).map_err(|source| {
+            CommandErrorPayload::with_detail(
+                "subwindow_browser_resize_failed",
+                "failed to resize subwindow browser",
+                source.to_string(),
+            )
+        })
+    })
+    .await
+    .map_err(|source| {
+        CommandErrorPayload::with_detail(
+            "subwindow_browser_task_failed",
+            "failed to run subwindow browser resize task",
             source.to_string(),
         )
     })?
@@ -475,6 +515,29 @@ fn clear_sub_window_browser_browsing_data<R: Runtime>(webview: &Webview<R>) {
     if let Err(error) = webview.clear_all_browsing_data() {
         eprintln!("failed to clear subwindow browser browsing data: {error}");
     }
+}
+
+fn validate_sub_window_browser_bounds(
+    bounds: SubWindowBrowserBoundsPayload,
+) -> Result<Rect, CommandErrorPayload> {
+    let values = [bounds.x, bounds.y, bounds.width, bounds.height];
+
+    if !values.iter().all(|value| value.is_finite())
+        || bounds.x < 0.0
+        || bounds.y < 0.0
+        || bounds.width < SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE
+        || bounds.height < SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE
+    {
+        return Err(CommandErrorPayload::new(
+            "invalid_subwindow_browser_bounds",
+            "subwindow browser bounds are invalid",
+        ));
+    }
+
+    Ok(Rect {
+        position: Position::Logical(LogicalPosition::new(bounds.x, bounds.y)),
+        size: Size::Logical(LogicalSize::new(bounds.width, bounds.height)),
+    })
 }
 
 fn sub_window_browser_bounds_for_window<R: Runtime>(

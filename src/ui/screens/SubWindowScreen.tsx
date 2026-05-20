@@ -4,7 +4,9 @@ import { isSupportedExternalLink } from "../../adapters/browser/browserExternalL
 import {
   closeSubWindowExternalBrowser,
   openSubWindowExternalBrowser,
+  resizeSubWindowExternalBrowser,
   supportsNativeSubWindowExternalBrowser,
+  type SubWindowExternalBrowserBounds,
 } from "../../adapters/browser/browserSubWindowExternalBrowser";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
 import {
@@ -21,6 +23,7 @@ import { useWindowTitle } from "../hooks/useWindowTitle";
 const AUTO_SOURCE_OPTION_ID = "auto";
 const FULLSCREEN_CURSOR_IDLE_HIDE_MS = 1200;
 const SUB_WINDOW_BROWSER_IFRAME_SANDBOX = "allow-forms allow-scripts";
+const SUB_WINDOW_BROWSER_RESIZE_SYNC_DELAY_MS = 80;
 
 type SubWindowScreenProps = {
   readonly stateKey: string | null;
@@ -75,9 +78,25 @@ type SubWindowBrowserOverlayProps = {
   readonly url: string;
 };
 
+function resolveSubWindowExternalBrowserBounds(element: HTMLElement): SubWindowExternalBrowserBounds | null {
+  const rect = element.getBoundingClientRect();
+
+  if (rect.width < 1 || rect.height < 1) {
+    return null;
+  }
+
+  return {
+    height: rect.height,
+    width: rect.width,
+    x: Math.max(0, rect.left),
+    y: Math.max(0, rect.top),
+  };
+}
+
 function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const browserIdRef = useRef<string | null>(null);
+  const resizeTimeoutRef = useRef<number | null>(null);
   const usesNativeBrowser = supportsNativeSubWindowExternalBrowser();
 
   useEffect(() => {
@@ -90,6 +109,37 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
     }
 
     let isDisposed = false;
+    const syncBrowserBounds = () => {
+      const dialog = dialogRef.current;
+      const browserId = browserIdRef.current;
+
+      if (dialog === null || browserId === null) {
+        return;
+      }
+
+      const bounds = resolveSubWindowExternalBrowserBounds(dialog);
+
+      if (bounds === null) {
+        return;
+      }
+
+      void resizeSubWindowExternalBrowser(browserId, bounds).catch(() => {});
+    };
+    const cancelPendingResize = () => {
+      if (resizeTimeoutRef.current === null) {
+        return;
+      }
+
+      window.clearTimeout(resizeTimeoutRef.current);
+      resizeTimeoutRef.current = null;
+    };
+    const scheduleBrowserBoundsSync = () => {
+      cancelPendingResize();
+      resizeTimeoutRef.current = window.setTimeout(() => {
+        resizeTimeoutRef.current = null;
+        syncBrowserBounds();
+      }, SUB_WINDOW_BROWSER_RESIZE_SYNC_DELAY_MS);
+    };
 
     void openSubWindowExternalBrowser(url)
       .then((browserId) => {
@@ -99,6 +149,7 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
         }
 
         browserIdRef.current = browserId;
+        scheduleBrowserBoundsSync();
       })
       .catch(() => {
         if (!isDisposed) {
@@ -106,8 +157,18 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
         }
       });
 
+    const resizeObserver = new ResizeObserver(scheduleBrowserBoundsSync);
+
+    if (dialogRef.current !== null) {
+      resizeObserver.observe(dialogRef.current);
+    }
+    window.addEventListener("resize", scheduleBrowserBoundsSync);
+
     return () => {
       isDisposed = true;
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleBrowserBoundsSync);
+      cancelPendingResize();
 
       const browserId = browserIdRef.current;
       browserIdRef.current = null;
@@ -125,6 +186,7 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
         aria-label="外部リンク"
         aria-modal="true"
         className="subwindow-browser-dialog"
+        data-native-browser={usesNativeBrowser ? "true" : "false"}
         role="dialog"
         tabIndex={-1}
       >
