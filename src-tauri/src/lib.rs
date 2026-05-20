@@ -397,6 +397,10 @@ pub fn run() {
                 }
 
                 if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
+                    commands::external_link::close_sub_window_external_browsers_for_window_label(
+                        window.app_handle(),
+                        window.label(),
+                    );
                     return;
                 }
 
@@ -535,6 +539,8 @@ pub fn run() {
             commands::editor_preferences::get_editor_preferences,
             commands::editor_preferences::set_editor_preferences,
             commands::external_link::open_external_link,
+            commands::external_link::open_sub_window_external_browser,
+            commands::external_link::close_sub_window_external_browser,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,
