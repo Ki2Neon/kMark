@@ -24,7 +24,9 @@ import {
 import { type RecentFile } from "../../domain/recentFiles";
 import { APP_THEME_OPTIONS, isAppThemeId, type AppThemeId } from "../../domain/theme";
 import {
+  MAX_SUB_WINDOW_BROWSER_FADE_MS,
   MAX_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
+  MIN_SUB_WINDOW_BROWSER_FADE_MS,
   MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
 } from "../../application/subWindow/subWindowPorts";
 import { MenuIcon } from "./MenuIcon";
@@ -44,6 +46,7 @@ type MenuSectionProps = {
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
+  readonly subWindowBrowserFadeMs: number;
   readonly subWindowPageTransitionFadeMs: number;
   readonly windowsStartupTrayResidentEnabled: boolean;
   readonly onAppFontChange: (appFontId: AppFontId) => void;
@@ -66,6 +69,7 @@ type MenuSectionProps = {
   readonly onSaveDocumentAs: () => void;
   readonly onShowLineNumbersChange: (showLineNumbers: boolean) => void;
   readonly onStartupEditModeChange: (startupEditMode: StartupEditMode) => void;
+  readonly onSubWindowBrowserFadeMsChange: (browserFadeMs: number) => void;
   readonly onSubWindowPageTransitionFadeMsChange: (pageTransitionFadeMs: number) => void;
   readonly onWindowsStartupTrayResidentChange: (windowsStartupTrayResidentEnabled: boolean) => void;
 };
@@ -73,7 +77,11 @@ type MenuSectionProps = {
 const APP_FONT_DATALIST_ID = "menu-section-app-fonts";
 const EDIT_FONT_DATALIST_ID = "menu-section-edit-fonts";
 
-type NumberDraftField = "edit-font-size" | "subwindow-page-transition-fade" | "system-font-size";
+type NumberDraftField =
+  | "edit-font-size"
+  | "subwindow-browser-fade"
+  | "subwindow-page-transition-fade"
+  | "system-font-size";
 type MenuPanel = "root" | "recent-files";
 
 function normalizeMenuSearchValue(value: string): string {
@@ -109,6 +117,7 @@ function MenuSectionComponent({
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
+  subWindowBrowserFadeMs,
   subWindowPageTransitionFadeMs,
   windowsStartupTrayResidentEnabled,
   onAppFontChange,
@@ -131,6 +140,7 @@ function MenuSectionComponent({
   onSaveDocumentAs,
   onShowLineNumbersChange,
   onStartupEditModeChange,
+  onSubWindowBrowserFadeMsChange,
   onSubWindowPageTransitionFadeMsChange,
   onWindowsStartupTrayResidentChange,
 }: MenuSectionProps) {
@@ -139,6 +149,7 @@ function MenuSectionComponent({
   const [appFontDraft, setAppFontDraft] = useState(appFontId);
   const [editFontDraft, setEditFontDraft] = useState(editFontId);
   const [editFontSizeDraft, setEditFontSizeDraft] = useState(() => String(editFontSizePx));
+  const [subWindowBrowserFadeDraft, setSubWindowBrowserFadeDraft] = useState(() => String(subWindowBrowserFadeMs));
   const [subWindowPageTransitionFadeDraft, setSubWindowPageTransitionFadeDraft] = useState(() => String(subWindowPageTransitionFadeMs));
   const [systemFontSizeDraft, setSystemFontSizeDraft] = useState(() => String(systemFontSizePx));
   const [focusedFontField, setFocusedFontField] = useState<"app" | "edit" | null>(null);
@@ -178,7 +189,9 @@ function MenuSectionComponent({
     "配色",
     "preview",
     "サブウィンドウ",
+    "ブラウザ",
     "subwindow",
+    "browser",
     "フェード",
     "fade",
     "transition",
@@ -189,8 +202,14 @@ function MenuSectionComponent({
   const previewColorVisible = previewGroupMatched || matchesMenuSearch("配色", "固定色", "アプリテーマ色", "color");
   const subWindowPageTransitionFadeVisible =
     previewGroupMatched || matchesMenuSearch("サブウィンドウ", "フェード", "fade", "transition", "ms");
+  const subWindowBrowserFadeVisible =
+    previewGroupMatched || matchesMenuSearch("サブウィンドウ", "ブラウザ", "browser", "フェード", "fade", "ms");
   const previewGroupVisible =
-    previewVisibilityVisible || previewDisplayModeVisible || previewColorVisible || subWindowPageTransitionFadeVisible;
+    previewVisibilityVisible
+    || previewDisplayModeVisible
+    || previewColorVisible
+    || subWindowPageTransitionFadeVisible
+    || subWindowBrowserFadeVisible;
   const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
   const showLineNumbersVisible = editGroupMatched || matchesMenuSearch("行番号", "line number");
   const editFontSizeVisible = editGroupMatched || matchesMenuSearch("エディタフォントサイズ", "font size", "editor");
@@ -234,6 +253,12 @@ function MenuSectionComponent({
       setEditFontSizeDraft(String(editFontSizePx));
     }
   }, [editFontSizePx, focusedNumberField]);
+
+  useEffect(() => {
+    if (focusedNumberField !== "subwindow-browser-fade") {
+      setSubWindowBrowserFadeDraft(String(subWindowBrowserFadeMs));
+    }
+  }, [focusedNumberField, subWindowBrowserFadeMs]);
 
   useEffect(() => {
     if (focusedNumberField !== "subwindow-page-transition-fade") {
@@ -398,6 +423,10 @@ function MenuSectionComponent({
     setSystemFontSizeDraft(event.currentTarget.value);
   };
 
+  const handleSubWindowBrowserFadeInput = (event: ChangeEvent<HTMLInputElement>) => {
+    setSubWindowBrowserFadeDraft(event.currentTarget.value);
+  };
+
   const handleSubWindowPageTransitionFadeInput = (event: ChangeEvent<HTMLInputElement>) => {
     setSubWindowPageTransitionFadeDraft(event.currentTarget.value);
   };
@@ -413,6 +442,23 @@ function MenuSectionComponent({
     const nextSystemFontSizePx = clampInteger(parsedSystemFontSizePx, MIN_SYSTEM_FONT_SIZE_PX, MAX_SYSTEM_FONT_SIZE_PX);
     setSystemFontSizeDraft(String(nextSystemFontSizePx));
     onSystemFontSizeChange(nextSystemFontSizePx);
+  };
+
+  const commitSubWindowBrowserFadeDraft = () => {
+    const parsedFadeMs = parseIntegerDraft(subWindowBrowserFadeDraft);
+
+    if (parsedFadeMs === null) {
+      setSubWindowBrowserFadeDraft(String(subWindowBrowserFadeMs));
+      return;
+    }
+
+    const nextFadeMs = clampInteger(
+      parsedFadeMs,
+      MIN_SUB_WINDOW_BROWSER_FADE_MS,
+      MAX_SUB_WINDOW_BROWSER_FADE_MS,
+    );
+    setSubWindowBrowserFadeDraft(String(nextFadeMs));
+    onSubWindowBrowserFadeMsChange(nextFadeMs);
   };
 
   const commitSubWindowPageTransitionFadeDraft = () => {
@@ -440,6 +486,10 @@ function MenuSectionComponent({
     setFocusedNumberField("subwindow-page-transition-fade");
   };
 
+  const handleSubWindowBrowserFadeFocus = () => {
+    setFocusedNumberField("subwindow-browser-fade");
+  };
+
   const handleSystemFontSizeFocus = () => {
     setFocusedNumberField("system-font-size");
   };
@@ -460,6 +510,15 @@ function MenuSectionComponent({
       return;
     }
     commitSubWindowPageTransitionFadeDraft();
+  };
+
+  const handleSubWindowBrowserFadeBlur = () => {
+    setFocusedNumberField(null);
+    if (discardNextNumberBlurRef.current) {
+      discardNextNumberBlurRef.current = false;
+      return;
+    }
+    commitSubWindowBrowserFadeDraft();
   };
 
   const handleSystemFontSizeBlur = () => {
@@ -493,6 +552,19 @@ function MenuSectionComponent({
     if (event.key === "Escape") {
       discardNextNumberBlurRef.current = true;
       setSubWindowPageTransitionFadeDraft(String(subWindowPageTransitionFadeMs));
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleSubWindowBrowserFadeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      discardNextNumberBlurRef.current = true;
+      setSubWindowBrowserFadeDraft(String(subWindowBrowserFadeMs));
       event.currentTarget.blur();
     }
   };
@@ -659,6 +731,26 @@ function MenuSectionComponent({
                 onFocus={handleSubWindowPageTransitionFadeFocus}
                 onKeyDown={handleSubWindowPageTransitionFadeKeyDown}
                 aria-label="サブウィンドウのページ遷移フェード時間 ms"
+                className="menu-section__select"
+              />
+            </label>
+          ) : null}
+
+          {subWindowBrowserFadeVisible ? (
+            <label className="menu-section__label">
+              <span className="menu-section__field-label">ブラウザ fade ms</span>
+              <input
+                type="number"
+                value={subWindowBrowserFadeDraft}
+                min={MIN_SUB_WINDOW_BROWSER_FADE_MS}
+                max={MAX_SUB_WINDOW_BROWSER_FADE_MS}
+                step={1}
+                inputMode="numeric"
+                onChange={handleSubWindowBrowserFadeInput}
+                onBlur={handleSubWindowBrowserFadeBlur}
+                onFocus={handleSubWindowBrowserFadeFocus}
+                onKeyDown={handleSubWindowBrowserFadeKeyDown}
+                aria-label="サブウィンドウ内ブラウザのフェード時間 ms"
                 className="menu-section__select"
               />
             </label>

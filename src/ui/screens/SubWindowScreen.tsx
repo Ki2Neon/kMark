@@ -20,6 +20,7 @@ import {
 } from "../../adapters/browser/browserSubWindowExternalBrowser";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
 import {
+  DEFAULT_SUB_WINDOW_BROWSER_FADE_MS,
   type SubWindowResolvedSourceState,
   type SubWindowSelection,
   type SubWindowSourcesSnapshot,
@@ -126,6 +127,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
   const isCompleteRef = useRef(false);
   const loadedBrowserIdsRef = useRef<Set<string>>(new Set());
   const revealedBrowserIdsRef = useRef<Set<string>>(new Set());
+  const [isBackgroundVisible, setIsBackgroundVisible] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const usesNativeBrowser = supportsNativeSubWindowExternalBrowser();
@@ -174,6 +176,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
       return;
     }
     revealedBrowserIdsRef.current.add(browserId);
+    setIsBackgroundVisible(true);
 
     void showSubWindowExternalBrowser(browserId)
       .catch(() => {
@@ -189,6 +192,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
     }
 
     isClosingRef.current = true;
+    setIsBackgroundVisible(false);
     setIsClosing(true);
 
     const browserId = browserIdRef.current;
@@ -370,6 +374,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
   return (
     <div
       className="subwindow-browser-overlay"
+      data-background-visible={isBackgroundVisible ? "true" : "false"}
       data-closing={isClosing ? "true" : "false"}
       data-loaded={isLoaded ? "true" : "false"}
       onMouseDown={handleOverlayMouseDown}
@@ -384,14 +389,20 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
         role="dialog"
         tabIndex={-1}
       >
+        <div className="subwindow-browser-background-layer" aria-hidden="true" />
         {usesNativeBrowser ? null : (
           <iframe
+            allow="fullscreen"
+            allowFullScreen
             className="subwindow-browser-frame"
             referrerPolicy="no-referrer"
             sandbox={SUB_WINDOW_BROWSER_IFRAME_SANDBOX}
             src={url}
             title="外部リンク"
-            onLoad={() => setIsLoaded(true)}
+            onLoad={() => {
+              setIsBackgroundVisible(true);
+              setIsLoaded(true);
+            }}
           />
         )}
       </div>
@@ -744,7 +755,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
   const browserOverlay = browserUrl === null ? null : (
     <SubWindowBrowserOverlay
       key={browserUrl}
-      fadeMs={state?.pageTransitionFadeMs ?? 0}
+      fadeMs={state?.browserFadeMs ?? DEFAULT_SUB_WINDOW_BROWSER_FADE_MS}
       url={browserUrl}
       onCloseComplete={handleBrowserCloseComplete}
     />
