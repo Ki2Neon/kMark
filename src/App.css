@@ -391,8 +391,28 @@ input:focus-visible,
 .subwindow-browser-dialog[data-native-browser="true"] {
   border-color: transparent;
   background: transparent;
+  opacity: 1;
   box-shadow: none;
   pointer-events: none;
+  transition: none;
+}
+
+.subwindow-browser-background-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--subwindow-browser-fade-ms, 180ms) cubic-bezier(.22, .61, .36, 1);
+}
+
+.subwindow-browser-overlay[data-background-visible="true"] .subwindow-browser-background-layer {
+  opacity: 1;
+}
+
+.subwindow-browser-overlay[data-closing="true"] .subwindow-browser-background-layer {
+  opacity: 0;
 }
 
 .subwindow-browser-dialog[data-native-browser="true"]:focus {
@@ -409,6 +429,8 @@ input:focus-visible,
 }
 
 .subwindow-browser-frame {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: 100%;
