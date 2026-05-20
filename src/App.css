@@ -364,7 +364,7 @@ input:focus-visible,
   z-index: 25;
   display: grid;
   place-items: center;
-  padding: 100px;
+  padding: 5vh 100px;
   background: var(--overlay);
   opacity: 1;
   transition: opacity var(--subwindow-browser-fade-ms, 180ms) ease;
@@ -390,6 +390,11 @@ input:focus-visible,
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+  pointer-events: none;
+}
+
+.subwindow-browser-dialog[data-native-browser="true"]:focus {
+  outline: none;
 }
 
 .subwindow-browser-dialog:focus {
@@ -408,10 +413,10 @@ input:focus-visible,
 .subwindow-browser-loading-layer {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   place-items: center;
-  background: #101217;
+  background: transparent;
   opacity: 1;
   pointer-events: none;
   transition: opacity var(--subwindow-browser-fade-ms, 180ms) cubic-bezier(.22, .61, .36, 1);

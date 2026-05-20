@@ -31,9 +31,6 @@ const SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS: &str =
 const SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT: &str = r##"
 (() => {
   const STYLE_ID = "kmark-sandbox-smooth-scroll-style";
-  const DURATION_MS = 220;
-  const LINE_HEIGHT_PX = 40;
-  const stateByElement = new WeakMap();
 
   const installStyle = () => {
     const doc = window.document;
@@ -53,138 +50,17 @@ const SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT: &str = r##"
     (doc.head || doc.documentElement).appendChild(style);
   };
 
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-  const maxScrollLeft = (element) => Math.max(0, element.scrollWidth - element.clientWidth);
-  const maxScrollTop = (element) => Math.max(0, element.scrollHeight - element.clientHeight);
-  const canScrollAxis = (element, axis, delta) => {
-    if (delta === 0) {
-      return false;
-    }
-
-    const max = axis === "x" ? maxScrollLeft(element) : maxScrollTop(element);
-    if (max <= 0) {
-      return false;
-    }
-
-    const current = axis === "x" ? element.scrollLeft : element.scrollTop;
-    return delta > 0 ? current < max : current > 0;
-  };
-  const hasScrollableOverflow = (element, axis) => {
-    const style = window.getComputedStyle(element);
-    const overflow = axis === "x" ? style.overflowX : style.overflowY;
-    return overflow === "auto" || overflow === "scroll" || overflow === "overlay";
-  };
-  const normalizeWheelDelta = (event) => {
-    const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? LINE_HEIGHT_PX
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? window.innerHeight
-        : 1;
-    let x = event.deltaX * scale;
-    let y = event.deltaY * scale;
-
-    if (event.shiftKey && Math.abs(x) < 1 && Math.abs(y) > 0) {
-      x = y;
-      y = 0;
-    }
-
-    return { x, y };
-  };
-  const firstElementFromEvent = (event) => {
-    if (typeof event.composedPath === "function") {
-      for (const item of event.composedPath()) {
-        if (item instanceof Element) {
-          return item;
-        }
-      }
-    }
-
-    return event.target instanceof Element ? event.target : null;
-  };
-  const findScrollTarget = (event, delta) => {
-    const doc = window.document;
-    const root = doc.scrollingElement || doc.documentElement;
-    let element = firstElementFromEvent(event);
-
-    while (element !== null && element !== doc.documentElement) {
-      const canScrollX = hasScrollableOverflow(element, "x") && canScrollAxis(element, "x", delta.x);
-      const canScrollY = hasScrollableOverflow(element, "y") && canScrollAxis(element, "y", delta.y);
-
-      if (canScrollX || canScrollY) {
-        return element;
-      }
-
-      element = element.parentElement;
-    }
-
-    if (canScrollAxis(root, "x", delta.x) || canScrollAxis(root, "y", delta.y)) {
-      return root;
-    }
-
-    return null;
-  };
-  const easeOutCubic = (value) => 1 - Math.pow(1 - value, 3);
-  const smoothScrollBy = (element, delta) => {
-    const now = window.performance.now();
-    const previous = stateByElement.get(element);
-    const maxLeft = maxScrollLeft(element);
-    const maxTop = maxScrollTop(element);
-    const state = {
-      frame: 0,
-      fromLeft: element.scrollLeft,
-      fromTop: element.scrollTop,
-      startedAt: now,
-      targetLeft: clamp((previous?.targetLeft ?? element.scrollLeft) + delta.x, 0, maxLeft),
-      targetTop: clamp((previous?.targetTop ?? element.scrollTop) + delta.y, 0, maxTop),
-    };
-
-    if (previous?.frame) {
-      window.cancelAnimationFrame(previous.frame);
-    }
-
-    const step = (time) => {
-      const progress = clamp((time - state.startedAt) / DURATION_MS, 0, 1);
-      const eased = easeOutCubic(progress);
-      element.scrollLeft = state.fromLeft + (state.targetLeft - state.fromLeft) * eased;
-      element.scrollTop = state.fromTop + (state.targetTop - state.fromTop) * eased;
-
-      if (progress < 1) {
-        state.frame = window.requestAnimationFrame(step);
-        return;
-      }
-
-      stateByElement.delete(element);
-    };
-
-    state.frame = window.requestAnimationFrame(step);
-    stateByElement.set(element, state);
-  };
-
-  window.addEventListener("wheel", (event) => {
-    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
-      return;
-    }
-
-    const delta = normalizeWheelDelta(event);
-    const target = findScrollTarget(event, delta);
-
-    if (target === null) {
-      return;
-    }
-
-    event.preventDefault();
-    smoothScrollBy(target, delta);
-  }, { capture: true, passive: false });
-
   installStyle();
   window.document.addEventListener("DOMContentLoaded", installStyle, { once: true });
 })();
 "##;
-const SUB_WINDOW_BROWSER_GAP_LOGICAL_PX: f64 = 100.0;
+const SUB_WINDOW_BROWSER_HORIZONTAL_GAP_LOGICAL_PX: f64 = 100.0;
+const SUB_WINDOW_BROWSER_VERTICAL_GAP_RATIO: f64 = 0.05;
 const SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE: f64 = 1.0;
 const SUB_WINDOW_BROWSER_HOST_EVENT: &str = "subwindow-browser-host-event";
 const SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT: &str = "closeRequested";
 const SUB_WINDOW_BROWSER_LOADED_EVENT: &str = "loaded";
+const SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT: &str = "revealStarted";
 const SUB_WINDOW_BROWSER_MIN_ZOOM_SCALE: f64 = 0.2;
 const SUB_WINDOW_BROWSER_MAX_ZOOM_SCALE: f64 = 5.0;
 const SUB_WINDOW_BROWSER_MAX_FADE_MS: u32 = 5_000;
@@ -195,6 +71,13 @@ try {
   }
 } catch (_) {}
 "#;
+const SUB_WINDOW_BROWSER_BEGIN_REVEAL_SCRIPT: &str = r#"
+try {
+  if (typeof window.__KMARK_SANDBOX_BROWSER_BEGIN_REVEAL__ === "function") {
+    window.__KMARK_SANDBOX_BROWSER_BEGIN_REVEAL__();
+  }
+} catch (_) {}
+"#;
 const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 (() => {
   const TOKEN = __KMARK_TOKEN__;
@@ -202,12 +85,72 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
   const MIN_ZOOM = 0.2;
   const MAX_ZOOM = 5.0;
   const ZOOM_STEP = 0.1;
+  const REVEAL_SETTLE_MS = 180;
+  const REVEAL_TRANSITION = `opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1)`;
   let zoomScale = 1;
-  let closeLayer = null;
   let zoomElement = null;
 
   const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
   const isZoomed = () => Math.abs(zoomScale - 1) > 0.001;
+  const setImportantStyle = (element, name, value) => {
+    try {
+      element.style.setProperty(name, value, "important");
+    } catch (_) {}
+  };
+  const removeInlineStyle = (element, name) => {
+    try {
+      element.style.removeProperty(name);
+    } catch (_) {}
+  };
+  const prepareReveal = () => {
+    try {
+      const doc = window.document;
+      const root = doc.documentElement;
+
+      root.removeAttribute("data-kmark-sandbox-closing");
+      root.setAttribute("data-kmark-sandbox-reveal", "pending");
+      setImportantStyle(root, "transition", "none");
+      setImportantStyle(root, "opacity", "0");
+      setImportantStyle(root, "background", "transparent");
+
+      if (doc.body !== null) {
+        setImportantStyle(doc.body, "background", "transparent");
+      }
+    } catch (_) {}
+  };
+  const finishReveal = () => {
+    const doc = window.document;
+    const root = doc.documentElement;
+
+    root.setAttribute("data-kmark-sandbox-reveal", "visible");
+    removeInlineStyle(root, "background");
+    if (doc.body !== null) {
+      removeInlineStyle(doc.body, "background");
+    }
+    setImportantStyle(root, "transition", REVEAL_TRANSITION);
+    setImportantStyle(root, "opacity", "1");
+    bridge({ type: "revealStarted" });
+  };
+  const afterPaintSettled = (callback) => {
+    const runFrames = () => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            window.setTimeout(callback, REVEAL_SETTLE_MS);
+          });
+        });
+      });
+    };
+
+    try {
+      if (window.document.fonts && typeof window.document.fonts.ready?.then === "function") {
+        window.document.fonts.ready.then(runFrames, runFrames);
+        return;
+      }
+    } catch (_) {}
+
+    runFrames();
+  };
   const bridge = (event) => {
     try {
       const internals = window.__TAURI_INTERNALS__;
@@ -231,18 +174,44 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
         * {
           scroll-behavior: smooth !important;
         }
-        #kmark-sandbox-browser-close-layer {
-          position: fixed;
-          inset: 0;
-          z-index: 2147483646;
-          display: block;
-          background: rgba(9, 11, 15, .94);
-          opacity: 0;
-          pointer-events: none;
-          transition: opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1);
+        html,
+        body {
+          scrollbar-color: transparent transparent !important;
+          transition: scrollbar-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
         }
-        html[data-kmark-sandbox-closing="true"] #kmark-sandbox-browser-close-layer {
-          opacity: 1;
+        html[data-kmark-sandbox-reveal="pending"] {
+          opacity: 0 !important;
+        }
+        html[data-kmark-sandbox-reveal="pending"],
+        html[data-kmark-sandbox-reveal="pending"] body,
+        html[data-kmark-sandbox-closing="true"],
+        html[data-kmark-sandbox-closing="true"] body {
+          background: transparent !important;
+        }
+        html[data-kmark-sandbox-closing="true"] {
+          opacity: 0 !important;
+        }
+        html[data-kmark-sandbox-reveal="visible"],
+        html[data-kmark-sandbox-reveal="visible"] body {
+          scrollbar-color: rgba(148, 163, 184, .55) transparent !important;
+        }
+        html::-webkit-scrollbar-thumb,
+        body::-webkit-scrollbar-thumb {
+          background-color: transparent !important;
+          transition: background-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
+        }
+        html::-webkit-scrollbar-track,
+        body::-webkit-scrollbar-track {
+          background-color: transparent !important;
+          transition: background-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
+        }
+        html[data-kmark-sandbox-reveal="visible"]::-webkit-scrollbar-thumb,
+        html[data-kmark-sandbox-reveal="visible"] body::-webkit-scrollbar-thumb {
+          background-color: rgba(148, 163, 184, .55) !important;
+        }
+        html[data-kmark-sandbox-closing="true"]::-webkit-scrollbar-thumb,
+        html[data-kmark-sandbox-closing="true"] body::-webkit-scrollbar-thumb {
+          background-color: transparent !important;
         }
         #kmark-sandbox-browser-zoom {
           position: fixed;
@@ -276,12 +245,6 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     if (doc.body === null) {
       doc.addEventListener("DOMContentLoaded", ensureUi, { once: true });
       return;
-    }
-
-    if (closeLayer === null || !doc.contains(closeLayer)) {
-      closeLayer = doc.createElement("div");
-      closeLayer.id = "kmark-sandbox-browser-close-layer";
-      doc.body.appendChild(closeLayer);
     }
 
     if (zoomElement === null || !doc.contains(zoomElement)) {
@@ -323,10 +286,37 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     bridge({ type: "zoom", zoom: zoomScale });
   };
 
+  const beginReveal = () => {
+    ensureUi();
+    prepareReveal();
+
+    if (FADE_MS <= 0) {
+      finishReveal();
+      return;
+    }
+
+    afterPaintSettled(finishReveal);
+  };
+
   const beginClose = () => {
     ensureUi();
-    window.document.documentElement.setAttribute("data-kmark-sandbox-closing", "true");
+    const root = window.document.documentElement;
+
+    root.setAttribute("data-kmark-sandbox-reveal", "visible");
+    root.setAttribute("data-kmark-sandbox-closing", "true");
+    setImportantStyle(root, "transition", REVEAL_TRANSITION);
+    setImportantStyle(root, "opacity", "0");
   };
+
+  try {
+    Object.defineProperty(window, "__KMARK_SANDBOX_BROWSER_BEGIN_REVEAL__", {
+      value: beginReveal,
+      configurable: false,
+      writable: false,
+    });
+  } catch (_) {
+    window.__KMARK_SANDBOX_BROWSER_BEGIN_REVEAL__ = beginReveal;
+  }
 
   try {
     Object.defineProperty(window, "__KMARK_SANDBOX_BROWSER_BEGIN_CLOSE__", {
@@ -384,6 +374,7 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     setZoom(zoomScale + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
   }, { capture: true, passive: false });
 
+  prepareReveal();
   ensureUi();
   bridge({ type: "zoom", zoom: 1 });
 })();
@@ -533,9 +524,9 @@ fn open_sub_window_external_browser_on_blocking_thread(
 
     let browser_webview =
         WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed_url.clone()))
-            .auto_resize()
             .incognito(true)
             .focused(false)
+            .transparent(true)
             .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
             .data_directory(data_directory)
             .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
@@ -648,7 +639,17 @@ pub async fn show_sub_window_external_browser(
                 "failed to show subwindow browser",
                 source.to_string(),
             )
-        })
+        })?;
+
+        browser_webview
+            .eval(SUB_WINDOW_BROWSER_BEGIN_REVEAL_SCRIPT)
+            .map_err(|source| {
+                CommandErrorPayload::with_detail(
+                    "subwindow_browser_reveal_animation_failed",
+                    "failed to start subwindow browser reveal animation",
+                    source.to_string(),
+                )
+            })
     })
     .await
     .map_err(|source| {
@@ -689,6 +690,14 @@ pub async fn sub_window_browser_event(
                         )
                     })?;
                 }
+            }
+            "revealStarted" => {
+                emit_sub_window_browser_host_event(
+                    &app,
+                    webview.window().label(),
+                    webview.label(),
+                    SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT,
+                );
             }
             _ => {}
         }
@@ -1181,8 +1190,14 @@ fn sub_window_browser_bounds_for_window<R: Runtime>(
     })?;
     let host_width = inner_size.width as f64 / scale_factor;
     let host_height = inner_size.height as f64 / scale_factor;
-    let (x, width) = resolve_sub_window_browser_axis(host_width);
-    let (y, height) = resolve_sub_window_browser_axis(host_height);
+    let (x, width) = resolve_sub_window_browser_fixed_gap_axis(
+        host_width,
+        SUB_WINDOW_BROWSER_HORIZONTAL_GAP_LOGICAL_PX,
+    );
+    let (y, height) = resolve_sub_window_browser_ratio_gap_axis(
+        host_height,
+        SUB_WINDOW_BROWSER_VERTICAL_GAP_RATIO,
+    );
 
     Ok(Rect {
         position: Position::Logical(LogicalPosition::new(x, y)),
@@ -1190,14 +1205,19 @@ fn sub_window_browser_bounds_for_window<R: Runtime>(
     })
 }
 
-fn resolve_sub_window_browser_axis(total_size: f64) -> (f64, f64) {
-    if total_size
-        > SUB_WINDOW_BROWSER_GAP_LOGICAL_PX.mul_add(2.0, SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE)
-    {
-        (
-            SUB_WINDOW_BROWSER_GAP_LOGICAL_PX,
-            total_size - SUB_WINDOW_BROWSER_GAP_LOGICAL_PX * 2.0,
-        )
+fn resolve_sub_window_browser_fixed_gap_axis(total_size: f64, gap: f64) -> (f64, f64) {
+    if total_size > gap.mul_add(2.0, SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE) {
+        (gap, total_size - gap * 2.0)
+    } else {
+        (0.0, total_size.max(SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE))
+    }
+}
+
+fn resolve_sub_window_browser_ratio_gap_axis(total_size: f64, gap_ratio: f64) -> (f64, f64) {
+    let gap = (total_size * gap_ratio).max(0.0);
+
+    if total_size > gap.mul_add(2.0, SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE) {
+        (gap, total_size - gap * 2.0)
     } else {
         (0.0, total_size.max(SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE))
     }

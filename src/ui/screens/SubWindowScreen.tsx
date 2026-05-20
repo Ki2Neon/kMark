@@ -37,6 +37,7 @@ const SUB_WINDOW_BROWSER_RESIZE_SYNC_DELAY_MS = 80;
 const SUB_WINDOW_BROWSER_HOST_EVENT = "subwindow-browser-host-event";
 const SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT = "closeRequested";
 const SUB_WINDOW_BROWSER_LOADED_EVENT = "loaded";
+const SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT = "revealStarted";
 
 type SubWindowScreenProps = {
   readonly stateKey: string | null;
@@ -116,11 +117,11 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const browserIdRef = useRef<string | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
-  const showTimeoutRef = useRef<number | null>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
   const isClosingRef = useRef(false);
   const isCompleteRef = useRef(false);
   const loadedBrowserIdsRef = useRef<Set<string>>(new Set());
+  const revealedBrowserIdsRef = useRef<Set<string>>(new Set());
   const [isLoaded, setIsLoaded] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const usesNativeBrowser = supportsNativeSubWindowExternalBrowser();
@@ -138,15 +139,6 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
     closeTimeoutRef.current = null;
   }, []);
 
-  const clearShowTimeout = useCallback(() => {
-    if (showTimeoutRef.current === null) {
-      return;
-    }
-
-    window.clearTimeout(showTimeoutRef.current);
-    showTimeoutRef.current = null;
-  }, []);
-
   const closeNativeBrowserNow = useCallback((browserId: string) => {
     void closeSubWindowExternalBrowser(browserId).catch(() => {});
   }, []);
@@ -158,7 +150,6 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
 
     isCompleteRef.current = true;
     clearCloseTimeout();
-    clearShowTimeout();
 
     const browserId = browserIdRef.current;
     browserIdRef.current = null;
@@ -168,25 +159,25 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
     }
 
     onCloseComplete();
-  }, [clearCloseTimeout, clearShowTimeout, closeNativeBrowserNow, onCloseComplete]);
+  }, [clearCloseTimeout, closeNativeBrowserNow, onCloseComplete]);
 
   const revealLoadedBrowser = useCallback((browserId: string) => {
     if (isClosingRef.current || isCompleteRef.current) {
       return;
     }
 
-    setIsLoaded(true);
-    clearShowTimeout();
-    showTimeoutRef.current = window.setTimeout(() => {
-      showTimeoutRef.current = null;
+    if (revealedBrowserIdsRef.current.has(browserId)) {
+      return;
+    }
+    revealedBrowserIdsRef.current.add(browserId);
 
-      if (isClosingRef.current || isCompleteRef.current || browserId !== browserIdRef.current) {
-        return;
-      }
-
-      void showSubWindowExternalBrowser(browserId).catch(() => {});
-    }, Math.max(0, fadeMs));
-  }, [clearShowTimeout, fadeMs]);
+    void showSubWindowExternalBrowser(browserId)
+      .catch(() => {
+        if (!isClosingRef.current && !isCompleteRef.current && browserId === browserIdRef.current) {
+          completeClose();
+        }
+      });
+  }, [completeClose]);
 
   const requestClose = useCallback(() => {
     if (isClosingRef.current) {
@@ -280,7 +271,6 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
       resizeObserver.disconnect();
       window.removeEventListener("resize", scheduleBrowserBoundsSync);
       cancelPendingResize();
-      clearShowTimeout();
 
       const browserId = browserIdRef.current;
       browserIdRef.current = null;
@@ -289,7 +279,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
         void closeSubWindowExternalBrowser(browserId).catch(() => {});
       }
     };
-  }, [clearShowTimeout, completeClose, fadeMs, revealLoadedBrowser, url, usesNativeBrowser]);
+  }, [completeClose, fadeMs, revealLoadedBrowser, url, usesNativeBrowser]);
 
   useEffect(() => {
     if (!usesNativeBrowser) {
@@ -311,6 +301,13 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
         }
 
         loadedBrowserIdsRef.current.add(event.browserId);
+        return;
+      }
+
+      if (event.event === SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT) {
+        if (event.browserId === browserIdRef.current) {
+          setIsLoaded(true);
+        }
         return;
       }
 
@@ -355,8 +352,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
 
   useEffect(() => () => {
     clearCloseTimeout();
-    clearShowTimeout();
-  }, [clearCloseTimeout, clearShowTimeout]);
+  }, [clearCloseTimeout]);
 
   const handleOverlayMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) {
@@ -394,8 +390,8 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
             onLoad={() => setIsLoaded(true)}
           />
         )}
-        <div className="subwindow-browser-loading-layer" aria-hidden="true" />
       </div>
+      <div className="subwindow-browser-loading-layer" aria-hidden="true" />
     </div>
   );
 }
