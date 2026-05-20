@@ -344,16 +344,20 @@ const LINE_COMMENT_PREFIX = "<!-- ";
 const LINE_COMMENT_SUFFIX = " -->";
 const FULL_LINE_HTML_COMMENT_PATTERN = /^<!--\s?([\s\S]*?)\s?-->$/u;
 
+const KMARK_SCOPE_CLOSE_TEXT = "<!--k}-->";
+const KMARK_SCOPE_OPEN_TEXT = "<!--k{ -->";
+const KMARK_SCOPE_OPEN_CURSOR_OFFSET = "<!--k{ ".length;
+
 const KMARK_SHORTCUT_INSERTIONS: Record<"close" | "open" | "parameter", KmarkShortcutInsertion> = {
   close: {
-    cursorOffset: "<!--k}-->".length,
+    cursorOffset: KMARK_SCOPE_CLOSE_TEXT.length,
     shouldStartCompletion: false,
-    text: "<!--k}-->",
+    text: KMARK_SCOPE_CLOSE_TEXT,
   },
   open: {
-    cursorOffset: "<!--k{ ".length,
+    cursorOffset: KMARK_SCOPE_OPEN_CURSOR_OFFSET,
     shouldStartCompletion: true,
-    text: "<!--k{ -->",
+    text: KMARK_SCOPE_OPEN_TEXT,
   },
   parameter: {
     cursorOffset: "<!--k ".length,
@@ -471,6 +475,33 @@ function runKmarkShortcutInsertion(view: EditorView, insertion: KmarkShortcutIns
   }
 }
 
+function runKmarkScopeSelectionWrap(view: EditorView): boolean {
+  if (!view.state.selection.ranges.every((range) => !range.empty)) {
+    return false;
+  }
+
+  const transaction = view.state.changeByRange((range) => {
+    const selectedText = view.state.doc.sliceString(range.from, range.to);
+
+    return {
+      changes: {
+        from: range.from,
+        insert: `${KMARK_SCOPE_OPEN_TEXT}${selectedText}${KMARK_SCOPE_CLOSE_TEXT}`,
+        to: range.to,
+      },
+      range: EditorSelection.cursor(range.from + KMARK_SCOPE_OPEN_CURSOR_OFFSET),
+    };
+  });
+
+  view.dispatch({
+    ...transaction,
+    scrollIntoView: true,
+  });
+
+  startCompletion(view);
+  return true;
+}
+
 const KMARK_SHORTCUT_INSERTION_EXTENSION = Prec.highest(EditorView.domEventHandlers({
   keydown: (event, view) => {
     if (view.composing || event.isComposing) {
@@ -489,6 +520,10 @@ const KMARK_SHORTCUT_INSERTION_EXTENSION = Prec.highest(EditorView.domEventHandl
     }
 
     event.preventDefault();
+    if (insertion === KMARK_SHORTCUT_INSERTIONS.parameter && runKmarkScopeSelectionWrap(view)) {
+      return true;
+    }
+
     runKmarkShortcutInsertion(view, insertion);
     return true;
   },
