@@ -15,6 +15,9 @@ type ModelKeyboardMovement = {
   dispose: () => void;
   pressedKeys: Set<string>;
 };
+type ModelTurnTableInteraction = {
+  dispose: () => void;
+};
 type ModelCameraSnapshot = {
   fov: number | null;
   position: readonly [number, number, number];
@@ -41,6 +44,8 @@ type ModelRenderState = {
   renderer: THREE.WebGLRenderer | null;
   renderSizeKey: string;
   scene: THREE.Scene | null;
+  turnTableInteraction: ModelTurnTableInteraction | null;
+  turnTablePausedByUser: boolean;
 };
 type ModelViewerScopeEntry = {
   cleanup: ModelViewerCleanup;
@@ -70,6 +75,16 @@ const MODEL_KEYBOARD_MOVE_SPEED = 0.9;
 const MAX_MODEL_CAMERA_SNAPSHOTS = 160;
 const MODEL_VIEWER_REUSE_SEPARATOR = "\u0000";
 const MODEL_UP = new THREE.Vector3(0, 0, 1);
+const MODEL_DEFAULT_TURN_TABLE_AXIS = "z";
+const MODEL_DEFAULT_TURN_TABLE_SPEED = 0.5;
+const MODEL_TURN_TABLE_AXES: Record<string, THREE.Vector3> = {
+  "-x": new THREE.Vector3(-1, 0, 0),
+  "-y": new THREE.Vector3(0, -1, 0),
+  "-z": new THREE.Vector3(0, 0, -1),
+  x: new THREE.Vector3(1, 0, 0),
+  y: new THREE.Vector3(0, 1, 0),
+  z: new THREE.Vector3(0, 0, 1),
+};
 const MODEL_KEYBOARD_MOVE_KEYS = new Set(["KeyA", "KeyD", "KeyE", "KeyQ", "KeyS", "KeyW"]);
 const MODEL_DEFAULT_PROJECTION = "perspective";
 const MODEL_CAMERA_DATA_ATTRIBUTE_NAMES = new Set([
@@ -368,6 +383,7 @@ export function resetKmarkModelViewerCamera(viewer: HTMLElement): boolean {
   fitCameraToModel(viewer, state.camera, state.bounds);
   state.controls?.target.copy(target);
   state.controls?.update();
+  state.turnTablePausedByUser = false;
 
   return true;
 }
@@ -574,6 +590,8 @@ function mountKmarkModelViewer(
     renderer,
     renderSizeKey: "",
     scene,
+    turnTableInteraction: null,
+    turnTablePausedByUser: false,
   };
   mountedModelStates.set(viewer, state);
 
@@ -621,6 +639,7 @@ function mountKmarkModelViewer(
     state.composer = composer;
     state.outlinePass = outlinePass;
     state.controls = configureControls(viewer, renderer.domElement, state.camera);
+    state.turnTableInteraction = configureModelTurnTableInteraction(viewer, state, state.controls);
     state.keyboardMovement = configureViewerKeyboardMovement(renderer.domElement);
     resizeRenderer(viewer, renderer, state.camera, state);
     if (options.restoreCameraSnapshots !== false) {
@@ -647,6 +666,7 @@ function mountKmarkModelViewer(
     }
     state.controls?.dispose();
     state.keyboardMovement?.dispose();
+    state.turnTableInteraction?.dispose();
     state.outlinePass?.dispose();
     state.composer?.dispose();
     disposeObject3D(scene);
@@ -698,6 +718,7 @@ function drawModelFrame(
     }
   }
 
+  applyModelTurnTable(viewer, state, deltaSeconds);
   resizeRenderer(viewer, renderer, camera, state);
   applyKeyboardMovement(state, deltaSeconds);
   updateModelEdgeOverlay(viewer, state);
@@ -708,6 +729,47 @@ function drawModelFrame(
     renderer.render(scene, camera);
   }
   viewer.dataset.kmarkModelFrameState = "rendered";
+}
+
+function applyModelTurnTable(viewer: HTMLElement, state: ModelRenderState, deltaSeconds: number): void {
+  if (
+    !getBooleanDataset(viewer.dataset.kmarkModelTurnTable, false)
+    || state.model === null
+    || state.turnTablePausedByUser
+  ) {
+    return;
+  }
+
+  const speed = getNumberDataset(viewer.dataset.kmarkModelTurnTableSpeed, MODEL_DEFAULT_TURN_TABLE_SPEED);
+  const axis = getModelTurnTableAxis(viewer.dataset.kmarkModelTurnTableAxis);
+
+  state.model.rotateOnWorldAxis(axis, deltaSeconds * speed);
+}
+
+function getModelTurnTableAxis(value: string | undefined): THREE.Vector3 {
+  const axisName = value?.trim() || MODEL_DEFAULT_TURN_TABLE_AXIS;
+
+  return MODEL_TURN_TABLE_AXES[axisName] ?? MODEL_TURN_TABLE_AXES[MODEL_DEFAULT_TURN_TABLE_AXIS];
+}
+
+function configureModelTurnTableInteraction(
+  viewer: HTMLElement,
+  state: ModelRenderState,
+  controls: OrbitControls,
+): ModelTurnTableInteraction {
+  const handleControlStart = () => {
+    if (getBooleanDataset(viewer.dataset.kmarkModelTurnTable, false)) {
+      state.turnTablePausedByUser = true;
+    }
+  };
+
+  controls.addEventListener("start", handleControlStart);
+
+  return {
+    dispose: () => {
+      controls.removeEventListener("start", handleControlStart);
+    },
+  };
 }
 
 function configureLighting(scene: THREE.Scene, preset: string): void {

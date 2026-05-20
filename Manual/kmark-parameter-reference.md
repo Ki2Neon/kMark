@@ -264,6 +264,18 @@ flowchart TD
 - time形式: `5` `5s` `01:23` `01:02:03.5`
 - 未登録: `video_controls` `video_fullscreen` `video_preload` `controls` `fullscreen` `preload`
 
+## 3D Model Parameters
+
+| Parameter | 使用者視点 | 値 | 例 | 注意 |
+| --- | --- | --- | --- | --- |
+| `3d_turn_table` | model本体を常時回転 | boolean | `3d_turn_table:true` | cameraではなくmodelを回転 |
+| `3d_turn_table_speed` | 回転速度 | number | `3d_turn_table_speed:0.5` | rad/s 未指定時 `0.5` |
+| `3d_turn_table_axis` | 回転軸 | `x` `y` `z` `-x` `-y` `-z` | `3d_turn_table_axis:z` | 未指定時 `z` |
+
+- 対象記法: `![]()`
+- 3D判定: extension `.glb` `.gltf` `.obj` `.stl` `.fbx`
+- 操作: modelをつかむと回転停止 画角resetで回転再開
+
 ## Text Parameters
 
 | Parameter | 使用者視点 | 値 | 例 | 注意 |
