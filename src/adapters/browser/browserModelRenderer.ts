@@ -70,6 +70,16 @@ const MODEL_KEYBOARD_MOVE_SPEED = 0.9;
 const MAX_MODEL_CAMERA_SNAPSHOTS = 160;
 const MODEL_VIEWER_REUSE_SEPARATOR = "\u0000";
 const MODEL_UP = new THREE.Vector3(0, 0, 1);
+const MODEL_DEFAULT_TURN_TABLE_AXIS = "z";
+const MODEL_DEFAULT_TURN_TABLE_SPEED = 1;
+const MODEL_TURN_TABLE_AXES: Record<string, THREE.Vector3> = {
+  "-x": new THREE.Vector3(-1, 0, 0),
+  "-y": new THREE.Vector3(0, -1, 0),
+  "-z": new THREE.Vector3(0, 0, -1),
+  x: new THREE.Vector3(1, 0, 0),
+  y: new THREE.Vector3(0, 1, 0),
+  z: new THREE.Vector3(0, 0, 1),
+};
 const MODEL_KEYBOARD_MOVE_KEYS = new Set(["KeyA", "KeyD", "KeyE", "KeyQ", "KeyS", "KeyW"]);
 const MODEL_DEFAULT_PROJECTION = "perspective";
 const MODEL_CAMERA_DATA_ATTRIBUTE_NAMES = new Set([
@@ -698,6 +708,7 @@ function drawModelFrame(
     }
   }
 
+  applyModelTurnTable(viewer, state, deltaSeconds);
   resizeRenderer(viewer, renderer, camera, state);
   applyKeyboardMovement(state, deltaSeconds);
   updateModelEdgeOverlay(viewer, state);
@@ -708,6 +719,23 @@ function drawModelFrame(
     renderer.render(scene, camera);
   }
   viewer.dataset.kmarkModelFrameState = "rendered";
+}
+
+function applyModelTurnTable(viewer: HTMLElement, state: ModelRenderState, deltaSeconds: number): void {
+  if (!getBooleanDataset(viewer.dataset.kmarkModelTurnTable, false) || state.model === null) {
+    return;
+  }
+
+  const speed = getNumberDataset(viewer.dataset.kmarkModelTurnTableSpeed, MODEL_DEFAULT_TURN_TABLE_SPEED);
+  const axis = getModelTurnTableAxis(viewer.dataset.kmarkModelTurnTableAxis);
+
+  state.model.rotateOnWorldAxis(axis, deltaSeconds * speed);
+}
+
+function getModelTurnTableAxis(value: string | undefined): THREE.Vector3 {
+  const axisName = value?.trim() || MODEL_DEFAULT_TURN_TABLE_AXIS;
+
+  return MODEL_TURN_TABLE_AXES[axisName] ?? MODEL_TURN_TABLE_AXES[MODEL_DEFAULT_TURN_TABLE_AXIS];
 }
 
 function configureLighting(scene: THREE.Scene, preset: string): void {

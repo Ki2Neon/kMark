@@ -305,6 +305,9 @@ struct KmarkModelParams {
     pan: Option<bool>,
     auto_rotate: Option<bool>,
     auto_rotate_speed: Option<String>,
+    turn_table: Option<bool>,
+    turn_table_speed: Option<String>,
+    turn_table_axis: Option<String>,
     background: Option<String>,
     loading: Option<String>,
     poster: Option<String>,
@@ -6360,6 +6363,15 @@ impl KmarkModelParams {
         if let Some(auto_rotate_speed) = &other.auto_rotate_speed {
             self.auto_rotate_speed = Some(auto_rotate_speed.clone());
         }
+        if let Some(turn_table) = other.turn_table {
+            self.turn_table = Some(turn_table);
+        }
+        if let Some(turn_table_speed) = &other.turn_table_speed {
+            self.turn_table_speed = Some(turn_table_speed.clone());
+        }
+        if let Some(turn_table_axis) = &other.turn_table_axis {
+            self.turn_table_axis = Some(turn_table_axis.clone());
+        }
         if let Some(background) = &other.background {
             self.background = Some(background.clone());
         }
@@ -6412,6 +6424,9 @@ impl KmarkModelParams {
             || self.pan.is_some()
             || self.auto_rotate.is_some()
             || self.auto_rotate_speed.is_some()
+            || self.turn_table.is_some()
+            || self.turn_table_speed.is_some()
+            || self.turn_table_axis.is_some()
             || self.background.is_some()
             || self.loading.is_some()
             || self.poster.is_some()
@@ -7478,6 +7493,21 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.model.auto_rotate_speed = Some(auto_rotate_speed);
                 }
             }
+            "turn_table" | "model_turn_table" => {
+                if let Some(turn_table) = parse_kmark_bool_value(&value) {
+                    bundle.params.model.turn_table = Some(turn_table);
+                }
+            }
+            "turn_table_speed" | "model_turn_table_speed" => {
+                if let Some(turn_table_speed) = parse_kmark_model_positive_number_value(&value) {
+                    bundle.params.model.turn_table_speed = Some(turn_table_speed);
+                }
+            }
+            "turn_table_axis" | "model_turn_table_axis" => {
+                if let Some(turn_table_axis) = parse_kmark_model_turn_table_axis_value(&value) {
+                    bundle.params.model.turn_table_axis = Some(turn_table_axis);
+                }
+            }
             "model_bg" => {
                 if let Some(background) = parse_kmark_model_background_value(&value) {
                     bundle.params.model.background = Some(background);
@@ -7869,6 +7899,13 @@ fn parse_kmark_model_convert_up_value(value: &str) -> Option<String> {
         "auto" | "x" | "y" | "z" | "-x" | "-y" | "-z" => {
             Some(trim_kmark_quotes(value).trim().to_owned())
         }
+        _ => None,
+    }
+}
+
+fn parse_kmark_model_turn_table_axis_value(value: &str) -> Option<String> {
+    match trim_kmark_quotes(value).trim() {
+        "x" | "y" | "z" | "-x" | "-y" | "-z" => Some(trim_kmark_quotes(value).trim().to_owned()),
         _ => None,
     }
 }
@@ -8363,6 +8400,9 @@ fn push_model_data_attrs(
         "auto-rotate-speed",
         model.auto_rotate_speed.as_deref(),
     );
+    push_optional_bool_model_data_attr(html, "turn-table", model.turn_table);
+    push_optional_model_data_attr(html, "turn-table-speed", model.turn_table_speed.as_deref());
+    push_optional_model_data_attr(html, "turn-table-axis", model.turn_table_axis.as_deref());
     push_optional_model_data_attr(html, "bg", model.background.as_deref());
     push_optional_model_data_attr(html, "loading", model.loading.as_deref());
     push_optional_model_data_attr(html, "convert", model.convert.as_deref());
@@ -11004,7 +11044,7 @@ mod tests {
     #[test]
     fn renders_markdown_image_model_extensions_as_model_viewers() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark w:600 model_view:front model_projection:orthographic model_camera_position:1,2,3 model_camera_target:0,0,0 model_camera_zoom:1.5 model_controls:false model_convert_scale:0.01 -->\n![gear](./gear.obj)",
+            "<!-- kmark w:600 model_view:front model_projection:orthographic model_camera_position:1,2,3 model_camera_target:0,0,0 model_camera_zoom:1.5 model_controls:false turn_table:true turn_table_speed:2 turn_table_axis:x model_convert_scale:0.01 -->\n![gear](./gear.obj)",
         );
 
         assert!(rendered_preview
@@ -11034,6 +11074,15 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-controls=\"false\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-turn-table=\"true\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-turn-table-speed=\"2\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-model-turn-table-axis=\"x\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-model-convert-scale=\"0.01\""));

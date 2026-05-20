@@ -456,6 +456,38 @@
       "priority": 87
     },
     {
+      "name": "turn_table",
+      "aliases": ["model_turn_table"],
+      "type": "boolean",
+      "contexts": ["single", "model"],
+      "insertText": "turn_table:true",
+      "description": "3Dモデル本体のターンテーブル回転を有効化する",
+      "examples": ["<!-- kmark turn_table:true -->"],
+      "priority": 87
+    },
+    {
+      "name": "turn_table_speed",
+      "aliases": ["model_turn_table_speed"],
+      "type": "number",
+      "contexts": ["single", "model"],
+      "values": ["0.25", "0.5", "1", "2"],
+      "insertText": "turn_table_speed:",
+      "description": "3Dモデル本体のターンテーブル回転速度を指定する",
+      "examples": ["<!-- kmark turn_table:true turn_table_speed:1 -->"],
+      "priority": 86
+    },
+    {
+      "name": "turn_table_axis",
+      "aliases": ["model_turn_table_axis"],
+      "type": "enum",
+      "contexts": ["single", "model"],
+      "values": ["z", "x", "y", "-x", "-y", "-z"],
+      "insertText": "turn_table_axis:",
+      "description": "3Dモデル本体のターンテーブル回転軸を指定する 未指定時はZ軸",
+      "examples": ["<!-- kmark turn_table:true turn_table_axis:z -->"],
+      "priority": 86
+    },
+    {
       "name": "model_bg",
       "aliases": [],
       "type": "color",
