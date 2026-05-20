@@ -67,6 +67,7 @@ pub(crate) struct AppState {
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
     pub(crate) next_sub_window_sequence: AtomicU64,
+    pub(crate) next_sandbox_browser_sequence: AtomicU64,
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -341,6 +342,20 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window
+                    .label()
+                    .starts_with(commands::external_link::SANDBOX_BROWSER_LABEL_PREFIX)
+                {
+                    if let Some(webview_window) =
+                        window.app_handle().get_webview_window(window.label())
+                    {
+                        commands::external_link::clear_sandbox_browser_browsing_data(
+                            &webview_window,
+                        );
+                    }
+                    return;
+                }
+
                 if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
                     commands::sub_window::remove_sub_window_state(
                         window.app_handle(),
@@ -370,6 +385,17 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Destroyed => {
+                if window
+                    .label()
+                    .starts_with(commands::external_link::SANDBOX_BROWSER_LABEL_PREFIX)
+                {
+                    commands::external_link::remove_sandbox_browser_data_directory(
+                        window.app_handle(),
+                        window.label(),
+                    );
+                    return;
+                }
+
                 if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
                     return;
                 }

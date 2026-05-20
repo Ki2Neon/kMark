@@ -8335,7 +8335,9 @@ fn contains_pending_kmark_break_gap(text: &str) -> bool {
 fn is_safe_url(url: &str) -> bool {
     let normalized = url.trim().to_ascii_lowercase();
 
-    !(normalized.starts_with("javascript:") || normalized.starts_with("data:"))
+    normalized.starts_with("https://")
+        || normalized.starts_with("http://")
+        || normalized.starts_with('#')
 }
 
 fn push_model_data_attrs(
@@ -10783,11 +10785,11 @@ mod tests {
     #[test]
     fn suppresses_inline_html_and_unsafe_links() {
         let rendered_preview =
-            render_markdown_preview("[x](javascript:alert(1))<script>alert(1)</script>");
+            render_markdown_preview("[x](javascript:alert(1)) [mail](mailto:a@example.com) [tel](tel:123) [file](file:///tmp/a.md)<script>alert(1)</script>");
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x</p>"
+            "<p data-source-line-start=\"0\" data-source-line-end=\"0\">x mail tel file</p>"
         );
     }
 
