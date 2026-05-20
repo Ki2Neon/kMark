@@ -59,14 +59,15 @@ export function useMarkdownEditorShortcuts({
       }
 
       const key = event.key.toLowerCase();
+      const isPrimaryOnlyShortcut = !event.shiftKey;
 
-      if (key === "s") {
+      if (key === "s" && isPrimaryOnlyShortcut) {
         event.preventDefault();
         saveDocumentEvent();
         return;
       }
 
-      if (key === "p") {
+      if (key === "p" && isPrimaryOnlyShortcut) {
         event.preventDefault();
         printDocumentEvent();
         return;
@@ -78,13 +79,13 @@ export function useMarkdownEditorShortcuts({
         return;
       }
 
-      if (key === "o") {
+      if (key === "o" && isPrimaryOnlyShortcut) {
         event.preventDefault();
         openDocumentEvent();
         return;
       }
 
-      if (key === "n") {
+      if (key === "n" && isPrimaryOnlyShortcut) {
         event.preventDefault();
         newDocumentEvent();
       }

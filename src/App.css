@@ -308,6 +308,7 @@ input:focus-visible,
 }
 
 .subwindow-shell {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
@@ -355,6 +356,91 @@ input:focus-visible,
 .subwindow-shell[data-fullscreen="true"][data-cursor-hidden="true"],
 .subwindow-shell[data-fullscreen="true"][data-cursor-hidden="true"] * {
   cursor: none !important;
+}
+
+.subwindow-browser-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  padding: 5vh 100px;
+  background: var(--overlay);
+  opacity: 1;
+  transition: opacity var(--subwindow-browser-fade-ms, 180ms) ease;
+}
+
+.subwindow-browser-overlay[data-closing="true"] {
+  opacity: 0;
+}
+
+.subwindow-browser-dialog {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 34%);
+}
+
+.subwindow-browser-dialog[data-native-browser="true"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.subwindow-browser-dialog[data-native-browser="true"]:focus {
+  outline: none;
+}
+
+.subwindow-browser-dialog:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.subwindow-browser-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.subwindow-browser-loading-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity var(--subwindow-browser-fade-ms, 180ms) cubic-bezier(.22, .61, .36, 1);
+}
+
+.subwindow-browser-loading-layer::before {
+  content: "";
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-top-color: rgb(255 255 255 / 88%);
+  border-radius: 999px;
+  box-shadow: 0 0 32px rgb(119 177 255 / 20%);
+  animation: subwindow-browser-spin 900ms linear infinite;
+}
+
+.subwindow-browser-overlay[data-loaded="true"] .subwindow-browser-loading-layer {
+  opacity: 0;
+}
+
+@keyframes subwindow-browser-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .editor-shell__toast {

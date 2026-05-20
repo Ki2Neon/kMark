@@ -2,9 +2,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 
 use super::error::CommandErrorPayload;
 use crate::{
-    dto::DesktopLayoutPreferencesPayload,
-    infra::persist_desktop_layout_preferences,
-    AppState,
+    dto::DesktopLayoutPreferencesPayload, infra::persist_desktop_layout_preferences, AppState,
 };
 use kmark_core::DesktopLayoutPreferences;
 

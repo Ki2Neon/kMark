@@ -20,15 +20,15 @@ type ParsedKmarkDirectiveLine = {
 };
 
 const MODEL_VIEWPOINT_PARAM_NAMES = [
-  "model_view",
-  "model_projection",
-  "model_fov",
-  "model_camera_yaw",
-  "model_camera_pitch",
-  "model_camera_distance",
-  "model_camera_position",
-  "model_camera_target",
-  "model_camera_zoom",
+  "3d_view",
+  "3d_projection",
+  "3d_fov",
+  "3d_camera_yaw",
+  "3d_camera_pitch",
+  "3d_camera_distance",
+  "3d_camera_position",
+  "3d_camera_target",
+  "3d_camera_zoom",
 ] as const;
 const MODEL_VIEWPOINT_PARAM_PATTERN = new RegExp(
   `(^|\\s)(?:${MODEL_VIEWPOINT_PARAM_NAMES.join("|")}):(?:"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s{}]+)`,
@@ -100,13 +100,13 @@ function restoreLineEndings(markdown: string, lineEnding: "\n" | "\r" | "\r\n"):
 
 function createModelViewpointDirectiveText(viewpoint: ModelViewpoint): string {
   const params = [
-    `model_projection:${viewpoint.projection}`,
+    `3d_projection:${viewpoint.projection}`,
     viewpoint.projection === "perspective" && isFiniteNumber(viewpoint.fov)
-      ? `model_fov:${formatNumber(viewpoint.fov)}`
+      ? `3d_fov:${formatNumber(viewpoint.fov)}`
       : null,
-    `model_camera_position:${formatVector(viewpoint.position)}`,
-    `model_camera_target:${formatVector(viewpoint.target)}`,
-    isMeaningfulZoom(viewpoint.zoom) ? `model_camera_zoom:${formatNumber(viewpoint.zoom)}` : null,
+    `3d_camera_position:${formatVector(viewpoint.position)}`,
+    `3d_camera_target:${formatVector(viewpoint.target)}`,
+    isMeaningfulZoom(viewpoint.zoom) ? `3d_camera_zoom:${formatNumber(viewpoint.zoom)}` : null,
   ];
 
   return params.filter((param): param is string => param !== null).join(" ");

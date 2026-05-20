@@ -21,7 +21,12 @@ fn system_font_directories() -> Vec<PathBuf> {
             directories.push(PathBuf::from(windir).join("Fonts"));
         }
         if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-            directories.push(PathBuf::from(local_app_data).join("Microsoft").join("Windows").join("Fonts"));
+            directories.push(
+                PathBuf::from(local_app_data)
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("Fonts"),
+            );
         }
     }
 
@@ -70,7 +75,11 @@ fn collect_font_families_from_bytes(bytes: &[u8], font_families: &mut HashSet<St
     collect_font_families_from_sfnt(bytes, 0, font_families);
 }
 
-fn collect_font_families_from_sfnt(bytes: &[u8], sfnt_offset: usize, font_families: &mut HashSet<String>) {
+fn collect_font_families_from_sfnt(
+    bytes: &[u8],
+    sfnt_offset: usize,
+    font_families: &mut HashSet<String>,
+) {
     let Some(table_count) = read_u16(bytes, sfnt_offset + 4) else {
         return;
     };
@@ -90,7 +99,11 @@ fn collect_font_families_from_sfnt(bytes: &[u8], sfnt_offset: usize, font_famili
     }
 }
 
-fn collect_font_families_from_name_table(bytes: &[u8], table_offset: usize, font_families: &mut HashSet<String>) {
+fn collect_font_families_from_name_table(
+    bytes: &[u8],
+    table_offset: usize,
+    font_families: &mut HashSet<String>,
+) {
     let Some(record_count) = read_u16(bytes, table_offset + 2) else {
         return;
     };
@@ -126,7 +139,9 @@ fn collect_font_families_from_name_table(bytes: &[u8], table_offset: usize, font
             let Some(raw_name) = bytes.get(start..end) else {
                 continue;
             };
-            let Some(font_family) = decode_font_name(platform_id, raw_name).and_then(normalize_font_family) else {
+            let Some(font_family) =
+                decode_font_name(platform_id, raw_name).and_then(normalize_font_family)
+            else {
                 continue;
             };
 

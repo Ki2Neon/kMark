@@ -3,7 +3,10 @@ use tauri::{AppHandle, Runtime};
 use crate::dto::ThemePreferencesPayload;
 use kmark_core::ThemePreferences;
 
-use super::{json_state_store::{load_json_state, persist_json_state}, JsonStateStoreError};
+use super::{
+    json_state_store::{load_json_state, persist_json_state},
+    JsonStateStoreError,
+};
 
 const THEME_PREFERENCES_SCOPE: &str = "theme_preferences";
 const THEME_PREFERENCES_FILE_NAME: &str = "theme-preferences.json";

@@ -64,9 +64,11 @@ pub(crate) struct AppState {
     pub(crate) preview_preferences: Mutex<PreviewPreferences>,
     pub(crate) recent_files: Mutex<RecentFiles>,
     pub(crate) sub_window_sources: Mutex<HashMap<String, dto::SubWindowStatePayload>>,
+    pub(crate) sub_window_browser_tokens: Mutex<HashMap<String, String>>,
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
     pub(crate) next_sub_window_sequence: AtomicU64,
+    pub(crate) next_sandbox_browser_sequence: AtomicU64,
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -341,6 +343,20 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window
+                    .label()
+                    .starts_with(commands::external_link::SANDBOX_BROWSER_LABEL_PREFIX)
+                {
+                    if let Some(webview_window) =
+                        window.app_handle().get_webview_window(window.label())
+                    {
+                        commands::external_link::clear_sandbox_browser_browsing_data(
+                            &webview_window,
+                        );
+                    }
+                    return;
+                }
+
                 if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
                     commands::sub_window::remove_sub_window_state(
                         window.app_handle(),
@@ -370,7 +386,22 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Destroyed => {
+                if window
+                    .label()
+                    .starts_with(commands::external_link::SANDBOX_BROWSER_LABEL_PREFIX)
+                {
+                    commands::external_link::remove_sandbox_browser_data_directory(
+                        window.app_handle(),
+                        window.label(),
+                    );
+                    return;
+                }
+
                 if window.label().starts_with(SUB_WINDOW_LABEL_PREFIX) {
+                    commands::external_link::close_sub_window_external_browsers_for_window_label(
+                        window.app_handle(),
+                        window.label(),
+                    );
                     return;
                 }
 
@@ -509,6 +540,12 @@ pub fn run() {
             commands::editor_preferences::get_editor_preferences,
             commands::editor_preferences::set_editor_preferences,
             commands::external_link::open_external_link,
+            commands::external_link::open_sub_window_external_browser,
+            commands::external_link::resize_sub_window_external_browser,
+            commands::external_link::begin_sub_window_external_browser_close,
+            commands::external_link::show_sub_window_external_browser,
+            commands::external_link::close_sub_window_external_browser,
+            commands::external_link::sub_window_browser_event,
             commands::file_open::clear_pending_markdown_open_requests,
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,

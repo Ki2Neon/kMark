@@ -227,30 +227,30 @@ fn parse_model_convert_params(input: &str) -> ParsedModelConvertParams {
 
     for (key, value) in split_kmark_param_pairs(input) {
         match key.as_str() {
-            "model_convert" => match trim_kmark_quotes(&value).trim() {
+            "3d_convert" => match trim_kmark_quotes(&value).trim() {
                 "never" => parsed.convert = ModelConvertMode::Never,
                 "force" => parsed.convert = ModelConvertMode::Force,
                 "auto" => parsed.convert = ModelConvertMode::Auto,
                 _ => {}
             },
-            "model_convert_force" => {
+            "3d_convert_force" => {
                 if let Some(force) = parse_bool(&value) {
                     parsed.options.force = force;
                 }
             }
-            "model_convert_scale" => {
+            "3d_convert_scale" => {
                 if let Ok(scale) = trim_kmark_quotes(&value).trim().parse::<f32>() {
                     if scale.is_finite() && scale > 0.0 {
                         parsed.options.scale = scale;
                     }
                 }
             }
-            "model_convert_up" => {
+            "3d_convert_up" => {
                 if let Some(up) = parse_model_up_axis(&value) {
                     parsed.options.up = up;
                 }
             }
-            "model_convert_center" => {
+            "3d_convert_center" => {
                 if let Some(center) = parse_bool(&value) {
                     parsed.options.center = center;
                 }

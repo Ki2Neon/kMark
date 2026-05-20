@@ -4,11 +4,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use super::error::CommandErrorPayload;
-use crate::{
-    dto::EditorPreferencesPayload,
-    infra::persist_editor_preferences,
-    AppState,
-};
+use crate::{dto::EditorPreferencesPayload, infra::persist_editor_preferences, AppState};
 use kmark_core::EditorPreferences;
 
 pub const EDITOR_PREFERENCES_UPDATED_EVENT: &str = "editor-preferences-updated";

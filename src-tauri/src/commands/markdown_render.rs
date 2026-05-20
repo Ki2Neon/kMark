@@ -56,7 +56,7 @@ mod tests {
         fs::write(&model_path, b"glTF\x02\0\0\0\x0c\0\0\0").expect("failed to create model");
 
         let payload = render_markdown_preview_payload(
-            "<!-- kmark model_projection:perspective model_fov:45 model_camera_position:1,2,3 model_camera_target:0,0,0 model_camera_zoom:1.5 -->\n![基板写真](./gear.glb)".to_owned(),
+            "<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:1,2,3 3d_camera_target:0,0,0 3d_camera_zoom:1.5 -->\n![基板写真](./gear.glb)".to_owned(),
             Some(markdown_path.to_string_lossy().into_owned()),
         );
 
@@ -87,7 +87,7 @@ mod tests {
         }
 
         let payload = render_markdown_preview_payload(
-            "<!--k{ layout:row -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:69.42524,69.42524,56.685471 model_camera_target:0,0,0 -->\n![1](3x3フック-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:56.209225,58.217715,44.846884 model_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n<!-- kmark model_projection:perspective model_fov:45 model_camera_position:194.335673,194.335673,158.674412 model_camera_target:0,0,0 -->\n![](poop_shooter-Body.stl)\n<!--k}-->".to_owned(),
+            "<!--k{ layout:row -->\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:69.42524,69.42524,56.685471 3d_camera_target:0,0,0 -->\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:69.42524,69.42524,56.685471 3d_camera_target:0,0,0 -->\n![1](3x3フック-Body.stl)\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:56.209225,58.217715,44.846884 3d_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:194.335673,194.335673,158.674412 3d_camera_target:0,0,0 -->\n![](poop_shooter-Body.stl)\n<!--k}-->".to_owned(),
             Some(markdown_path.to_string_lossy().into_owned()),
         );
 

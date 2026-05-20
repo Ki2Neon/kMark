@@ -2,10 +2,15 @@ import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand } from "./tauriCommand";
 
 const OPEN_EXTERNAL_LINK_COMMAND = "open_external_link";
-const EXTERNAL_LINK_SCHEME_PATTERN = /^(https?:|mailto:|tel:)/iu;
 
 export function isSupportedExternalLink(url: string): boolean {
-  return EXTERNAL_LINK_SCHEME_PATTERN.test(url.trim());
+  try {
+    const parsedUrl = new URL(url.trim());
+
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export async function openExternalLink(url: string): Promise<void> {

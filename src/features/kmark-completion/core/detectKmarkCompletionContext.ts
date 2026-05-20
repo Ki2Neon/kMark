@@ -61,8 +61,10 @@ export function detectKmarkCompletionContext(input: {
   const separatorIndex = tokenText.indexOf(":");
   const contexts = resolveCompletionContexts({
     markdown: input.markdown,
+    cursorInLine,
     lineEnd,
     lineStart,
+    lineText,
     parsedFragment,
     tokenText,
   });
@@ -196,20 +198,23 @@ function splitKmarkDirectiveTokensWithRanges(
 
 function resolveCompletionContexts(input: {
   readonly markdown: string;
+  readonly cursorInLine: number;
   readonly lineEnd: number;
   readonly lineStart: number;
+  readonly lineText: string;
   readonly parsedFragment: ReturnType<typeof parseKmarkDirectiveFragment>;
   readonly tokenText: string;
 }): readonly KmarkParamContext[] {
   const contexts: KmarkParamContext[] = [];
   const isScope = input.parsedFragment.hasScopeOpen;
   const isAtDirectiveStart = input.tokenText.trim().length === 0;
+  const isInlineScope = isScope && hasInlineScopeContentAfterCurrentComment(input.lineText, input.cursorInLine);
   const nextBlockKind = resolveNextBlockKind(input.markdown, input.lineEnd);
   const isTocCandidate = input.parsedFragment.hasTocParam
     || isAtDirectiveStart
     || input.tokenText.toLocaleLowerCase("en-US").startsWith("toc");
   const isPageCandidate = input.parsedFragment.hasPageParam
-    || ((isScope || isAtDirectiveStart) && isDocumentStart(input.markdown, input.lineStart));
+    || (!isInlineScope && (isScope || isAtDirectiveStart) && isDocumentStart(input.markdown, input.lineStart));
 
   if (isTocCandidate) {
     addContext(contexts, "toc");
@@ -235,17 +240,36 @@ function resolveCompletionContexts(input: {
     addContext(contexts, "page");
   }
 
-  if (isScope || isAtDirectiveStart) {
+  if (!isInlineScope && (isScope || isAtDirectiveStart)) {
     addContext(contexts, "scope");
   }
 
-  if (nextBlockKind === "text" || (!isScope && nextBlockKind === "none")) {
+  if (isInlineScope || nextBlockKind === "text" || (!isScope && nextBlockKind === "none")) {
     addContext(contexts, "text");
   }
 
   addContext(contexts, "single");
 
   return contexts;
+}
+
+const INLINE_KMARK_SCOPE_CLOSE_PATTERN = /<!--\s*(?:(?:k|kmark)\s*)?\}\s*-->/iu;
+
+function hasInlineScopeContentAfterCurrentComment(lineText: string, cursorInLine: number): boolean {
+  const commentCloseIndex = lineText.indexOf("-->", cursorInLine);
+
+  if (commentCloseIndex === -1) {
+    return false;
+  }
+
+  const afterCurrentComment = lineText.slice(commentCloseIndex + "-->".length);
+  const scopeCloseMatch = INLINE_KMARK_SCOPE_CLOSE_PATTERN.exec(afterCurrentComment);
+
+  if (scopeCloseMatch === null || scopeCloseMatch.index === undefined) {
+    return false;
+  }
+
+  return afterCurrentComment.slice(0, scopeCloseMatch.index).trim().length > 0;
 }
 
 function addContext(contexts: KmarkParamContext[], context: KmarkParamContext): void {

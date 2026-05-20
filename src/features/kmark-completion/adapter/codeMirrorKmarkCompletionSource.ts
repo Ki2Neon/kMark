@@ -93,7 +93,7 @@ export function createCodeMirrorKmarkCompletionSource(
 }
 
 function pathCompletionFilterForParam(paramName: string): KmarkPathCompletionFilter {
-  if (paramName === "video_poster" || paramName === "model_poster") {
+  if (paramName === "video_poster" || paramName === "3d_poster") {
     return {
       kind: "extensions",
       extensions: IMAGE_PATH_COMPLETION_EXTENSIONS,
