@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
 import { isSupportedExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 import {
+  beginSubWindowExternalBrowserClose,
   closeSubWindowExternalBrowser,
   openSubWindowExternalBrowser,
   resizeSubWindowExternalBrowser,
+  showSubWindowExternalBrowser,
   supportsNativeSubWindowExternalBrowser,
   type SubWindowExternalBrowserBounds,
 } from "../../adapters/browser/browserSubWindowExternalBrowser";
@@ -14,7 +24,7 @@ import {
   type SubWindowSelection,
   type SubWindowSourcesSnapshot,
 } from "../../application/subWindow/subWindowPorts";
-import { closeRuntimeWindow, isRuntimeFullscreen, setRuntimeFullscreen } from "../../runtime/runtime";
+import { closeRuntimeWindow, isRuntimeFullscreen, listenRuntimeEvent, setRuntimeFullscreen } from "../../runtime/runtime";
 import { MarkdownPreview, type PreviewNavigationRequest } from "../components/MarkdownPreview";
 import { PreviewContextMenu, type PreviewContextMenuSourceOption } from "../components/PreviewContextMenu";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
@@ -24,6 +34,9 @@ const AUTO_SOURCE_OPTION_ID = "auto";
 const FULLSCREEN_CURSOR_IDLE_HIDE_MS = 1200;
 const SUB_WINDOW_BROWSER_IFRAME_SANDBOX = "allow-forms allow-scripts";
 const SUB_WINDOW_BROWSER_RESIZE_SYNC_DELAY_MS = 80;
+const SUB_WINDOW_BROWSER_HOST_EVENT = "subwindow-browser-host-event";
+const SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT = "closeRequested";
+const SUB_WINDOW_BROWSER_LOADED_EVENT = "loaded";
 
 type SubWindowScreenProps = {
   readonly stateKey: string | null;
@@ -74,8 +87,14 @@ function resolveSourceMenuLabel(
 }
 
 type SubWindowBrowserOverlayProps = {
-  readonly onClose: () => void;
+  readonly fadeMs: number;
+  readonly onCloseComplete: () => void;
   readonly url: string;
+};
+
+type SubWindowBrowserHostEvent = {
+  readonly browserId: string;
+  readonly event: string;
 };
 
 function resolveSubWindowExternalBrowserBounds(element: HTMLElement): SubWindowExternalBrowserBounds | null {
@@ -93,15 +112,99 @@ function resolveSubWindowExternalBrowserBounds(element: HTMLElement): SubWindowE
   };
 }
 
-function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps) {
+function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrowserOverlayProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const browserIdRef = useRef<string | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
+  const showTimeoutRef = useRef<number | null>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
+  const isClosingRef = useRef(false);
+  const isCompleteRef = useRef(false);
+  const loadedBrowserIdsRef = useRef<Set<string>>(new Set());
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const usesNativeBrowser = supportsNativeSubWindowExternalBrowser();
 
   useEffect(() => {
     dialogRef.current?.focus({ preventScroll: true });
   }, [url]);
+
+  const clearCloseTimeout = useCallback(() => {
+    if (closeTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(closeTimeoutRef.current);
+    closeTimeoutRef.current = null;
+  }, []);
+
+  const clearShowTimeout = useCallback(() => {
+    if (showTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(showTimeoutRef.current);
+    showTimeoutRef.current = null;
+  }, []);
+
+  const closeNativeBrowserNow = useCallback((browserId: string) => {
+    void closeSubWindowExternalBrowser(browserId).catch(() => {});
+  }, []);
+
+  const completeClose = useCallback(() => {
+    if (isCompleteRef.current) {
+      return;
+    }
+
+    isCompleteRef.current = true;
+    clearCloseTimeout();
+    clearShowTimeout();
+
+    const browserId = browserIdRef.current;
+    browserIdRef.current = null;
+
+    if (browserId !== null) {
+      closeNativeBrowserNow(browserId);
+    }
+
+    onCloseComplete();
+  }, [clearCloseTimeout, clearShowTimeout, closeNativeBrowserNow, onCloseComplete]);
+
+  const revealLoadedBrowser = useCallback((browserId: string) => {
+    if (isClosingRef.current || isCompleteRef.current) {
+      return;
+    }
+
+    setIsLoaded(true);
+    clearShowTimeout();
+    showTimeoutRef.current = window.setTimeout(() => {
+      showTimeoutRef.current = null;
+
+      if (isClosingRef.current || isCompleteRef.current || browserId !== browserIdRef.current) {
+        return;
+      }
+
+      void showSubWindowExternalBrowser(browserId).catch(() => {});
+    }, Math.max(0, fadeMs));
+  }, [clearShowTimeout, fadeMs]);
+
+  const requestClose = useCallback(() => {
+    if (isClosingRef.current) {
+      return;
+    }
+
+    isClosingRef.current = true;
+    setIsClosing(true);
+
+    const browserId = browserIdRef.current;
+
+    if (browserId !== null) {
+      void beginSubWindowExternalBrowserClose(browserId).catch(() => {});
+    }
+
+    clearCloseTimeout();
+    closeTimeoutRef.current = window.setTimeout(completeClose, Math.max(0, fadeMs));
+  }, [clearCloseTimeout, completeClose, fadeMs]);
 
   useEffect(() => {
     if (!usesNativeBrowser) {
@@ -141,19 +244,27 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
       }, SUB_WINDOW_BROWSER_RESIZE_SYNC_DELAY_MS);
     };
 
-    void openSubWindowExternalBrowser(url)
+    void openSubWindowExternalBrowser(url, fadeMs)
       .then((browserId) => {
-        if (isDisposed) {
+        if (isDisposed || isCompleteRef.current) {
           void closeSubWindowExternalBrowser(browserId).catch(() => {});
           return;
         }
 
         browserIdRef.current = browserId;
         scheduleBrowserBoundsSync();
+
+        if (loadedBrowserIdsRef.current.delete(browserId)) {
+          revealLoadedBrowser(browserId);
+        }
+
+        if (isClosingRef.current) {
+          void beginSubWindowExternalBrowserClose(browserId).catch(() => {});
+        }
       })
       .catch(() => {
-        if (!isDisposed) {
-          onClose();
+        if (!isDisposed && !isCompleteRef.current) {
+          completeClose();
         }
       });
 
@@ -169,6 +280,7 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
       resizeObserver.disconnect();
       window.removeEventListener("resize", scheduleBrowserBoundsSync);
       cancelPendingResize();
+      clearShowTimeout();
 
       const browserId = browserIdRef.current;
       browserIdRef.current = null;
@@ -177,10 +289,92 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
         void closeSubWindowExternalBrowser(browserId).catch(() => {});
       }
     };
-  }, [onClose, url, usesNativeBrowser]);
+  }, [clearShowTimeout, completeClose, fadeMs, revealLoadedBrowser, url, usesNativeBrowser]);
+
+  useEffect(() => {
+    if (!usesNativeBrowser) {
+      return;
+    }
+
+    let isDisposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void listenRuntimeEvent<SubWindowBrowserHostEvent>(SUB_WINDOW_BROWSER_HOST_EVENT, (event) => {
+      if (isDisposed) {
+        return;
+      }
+
+      if (event.event === SUB_WINDOW_BROWSER_LOADED_EVENT) {
+        if (event.browserId === browserIdRef.current) {
+          revealLoadedBrowser(event.browserId);
+          return;
+        }
+
+        loadedBrowserIdsRef.current.add(event.browserId);
+        return;
+      }
+
+      if (
+        event.event === SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT
+        && event.browserId === browserIdRef.current
+      ) {
+        requestClose();
+      }
+    }).then((nextUnlisten) => {
+      if (isDisposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    }).catch(() => {});
+
+    return () => {
+      isDisposed = true;
+      unlisten?.();
+    };
+  }, [requestClose, revealLoadedBrowser, usesNativeBrowser]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      requestClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [requestClose]);
+
+  useEffect(() => () => {
+    clearCloseTimeout();
+    clearShowTimeout();
+  }, [clearCloseTimeout, clearShowTimeout]);
+
+  const handleOverlayMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    event.preventDefault();
+    requestClose();
+  }, [requestClose]);
 
   return (
-    <div className="subwindow-browser-overlay">
+    <div
+      className="subwindow-browser-overlay"
+      data-closing={isClosing ? "true" : "false"}
+      data-loaded={isLoaded ? "true" : "false"}
+      onMouseDown={handleOverlayMouseDown}
+      style={{ "--subwindow-browser-fade-ms": `${Math.max(0, fadeMs)}ms` } as CSSProperties}
+    >
       <div
         ref={dialogRef}
         aria-label="外部リンク"
@@ -197,8 +391,10 @@ function SubWindowBrowserOverlay({ onClose, url }: SubWindowBrowserOverlayProps)
             sandbox={SUB_WINDOW_BROWSER_IFRAME_SANDBOX}
             src={url}
             title="外部リンク"
+            onLoad={() => setIsLoaded(true)}
           />
         )}
+        <div className="subwindow-browser-loading-layer" aria-hidden="true" />
       </div>
     </div>
   );
@@ -447,7 +643,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     setBrowserUrl(normalizedUrl);
   }, [closeContextMenu]);
 
-  const handleBrowserClose = useCallback(() => {
+  const handleBrowserCloseComplete = useCallback(() => {
     setBrowserUrl(null);
   }, []);
 
@@ -528,28 +724,6 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     };
   }, [browserUrl, handleFullscreenToggle, requestPreviewNavigation, state]);
 
-  useEffect(() => {
-    if (browserUrl === null) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      setBrowserUrl(null);
-    };
-
-    window.addEventListener("keydown", handleKeyDown, true);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [browserUrl]);
-
   const previewContextMenu = previewContextMenuState === null ? null : (
     <PreviewContextMenu
       ariaLabel="サブウィンドウプレビューのコンテキストメニュー"
@@ -568,7 +742,12 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     />
   );
   const browserOverlay = browserUrl === null ? null : (
-    <SubWindowBrowserOverlay key={browserUrl} url={browserUrl} onClose={handleBrowserClose} />
+    <SubWindowBrowserOverlay
+      key={browserUrl}
+      fadeMs={state?.pageTransitionFadeMs ?? 0}
+      url={browserUrl}
+      onCloseComplete={handleBrowserCloseComplete}
+    />
   );
 
   if (!sourceLoadState.isLoaded || state === null) {

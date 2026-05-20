@@ -3,7 +3,10 @@ use tauri::{AppHandle, Runtime};
 use crate::dto::EditorDraftPayload;
 use kmark_core::StoredEdit;
 
-use super::{json_state_store::{load_json_state, persist_json_state}, JsonStateStoreError};
+use super::{
+    json_state_store::{load_json_state, persist_json_state},
+    JsonStateStoreError,
+};
 
 const EDITOR_DRAFT_SCOPE: &str = "editor_draft";
 const EDITOR_DRAFT_FILE_NAME: &str = "editor-draft.json";

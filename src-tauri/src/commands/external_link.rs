@@ -1,10 +1,17 @@
-use std::{fs, io::ErrorKind, path::PathBuf, sync::atomic::Ordering, thread, time::Duration};
+use std::{
+    fs,
+    io::ErrorKind,
+    path::PathBuf,
+    sync::atomic::Ordering,
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    webview::{DownloadEvent, NewWindowResponse},
-    AppHandle, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url, Webview,
-    WebviewBuilder, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
+    webview::{DownloadEvent, NewWindowResponse, PageLoadEvent},
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
+    Webview, WebviewBuilder, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
 };
 
 use super::error::CommandErrorPayload;
@@ -19,10 +26,370 @@ const SANDBOX_BROWSER_DATA_REMOVAL_RETRY_COUNT: usize = 60;
 const SANDBOX_BROWSER_DATA_REMOVAL_RETRY_DELAY_MS: u64 = 500;
 const SANDBOX_BROWSER_TITLE_PREFIX: &str = "Sandbox Browser - ";
 const SANDBOX_BROWSER_TITLE_URL_MAX_CHARS: usize = 160;
+const SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-smooth-scrolling --enable-features=SmoothScrolling";
+const SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT: &str = r##"
+(() => {
+  const STYLE_ID = "kmark-sandbox-smooth-scroll-style";
+  const DURATION_MS = 220;
+  const LINE_HEIGHT_PX = 40;
+  const stateByElement = new WeakMap();
+
+  const installStyle = () => {
+    const doc = window.document;
+    if (doc.getElementById(STYLE_ID) !== null) {
+      return;
+    }
+
+    const style = doc.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      html,
+      body,
+      * {
+        scroll-behavior: smooth !important;
+      }
+    `;
+    (doc.head || doc.documentElement).appendChild(style);
+  };
+
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const maxScrollLeft = (element) => Math.max(0, element.scrollWidth - element.clientWidth);
+  const maxScrollTop = (element) => Math.max(0, element.scrollHeight - element.clientHeight);
+  const canScrollAxis = (element, axis, delta) => {
+    if (delta === 0) {
+      return false;
+    }
+
+    const max = axis === "x" ? maxScrollLeft(element) : maxScrollTop(element);
+    if (max <= 0) {
+      return false;
+    }
+
+    const current = axis === "x" ? element.scrollLeft : element.scrollTop;
+    return delta > 0 ? current < max : current > 0;
+  };
+  const hasScrollableOverflow = (element, axis) => {
+    const style = window.getComputedStyle(element);
+    const overflow = axis === "x" ? style.overflowX : style.overflowY;
+    return overflow === "auto" || overflow === "scroll" || overflow === "overlay";
+  };
+  const normalizeWheelDelta = (event) => {
+    const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? LINE_HEIGHT_PX
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? window.innerHeight
+        : 1;
+    let x = event.deltaX * scale;
+    let y = event.deltaY * scale;
+
+    if (event.shiftKey && Math.abs(x) < 1 && Math.abs(y) > 0) {
+      x = y;
+      y = 0;
+    }
+
+    return { x, y };
+  };
+  const firstElementFromEvent = (event) => {
+    if (typeof event.composedPath === "function") {
+      for (const item of event.composedPath()) {
+        if (item instanceof Element) {
+          return item;
+        }
+      }
+    }
+
+    return event.target instanceof Element ? event.target : null;
+  };
+  const findScrollTarget = (event, delta) => {
+    const doc = window.document;
+    const root = doc.scrollingElement || doc.documentElement;
+    let element = firstElementFromEvent(event);
+
+    while (element !== null && element !== doc.documentElement) {
+      const canScrollX = hasScrollableOverflow(element, "x") && canScrollAxis(element, "x", delta.x);
+      const canScrollY = hasScrollableOverflow(element, "y") && canScrollAxis(element, "y", delta.y);
+
+      if (canScrollX || canScrollY) {
+        return element;
+      }
+
+      element = element.parentElement;
+    }
+
+    if (canScrollAxis(root, "x", delta.x) || canScrollAxis(root, "y", delta.y)) {
+      return root;
+    }
+
+    return null;
+  };
+  const easeOutCubic = (value) => 1 - Math.pow(1 - value, 3);
+  const smoothScrollBy = (element, delta) => {
+    const now = window.performance.now();
+    const previous = stateByElement.get(element);
+    const maxLeft = maxScrollLeft(element);
+    const maxTop = maxScrollTop(element);
+    const state = {
+      frame: 0,
+      fromLeft: element.scrollLeft,
+      fromTop: element.scrollTop,
+      startedAt: now,
+      targetLeft: clamp((previous?.targetLeft ?? element.scrollLeft) + delta.x, 0, maxLeft),
+      targetTop: clamp((previous?.targetTop ?? element.scrollTop) + delta.y, 0, maxTop),
+    };
+
+    if (previous?.frame) {
+      window.cancelAnimationFrame(previous.frame);
+    }
+
+    const step = (time) => {
+      const progress = clamp((time - state.startedAt) / DURATION_MS, 0, 1);
+      const eased = easeOutCubic(progress);
+      element.scrollLeft = state.fromLeft + (state.targetLeft - state.fromLeft) * eased;
+      element.scrollTop = state.fromTop + (state.targetTop - state.fromTop) * eased;
+
+      if (progress < 1) {
+        state.frame = window.requestAnimationFrame(step);
+        return;
+      }
+
+      stateByElement.delete(element);
+    };
+
+    state.frame = window.requestAnimationFrame(step);
+    stateByElement.set(element, state);
+  };
+
+  window.addEventListener("wheel", (event) => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+
+    const delta = normalizeWheelDelta(event);
+    const target = findScrollTarget(event, delta);
+
+    if (target === null) {
+      return;
+    }
+
+    event.preventDefault();
+    smoothScrollBy(target, delta);
+  }, { capture: true, passive: false });
+
+  installStyle();
+  window.document.addEventListener("DOMContentLoaded", installStyle, { once: true });
+})();
+"##;
 const SUB_WINDOW_BROWSER_GAP_LOGICAL_PX: f64 = 100.0;
 const SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE: f64 = 1.0;
+const SUB_WINDOW_BROWSER_HOST_EVENT: &str = "subwindow-browser-host-event";
+const SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT: &str = "closeRequested";
+const SUB_WINDOW_BROWSER_LOADED_EVENT: &str = "loaded";
+const SUB_WINDOW_BROWSER_MIN_ZOOM_SCALE: f64 = 0.2;
+const SUB_WINDOW_BROWSER_MAX_ZOOM_SCALE: f64 = 5.0;
+const SUB_WINDOW_BROWSER_MAX_FADE_MS: u32 = 5_000;
+const SUB_WINDOW_BROWSER_BEGIN_CLOSE_SCRIPT: &str = r#"
+try {
+  if (typeof window.__KMARK_SANDBOX_BROWSER_BEGIN_CLOSE__ === "function") {
+    window.__KMARK_SANDBOX_BROWSER_BEGIN_CLOSE__();
+  }
+} catch (_) {}
+"#;
+const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
+(() => {
+  const TOKEN = __KMARK_TOKEN__;
+  const FADE_MS = __KMARK_FADE_MS__;
+  const MIN_ZOOM = 0.2;
+  const MAX_ZOOM = 5.0;
+  const ZOOM_STEP = 0.1;
+  let zoomScale = 1;
+  let closeLayer = null;
+  let zoomElement = null;
 
-#[derive(Serialize)]
+  const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+  const isZoomed = () => Math.abs(zoomScale - 1) > 0.001;
+  const bridge = (event) => {
+    try {
+      const internals = window.__TAURI_INTERNALS__;
+      if (internals === undefined || typeof internals.invoke !== "function") {
+        return;
+      }
+      internals.invoke("sub_window_browser_event", { token: TOKEN, event }).catch(() => {});
+    } catch (_) {}
+  };
+
+  const ensureUi = () => {
+    const doc = window.document;
+    const root = doc.documentElement;
+
+    if (doc.getElementById("kmark-sandbox-browser-style") === null) {
+      const style = doc.createElement("style");
+      style.id = "kmark-sandbox-browser-style";
+      style.textContent = `
+        html,
+        body,
+        * {
+          scroll-behavior: smooth !important;
+        }
+        #kmark-sandbox-browser-close-layer {
+          position: fixed;
+          inset: 0;
+          z-index: 2147483646;
+          display: block;
+          background: rgba(9, 11, 15, .94);
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1);
+        }
+        html[data-kmark-sandbox-closing="true"] #kmark-sandbox-browser-close-layer {
+          opacity: 1;
+        }
+        #kmark-sandbox-browser-zoom {
+          position: fixed;
+          right: 16px;
+          bottom: 16px;
+          z-index: 2147483647;
+          min-width: 58px;
+          height: 32px;
+          display: none;
+          align-items: center;
+          justify-content: center;
+          padding: 0 10px;
+          border: 1px solid rgba(255, 255, 255, .18);
+          border-radius: 8px;
+          background: rgba(14, 17, 23, .82);
+          color: #f7f9ff;
+          box-shadow: 0 10px 28px rgba(0, 0, 0, .24);
+          font: 600 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          letter-spacing: 0;
+          user-select: none;
+          cursor: pointer;
+          backdrop-filter: blur(10px);
+        }
+        html[data-kmark-sandbox-zoomed="true"] #kmark-sandbox-browser-zoom {
+          display: flex;
+        }
+      `;
+      (doc.head || root).appendChild(style);
+    }
+
+    if (doc.body === null) {
+      doc.addEventListener("DOMContentLoaded", ensureUi, { once: true });
+      return;
+    }
+
+    if (closeLayer === null || !doc.contains(closeLayer)) {
+      closeLayer = doc.createElement("div");
+      closeLayer.id = "kmark-sandbox-browser-close-layer";
+      doc.body.appendChild(closeLayer);
+    }
+
+    if (zoomElement === null || !doc.contains(zoomElement)) {
+      zoomElement = doc.createElement("button");
+      zoomElement.id = "kmark-sandbox-browser-zoom";
+      zoomElement.type = "button";
+      zoomElement.title = "Reset zoom";
+      zoomElement.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setZoom(1);
+      }, true);
+      doc.body.appendChild(zoomElement);
+    }
+
+    updateZoomBadge();
+  };
+
+  const updateZoomBadge = () => {
+    const root = window.document.documentElement;
+    if (isZoomed()) {
+      root.setAttribute("data-kmark-sandbox-zoomed", "true");
+    } else {
+      root.removeAttribute("data-kmark-sandbox-zoomed");
+    }
+    if (zoomElement !== null) {
+      zoomElement.textContent = `${Math.round(zoomScale * 100)}%`;
+    }
+  };
+
+  const setZoom = (nextZoom) => {
+    const resolvedZoom = Math.round(clampZoom(nextZoom) * 100) / 100;
+    if (Math.abs(resolvedZoom - zoomScale) < 0.001) {
+      return;
+    }
+    zoomScale = resolvedZoom;
+    ensureUi();
+    updateZoomBadge();
+    bridge({ type: "zoom", zoom: zoomScale });
+  };
+
+  const beginClose = () => {
+    ensureUi();
+    window.document.documentElement.setAttribute("data-kmark-sandbox-closing", "true");
+  };
+
+  try {
+    Object.defineProperty(window, "__KMARK_SANDBOX_BROWSER_BEGIN_CLOSE__", {
+      value: beginClose,
+      configurable: false,
+      writable: false,
+    });
+  } catch (_) {
+    window.__KMARK_SANDBOX_BROWSER_BEGIN_CLOSE__ = beginClose;
+  }
+
+  const requestClose = (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    bridge({ type: "close" });
+  };
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      requestClose(event);
+      return;
+    }
+
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+
+    if (event.key === "0") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setZoom(1);
+      return;
+    }
+
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setZoom(zoomScale + ZOOM_STEP);
+      return;
+    }
+
+    if (event.key === "-") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setZoom(zoomScale - ZOOM_STEP);
+    }
+  }, true);
+
+  window.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setZoom(zoomScale + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+  }, { capture: true, passive: false });
+
+  ensureUi();
+  bridge({ type: "zoom", zoom: 1 });
+})();
+"##;
+
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenSubWindowExternalBrowserResponsePayload {
     browser_id: String,
@@ -35,6 +402,21 @@ pub struct SubWindowBrowserBoundsPayload {
     y: f64,
     width: f64,
     height: f64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubWindowBrowserHostEventPayload<'a> {
+    browser_id: &'a str,
+    event: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWindowBrowserEventPayload {
+    #[serde(rename = "type")]
+    event_type: String,
+    zoom: Option<f64>,
 }
 
 #[tauri::command]
@@ -71,6 +453,8 @@ pub async fn open_external_link(
             .visible(true)
             .focused(true)
             .incognito(true)
+            .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
+            .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
             .data_directory(data_directory)
             .on_navigation(is_supported_external_url)
             .on_new_window(|_url, _features| NewWindowResponse::Deny)
@@ -104,9 +488,10 @@ pub async fn open_sub_window_external_browser(
     window: Window,
     webview: Webview,
     url: String,
+    fade_ms: u32,
 ) -> Result<OpenSubWindowExternalBrowserResponsePayload, CommandErrorPayload> {
     tauri::async_runtime::spawn_blocking(move || {
-        open_sub_window_external_browser_on_blocking_thread(app, window, webview, url)
+        open_sub_window_external_browser_on_blocking_thread(app, window, webview, url, fade_ms)
     })
     .await
     .map_err(|source| {
@@ -123,13 +508,19 @@ fn open_sub_window_external_browser_on_blocking_thread(
     window: Window,
     webview: Webview,
     url: String,
+    fade_ms: u32,
 ) -> Result<OpenSubWindowExternalBrowserResponsePayload, CommandErrorPayload> {
     ensure_sub_window_browser_host(&window, &webview)?;
 
     let parsed_url = parse_supported_external_link_url(&url)?;
     let bounds = sub_window_browser_bounds_for_window(&window)?;
     let label = next_sub_window_browser_label(&app);
+    let token = next_sub_window_browser_token(&label);
+    let fade_ms = fade_ms.min(SUB_WINDOW_BROWSER_MAX_FADE_MS);
     let data_directory = sub_window_browser_data_directory(&app, &label)?;
+    let bridge_app = app.clone();
+    let bridge_window_label = window.label().to_string();
+    let bridge_label = label.clone();
 
     fs::create_dir_all(&data_directory).map_err(|source| {
         CommandErrorPayload::with_detail(
@@ -138,14 +529,30 @@ fn open_sub_window_external_browser_on_blocking_thread(
             source.to_string(),
         )
     })?;
+    remember_sub_window_browser_token(&app, &label, token.clone());
 
     let browser_webview =
         WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed_url.clone()))
             .auto_resize()
             .incognito(true)
             .focused(false)
+            .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
             .data_directory(data_directory)
-            .on_navigation(is_supported_external_url)
+            .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
+            .initialization_script(sub_window_browser_initialization_script(&token, fade_ms))
+            .on_page_load(move |_webview, payload| {
+                if payload.event() != PageLoadEvent::Finished {
+                    return;
+                }
+
+                emit_sub_window_browser_host_event(
+                    &bridge_app,
+                    &bridge_window_label,
+                    &bridge_label,
+                    SUB_WINDOW_BROWSER_LOADED_EVENT,
+                );
+            })
+            .on_navigation(|url| is_supported_external_url(url))
             .on_new_window(|_url, _features| NewWindowResponse::Deny)
             .on_download(|_webview, event| {
                 if let DownloadEvent::Requested { url, .. } = event {
@@ -155,15 +562,17 @@ fn open_sub_window_external_browser_on_blocking_thread(
                 false
             });
 
-    window
+    let browser_webview = window
         .add_child(browser_webview, bounds.position, bounds.size)
         .map_err(|source| {
+            forget_sub_window_browser_token(&app, &label);
             CommandErrorPayload::with_detail(
                 "subwindow_browser_open_failed",
                 "failed to open subwindow browser",
                 source.to_string(),
             )
         })?;
+    let _ = browser_webview.hide();
 
     Ok(OpenSubWindowExternalBrowserResponsePayload { browser_id: label })
 }
@@ -190,6 +599,113 @@ pub async fn close_sub_window_external_browser(
 }
 
 #[tauri::command]
+pub async fn begin_sub_window_external_browser_close(
+    app: AppHandle,
+    window: Window,
+    webview: Webview,
+    browser_id: String,
+) -> Result<(), CommandErrorPayload> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_sub_window_browser_host(&window, &webview)?;
+        let browser_webview =
+            resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
+
+        browser_webview
+            .eval(SUB_WINDOW_BROWSER_BEGIN_CLOSE_SCRIPT)
+            .map_err(|source| {
+                CommandErrorPayload::with_detail(
+                    "subwindow_browser_close_animation_failed",
+                    "failed to start subwindow browser close animation",
+                    source.to_string(),
+                )
+            })
+    })
+    .await
+    .map_err(|source| {
+        CommandErrorPayload::with_detail(
+            "subwindow_browser_task_failed",
+            "failed to run subwindow browser close animation task",
+            source.to_string(),
+        )
+    })?
+}
+
+#[tauri::command]
+pub async fn show_sub_window_external_browser(
+    app: AppHandle,
+    window: Window,
+    webview: Webview,
+    browser_id: String,
+) -> Result<(), CommandErrorPayload> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_sub_window_browser_host(&window, &webview)?;
+        let browser_webview =
+            resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
+
+        browser_webview.show().map_err(|source| {
+            CommandErrorPayload::with_detail(
+                "subwindow_browser_show_failed",
+                "failed to show subwindow browser",
+                source.to_string(),
+            )
+        })
+    })
+    .await
+    .map_err(|source| {
+        CommandErrorPayload::with_detail(
+            "subwindow_browser_task_failed",
+            "failed to run subwindow browser show task",
+            source.to_string(),
+        )
+    })?
+}
+
+#[tauri::command]
+pub async fn sub_window_browser_event(
+    app: AppHandle,
+    webview: Webview,
+    token: String,
+    event: SubWindowBrowserEventPayload,
+) -> Result<(), CommandErrorPayload> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_sub_window_browser_event_source(&app, &webview, &token)?;
+
+        match event.event_type.as_str() {
+            "close" => {
+                emit_sub_window_browser_host_event(
+                    &app,
+                    webview.window().label(),
+                    webview.label(),
+                    SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT,
+                );
+            }
+            "zoom" => {
+                if let Some(zoom) = event.zoom.and_then(validate_sub_window_browser_zoom) {
+                    webview.set_zoom(zoom).map_err(|source| {
+                        CommandErrorPayload::with_detail(
+                            "subwindow_browser_zoom_failed",
+                            "failed to zoom subwindow browser",
+                            source.to_string(),
+                        )
+                    })?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|source| {
+        CommandErrorPayload::with_detail(
+            "subwindow_browser_task_failed",
+            "failed to run subwindow browser event task",
+            source.to_string(),
+        )
+    })?
+}
+
+#[tauri::command]
 pub async fn resize_sub_window_external_browser(
     app: AppHandle,
     window: Window,
@@ -200,7 +716,8 @@ pub async fn resize_sub_window_external_browser(
     tauri::async_runtime::spawn_blocking(move || {
         ensure_sub_window_browser_host(&window, &webview)?;
         let bounds = validate_sub_window_browser_bounds(bounds)?;
-        let browser_webview = resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
+        let browser_webview =
+            resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
 
         browser_webview.set_bounds(bounds).map_err(|source| {
             CommandErrorPayload::with_detail(
@@ -266,6 +783,7 @@ pub(crate) fn close_sub_window_external_browsers_for_window_label<R: Runtime>(
         if let Err(error) = webview.close() {
             eprintln!("failed to close subwindow browser webview: {error}");
         }
+        forget_sub_window_browser_token(app, &label);
         remove_sub_window_browser_data_directory(app, &label);
     }
 }
@@ -303,6 +821,39 @@ fn is_supported_external_url(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https")
 }
 
+fn sub_window_browser_initialization_script(token: &str, fade_ms: u32) -> String {
+    let token_json = serde_json::to_string(token).unwrap_or_else(|_| "\"\"".to_string());
+
+    SUB_WINDOW_BROWSER_INIT_SCRIPT
+        .replace("__KMARK_TOKEN__", &token_json)
+        .replace("__KMARK_FADE_MS__", &fade_ms.to_string())
+}
+
+fn validate_sub_window_browser_zoom(zoom: f64) -> Option<f64> {
+    if !zoom.is_finite() {
+        return None;
+    }
+
+    Some(zoom.clamp(
+        SUB_WINDOW_BROWSER_MIN_ZOOM_SCALE,
+        SUB_WINDOW_BROWSER_MAX_ZOOM_SCALE,
+    ))
+}
+
+fn emit_sub_window_browser_host_event<R: Runtime>(
+    app: &AppHandle<R>,
+    window_label: &str,
+    browser_label: &str,
+    event: &'static str,
+) {
+    let payload = SubWindowBrowserHostEventPayload {
+        browser_id: browser_label,
+        event,
+    };
+
+    let _ = app.emit_to(window_label, SUB_WINDOW_BROWSER_HOST_EVENT, payload);
+}
+
 fn next_sandbox_browser_label<R: Runtime>(app: &AppHandle<R>) -> String {
     let state = app.state::<AppState>();
     let next_sequence = state
@@ -321,6 +872,40 @@ fn next_sub_window_browser_label<R: Runtime>(app: &AppHandle<R>) -> String {
         + 1;
 
     format!("{SUB_WINDOW_BROWSER_LABEL_PREFIX}{next_sequence}")
+}
+
+fn next_sub_window_browser_token(label: &str) -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    format!("{label}-{}-{timestamp}", std::process::id())
+}
+
+fn remember_sub_window_browser_token<R: Runtime>(app: &AppHandle<R>, label: &str, token: String) {
+    if let Ok(mut tokens) = app.state::<AppState>().sub_window_browser_tokens.lock() {
+        tokens.insert(label.to_string(), token);
+    }
+}
+
+fn forget_sub_window_browser_token<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    if let Ok(mut tokens) = app.state::<AppState>().sub_window_browser_tokens.lock() {
+        tokens.remove(label);
+    }
+}
+
+fn is_current_sub_window_browser_token<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    token: &str,
+) -> bool {
+    app.state::<AppState>()
+        .sub_window_browser_tokens
+        .lock()
+        .ok()
+        .and_then(|tokens| tokens.get(label).cloned())
+        .is_some_and(|current_token| current_token == token)
 }
 
 fn is_sandbox_browser_window_label(label: &str) -> bool {
@@ -455,6 +1040,42 @@ fn ensure_sub_window_browser_host<R: Runtime>(
     Ok(())
 }
 
+fn ensure_sub_window_browser_event_source<R: Runtime>(
+    app: &AppHandle<R>,
+    webview: &Webview<R>,
+    token: &str,
+) -> Result<(), CommandErrorPayload> {
+    if !is_sub_window_browser_label(webview.label()) {
+        return Err(CommandErrorPayload::with_detail(
+            "subwindow_browser_event_forbidden",
+            "only subwindow browser webviews can send browser events",
+            webview.label(),
+        ));
+    }
+
+    if !webview
+        .window()
+        .label()
+        .starts_with(SUB_WINDOW_LABEL_PREFIX)
+    {
+        return Err(CommandErrorPayload::with_detail(
+            "subwindow_browser_event_forbidden",
+            "subwindow browser event source window is invalid",
+            webview.window().label(),
+        ));
+    }
+
+    if !is_current_sub_window_browser_token(app, webview.label(), token) {
+        return Err(CommandErrorPayload::with_detail(
+            "subwindow_browser_event_forbidden",
+            "subwindow browser event token is invalid",
+            webview.label(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn resolve_sub_window_browser_webview<R: Runtime>(
     app: &AppHandle<R>,
     window_label: &str,
@@ -502,6 +1123,7 @@ fn close_sub_window_browser_by_label<R: Runtime>(
             source.to_string(),
         )
     })?;
+    forget_sub_window_browser_token(app, browser_id);
     remove_sub_window_browser_data_directory(app, browser_id);
 
     Ok(())

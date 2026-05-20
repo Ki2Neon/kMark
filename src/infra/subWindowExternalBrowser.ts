@@ -3,6 +3,8 @@ import { invokeTauriCommand } from "./tauriCommand";
 
 const OPEN_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND = "open_sub_window_external_browser";
 const RESIZE_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND = "resize_sub_window_external_browser";
+const BEGIN_SUB_WINDOW_EXTERNAL_BROWSER_CLOSE_COMMAND = "begin_sub_window_external_browser_close";
+const SHOW_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND = "show_sub_window_external_browser";
 const CLOSE_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND = "close_sub_window_external_browser";
 
 export type SubWindowExternalBrowserBounds = {
@@ -20,14 +22,14 @@ export function supportsNativeSubWindowExternalBrowser(): boolean {
   return isTauri();
 }
 
-export async function openSubWindowExternalBrowser(url: string): Promise<string> {
+export async function openSubWindowExternalBrowser(url: string, fadeMs: number): Promise<string> {
   if (!isTauri()) {
     throw new Error("この環境ではサブウィンドウ内ブラウザを開けません。");
   }
 
   const response = await invokeTauriCommand<OpenSubWindowExternalBrowserResponse>(
     OPEN_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND,
-    { url },
+    { fadeMs, url },
     "サブウィンドウ内ブラウザを開けませんでした。",
   );
 
@@ -46,6 +48,30 @@ export async function resizeSubWindowExternalBrowser(
     RESIZE_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND,
     { bounds, browserId },
     "サブウィンドウ内ブラウザをリサイズできませんでした。",
+  );
+}
+
+export async function beginSubWindowExternalBrowserClose(browserId: string): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+
+  await invokeTauriCommand<void>(
+    BEGIN_SUB_WINDOW_EXTERNAL_BROWSER_CLOSE_COMMAND,
+    { browserId },
+    "サブウィンドウ内ブラウザの閉じる演出を開始できませんでした。",
+  );
+}
+
+export async function showSubWindowExternalBrowser(browserId: string): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+
+  await invokeTauriCommand<void>(
+    SHOW_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND,
+    { browserId },
+    "サブウィンドウ内ブラウザを表示できませんでした。",
   );
 }
 
