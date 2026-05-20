@@ -383,7 +383,9 @@ input:focus-visible,
   overflow: hidden;
   border: 1px solid var(--border-strong);
   background: #fff;
+  opacity: 0;
   box-shadow: 0 18px 48px rgb(0 0 0 / 34%);
+  transition: opacity var(--subwindow-browser-fade-ms, 180ms) cubic-bezier(.22, .61, .36, 1);
 }
 
 .subwindow-browser-dialog[data-native-browser="true"] {
@@ -400,6 +402,10 @@ input:focus-visible,
 .subwindow-browser-dialog:focus {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
+}
+
+.subwindow-browser-overlay[data-loaded="true"] .subwindow-browser-dialog {
+  opacity: 1;
 }
 
 .subwindow-browser-frame {

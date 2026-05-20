@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    webview::{DownloadEvent, NewWindowResponse, PageLoadEvent},
+    webview::{Color, DownloadEvent, NewWindowResponse, PageLoadEvent},
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
     Webview, WebviewBuilder, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
 };
@@ -78,6 +78,13 @@ try {
   }
 } catch (_) {}
 "#;
+const SUB_WINDOW_BROWSER_PREPARE_REVEAL_SCRIPT: &str = r#"
+try {
+  if (typeof window.__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__ === "function") {
+    window.__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__();
+  }
+} catch (_) {}
+"#;
 const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 (() => {
   const TOKEN = __KMARK_TOKEN__;
@@ -86,9 +93,15 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
   const MAX_ZOOM = 5.0;
   const ZOOM_STEP = 0.1;
   const REVEAL_SETTLE_MS = 180;
+  const REVEAL_BACKGROUND_RESTORE_DELAY_MS = 80;
+  const TRANSPARENT_BACKGROUND = "rgba(0, 0, 0, 0)";
+  const DEFAULT_REVEAL_BACKGROUND = "#fff";
+  const BACKGROUND_ELEMENT_ID = "kmark-sandbox-browser-background";
   const REVEAL_TRANSITION = `opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1)`;
   let zoomScale = 1;
   let zoomElement = null;
+  let backgroundElement = null;
+  let revealRestoreTimeoutId = null;
 
   const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
   const isZoomed = () => Math.abs(zoomScale - 1) > 0.001;
@@ -102,20 +115,107 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
       element.style.removeProperty(name);
     } catch (_) {}
   };
+  const clearRevealRestoreTimeout = () => {
+    if (revealRestoreTimeoutId === null) {
+      return;
+    }
+
+    window.clearTimeout(revealRestoreTimeoutId);
+    revealRestoreTimeoutId = null;
+  };
+  const isTransparentBackground = (value) => {
+    if (typeof value !== "string") {
+      return true;
+    }
+
+    const normalizedValue = value.trim().toLowerCase();
+    return normalizedValue === ""
+      || normalizedValue === "transparent"
+      || normalizedValue === TRANSPARENT_BACKGROUND;
+  };
+  const resolveRevealBackground = () => {
+    try {
+      const doc = window.document;
+      const candidates = [doc.body, doc.documentElement];
+
+      for (const element of candidates) {
+        if (element === null) {
+          continue;
+        }
+
+        const backgroundColor = window.getComputedStyle(element).backgroundColor;
+        if (!isTransparentBackground(backgroundColor)) {
+          return backgroundColor;
+        }
+      }
+
+      const retainedBackground = doc.documentElement.style
+        .getPropertyValue("--kmark-sandbox-browser-background")
+        .trim();
+      if (!isTransparentBackground(retainedBackground)) {
+        return retainedBackground;
+      }
+    } catch (_) {}
+
+    return DEFAULT_REVEAL_BACKGROUND;
+  };
+  const syncRevealBackground = () => {
+    try {
+      window.document.documentElement.style.setProperty(
+        "--kmark-sandbox-browser-background",
+        resolveRevealBackground(),
+      );
+    } catch (_) {}
+  };
+  const holdCanvasBackground = () => {
+    const doc = window.document;
+    const root = doc.documentElement;
+
+    root.setAttribute("data-kmark-sandbox-background-held", "true");
+    setImportantStyle(root, "background", "transparent");
+
+    if (doc.body !== null) {
+      setImportantStyle(doc.body, "background", "transparent");
+    }
+  };
+  const restoreCanvasBackground = () => {
+    const doc = window.document;
+    const root = doc.documentElement;
+
+    root.removeAttribute("data-kmark-sandbox-background-held");
+    removeInlineStyle(root, "background");
+
+    if (doc.body !== null) {
+      removeInlineStyle(doc.body, "background");
+    }
+  };
+  const scheduleCanvasBackgroundRestore = () => {
+    clearRevealRestoreTimeout();
+
+    revealRestoreTimeoutId = window.setTimeout(() => {
+      revealRestoreTimeoutId = null;
+
+      const root = window.document.documentElement;
+      if (
+        root.getAttribute("data-kmark-sandbox-reveal") === "visible"
+        && root.getAttribute("data-kmark-sandbox-closing") !== "true"
+      ) {
+        restoreCanvasBackground();
+      }
+    }, Math.max(0, FADE_MS + REVEAL_BACKGROUND_RESTORE_DELAY_MS));
+  };
   const prepareReveal = () => {
     try {
       const doc = window.document;
       const root = doc.documentElement;
 
+      clearRevealRestoreTimeout();
+      syncRevealBackground();
       root.removeAttribute("data-kmark-sandbox-closing");
       root.setAttribute("data-kmark-sandbox-reveal", "pending");
       setImportantStyle(root, "transition", "none");
       setImportantStyle(root, "opacity", "0");
-      setImportantStyle(root, "background", "transparent");
-
-      if (doc.body !== null) {
-        setImportantStyle(doc.body, "background", "transparent");
-      }
+      holdCanvasBackground();
     } catch (_) {}
   };
   const finishReveal = () => {
@@ -123,13 +223,11 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     const root = doc.documentElement;
 
     root.setAttribute("data-kmark-sandbox-reveal", "visible");
-    removeInlineStyle(root, "background");
-    if (doc.body !== null) {
-      removeInlineStyle(doc.body, "background");
-    }
+    holdCanvasBackground();
     setImportantStyle(root, "transition", REVEAL_TRANSITION);
     setImportantStyle(root, "opacity", "1");
     bridge({ type: "revealStarted" });
+    scheduleCanvasBackgroundRestore();
   };
   const afterPaintSettled = (callback) => {
     const runFrames = () => {
@@ -181,6 +279,21 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
         }
         html[data-kmark-sandbox-reveal="pending"] {
           opacity: 0 !important;
+        }
+        #${BACKGROUND_ELEMENT_ID} {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: -1 !important;
+          display: none !important;
+          pointer-events: none !important;
+          background: var(--kmark-sandbox-browser-background, #fff) !important;
+          opacity: 1 !important;
+        }
+        html[data-kmark-sandbox-background-held="true"] #${BACKGROUND_ELEMENT_ID} {
+          display: block !important;
+        }
+        html[data-kmark-sandbox-background-held="true"] body {
+          isolation: isolate !important;
         }
         html[data-kmark-sandbox-reveal="pending"],
         html[data-kmark-sandbox-reveal="pending"] body,
@@ -247,6 +360,21 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
       return;
     }
 
+    if (backgroundElement === null || !doc.contains(backgroundElement)) {
+      const existingBackgroundElement = doc.getElementById(BACKGROUND_ELEMENT_ID);
+      if (existingBackgroundElement instanceof HTMLElement) {
+        backgroundElement = existingBackgroundElement;
+      } else {
+        backgroundElement = doc.createElement("div");
+        backgroundElement.id = BACKGROUND_ELEMENT_ID;
+        backgroundElement.setAttribute("aria-hidden", "true");
+      }
+    }
+
+    if (backgroundElement.parentElement !== doc.body) {
+      doc.body.appendChild(backgroundElement);
+    }
+
     if (zoomElement === null || !doc.contains(zoomElement)) {
       zoomElement = doc.createElement("button");
       zoomElement.id = "kmark-sandbox-browser-zoom";
@@ -288,7 +416,10 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 
   const beginReveal = () => {
     ensureUi();
-    prepareReveal();
+
+    if (window.document.documentElement.getAttribute("data-kmark-sandbox-reveal") !== "pending") {
+      prepareReveal();
+    }
 
     if (FADE_MS <= 0) {
       finishReveal();
@@ -302,6 +433,9 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     ensureUi();
     const root = window.document.documentElement;
 
+    clearRevealRestoreTimeout();
+    syncRevealBackground();
+    holdCanvasBackground();
     root.setAttribute("data-kmark-sandbox-reveal", "visible");
     root.setAttribute("data-kmark-sandbox-closing", "true");
     setImportantStyle(root, "transition", REVEAL_TRANSITION);
@@ -316,6 +450,16 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     });
   } catch (_) {
     window.__KMARK_SANDBOX_BROWSER_BEGIN_REVEAL__ = beginReveal;
+  }
+
+  try {
+    Object.defineProperty(window, "__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__", {
+      value: prepareReveal,
+      configurable: false,
+      writable: false,
+    });
+  } catch (_) {
+    window.__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__ = prepareReveal;
   }
 
   try {
@@ -527,6 +671,7 @@ fn open_sub_window_external_browser_on_blocking_thread(
             .incognito(true)
             .focused(false)
             .transparent(true)
+            .background_color(Color(0, 0, 0, 0))
             .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
             .data_directory(data_directory)
             .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
@@ -632,6 +777,16 @@ pub async fn show_sub_window_external_browser(
         ensure_sub_window_browser_host(&window, &webview)?;
         let browser_webview =
             resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
+
+        browser_webview
+            .eval(SUB_WINDOW_BROWSER_PREPARE_REVEAL_SCRIPT)
+            .map_err(|source| {
+                CommandErrorPayload::with_detail(
+                    "subwindow_browser_reveal_prepare_failed",
+                    "failed to prepare subwindow browser reveal animation",
+                    source.to_string(),
+                )
+            })?;
 
         browser_webview.show().map_err(|source| {
             CommandErrorPayload::with_detail(
