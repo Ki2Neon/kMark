@@ -93,8 +93,6 @@ export function createCodeMirrorMarkdownTableEditExtension(): Extension {
       { key: "Ctrl-ArrowDown", run: (view) => moveActiveTableCellToEdge(view, "down") },
       { key: "Delete", run: clearSelectedTableCells },
       { key: "Mod-Alt-Enter", run: (view) => deleteTableRow(view) },
-      { key: "Mod-Alt-ArrowUp", run: (view) => moveTableRow(view, "up") },
-      { key: "Mod-Alt-ArrowDown", run: (view) => moveTableRow(view, "down") },
       { key: "Mod-Alt-ArrowLeft", run: (view) => insertTableColumn(view, "left") },
       { key: "Mod-Alt-ArrowRight", run: (view) => insertTableColumn(view, "right") },
       { key: "Mod-Alt-Backspace", run: deleteTableColumn },
