@@ -5,7 +5,10 @@ import {
   type RenderedPreviewPage,
 } from "../../domain/preview";
 
-export const SUB_WINDOW_STATE_VERSION = 3;
+export const SUB_WINDOW_STATE_VERSION = 4;
+export const DEFAULT_SUB_WINDOW_BROWSER_FADE_MS = 500;
+export const MAX_SUB_WINDOW_BROWSER_FADE_MS = 5000;
+export const MIN_SUB_WINDOW_BROWSER_FADE_MS = 0;
 export const DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS = 80;
 export const MAX_SUB_WINDOW_PAGE_TRANSITION_FADE_MS = 5000;
 export const MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS = 0;
@@ -18,6 +21,7 @@ export type SubWindowState = {
   readonly displayMode: PreviewDisplayMode;
   readonly html: string;
   readonly pageHtmls: readonly string[];
+  readonly browserFadeMs: number;
   readonly pageTransitionFadeMs: number;
   readonly pages: readonly RenderedPreviewPage[];
   readonly defaultPageStyle: PageStyle;

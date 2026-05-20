@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    webview::{DownloadEvent, NewWindowResponse, PageLoadEvent},
+    webview::{Color, DownloadEvent, NewWindowResponse, PageLoadEvent},
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
     Webview, WebviewBuilder, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
 };
@@ -78,6 +78,13 @@ try {
   }
 } catch (_) {}
 "#;
+const SUB_WINDOW_BROWSER_PREPARE_REVEAL_SCRIPT: &str = r#"
+try {
+  if (typeof window.__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__ === "function") {
+    window.__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__();
+  }
+} catch (_) {}
+"#;
 const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 (() => {
   const TOKEN = __KMARK_TOKEN__;
@@ -86,9 +93,11 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
   const MAX_ZOOM = 5.0;
   const ZOOM_STEP = 0.1;
   const REVEAL_SETTLE_MS = 180;
+  const FULLSCREEN_TARGET_ATTRIBUTE = "data-kmark-sandbox-browser-fullscreen-target";
   const REVEAL_TRANSITION = `opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1)`;
   let zoomScale = 1;
   let zoomElement = null;
+  let internalFullscreenElement = null;
 
   const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
   const isZoomed = () => Math.abs(zoomScale - 1) > 0.001;
@@ -97,9 +106,96 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
       element.style.setProperty(name, value, "important");
     } catch (_) {}
   };
-  const removeInlineStyle = (element, name) => {
+  const dispatchFullscreenChange = () => {
+    const doc = window.document;
+
+    for (const eventName of ["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"]) {
+      try {
+        doc.dispatchEvent(new Event(eventName));
+      } catch (_) {}
+    }
+  };
+  const clearInternalFullscreenTarget = () => {
+    if (internalFullscreenElement !== null) {
+      try {
+        internalFullscreenElement.removeAttribute(FULLSCREEN_TARGET_ATTRIBUTE);
+      } catch (_) {}
+    }
+
+    internalFullscreenElement = null;
+    window.document.documentElement.removeAttribute("data-kmark-sandbox-browser-fullscreen");
+  };
+  const exitInternalFullscreen = () => {
+    if (internalFullscreenElement === null) {
+      return Promise.resolve();
+    }
+
+    clearInternalFullscreenTarget();
+    dispatchFullscreenChange();
+    return Promise.resolve();
+  };
+  const enterInternalFullscreen = (element) => {
+    if (!(element instanceof Element)) {
+      return Promise.reject(new TypeError("fullscreen target is not an element"));
+    }
+
+    if (internalFullscreenElement !== element) {
+      clearInternalFullscreenTarget();
+    }
+
+    internalFullscreenElement = element;
+    window.document.documentElement.setAttribute("data-kmark-sandbox-browser-fullscreen", "true");
+    element.setAttribute(FULLSCREEN_TARGET_ATTRIBUTE, "true");
+    dispatchFullscreenChange();
+    return Promise.resolve();
+  };
+  const installInternalFullscreenApi = () => {
+    const doc = window.document;
+
+    const defineDocumentGetter = (name, getter) => {
+      try {
+        Object.defineProperty(doc, name, {
+          configurable: true,
+          get: getter,
+        });
+      } catch (_) {}
+    };
+
+    defineDocumentGetter("fullscreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("webkitFullscreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("mozFullScreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("msFullscreenElement", () => internalFullscreenElement);
+    defineDocumentGetter("fullscreenEnabled", () => true);
+    defineDocumentGetter("webkitFullscreenEnabled", () => true);
+    defineDocumentGetter("mozFullScreenEnabled", () => true);
+    defineDocumentGetter("msFullscreenEnabled", () => true);
+
     try {
-      element.style.removeProperty(name);
+      doc.exitFullscreen = exitInternalFullscreen;
+      doc.webkitExitFullscreen = exitInternalFullscreen;
+      doc.mozCancelFullScreen = exitInternalFullscreen;
+      doc.msExitFullscreen = exitInternalFullscreen;
+    } catch (_) {}
+
+    try {
+      const elementPrototype = window.Element?.prototype;
+      if (elementPrototype !== undefined) {
+        elementPrototype.requestFullscreen = function requestFullscreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.webkitRequestFullscreen = function webkitRequestFullscreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.webkitRequestFullScreen = function webkitRequestFullScreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.mozRequestFullScreen = function mozRequestFullScreen() {
+          return enterInternalFullscreen(this);
+        };
+        elementPrototype.msRequestFullscreen = function msRequestFullscreen() {
+          return enterInternalFullscreen(this);
+        };
+      }
     } catch (_) {}
   };
   const prepareReveal = () => {
@@ -111,11 +207,6 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
       root.setAttribute("data-kmark-sandbox-reveal", "pending");
       setImportantStyle(root, "transition", "none");
       setImportantStyle(root, "opacity", "0");
-      setImportantStyle(root, "background", "transparent");
-
-      if (doc.body !== null) {
-        setImportantStyle(doc.body, "background", "transparent");
-      }
     } catch (_) {}
   };
   const finishReveal = () => {
@@ -123,10 +214,6 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     const root = doc.documentElement;
 
     root.setAttribute("data-kmark-sandbox-reveal", "visible");
-    removeInlineStyle(root, "background");
-    if (doc.body !== null) {
-      removeInlineStyle(doc.body, "background");
-    }
     setImportantStyle(root, "transition", REVEAL_TRANSITION);
     setImportantStyle(root, "opacity", "1");
     bridge({ type: "revealStarted" });
@@ -177,7 +264,14 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
         html,
         body {
           scrollbar-color: transparent transparent !important;
-          transition: scrollbar-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
+          scrollbar-width: none !important;
+          -ms-overflow-style: none !important;
+        }
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+          display: none !important;
+          width: 0 !important;
+          height: 0 !important;
         }
         html[data-kmark-sandbox-reveal="pending"] {
           opacity: 0 !important;
@@ -191,27 +285,23 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
         html[data-kmark-sandbox-closing="true"] {
           opacity: 0 !important;
         }
-        html[data-kmark-sandbox-reveal="visible"],
-        html[data-kmark-sandbox-reveal="visible"] body {
-          scrollbar-color: rgba(148, 163, 184, .55) transparent !important;
+        html[data-kmark-sandbox-browser-fullscreen="true"],
+        html[data-kmark-sandbox-browser-fullscreen="true"] body {
+          overflow: hidden !important;
         }
-        html::-webkit-scrollbar-thumb,
-        body::-webkit-scrollbar-thumb {
-          background-color: transparent !important;
-          transition: background-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
-        }
-        html::-webkit-scrollbar-track,
-        body::-webkit-scrollbar-track {
-          background-color: transparent !important;
-          transition: background-color ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1) !important;
-        }
-        html[data-kmark-sandbox-reveal="visible"]::-webkit-scrollbar-thumb,
-        html[data-kmark-sandbox-reveal="visible"] body::-webkit-scrollbar-thumb {
-          background-color: rgba(148, 163, 184, .55) !important;
-        }
-        html[data-kmark-sandbox-closing="true"]::-webkit-scrollbar-thumb,
-        html[data-kmark-sandbox-closing="true"] body::-webkit-scrollbar-thumb {
-          background-color: transparent !important;
+        html[data-kmark-sandbox-browser-fullscreen="true"] [${FULLSCREEN_TARGET_ATTRIBUTE}="true"] {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 2147483646 !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          max-width: none !important;
+          max-height: none !important;
+          min-width: 0 !important;
+          min-height: 0 !important;
+          margin: 0 !important;
+          transform: none !important;
+          background: #000 !important;
         }
         #kmark-sandbox-browser-zoom {
           position: fixed;
@@ -288,7 +378,10 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 
   const beginReveal = () => {
     ensureUi();
-    prepareReveal();
+
+    if (window.document.documentElement.getAttribute("data-kmark-sandbox-reveal") !== "pending") {
+      prepareReveal();
+    }
 
     if (FADE_MS <= 0) {
       finishReveal();
@@ -302,6 +395,7 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     ensureUi();
     const root = window.document.documentElement;
 
+    void exitInternalFullscreen();
     root.setAttribute("data-kmark-sandbox-reveal", "visible");
     root.setAttribute("data-kmark-sandbox-closing", "true");
     setImportantStyle(root, "transition", REVEAL_TRANSITION);
@@ -316,6 +410,16 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     });
   } catch (_) {
     window.__KMARK_SANDBOX_BROWSER_BEGIN_REVEAL__ = beginReveal;
+  }
+
+  try {
+    Object.defineProperty(window, "__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__", {
+      value: prepareReveal,
+      configurable: false,
+      writable: false,
+    });
+  } catch (_) {
+    window.__KMARK_SANDBOX_BROWSER_PREPARE_REVEAL__ = prepareReveal;
   }
 
   try {
@@ -336,6 +440,13 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      if (internalFullscreenElement !== null) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void exitInternalFullscreen();
+        return;
+      }
+
       requestClose(event);
       return;
     }
@@ -374,6 +485,7 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
     setZoom(zoomScale + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
   }, { capture: true, passive: false });
 
+  installInternalFullscreenApi();
   prepareReveal();
   ensureUi();
   bridge({ type: "zoom", zoom: 1 });
@@ -527,6 +639,7 @@ fn open_sub_window_external_browser_on_blocking_thread(
             .incognito(true)
             .focused(false)
             .transparent(true)
+            .background_color(Color(0, 0, 0, 0))
             .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
             .data_directory(data_directory)
             .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
@@ -632,6 +745,16 @@ pub async fn show_sub_window_external_browser(
         ensure_sub_window_browser_host(&window, &webview)?;
         let browser_webview =
             resolve_sub_window_browser_webview(&app, window.label(), &browser_id)?;
+
+        browser_webview
+            .eval(SUB_WINDOW_BROWSER_PREPARE_REVEAL_SCRIPT)
+            .map_err(|source| {
+                CommandErrorPayload::with_detail(
+                    "subwindow_browser_reveal_prepare_failed",
+                    "failed to prepare subwindow browser reveal animation",
+                    source.to_string(),
+                )
+            })?;
 
         browser_webview.show().map_err(|source| {
             CommandErrorPayload::with_detail(

@@ -36,7 +36,10 @@ import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpen
 import { getKmarkModelViewerViewpoint } from "../../adapters/browser/browserModelRenderer";
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
-import { DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS } from "../../application/subWindow/subWindowPorts";
+import {
+  DEFAULT_SUB_WINDOW_BROWSER_FADE_MS,
+  DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
+} from "../../application/subWindow/subWindowPorts";
 import { saveModelViewpointToMarkdown } from "../../domain/modelViewpoint";
 import { type RecentFile } from "../../domain/recentFiles";
 
@@ -180,6 +183,7 @@ export function MarkdownEditorScreen({
   const [isEditFocused, setIsEditFocused] = useState(false);
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
+  const [subWindowBrowserFadeMs, setSubWindowBrowserFadeMs] = useState(DEFAULT_SUB_WINDOW_BROWSER_FADE_MS);
   const [subWindowPageTransitionFadeMs, setSubWindowPageTransitionFadeMs] = useState(DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS);
   const [subWindowSourceId, setSubWindowSourceId] = useState<string | null>(null);
   const previewHighlightSourceLine = isEditFocused ? activeEditCursorLine : null;
@@ -315,6 +319,7 @@ export function MarkdownEditorScreen({
     displayMode: previewDisplayMode,
     html: previewHtml,
     pageHtmls: previewPageHtmls,
+    browserFadeMs: subWindowBrowserFadeMs,
     pageTransitionFadeMs: subWindowPageTransitionFadeMs,
     pages: previewPages,
     title: normalizedFileName,
@@ -327,6 +332,7 @@ export function MarkdownEditorScreen({
     previewHtml,
     previewPageHtmls,
     previewPages,
+    subWindowBrowserFadeMs,
     subWindowPageTransitionFadeMs,
   ]);
   const subWindowStateRequestRef = useRef(subWindowStateRequest);
@@ -755,6 +761,7 @@ export function MarkdownEditorScreen({
     onSaveDocumentAs: handleRequestSaveAs,
     onShowLineNumbersChange,
     onStartupEditModeChange,
+    onSubWindowBrowserFadeMsChange: setSubWindowBrowserFadeMs,
     onSubWindowPageTransitionFadeMsChange: setSubWindowPageTransitionFadeMs,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
@@ -762,6 +769,7 @@ export function MarkdownEditorScreen({
     previewUsesAppThemeColors,
     showLineNumbers,
     startupEditMode,
+    subWindowBrowserFadeMs,
     subWindowPageTransitionFadeMs,
     windowsStartupTrayResidentEnabled,
   };
