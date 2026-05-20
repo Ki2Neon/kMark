@@ -45,6 +45,10 @@ function isKeyboardEventFromEditableTarget(event: KeyboardEvent): boolean {
     && target.closest("input, textarea, select, button, [contenteditable='true']") !== null;
 }
 
+function isPlainKeyEvent(event: KeyboardEvent): boolean {
+  return !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+}
+
 function isFixedSourceMissing(selection: SubWindowSelection, sourcesSnapshot: SubWindowSourcesSnapshot): boolean {
   return selection.mode === "source"
     && !sourcesSnapshot.sources.some((source) => source.id === selection.sourceId);
@@ -356,7 +360,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
         return;
       }
 
-      if (event.key.toLocaleLowerCase("en-US") === "f") {
+      if (isPlainKeyEvent(event) && event.key.toLocaleLowerCase("en-US") === "f") {
         event.preventDefault();
         handleFullscreenToggle();
       }

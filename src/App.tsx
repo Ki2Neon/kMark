@@ -2,6 +2,7 @@ import "./App.css";
 import { useEditorPreferences } from "./ui/hooks/useEditorPreferences";
 import { useAppTheme } from "./ui/hooks/useAppTheme";
 import { useAppShell } from "./ui/hooks/useAppShell";
+import { useBrowserShortcutGuard } from "./ui/hooks/useBrowserShortcutGuard";
 import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
 import { SubWindowScreen } from "./ui/screens/SubWindowScreen";
 import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
@@ -57,6 +58,7 @@ function App() {
     systemFontSizePx,
     previewUsesAppThemeColors,
   });
+  useBrowserShortcutGuard();
 
   if (!isThemeReady || !isEditorPreferencesReady) {
     return null;
