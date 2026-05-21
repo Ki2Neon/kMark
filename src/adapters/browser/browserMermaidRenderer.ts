@@ -261,6 +261,36 @@ function sanitizeSvgElement(svgElement: Element): void {
   }
 }
 
+function isMermaidGanttSvg(svgElement: SVGElement): boolean {
+  return svgElement.getAttribute("aria-roledescription") === "gantt"
+    || svgElement.querySelector(":scope > g.grid") !== null;
+}
+
+function findMermaidGanttSectionBackgroundGroup(svgElement: SVGElement): Element | null {
+  return Array.from(svgElement.children).find((child) => child.querySelector(":scope > rect.section") !== null) ?? null;
+}
+
+function normalizeMermaidGanttLayerOrder(svgElement: SVGElement): void {
+  if (!isMermaidGanttSvg(svgElement)) {
+    return;
+  }
+
+  const gridGroup = svgElement.querySelector(":scope > g.grid");
+  const sectionBackgroundGroup = findMermaidGanttSectionBackgroundGroup(svgElement);
+
+  if (gridGroup === null || sectionBackgroundGroup === null) {
+    return;
+  }
+
+  const sectionNextSibling = sectionBackgroundGroup.nextSibling;
+
+  if (gridGroup === sectionNextSibling) {
+    return;
+  }
+
+  svgElement.insertBefore(gridGroup, sectionNextSibling);
+}
+
 function parseSafeMermaidSvg(
   svg: string,
   targetDocument: Document,
@@ -275,6 +305,7 @@ function parseSafeMermaidSvg(
 
   sanitizeSvgElement(svgElement);
   const importedSvg = targetDocument.importNode(svgElement, true) as unknown as SVGElement;
+  normalizeMermaidGanttLayerOrder(importedSvg);
   normalizeMermaidSvgSize(importedSvg, sizing);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
