@@ -22,7 +22,7 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "benchmark:rust": "cargo test --manifest-path src-tauri/Cargo.toml benchmark_collect_markdown_file_paths -- --ignored --nocapture",
     "typecheck": "tsc --noEmit",
-    "tauri": "node tools/run-tauri.mjs"
+    "tauri": "tauri"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
