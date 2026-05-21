@@ -326,6 +326,13 @@ struct KmarkMermaidParams {
     font_size: Option<String>,
     gantt_font_size: Option<String>,
     gantt_section_font_size: Option<String>,
+    gantt_auto_bar_size: Option<bool>,
+    gantt_bar_height: Option<String>,
+    gantt_bar_gap: Option<String>,
+    gantt_text_line_height: Option<String>,
+    gantt_bar_padding_y: Option<String>,
+    gantt_min_bar_height: Option<String>,
+    gantt_max_bar_height: Option<String>,
     theme: Option<String>,
     background: Option<String>,
     init_merge: Option<String>,
@@ -5068,6 +5075,27 @@ impl KmarkMermaidParams {
         if let Some(gantt_section_font_size) = &other.gantt_section_font_size {
             self.gantt_section_font_size = Some(gantt_section_font_size.clone());
         }
+        if let Some(gantt_auto_bar_size) = other.gantt_auto_bar_size {
+            self.gantt_auto_bar_size = Some(gantt_auto_bar_size);
+        }
+        if let Some(gantt_bar_height) = &other.gantt_bar_height {
+            self.gantt_bar_height = Some(gantt_bar_height.clone());
+        }
+        if let Some(gantt_bar_gap) = &other.gantt_bar_gap {
+            self.gantt_bar_gap = Some(gantt_bar_gap.clone());
+        }
+        if let Some(gantt_text_line_height) = &other.gantt_text_line_height {
+            self.gantt_text_line_height = Some(gantt_text_line_height.clone());
+        }
+        if let Some(gantt_bar_padding_y) = &other.gantt_bar_padding_y {
+            self.gantt_bar_padding_y = Some(gantt_bar_padding_y.clone());
+        }
+        if let Some(gantt_min_bar_height) = &other.gantt_min_bar_height {
+            self.gantt_min_bar_height = Some(gantt_min_bar_height.clone());
+        }
+        if let Some(gantt_max_bar_height) = &other.gantt_max_bar_height {
+            self.gantt_max_bar_height = Some(gantt_max_bar_height.clone());
+        }
         if let Some(theme) = &other.theme {
             self.theme = Some(theme.clone());
         }
@@ -5083,6 +5111,13 @@ impl KmarkMermaidParams {
         self.font_size.is_some()
             || self.gantt_font_size.is_some()
             || self.gantt_section_font_size.is_some()
+            || self.gantt_auto_bar_size.is_some()
+            || self.gantt_bar_height.is_some()
+            || self.gantt_bar_gap.is_some()
+            || self.gantt_text_line_height.is_some()
+            || self.gantt_bar_padding_y.is_some()
+            || self.gantt_min_bar_height.is_some()
+            || self.gantt_max_bar_height.is_some()
             || self.theme.is_some()
             || self.background.is_some()
             || self.init_merge.is_some()
@@ -5105,6 +5140,42 @@ impl KmarkMermaidParams {
             &mut attributes,
             "data-kmark-mermaid-gantt-section-font-size",
             self.gantt_section_font_size.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-auto-bar-size",
+            self.gantt_auto_bar_size
+                .map(|value| if value { "true" } else { "false" }),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-bar-height",
+            self.gantt_bar_height.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-bar-gap",
+            self.gantt_bar_gap.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-text-line-height",
+            self.gantt_text_line_height.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-bar-padding-y",
+            self.gantt_bar_padding_y.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-min-bar-height",
+            self.gantt_min_bar_height.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-max-bar-height",
+            self.gantt_max_bar_height.as_deref(),
         );
         push_optional_data_attribute(
             &mut attributes,
@@ -7676,6 +7747,43 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.mermaid.gantt_section_font_size = Some(font_size);
                 }
             }
+            "mermaid_gantt_auto_bar_size" => {
+                if let Some(auto_bar_size) = parse_kmark_bool_value(&value) {
+                    bundle.params.mermaid.gantt_auto_bar_size = Some(auto_bar_size);
+                }
+            }
+            "mermaid_gantt_bar_height" => {
+                if let Some(bar_height) = parse_kmark_mermaid_auto_or_positive_number_value(&value)
+                {
+                    bundle.params.mermaid.gantt_bar_height = Some(bar_height);
+                }
+            }
+            "mermaid_gantt_bar_gap" => {
+                if let Some(bar_gap) = parse_kmark_mermaid_auto_or_non_negative_number_value(&value)
+                {
+                    bundle.params.mermaid.gantt_bar_gap = Some(bar_gap);
+                }
+            }
+            "mermaid_gantt_text_line_height" => {
+                if let Some(line_height) = parse_kmark_mermaid_positive_number_value(&value) {
+                    bundle.params.mermaid.gantt_text_line_height = Some(line_height);
+                }
+            }
+            "mermaid_gantt_bar_padding_y" => {
+                if let Some(padding_y) = parse_kmark_mermaid_non_negative_number_value(&value) {
+                    bundle.params.mermaid.gantt_bar_padding_y = Some(padding_y);
+                }
+            }
+            "mermaid_gantt_min_bar_height" => {
+                if let Some(min_bar_height) = parse_kmark_mermaid_positive_number_value(&value) {
+                    bundle.params.mermaid.gantt_min_bar_height = Some(min_bar_height);
+                }
+            }
+            "mermaid_gantt_max_bar_height" => {
+                if let Some(max_bar_height) = parse_kmark_mermaid_positive_number_value(&value) {
+                    bundle.params.mermaid.gantt_max_bar_height = Some(max_bar_height);
+                }
+            }
             "mermaid_theme" => {
                 if let Some(theme) = parse_kmark_mermaid_theme_value(&value) {
                     bundle.params.mermaid.theme = Some(theme);
@@ -8133,6 +8241,40 @@ fn parse_kmark_font_size_value(value: &str) -> Option<String> {
 
 fn parse_kmark_mermaid_font_size_value(value: &str) -> Option<String> {
     parse_css_length_value(value, false)
+}
+
+fn parse_kmark_mermaid_positive_number_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let number = trimmed.parse::<f64>().ok()?;
+
+    (number.is_finite() && number > 0.0).then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_mermaid_non_negative_number_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+    let number = trimmed.parse::<f64>().ok()?;
+
+    (number.is_finite() && number >= 0.0).then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_mermaid_auto_or_positive_number_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if trimmed == "auto" {
+        return Some(trimmed.to_owned());
+    }
+
+    parse_kmark_mermaid_positive_number_value(trimmed)
+}
+
+fn parse_kmark_mermaid_auto_or_non_negative_number_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if trimmed == "auto" {
+        return Some(trimmed.to_owned());
+    }
+
+    parse_kmark_mermaid_non_negative_number_value(trimmed)
 }
 
 fn parse_kmark_mermaid_theme_value(value: &str) -> Option<String> {
@@ -10563,7 +10705,7 @@ mod tests {
     #[test]
     fn applies_kmark_mermaid_params_to_mermaid_blocks() {
         let rendered_preview = render_markdown_preview(
-            "<!-- kmark mermaid_font_size:10 mermaid_gantt_font_size:11 mermaid_gantt_section_font_size:12 mermaid_theme:gantt_clean mermaid_background:transparent mermaid_init_merge:kmark-first -->\n\
+            "<!-- kmark mermaid_font_size:10 mermaid_gantt_font_size:11 mermaid_gantt_section_font_size:12 mermaid_gantt_auto_bar_size:true mermaid_gantt_bar_height:40 mermaid_gantt_bar_gap:auto mermaid_gantt_text_line_height:1.25 mermaid_gantt_bar_padding_y:4 mermaid_gantt_min_bar_height:20 mermaid_gantt_max_bar_height:56 mermaid_theme:gantt_clean mermaid_background:transparent mermaid_init_merge:kmark-first -->\n\
              ```mermaid\ngantt\n  title Plan\n```",
         );
 
@@ -10576,6 +10718,27 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("data-kmark-mermaid-gantt-section-font-size=\"12px\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-auto-bar-size=\"true\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-bar-height=\"40\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-bar-gap=\"auto\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-text-line-height=\"1.25\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-bar-padding-y=\"4\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-min-bar-height=\"20\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-max-bar-height=\"56\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-mermaid-theme-preset=\"gantt_clean\""));

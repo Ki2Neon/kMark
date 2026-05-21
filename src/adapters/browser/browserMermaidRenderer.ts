@@ -21,9 +21,30 @@ type KmarkMermaidBlockParams = {
   readonly fontSize?: string;
   readonly ganttFontSize?: string;
   readonly ganttSectionFontSize?: string;
+  readonly ganttAutoBarSize?: string;
+  readonly ganttBarHeight?: string;
+  readonly ganttBarGap?: string;
+  readonly ganttTextLineHeight?: string;
+  readonly ganttBarPaddingY?: string;
+  readonly ganttMinBarHeight?: string;
+  readonly ganttMaxBarHeight?: string;
   readonly themePreset?: string;
   readonly background?: string;
   readonly initMerge?: MermaidInitMergeMode;
+};
+
+type KmarkMermaidGanttResolvedSize = {
+  readonly fontSizePx: number;
+  readonly sectionFontSizePx: number;
+  readonly barHeight: number;
+  readonly barGap: number;
+  readonly topPadding: number;
+  readonly gridLineStartPadding: number;
+};
+
+type CompletedGanttConfig = {
+  readonly config: MermaidConfig;
+  readonly size?: KmarkMermaidGanttResolvedSize;
 };
 
 type PreparedMermaidRender = {
@@ -32,6 +53,7 @@ type PreparedMermaidRender = {
   readonly renderSource: string;
   readonly svgBackground: string;
   readonly surfaceBackground: string;
+  readonly ganttSize?: KmarkMermaidGanttResolvedSize;
 };
 
 const MERMAID_BLOCK_SELECTOR = ".kmark-mermaid-block";
@@ -204,8 +226,14 @@ const INIT_DIRECTIVE_CONFIG_PATTERN = /%%\{\s*(?:init|initialize)\s*:([\s\S]*?)\
 const JSON_LIKE_UNQUOTED_KEY_PATTERN = /([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/gu;
 const JSON_LIKE_TRAILING_COMMA_PATTERN = /,\s*([}\]])/gu;
 const PX_FONT_SIZE_PATTERN = /^\s*(\d+(?:\.\d+)?)(?:px)?\s*$/iu;
+const NUMBER_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*$/u;
 const CSS_UNSAFE_VALUE_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\(|[;{}<>])/iu;
 const GANTT_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-post-style";
+const DEFAULT_GANTT_FONT_SIZE = 10;
+const DEFAULT_GANTT_TEXT_LINE_HEIGHT = 1.25;
+const DEFAULT_GANTT_BAR_PADDING_Y = 4;
+const DEFAULT_GANTT_MIN_BAR_HEIGHT = 20;
+const DEFAULT_GANTT_MAX_BAR_HEIGHT = 56;
 
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
@@ -314,6 +342,13 @@ function resolveBlockParams(block: HTMLElement): KmarkMermaidBlockParams {
     fontSize: block.dataset.kmarkMermaidFontSize,
     ganttFontSize: block.dataset.kmarkMermaidGanttFontSize,
     ganttSectionFontSize: block.dataset.kmarkMermaidGanttSectionFontSize,
+    ganttAutoBarSize: block.dataset.kmarkMermaidGanttAutoBarSize,
+    ganttBarHeight: block.dataset.kmarkMermaidGanttBarHeight,
+    ganttBarGap: block.dataset.kmarkMermaidGanttBarGap,
+    ganttTextLineHeight: block.dataset.kmarkMermaidGanttTextLineHeight,
+    ganttBarPaddingY: block.dataset.kmarkMermaidGanttBarPaddingY,
+    ganttMinBarHeight: block.dataset.kmarkMermaidGanttMinBarHeight,
+    ganttMaxBarHeight: block.dataset.kmarkMermaidGanttMaxBarHeight,
     themePreset: block.dataset.kmarkMermaidThemePreset,
     background: block.dataset.kmarkMermaidBackground,
     initMerge: resolveMermaidInitMerge(block.dataset.kmarkMermaidInitMerge),
@@ -334,8 +369,16 @@ function isMermaidGanttSource(source: string): boolean {
   return stripMermaidInitDirectives(source).trimStart().toLowerCase().startsWith("gantt");
 }
 
-function parseMermaidFontSizeNumber(value: string | undefined): number | undefined {
-  const match = value?.match(PX_FONT_SIZE_PATTERN);
+function parseMermaidFontSizeNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(PX_FONT_SIZE_PATTERN);
 
   if (match === undefined || match === null) {
     return undefined;
@@ -344,6 +387,65 @@ function parseMermaidFontSizeNumber(value: string | undefined): number | undefin
   const fontSize = Number(match[1]);
 
   return Number.isFinite(fontSize) && fontSize > 0 ? fontSize : undefined;
+}
+
+function parsePositiveNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(NUMBER_PATTERN);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const number = Number(match[1]);
+
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function parseNonNegativeNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(NUMBER_PATTERN);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const number = Number(match[1]);
+
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function isAutoValue(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "auto";
+}
+
+function isTruthyKmarkBool(value: string | undefined, fallback: boolean): boolean {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+
+  return fallback;
+}
+
+function clampNumber(minimum: number, maximum: number, value: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }
 
 function createFontSizeThemeVariables(fontSize: string | undefined): MermaidThemeVariables | undefined {
@@ -360,8 +462,18 @@ function createKmarkMermaidParamConfig(params: KmarkMermaidBlockParams, expectsG
   const ganttFontSize = params.ganttFontSize ?? params.fontSize;
   const ganttFontSizeNumber = parseMermaidFontSizeNumber(ganttFontSize);
   const ganttSectionFontSizeNumber = parseMermaidFontSizeNumber(params.ganttSectionFontSize);
+  const ganttBarHeight = isAutoValue(params.ganttBarHeight) ? undefined : parsePositiveNumber(params.ganttBarHeight);
+  const ganttBarGap = isAutoValue(params.ganttBarGap) ? undefined : parseNonNegativeNumber(params.ganttBarGap);
 
-  if (expectsGantt && (ganttFontSizeNumber !== undefined || ganttSectionFontSizeNumber !== undefined)) {
+  if (
+    expectsGantt
+    && (
+      ganttFontSizeNumber !== undefined
+      || ganttSectionFontSizeNumber !== undefined
+      || ganttBarHeight !== undefined
+      || ganttBarGap !== undefined
+    )
+  ) {
     config.gantt = {};
 
     if (ganttFontSizeNumber !== undefined) {
@@ -369,6 +481,12 @@ function createKmarkMermaidParamConfig(params: KmarkMermaidBlockParams, expectsG
     }
     if (ganttSectionFontSizeNumber !== undefined) {
       config.gantt.sectionFontSize = ganttSectionFontSizeNumber;
+    }
+    if (ganttBarHeight !== undefined) {
+      config.gantt.barHeight = ganttBarHeight;
+    }
+    if (ganttBarGap !== undefined) {
+      config.gantt.barGap = ganttBarGap;
     }
   }
 
@@ -383,31 +501,146 @@ function createKmarkMermaidPresetConfig(params: KmarkMermaidBlockParams, expects
   return undefined;
 }
 
-function completeGanttFontConfig(config: MermaidConfig, expectsGantt: boolean): MermaidConfig {
+function resolveMermaidGanttFontSizePx(
+  params: KmarkMermaidBlockParams,
+  config: MermaidConfig,
+  userInitConfig: MermaidConfig | undefined,
+): number {
+  return parseMermaidFontSizeNumber(params.ganttFontSize)
+    ?? parseMermaidFontSizeNumber(params.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.gantt?.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.themeVariables?.fontSize)
+    ?? parseMermaidFontSizeNumber(config.gantt?.fontSize)
+    ?? parseMermaidFontSizeNumber(config.themeVariables?.fontSize)
+    ?? DEFAULT_GANTT_FONT_SIZE;
+}
+
+function resolveMermaidGanttSectionFontSizePx(
+  params: KmarkMermaidBlockParams,
+  config: MermaidConfig,
+  userInitConfig: MermaidConfig | undefined,
+  fontSizePx: number,
+): number {
+  return parseMermaidFontSizeNumber(params.ganttSectionFontSize)
+    ?? parseMermaidFontSizeNumber(params.ganttFontSize)
+    ?? parseMermaidFontSizeNumber(params.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.gantt?.sectionFontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.gantt?.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.themeVariables?.fontSize)
+    ?? parseMermaidFontSizeNumber(config.gantt?.sectionFontSize)
+    ?? fontSizePx;
+}
+
+function hasExplicitGanttBarHeight(params: KmarkMermaidBlockParams, userInitConfig: MermaidConfig | undefined): boolean {
+  return (
+    params.ganttBarHeight !== undefined
+    && !isAutoValue(params.ganttBarHeight)
+    && parsePositiveNumber(params.ganttBarHeight) !== undefined
+  ) || userInitConfig?.gantt?.barHeight !== undefined;
+}
+
+function hasExplicitGanttBarGap(params: KmarkMermaidBlockParams, userInitConfig: MermaidConfig | undefined): boolean {
+  return (
+    params.ganttBarGap !== undefined
+    && !isAutoValue(params.ganttBarGap)
+    && parseNonNegativeNumber(params.ganttBarGap) !== undefined
+  ) || userInitConfig?.gantt?.barGap !== undefined;
+}
+
+function warnSmallGanttBarHeight(fontSize: number, barHeight: number, recommendedBarHeight: number): void {
+  if (barHeight >= recommendedBarHeight || import.meta.env.DEV !== true) {
+    return;
+  }
+
+  console.warn(
+    "[kmark Mermaid] gantt barHeight may be too small for fontSize.\n"
+    + `fontSize=${fontSize}, barHeight=${barHeight}, recommendedBarHeight=${recommendedBarHeight}`,
+  );
+}
+
+function completeGanttSizeConfig(
+  config: MermaidConfig,
+  expectsGantt: boolean,
+  params: KmarkMermaidBlockParams,
+  userInitConfig: MermaidConfig | undefined,
+): CompletedGanttConfig {
   if (!expectsGantt) {
-    return config;
+    return { config };
   }
 
-  const fontSize = parseMermaidFontSizeNumber(config.themeVariables?.fontSize);
+  const fontSizePx = resolveMermaidGanttFontSizePx(params, config, userInitConfig);
+  const sectionFontSizePx = resolveMermaidGanttSectionFontSizePx(params, config, userInitConfig, fontSizePx);
+  const lineHeight = parsePositiveNumber(params.ganttTextLineHeight) ?? DEFAULT_GANTT_TEXT_LINE_HEIGHT;
+  const paddingY = parseNonNegativeNumber(params.ganttBarPaddingY) ?? DEFAULT_GANTT_BAR_PADDING_Y;
+  const minimumBarHeight = parsePositiveNumber(params.ganttMinBarHeight) ?? DEFAULT_GANTT_MIN_BAR_HEIGHT;
+  const rawMaximumBarHeight = parsePositiveNumber(params.ganttMaxBarHeight) ?? DEFAULT_GANTT_MAX_BAR_HEIGHT;
+  const maximumBarHeight = Math.max(minimumBarHeight, rawMaximumBarHeight);
+  const textHeight = Math.ceil(fontSizePx * lineHeight);
+  const unclampedRecommendedBarHeight = Math.ceil(textHeight + paddingY * 2);
+  const recommendedBarHeight = clampNumber(
+    minimumBarHeight,
+    maximumBarHeight,
+    unclampedRecommendedBarHeight,
+  );
+  const autoBarGap = Math.max(4, Math.ceil(fontSizePx * 0.35));
+  const autoTopPadding = Math.max(50, Math.ceil(fontSizePx * 4.5));
+  const autoGridLineStartPadding = Math.max(10, Math.ceil(recommendedBarHeight * 0.5));
+  const autoBarSizeEnabled = isTruthyKmarkBool(params.ganttAutoBarSize, true);
 
-  if (fontSize === undefined) {
-    return config;
-  }
+  const mergedBarHeight = parsePositiveNumber(config.gantt?.barHeight);
+  const mergedBarGap = parseNonNegativeNumber(config.gantt?.barGap);
+  const explicitBarHeight = hasExplicitGanttBarHeight(params, userInitConfig);
+  const explicitBarGap = hasExplicitGanttBarGap(params, userInitConfig);
+  const barHeight = explicitBarHeight && mergedBarHeight !== undefined
+    ? mergedBarHeight
+    : autoBarSizeEnabled
+      ? recommendedBarHeight
+      : mergedBarHeight ?? recommendedBarHeight;
+  const barGap = explicitBarGap && mergedBarGap !== undefined
+    ? mergedBarGap
+    : autoBarSizeEnabled
+      ? autoBarGap
+      : mergedBarGap ?? autoBarGap;
 
   const gantt = {
     ...config.gantt,
+    fontSize: fontSizePx,
+    sectionFontSize: sectionFontSizePx,
   };
 
-  if (gantt.fontSize === undefined) {
-    gantt.fontSize = fontSize;
+  if (autoBarSizeEnabled || explicitBarHeight || gantt.barHeight === undefined) {
+    gantt.barHeight = barHeight;
   }
-  if (gantt.sectionFontSize === undefined) {
-    gantt.sectionFontSize = fontSize;
+  if (autoBarSizeEnabled || explicitBarGap || gantt.barGap === undefined) {
+    gantt.barGap = barGap;
+  }
+  if ((autoBarSizeEnabled || gantt.topPadding === undefined) && userInitConfig?.gantt?.topPadding === undefined) {
+    gantt.topPadding = autoTopPadding;
+  }
+  if (
+    (autoBarSizeEnabled || gantt.gridLineStartPadding === undefined)
+    && userInitConfig?.gantt?.gridLineStartPadding === undefined
+  ) {
+    gantt.gridLineStartPadding = autoGridLineStartPadding;
+  }
+
+  if (explicitBarHeight) {
+    warnSmallGanttBarHeight(fontSizePx, barHeight, recommendedBarHeight);
   }
 
   return {
-    ...config,
-    gantt,
+    config: {
+      ...config,
+      gantt,
+    },
+    size: {
+      fontSizePx,
+      sectionFontSizePx,
+      barHeight,
+      barGap,
+      topPadding: parsePositiveNumber(gantt.topPadding) ?? autoTopPadding,
+      gridLineStartPadding: parsePositiveNumber(gantt.gridLineStartPadding) ?? autoGridLineStartPadding,
+    },
   };
 }
 
@@ -476,15 +709,16 @@ function prepareMermaidRender(
     : initMerge === "kmark-first"
       ? mergeMermaidConfigs(BASE_MERMAID_CONFIG, surfaceConfig, presetConfig, userInitConfig, kmarkParamConfig)
       : mergeMermaidConfigs(BASE_MERMAID_CONFIG, surfaceConfig, presetConfig, kmarkParamConfig, userInitConfig);
-  const completedConfig = completeGanttFontConfig(config, expectsGantt);
+  const completedGanttConfig = completeGanttSizeConfig(config, expectsGantt, params, userInitConfig);
   const background = resolveMermaidBlockBackground(params, expectsGantt, surface);
 
   return {
-    config: enforceSafeMermaidRuntimeConfig(completedConfig),
+    config: enforceSafeMermaidRuntimeConfig(completedGanttConfig.config),
     expectsGantt,
     renderSource: stripMermaidInitDirectives(source),
     svgBackground: background.svg,
     surfaceBackground: background.surface,
+    ganttSize: completedGanttConfig.size,
   };
 }
 
@@ -637,6 +871,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
   styleElement.setAttribute(GANTT_POST_STYLE_ATTRIBUTE, "");
   styleElement.textContent = `
 #${svgId} text {
+  font-size: var(--kmark-mermaid-font-size) !important;
   paint-order: stroke;
   stroke: rgba(255, 255, 255, 0.85);
   stroke-width: 2px;
@@ -660,6 +895,11 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 }
 #${svgId} .taskText {
   fill: ${taskTextColor} !important;
+}
+#${svgId} .taskText,
+#${svgId} .taskTextOutsideRight,
+#${svgId} .taskTextOutsideLeft {
+  dominant-baseline: middle;
 }
 `;
 
@@ -782,6 +1022,14 @@ function applyMermaidBlockPresentation(block: HTMLElement, prepared: PreparedMer
   block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt);
   block.style.setProperty("--kmark-mermaid-surface-bg", prepared.surfaceBackground);
   block.style.setProperty("--kmark-mermaid-svg-bg", prepared.svgBackground);
+
+  if (prepared.ganttSize !== undefined) {
+    block.style.setProperty("--kmark-mermaid-font-size", `${prepared.ganttSize.fontSizePx}px`);
+    block.style.setProperty("--kmark-mermaid-gantt-bar-height", `${prepared.ganttSize.barHeight}px`);
+  } else {
+    block.style.removeProperty("--kmark-mermaid-font-size");
+    block.style.removeProperty("--kmark-mermaid-gantt-bar-height");
+  }
 }
 
 async function renderMermaidBlock(
