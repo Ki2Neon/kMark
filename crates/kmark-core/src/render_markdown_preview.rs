@@ -321,6 +321,16 @@ struct KmarkModelParams {
     axes: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkMermaidParams {
+    font_size: Option<String>,
+    gantt_font_size: Option<String>,
+    gantt_section_font_size: Option<String>,
+    theme: Option<String>,
+    background: Option<String>,
+    init_merge: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum KmarkSizeValue {
     Length(String),
@@ -397,6 +407,7 @@ struct KmarkParams {
     image: KmarkImageParams,
     video: KmarkVideoParams,
     model: KmarkModelParams,
+    mermaid: KmarkMermaidParams,
     layout: KmarkLayoutParams,
     text: KmarkTextParams,
     table: KmarkTableParams,
@@ -468,6 +479,7 @@ struct KmarkRootDecoration {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkMermaidDecoration {
     root: KmarkRootDecoration,
+    params: KmarkMermaidParams,
     sized_width: bool,
     sized_height: bool,
 }
@@ -3017,6 +3029,7 @@ impl<'a> HtmlEmitter<'a> {
                 style: params.to_mermaid_block_root_style(),
                 page_valign,
             },
+            params: params.mermaid.clone(),
             sized_width: params.image.has_width_directive(),
             sized_height: params.image.has_height_directive(),
         };
@@ -4725,6 +4738,7 @@ impl KmarkParams {
         self.image.merge(&other.image);
         self.video.merge(&other.video);
         self.model.merge(&other.model);
+        self.mermaid.merge(&other.mermaid);
         self.layout.merge(&other.layout);
         self.text.merge(&other.text);
         self.table.merge(&other.table);
@@ -4735,6 +4749,7 @@ impl KmarkParams {
         self.image.has_image_directives()
             || self.video.has_video_directives()
             || self.model.has_model_directives()
+            || self.mermaid.has_mermaid_directives()
             || self.layout.has_layout_directives()
             || self.text.has_text_directives()
             || self.table.has_table_directives()
@@ -5034,7 +5049,90 @@ impl KmarkMermaidDecoration {
     }
 
     fn data_and_style_attributes(&self) -> String {
-        self.root.data_and_style_attributes()
+        format!(
+            "{}{}",
+            self.root.data_and_style_attributes(),
+            self.params.data_attributes(),
+        )
+    }
+}
+
+impl KmarkMermaidParams {
+    fn merge(&mut self, other: &Self) {
+        if let Some(font_size) = &other.font_size {
+            self.font_size = Some(font_size.clone());
+        }
+        if let Some(gantt_font_size) = &other.gantt_font_size {
+            self.gantt_font_size = Some(gantt_font_size.clone());
+        }
+        if let Some(gantt_section_font_size) = &other.gantt_section_font_size {
+            self.gantt_section_font_size = Some(gantt_section_font_size.clone());
+        }
+        if let Some(theme) = &other.theme {
+            self.theme = Some(theme.clone());
+        }
+        if let Some(background) = &other.background {
+            self.background = Some(background.clone());
+        }
+        if let Some(init_merge) = &other.init_merge {
+            self.init_merge = Some(init_merge.clone());
+        }
+    }
+
+    fn has_mermaid_directives(&self) -> bool {
+        self.font_size.is_some()
+            || self.gantt_font_size.is_some()
+            || self.gantt_section_font_size.is_some()
+            || self.theme.is_some()
+            || self.background.is_some()
+            || self.init_merge.is_some()
+    }
+
+    fn data_attributes(&self) -> String {
+        let mut attributes = String::new();
+
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-font-size",
+            self.font_size.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-font-size",
+            self.gantt_font_size.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-gantt-section-font-size",
+            self.gantt_section_font_size.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-theme-preset",
+            self.theme.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-background",
+            self.background.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-init-merge",
+            self.init_merge.as_deref(),
+        );
+
+        attributes
+    }
+}
+
+fn push_optional_data_attribute(output: &mut String, name: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        output.push(' ');
+        output.push_str(name);
+        output.push_str("=\"");
+        output.push_str(&escape_html(value));
+        output.push('"');
     }
 }
 
@@ -7563,6 +7661,36 @@ fn parse_kmark_param_bundle_parts(input: &str) -> (Option<String>, KmarkParamBun
                     bundle.params.model.axes = Some(axes);
                 }
             }
+            "mermaid_font_size" => {
+                if let Some(font_size) = parse_kmark_mermaid_font_size_value(&value) {
+                    bundle.params.mermaid.font_size = Some(font_size);
+                }
+            }
+            "mermaid_gantt_font_size" => {
+                if let Some(font_size) = parse_kmark_mermaid_font_size_value(&value) {
+                    bundle.params.mermaid.gantt_font_size = Some(font_size);
+                }
+            }
+            "mermaid_gantt_section_font_size" => {
+                if let Some(font_size) = parse_kmark_mermaid_font_size_value(&value) {
+                    bundle.params.mermaid.gantt_section_font_size = Some(font_size);
+                }
+            }
+            "mermaid_theme" => {
+                if let Some(theme) = parse_kmark_mermaid_theme_value(&value) {
+                    bundle.params.mermaid.theme = Some(theme);
+                }
+            }
+            "mermaid_background" => {
+                if let Some(background) = parse_kmark_mermaid_background_value(&value) {
+                    bundle.params.mermaid.background = Some(background);
+                }
+            }
+            "mermaid_init_merge" => {
+                if let Some(init_merge) = parse_kmark_mermaid_init_merge_value(&value) {
+                    bundle.params.mermaid.init_merge = Some(init_merge);
+                }
+            }
             "color" => {
                 if let Some(color) = parse_kmark_color_value(&value) {
                     bundle.params.text.color = Some(color);
@@ -8001,6 +8129,38 @@ fn parse_non_negative_float_time_part(value: &str) -> Option<f64> {
 
 fn parse_kmark_font_size_value(value: &str) -> Option<String> {
     parse_css_length_value(value, false)
+}
+
+fn parse_kmark_mermaid_font_size_value(value: &str) -> Option<String> {
+    parse_css_length_value(value, false)
+}
+
+fn parse_kmark_mermaid_theme_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    (!trimmed.is_empty()
+        && trimmed.len() <= 64
+        && trimmed
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')))
+    .then(|| trimmed.to_owned())
+}
+
+fn parse_kmark_mermaid_background_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    if matches!(trimmed, "paper" | "transparent" | "none") {
+        return Some(trimmed.to_owned());
+    }
+
+    parse_kmark_color_value(trimmed)
+}
+
+fn parse_kmark_mermaid_init_merge_value(value: &str) -> Option<String> {
+    let trimmed = trim_kmark_quotes(value).trim();
+
+    matches!(trimmed, "merge" | "replace" | "user-first" | "kmark-first")
+        .then(|| trimmed.to_owned())
 }
 
 fn parse_kmark_font_weight_value(value: &str) -> Option<String> {
@@ -10398,6 +10558,33 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""));
+    }
+
+    #[test]
+    fn applies_kmark_mermaid_params_to_mermaid_blocks() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark mermaid_font_size:10 mermaid_gantt_font_size:11 mermaid_gantt_section_font_size:12 mermaid_theme:gantt_clean mermaid_background:transparent mermaid_init_merge:kmark-first -->\n\
+             ```mermaid\ngantt\n  title Plan\n```",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-font-size=\"10px\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-font-size=\"11px\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-gantt-section-font-size=\"12px\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-theme-preset=\"gantt_clean\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-background=\"transparent\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-init-merge=\"kmark-first\""));
     }
 
     #[test]

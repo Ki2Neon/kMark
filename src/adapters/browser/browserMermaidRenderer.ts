@@ -1,7 +1,8 @@
-import mermaid from "mermaid";
+import mermaid, { type MermaidConfig } from "mermaid";
 
 export type MermaidPreviewTheme = "default" | "dark" | "neutral";
 export type MermaidPreviewSurface = "standard" | "paper";
+type MermaidInitMergeMode = "merge" | "replace" | "user-first" | "kmark-first";
 
 type RenderMermaidHtmlOptions = {
   readonly surface?: MermaidPreviewSurface;
@@ -14,6 +15,23 @@ type MermaidThemeVariables = Record<string, string>;
 type MermaidBlockSizing = {
   readonly sizedWidth: boolean;
   readonly sizedHeight: boolean;
+};
+
+type KmarkMermaidBlockParams = {
+  readonly fontSize?: string;
+  readonly ganttFontSize?: string;
+  readonly ganttSectionFontSize?: string;
+  readonly themePreset?: string;
+  readonly background?: string;
+  readonly initMerge?: MermaidInitMergeMode;
+};
+
+type PreparedMermaidRender = {
+  readonly config: MermaidConfig;
+  readonly expectsGantt: boolean;
+  readonly renderSource: string;
+  readonly svgBackground: string;
+  readonly surfaceBackground: string;
 };
 
 const MERMAID_BLOCK_SELECTOR = ".kmark-mermaid-block";
@@ -137,6 +155,58 @@ const PAPER_MERMAID_THEME_VARIABLES: MermaidThemeVariables = {
   cScale11: "#a21caf",
 };
 
+const BASE_MERMAID_CONFIG: MermaidConfig = {
+  flowchart: {
+    htmlLabels: false,
+  },
+  securityLevel: "strict",
+  startOnLoad: false,
+};
+
+const GANTT_CLEAN_THEME_VARIABLES: MermaidThemeVariables = {
+  background: "#ffffff",
+  primaryColor: "#b7d7ea",
+  primaryTextColor: "#000000",
+  primaryBorderColor: "#7fa9c6",
+  activeColor: "#8fb8d1",
+  activeBorderColor: "#5d88a2",
+  doneColor: "#c8d9e6",
+  doneBorderColor: "#7fa9c6",
+  critColor: "#111111",
+  critBorderColor: "#111111",
+  gridColor: "#d9d9d9",
+  sectionBkgColor: "#f5f5f5",
+  taskTextColor: "#000000",
+  taskTextOutsideColor: "#000000",
+  taskTextDarkColor: "#000000",
+  titleColor: "#000000",
+  textColor: "#000000",
+  fontSize: "10px",
+};
+
+const GANTT_CLEAN_MERMAID_CONFIG: MermaidConfig = {
+  theme: "base",
+  themeVariables: GANTT_CLEAN_THEME_VARIABLES,
+  gantt: {
+    fontSize: 10,
+    sectionFontSize: 10,
+    barHeight: 20,
+    barGap: 4,
+    topPadding: 50,
+    leftPadding: 75,
+    rightPadding: 75,
+    gridLineStartPadding: 35,
+  },
+};
+
+const INIT_DIRECTIVE_PATTERN = /%%\{\s*(?:init|initialize)\b[\s\S]*?\}%%/giu;
+const INIT_DIRECTIVE_CONFIG_PATTERN = /%%\{\s*(?:init|initialize)\s*:([\s\S]*?)\}%%/giu;
+const JSON_LIKE_UNQUOTED_KEY_PATTERN = /([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/gu;
+const JSON_LIKE_TRAILING_COMMA_PATTERN = /,\s*([}\]])/gu;
+const PX_FONT_SIZE_PATTERN = /^\s*(\d+(?:\.\d+)?)(?:px)?\s*$/iu;
+const CSS_UNSAFE_VALUE_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\(|[;{}<>])/iu;
+const GANTT_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-post-style";
+
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
 
@@ -195,21 +265,262 @@ function resolveMermaidThemeVariables(surface: MermaidPreviewSurface = "standard
   return shouldUsePaperMermaidColors(surface) ? PAPER_MERMAID_THEME_VARIABLES : undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mergeMermaidConfigValues(base: unknown, override: unknown): unknown {
+  if (override === undefined) {
+    return cloneMermaidConfigValue(base);
+  }
+
+  if (isRecord(base) && isRecord(override)) {
+    return mergeMermaidConfigs(base as MermaidConfig, override as MermaidConfig);
+  }
+
+  return cloneMermaidConfigValue(override);
+}
+
+function cloneMermaidConfigValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(cloneMermaidConfigValue);
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return mergeMermaidConfigs(value as MermaidConfig);
+}
+
+function mergeMermaidConfigs(...configs: readonly (MermaidConfig | undefined)[]): MermaidConfig {
+  const merged: Record<string, unknown> = {};
+
+  for (const config of configs) {
+    if (config === undefined) {
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(config)) {
+      merged[key] = mergeMermaidConfigValues(merged[key], value);
+    }
+  }
+
+  return merged as MermaidConfig;
+}
+
+function resolveBlockParams(block: HTMLElement): KmarkMermaidBlockParams {
+  return {
+    fontSize: block.dataset.kmarkMermaidFontSize,
+    ganttFontSize: block.dataset.kmarkMermaidGanttFontSize,
+    ganttSectionFontSize: block.dataset.kmarkMermaidGanttSectionFontSize,
+    themePreset: block.dataset.kmarkMermaidThemePreset,
+    background: block.dataset.kmarkMermaidBackground,
+    initMerge: resolveMermaidInitMerge(block.dataset.kmarkMermaidInitMerge),
+  };
+}
+
+function resolveMermaidInitMerge(value: string | undefined): MermaidInitMergeMode | undefined {
+  return value === "merge" || value === "replace" || value === "user-first" || value === "kmark-first"
+    ? value
+    : undefined;
+}
+
+function stripMermaidInitDirectives(source: string): string {
+  return source.replace(INIT_DIRECTIVE_PATTERN, "").trimStart();
+}
+
+function isMermaidGanttSource(source: string): boolean {
+  return stripMermaidInitDirectives(source).trimStart().toLowerCase().startsWith("gantt");
+}
+
+function parseMermaidFontSizeNumber(value: string | undefined): number | undefined {
+  const match = value?.match(PX_FONT_SIZE_PATTERN);
+
+  if (match === undefined || match === null) {
+    return undefined;
+  }
+
+  const fontSize = Number(match[1]);
+
+  return Number.isFinite(fontSize) && fontSize > 0 ? fontSize : undefined;
+}
+
+function createFontSizeThemeVariables(fontSize: string | undefined): MermaidThemeVariables | undefined {
+  return fontSize !== undefined ? { fontSize } : undefined;
+}
+
+function createKmarkMermaidParamConfig(params: KmarkMermaidBlockParams, expectsGantt: boolean): MermaidConfig {
+  const config: MermaidConfig = {};
+
+  if (params.fontSize !== undefined) {
+    config.themeVariables = createFontSizeThemeVariables(params.fontSize);
+  }
+
+  const ganttFontSize = params.ganttFontSize ?? params.fontSize;
+  const ganttFontSizeNumber = parseMermaidFontSizeNumber(ganttFontSize);
+  const ganttSectionFontSizeNumber = parseMermaidFontSizeNumber(params.ganttSectionFontSize);
+
+  if (expectsGantt && (ganttFontSizeNumber !== undefined || ganttSectionFontSizeNumber !== undefined)) {
+    config.gantt = {};
+
+    if (ganttFontSizeNumber !== undefined) {
+      config.gantt.fontSize = ganttFontSizeNumber;
+    }
+    if (ganttSectionFontSizeNumber !== undefined) {
+      config.gantt.sectionFontSize = ganttSectionFontSizeNumber;
+    }
+  }
+
+  return config;
+}
+
+function createKmarkMermaidPresetConfig(params: KmarkMermaidBlockParams, expectsGantt: boolean): MermaidConfig | undefined {
+  if (params.themePreset === "gantt_clean" || (params.themePreset === undefined && expectsGantt)) {
+    return GANTT_CLEAN_MERMAID_CONFIG;
+  }
+
+  return undefined;
+}
+
+function completeGanttFontConfig(config: MermaidConfig, expectsGantt: boolean): MermaidConfig {
+  if (!expectsGantt) {
+    return config;
+  }
+
+  const fontSize = parseMermaidFontSizeNumber(config.themeVariables?.fontSize);
+
+  if (fontSize === undefined) {
+    return config;
+  }
+
+  const gantt = {
+    ...config.gantt,
+  };
+
+  if (gantt.fontSize === undefined) {
+    gantt.fontSize = fontSize;
+  }
+  if (gantt.sectionFontSize === undefined) {
+    gantt.sectionFontSize = fontSize;
+  }
+
+  return {
+    ...config,
+    gantt,
+  };
+}
+
+function enforceSafeMermaidRuntimeConfig(config: MermaidConfig): MermaidConfig {
+  return {
+    ...config,
+    flowchart: {
+      ...config.flowchart,
+      htmlLabels: false,
+    },
+    securityLevel: "strict",
+    startOnLoad: false,
+  };
+}
+
+function detectMermaidUserInit(source: string): MermaidConfig | undefined {
+  const configs = Array.from(source.matchAll(INIT_DIRECTIVE_CONFIG_PATTERN))
+    .map((match) => parseMermaidInitConfig(match[1]))
+    .filter((config): config is MermaidConfig => config !== undefined);
+
+  if (configs.length === 0) {
+    return undefined;
+  }
+
+  return mergeMermaidConfigs(...configs);
+}
+
+function parseMermaidInitConfig(rawConfig: string): MermaidConfig | undefined {
+  try {
+    const normalizedConfig = rawConfig
+      .trim()
+      .replace(/'/gu, "\"")
+      .replace(JSON_LIKE_UNQUOTED_KEY_PATTERN, "$1\"$2\"$3")
+      .replace(JSON_LIKE_TRAILING_COMMA_PATTERN, "$1");
+    const parsedConfig = JSON.parse(normalizedConfig) as unknown;
+
+    return isRecord(parsedConfig) ? parsedConfig as MermaidConfig : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function createSurfaceMermaidConfig(theme: MermaidPreviewTheme, themeVariables: MermaidThemeVariables | undefined): MermaidConfig {
+  return {
+    theme,
+    themeVariables,
+  };
+}
+
+function prepareMermaidRender(
+  source: string,
+  block: HTMLElement,
+  theme: MermaidPreviewTheme,
+  surface: MermaidPreviewSurface,
+  themeVariables?: MermaidThemeVariables,
+): PreparedMermaidRender {
+  const params = resolveBlockParams(block);
+  const expectsGantt = isMermaidGanttSource(source);
+  const presetConfig = createKmarkMermaidPresetConfig(params, expectsGantt);
+  const kmarkParamConfig = createKmarkMermaidParamConfig(params, expectsGantt);
+  const userInitConfig = detectMermaidUserInit(source);
+  const surfaceConfig = createSurfaceMermaidConfig(theme, themeVariables);
+  const initMerge = params.initMerge ?? "merge";
+  const config = initMerge === "replace"
+    ? mergeMermaidConfigs(BASE_MERMAID_CONFIG, userInitConfig)
+    : initMerge === "kmark-first"
+      ? mergeMermaidConfigs(BASE_MERMAID_CONFIG, surfaceConfig, presetConfig, userInitConfig, kmarkParamConfig)
+      : mergeMermaidConfigs(BASE_MERMAID_CONFIG, surfaceConfig, presetConfig, kmarkParamConfig, userInitConfig);
+  const completedConfig = completeGanttFontConfig(config, expectsGantt);
+  const background = resolveMermaidBlockBackground(params, expectsGantt, surface);
+
+  return {
+    config: enforceSafeMermaidRuntimeConfig(completedConfig),
+    expectsGantt,
+    renderSource: stripMermaidInitDirectives(source),
+    svgBackground: background.svg,
+    surfaceBackground: background.surface,
+  };
+}
+
+function resolveMermaidBlockBackground(
+  params: KmarkMermaidBlockParams,
+  expectsGantt: boolean,
+  surface: MermaidPreviewSurface,
+): { readonly surface: string; readonly svg: string } {
+  const background = params.background;
+
+  if (background === "none") {
+    return { surface: "transparent", svg: "transparent" };
+  }
+  if (background === "transparent") {
+    return {
+      surface: "transparent",
+      svg: expectsGantt ? "rgba(255, 255, 255, 0.92)" : "transparent",
+    };
+  }
+  if (background !== undefined && background !== "paper") {
+    return { surface: background, svg: background };
+  }
+
+  if (expectsGantt || surface === "paper") {
+    return { surface: "#ffffff", svg: "#ffffff" };
+  }
+
+  return { surface: "transparent", svg: "transparent" };
+}
+
 async function renderMermaidSvg(
   source: string,
-  theme: MermaidPreviewTheme,
-  themeVariables?: MermaidThemeVariables,
+  config: MermaidConfig,
 ): Promise<string> {
   return enqueueMermaidRender(async () => {
-    mermaid.initialize({
-      flowchart: {
-        htmlLabels: false,
-      },
-      securityLevel: "strict",
-      startOnLoad: false,
-      theme,
-      themeVariables,
-    });
+    mermaid.initialize(config);
 
     mermaidRenderSequence += 1;
     const renderId = `kmark-mermaid-render-${mermaidRenderSequence}`;
@@ -261,6 +572,18 @@ function sanitizeSvgElement(svgElement: Element): void {
   }
 }
 
+function isSafeCssColor(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && !CSS_UNSAFE_VALUE_PATTERN.test(value);
+}
+
+function resolveThemeColor(config: MermaidConfig, key: string, fallback: string): string {
+  const value = config.themeVariables?.[key];
+
+  return isSafeCssColor(value) ? value.trim() : fallback;
+}
+
 function isMermaidGanttSvg(svgElement: SVGElement): boolean {
   return svgElement.getAttribute("aria-roledescription") === "gantt"
     || svgElement.querySelector(":scope > g.grid") !== null;
@@ -291,10 +614,63 @@ function normalizeMermaidGanttLayerOrder(svgElement: SVGElement): void {
   svgElement.insertBefore(gridGroup, sectionNextSibling);
 }
 
+function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConfig): void {
+  if (!isMermaidGanttSvg(svgElement)) {
+    return;
+  }
+
+  const svgId = svgElement.id.trim();
+
+  if (svgId.length === 0 || /[^A-Za-z0-9_-]/u.test(svgId)) {
+    return;
+  }
+
+  svgElement.querySelector(`style[${GANTT_POST_STYLE_ATTRIBUTE}]`)?.remove();
+
+  const ownerDocument = svgElement.ownerDocument;
+  const styleElement = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "style");
+  const gridColor = resolveThemeColor(config, "gridColor", "#d9d9d9");
+  const sectionColor = resolveThemeColor(config, "sectionBkgColor", "#f5f5f5");
+  const textColor = resolveThemeColor(config, "textColor", "#000000");
+  const taskTextColor = resolveThemeColor(config, "taskTextColor", textColor);
+
+  styleElement.setAttribute(GANTT_POST_STYLE_ATTRIBUTE, "");
+  styleElement.textContent = `
+#${svgId} text {
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+#${svgId} .grid .tick line,
+#${svgId} .grid path {
+  stroke: ${gridColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} .section {
+  fill: ${sectionColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} .titleText,
+#${svgId} .sectionTitle,
+#${svgId} .taskTextOutsideLeft,
+#${svgId} .taskTextOutsideRight,
+#${svgId} .milestoneText {
+  fill: ${textColor} !important;
+}
+#${svgId} .taskText {
+  fill: ${taskTextColor} !important;
+}
+`;
+
+  svgElement.append(styleElement);
+}
+
 function parseSafeMermaidSvg(
   svg: string,
   targetDocument: Document,
   sizing: MermaidBlockSizing,
+  config: MermaidConfig,
 ): SVGElement {
   const parsedDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
   const svgElement = parsedDocument.documentElement;
@@ -306,6 +682,7 @@ function parseSafeMermaidSvg(
   sanitizeSvgElement(svgElement);
   const importedSvg = targetDocument.importNode(svgElement, true) as unknown as SVGElement;
   normalizeMermaidGanttLayerOrder(importedSvg);
+  injectMermaidGanttPostStyle(importedSvg, config);
   normalizeMermaidSvgSize(importedSvg, sizing);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
@@ -401,6 +778,12 @@ function renderMermaidError(
   block.dataset.kmarkMermaidState = "error";
 }
 
+function applyMermaidBlockPresentation(block: HTMLElement, prepared: PreparedMermaidRender): void {
+  block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt);
+  block.style.setProperty("--kmark-mermaid-surface-bg", prepared.surfaceBackground);
+  block.style.setProperty("--kmark-mermaid-svg-bg", prepared.svgBackground);
+}
+
 async function renderMermaidBlock(
   block: HTMLElement,
   theme: MermaidPreviewTheme,
@@ -428,8 +811,12 @@ async function renderMermaidBlock(
   }
 
   try {
-    const svg = await renderMermaidSvg(source, theme, themeVariables);
-    const svgElement = parseSafeMermaidSvg(svg, block.ownerDocument, resolveMermaidBlockSizing(block));
+    const prepared = prepareMermaidRender(source, block, theme, surface, themeVariables);
+    block.dataset.kmarkMermaidTheme = String(prepared.config.theme ?? theme);
+    applyMermaidBlockPresentation(block, prepared);
+    const svg = await renderMermaidSvg(prepared.renderSource, prepared.config);
+    const svgElement = parseSafeMermaidSvg(svg, block.ownerDocument, resolveMermaidBlockSizing(block), prepared.config);
+    block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt || isMermaidGanttSvg(svgElement));
     renderedContainer.replaceChildren(svgElement);
     block.dataset.kmarkMermaidState = "rendered";
   } catch (error) {
