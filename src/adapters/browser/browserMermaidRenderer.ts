@@ -848,6 +848,67 @@ function normalizeMermaidGanttLayerOrder(svgElement: SVGElement): void {
   svgElement.insertBefore(gridGroup, sectionNextSibling);
 }
 
+function parseSvgNumber(value: string | null): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function findSvgElementById(root: SVGElement, id: string): Element | null {
+  return Array.from(root.querySelectorAll("[id]")).find((element) => element.id === id) ?? null;
+}
+
+function getSvgRectCenterY(rect: Element): number | undefined {
+  const y = parseSvgNumber(rect.getAttribute("y"));
+  const height = parseSvgNumber(rect.getAttribute("height"));
+
+  if (y === undefined || height === undefined) {
+    return undefined;
+  }
+
+  return y + height / 2;
+}
+
+function normalizeMermaidGanttTaskTextVerticalAlignment(svgElement: SVGElement): void {
+  if (!isMermaidGanttSvg(svgElement)) {
+    return;
+  }
+
+  const textElements = svgElement.querySelectorAll<SVGTextElement>(
+    "text.taskText, text.taskTextOutsideRight, text.taskTextOutsideLeft",
+  );
+
+  for (const textElement of Array.from(textElements)) {
+    const textId = textElement.id;
+    const taskId = textId.endsWith("-text") ? textId.slice(0, -"-text".length) : "";
+
+    if (taskId.length === 0) {
+      continue;
+    }
+
+    const taskElement = findSvgElementById(svgElement, taskId);
+
+    if (taskElement === null || taskElement.localName.toLowerCase() !== "rect") {
+      continue;
+    }
+
+    const centerY = getSvgRectCenterY(taskElement);
+
+    if (centerY === undefined) {
+      continue;
+    }
+
+    textElement.setAttribute("y", `${centerY}`);
+    textElement.setAttribute("dy", "0");
+    textElement.setAttribute("dominant-baseline", "middle");
+    textElement.setAttribute("alignment-baseline", "middle");
+  }
+}
+
 function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConfig): void {
   if (!isMermaidGanttSvg(svgElement)) {
     return;
@@ -922,6 +983,7 @@ function parseSafeMermaidSvg(
   sanitizeSvgElement(svgElement);
   const importedSvg = targetDocument.importNode(svgElement, true) as unknown as SVGElement;
   normalizeMermaidGanttLayerOrder(importedSvg);
+  normalizeMermaidGanttTaskTextVerticalAlignment(importedSvg);
   injectMermaidGanttPostStyle(importedSvg, config);
   normalizeMermaidSvgSize(importedSvg, sizing);
   importedSvg.setAttribute("role", "img");
