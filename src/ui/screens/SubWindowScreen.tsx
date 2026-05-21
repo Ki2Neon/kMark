@@ -38,7 +38,9 @@ const SUB_WINDOW_BROWSER_RESIZE_SYNC_DELAY_MS = 80;
 const SUB_WINDOW_BROWSER_HOST_EVENT = "subwindow-browser-host-event";
 const SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT = "closeRequested";
 const SUB_WINDOW_BROWSER_LOADED_EVENT = "loaded";
+const SUB_WINDOW_BROWSER_BACKGROUND_UPDATED_EVENT = "backgroundUpdated";
 const SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT = "revealStarted";
+const SUB_WINDOW_BROWSER_DEFAULT_BACKGROUND_COLOR = "rgb(255, 255, 255)";
 
 type SubWindowScreenProps = {
   readonly stateKey: string | null;
@@ -99,9 +101,26 @@ type SubWindowBrowserOverlayProps = {
 };
 
 type SubWindowBrowserHostEvent = {
+  readonly backgroundColor?: string;
   readonly browserId: string;
   readonly event: string;
 };
+
+function resolveSafeSubWindowBrowserBackgroundColor(value: string | undefined): string | null {
+  const match = /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/.exec(value?.trim() ?? "");
+
+  if (match === null) {
+    return null;
+  }
+
+  const channels = match.slice(1).map((channel) => Number(channel));
+
+  if (channels.some((channel) => !Number.isInteger(channel) || channel < 0 || channel > 255)) {
+    return null;
+  }
+
+  return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
 
 function resolveSubWindowExternalBrowserBounds(element: HTMLElement): SubWindowExternalBrowserBounds | null {
   const rect = element.getBoundingClientRect();
@@ -125,14 +144,18 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
   const resizeTimeoutRef = useRef<number | null>(null);
   const isClosingRef = useRef(false);
   const isCompleteRef = useRef(false);
+  const browserBackgroundColorsRef = useRef<Map<string, string>>(new Map());
   const loadedBrowserIdsRef = useRef<Set<string>>(new Set());
   const revealedBrowserIdsRef = useRef<Set<string>>(new Set());
+  const [browserBackgroundColor, setBrowserBackgroundColor] = useState(SUB_WINDOW_BROWSER_DEFAULT_BACKGROUND_COLOR);
   const [isBackgroundVisible, setIsBackgroundVisible] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const usesNativeBrowser = supportsNativeSubWindowExternalBrowser();
 
   useEffect(() => {
+    browserBackgroundColorsRef.current.clear();
+    setBrowserBackgroundColor(SUB_WINDOW_BROWSER_DEFAULT_BACKGROUND_COLOR);
     dialogRef.current?.focus({ preventScroll: true });
   }, [url]);
 
@@ -147,6 +170,20 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
 
   const closeNativeBrowserNow = useCallback((browserId: string) => {
     void closeSubWindowExternalBrowser(browserId).catch(() => {});
+  }, []);
+
+  const updateBrowserBackgroundColor = useCallback((browserId: string, backgroundColor: string | undefined) => {
+    const resolvedBackgroundColor = resolveSafeSubWindowBrowserBackgroundColor(backgroundColor);
+
+    if (resolvedBackgroundColor === null) {
+      return;
+    }
+
+    browserBackgroundColorsRef.current.set(browserId, resolvedBackgroundColor);
+
+    if (browserId === browserIdRef.current) {
+      setBrowserBackgroundColor(resolvedBackgroundColor);
+    }
   }, []);
 
   const completeClose = useCallback(() => {
@@ -251,6 +288,9 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
         }
 
         browserIdRef.current = browserId;
+        setBrowserBackgroundColor(
+          browserBackgroundColorsRef.current.get(browserId) ?? SUB_WINDOW_BROWSER_DEFAULT_BACKGROUND_COLOR,
+        );
         scheduleBrowserBoundsSync();
 
         if (loadedBrowserIdsRef.current.delete(browserId)) {
@@ -303,12 +343,19 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
       }
 
       if (event.event === SUB_WINDOW_BROWSER_LOADED_EVENT) {
+        updateBrowserBackgroundColor(event.browserId, event.backgroundColor);
+
         if (event.browserId === browserIdRef.current) {
           revealLoadedBrowser(event.browserId);
           return;
         }
 
         loadedBrowserIdsRef.current.add(event.browserId);
+        return;
+      }
+
+      if (event.event === SUB_WINDOW_BROWSER_BACKGROUND_UPDATED_EVENT) {
+        updateBrowserBackgroundColor(event.browserId, event.backgroundColor);
         return;
       }
 
@@ -338,7 +385,7 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
       isDisposed = true;
       unlisten?.();
     };
-  }, [requestClose, revealLoadedBrowser, usesNativeBrowser]);
+  }, [requestClose, revealLoadedBrowser, updateBrowserBackgroundColor, usesNativeBrowser]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -378,7 +425,10 @@ function SubWindowBrowserOverlay({ fadeMs, onCloseComplete, url }: SubWindowBrow
       data-closing={isClosing ? "true" : "false"}
       data-loaded={isLoaded ? "true" : "false"}
       onMouseDown={handleOverlayMouseDown}
-      style={{ "--subwindow-browser-fade-ms": `${Math.max(0, fadeMs)}ms` } as CSSProperties}
+      style={{
+        "--subwindow-browser-background-color": browserBackgroundColor,
+        "--subwindow-browser-fade-ms": `${Math.max(0, fadeMs)}ms`,
+      } as CSSProperties}
     >
       <div
         ref={dialogRef}

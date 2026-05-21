@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    webview::{Color, DownloadEvent, NewWindowResponse, PageLoadEvent},
+    webview::{Color, DownloadEvent, NewWindowResponse},
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
     Webview, WebviewBuilder, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
 };
@@ -60,6 +60,7 @@ const SUB_WINDOW_BROWSER_MIN_LOGICAL_SIZE: f64 = 1.0;
 const SUB_WINDOW_BROWSER_HOST_EVENT: &str = "subwindow-browser-host-event";
 const SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT: &str = "closeRequested";
 const SUB_WINDOW_BROWSER_LOADED_EVENT: &str = "loaded";
+const SUB_WINDOW_BROWSER_BACKGROUND_UPDATED_EVENT: &str = "backgroundUpdated";
 const SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT: &str = "revealStarted";
 const SUB_WINDOW_BROWSER_MIN_ZOOM_SCALE: f64 = 0.2;
 const SUB_WINDOW_BROWSER_MAX_ZOOM_SCALE: f64 = 5.0;
@@ -93,11 +94,15 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
   const MAX_ZOOM = 5.0;
   const ZOOM_STEP = 0.1;
   const REVEAL_SETTLE_MS = 180;
+  const DEFAULT_PAGE_BACKGROUND_COLOR = "rgb(255, 255, 255)";
   const FULLSCREEN_TARGET_ATTRIBUTE = "data-kmark-sandbox-browser-fullscreen-target";
   const REVEAL_TRANSITION = `opacity ${FADE_MS}ms cubic-bezier(.22, .61, .36, 1)`;
   let zoomScale = 1;
   let zoomElement = null;
   let internalFullscreenElement = null;
+  let lastPageBackgroundColor = null;
+  let pageBackgroundSyncAnimationFrame = null;
+  let pageBackgroundObserver = null;
 
   const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
   const isZoomed = () => Math.abs(zoomScale - 1) > 0.001;
@@ -246,6 +251,184 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
       }
       internals.invoke("sub_window_browser_event", { token: TOKEN, event }).catch(() => {});
     } catch (_) {}
+  };
+  const parseColorChannel = (value) => {
+    const normalizedValue = String(value).trim();
+    const parsed = normalizedValue.endsWith("%")
+      ? Number(normalizedValue.slice(0, -1)) * 2.55
+      : Number(normalizedValue);
+
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    return Math.min(255, Math.max(0, Math.round(parsed)));
+  };
+  const parseAlpha = (value) => {
+    if (value === undefined) {
+      return 1;
+    }
+
+    const normalizedValue = String(value).trim();
+    const parsed = normalizedValue.endsWith("%")
+      ? Number(normalizedValue.slice(0, -1)) / 100
+      : Number(normalizedValue);
+
+    if (!Number.isFinite(parsed)) {
+      return 1;
+    }
+
+    return Math.min(1, Math.max(0, parsed));
+  };
+  const normalizeBackgroundColor = (value) => {
+    const normalizedValue = String(value ?? "").trim().toLowerCase();
+
+    if (normalizedValue.length === 0 || normalizedValue === "transparent") {
+      return null;
+    }
+
+    const match = /^rgba?\((.*)\)$/.exec(normalizedValue);
+    if (match === null) {
+      return null;
+    }
+
+    const parts = match[1]
+      .replace(/\s*\/\s*/g, " ")
+      .split(/[,\s]+/)
+      .filter((part) => part.length > 0);
+
+    if (parts.length < 3) {
+      return null;
+    }
+
+    const red = parseColorChannel(parts[0]);
+    const green = parseColorChannel(parts[1]);
+    const blue = parseColorChannel(parts[2]);
+    const alpha = parseAlpha(parts[3]);
+
+    if (red === null || green === null || blue === null || alpha <= 0) {
+      return null;
+    }
+
+    return `rgb(${red}, ${green}, ${blue})`;
+  };
+  const readElementBackgroundColor = (element) => {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    try {
+      return normalizeBackgroundColor(window.getComputedStyle(element).backgroundColor);
+    } catch (_) {
+      return null;
+    }
+  };
+  const withInspectablePageBackground = (callback) => {
+    const root = window.document.documentElement;
+    const hadRevealAttribute = root.hasAttribute("data-kmark-sandbox-reveal");
+    const revealAttribute = root.getAttribute("data-kmark-sandbox-reveal");
+    const hadClosingAttribute = root.hasAttribute("data-kmark-sandbox-closing");
+    const closingAttribute = root.getAttribute("data-kmark-sandbox-closing");
+
+    root.removeAttribute("data-kmark-sandbox-reveal");
+    root.removeAttribute("data-kmark-sandbox-closing");
+
+    try {
+      return callback();
+    } finally {
+      if (hadRevealAttribute) {
+        root.setAttribute("data-kmark-sandbox-reveal", revealAttribute ?? "");
+      }
+      if (hadClosingAttribute) {
+        root.setAttribute("data-kmark-sandbox-closing", closingAttribute ?? "");
+      }
+    }
+  };
+  const resolvePageBackgroundColor = () => withInspectablePageBackground(() => {
+    const doc = window.document;
+    const rootBackgroundColor = readElementBackgroundColor(doc.documentElement);
+
+    if (rootBackgroundColor !== null) {
+      return rootBackgroundColor;
+    }
+
+    return readElementBackgroundColor(doc.body) ?? DEFAULT_PAGE_BACKGROUND_COLOR;
+  });
+  const publishPageBackgroundColor = () => {
+    const backgroundColor = resolvePageBackgroundColor();
+
+    if (backgroundColor !== lastPageBackgroundColor) {
+      lastPageBackgroundColor = backgroundColor;
+      bridge({ type: "background", backgroundColor });
+    }
+
+    return backgroundColor;
+  };
+  const schedulePageBackgroundSync = () => {
+    if (pageBackgroundSyncAnimationFrame !== null) {
+      return;
+    }
+
+    const syncBackground = () => {
+      pageBackgroundSyncAnimationFrame = null;
+      publishPageBackgroundColor();
+    };
+
+    try {
+      pageBackgroundSyncAnimationFrame = window.requestAnimationFrame(syncBackground);
+    } catch (_) {
+      pageBackgroundSyncAnimationFrame = window.setTimeout(syncBackground, 0);
+    }
+  };
+  const installPageBackgroundObserver = () => {
+    const doc = window.document;
+
+    doc.addEventListener("DOMContentLoaded", schedulePageBackgroundSync, { once: true });
+    window.addEventListener("load", schedulePageBackgroundSync, { once: true });
+
+    if (typeof window.MutationObserver !== "function" || pageBackgroundObserver !== null) {
+      return;
+    }
+
+    pageBackgroundObserver = new MutationObserver(schedulePageBackgroundSync);
+
+    try {
+      pageBackgroundObserver.observe(doc.documentElement, {
+        attributeFilter: ["class", "style"],
+        attributes: true,
+        childList: true,
+      });
+    } catch (_) {}
+
+    const observeBody = () => {
+      if (doc.body === null) {
+        return;
+      }
+
+      try {
+        pageBackgroundObserver.observe(doc.body, {
+          attributeFilter: ["class", "style"],
+          attributes: true,
+        });
+      } catch (_) {}
+    };
+
+    observeBody();
+    doc.addEventListener("DOMContentLoaded", () => {
+      observeBody();
+      schedulePageBackgroundSync();
+    }, { once: true });
+  };
+  const notifyPageLoaded = () => {
+    bridge({ type: "loaded", backgroundColor: publishPageBackgroundColor() });
+  };
+  const installPageLoadedBridge = () => {
+    if (window.document.readyState !== "loading") {
+      window.setTimeout(notifyPageLoaded, 0);
+      return;
+    }
+
+    window.document.addEventListener("DOMContentLoaded", notifyPageLoaded, { once: true });
   };
 
   const ensureUi = () => {
@@ -486,6 +669,9 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
   }, { capture: true, passive: false });
 
   installInternalFullscreenApi();
+  installPageBackgroundObserver();
+  installPageLoadedBridge();
+  publishPageBackgroundColor();
   prepareReveal();
   ensureUi();
   bridge({ type: "zoom", zoom: 1 });
@@ -510,6 +696,8 @@ pub struct SubWindowBrowserBoundsPayload {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SubWindowBrowserHostEventPayload<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_color: Option<&'a str>,
     browser_id: &'a str,
     event: &'a str,
 }
@@ -517,8 +705,11 @@ struct SubWindowBrowserHostEventPayload<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubWindowBrowserEventPayload {
+    #[serde(default)]
+    background_color: Option<String>,
     #[serde(rename = "type")]
     event_type: String,
+    #[serde(default)]
     zoom: Option<f64>,
 }
 
@@ -621,10 +812,6 @@ fn open_sub_window_external_browser_on_blocking_thread(
     let token = next_sub_window_browser_token(&label);
     let fade_ms = fade_ms.min(SUB_WINDOW_BROWSER_MAX_FADE_MS);
     let data_directory = sub_window_browser_data_directory(&app, &label)?;
-    let bridge_app = app.clone();
-    let bridge_window_label = window.label().to_string();
-    let bridge_label = label.clone();
-
     fs::create_dir_all(&data_directory).map_err(|source| {
         CommandErrorPayload::with_detail(
             "subwindow_browser_data_dir_create_failed",
@@ -648,18 +835,6 @@ fn open_sub_window_external_browser_on_blocking_thread(
         .data_directory(data_directory)
         .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
         .initialization_script(sub_window_browser_initialization_script(&token, fade_ms))
-        .on_page_load(move |_webview, payload| {
-            if payload.event() != PageLoadEvent::Finished {
-                return;
-            }
-
-            emit_sub_window_browser_host_event(
-                &bridge_app,
-                &bridge_window_label,
-                &bridge_label,
-                SUB_WINDOW_BROWSER_LOADED_EVENT,
-            );
-        })
         .on_navigation(|url| is_supported_external_url(url))
         .on_new_window(|_url, _features| NewWindowResponse::Deny)
         .on_download(|_webview, event| {
@@ -805,6 +980,36 @@ pub async fn sub_window_browser_event(
                     webview.window().label(),
                     webview.label(),
                     SUB_WINDOW_BROWSER_CLOSE_REQUESTED_EVENT,
+                    None,
+                );
+            }
+            "background" => {
+                if let Some(background_color) = event
+                    .background_color
+                    .as_deref()
+                    .and_then(validate_sub_window_browser_background_color)
+                {
+                    emit_sub_window_browser_host_event(
+                        &app,
+                        webview.window().label(),
+                        webview.label(),
+                        SUB_WINDOW_BROWSER_BACKGROUND_UPDATED_EVENT,
+                        Some(background_color),
+                    );
+                }
+            }
+            "loaded" => {
+                let background_color = event
+                    .background_color
+                    .as_deref()
+                    .and_then(validate_sub_window_browser_background_color);
+
+                emit_sub_window_browser_host_event(
+                    &app,
+                    webview.window().label(),
+                    webview.label(),
+                    SUB_WINDOW_BROWSER_LOADED_EVENT,
+                    background_color,
                 );
             }
             "zoom" => {
@@ -824,6 +1029,7 @@ pub async fn sub_window_browser_event(
                     webview.window().label(),
                     webview.label(),
                     SUB_WINDOW_BROWSER_REVEAL_STARTED_EVENT,
+                    None,
                 );
             }
             _ => {}
@@ -976,13 +1182,38 @@ fn validate_sub_window_browser_zoom(zoom: f64) -> Option<f64> {
     ))
 }
 
+fn validate_sub_window_browser_background_color(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+
+    if trimmed.len() > 32 || !trimmed.starts_with("rgb(") || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let channels = trimmed
+        .strip_prefix("rgb(")?
+        .strip_suffix(')')?
+        .split(',')
+        .map(str::trim)
+        .map(str::parse::<u8>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+
+    if channels.len() != 3 {
+        return None;
+    }
+
+    Some(trimmed)
+}
+
 fn emit_sub_window_browser_host_event<R: Runtime>(
     app: &AppHandle<R>,
     window_label: &str,
     browser_label: &str,
     event: &'static str,
+    background_color: Option<&str>,
 ) {
     let payload = SubWindowBrowserHostEventPayload {
+        background_color,
         browser_id: browser_label,
         event,
     };
