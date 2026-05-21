@@ -1870,10 +1870,6 @@ input:focus-visible,
 
 .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg text {
   font-size: var(--kmark-mermaid-font-size);
-  paint-order: stroke;
-  stroke: rgba(255, 255, 255, 0.85);
-  stroke-width: 2px;
-  stroke-linejoin: round;
 }
 
 .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskText,
@@ -1885,12 +1881,6 @@ input:focus-visible,
 .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid .tick line,
 .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid path {
   opacity: 1;
-}
-
-@media print {
-  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg text {
-    stroke-width: 1px;
-  }
 }
 
 .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {

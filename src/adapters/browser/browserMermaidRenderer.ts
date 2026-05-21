@@ -187,20 +187,33 @@ const BASE_MERMAID_CONFIG: MermaidConfig = {
 
 const GANTT_CLEAN_THEME_VARIABLES: MermaidThemeVariables = {
   background: "#ffffff",
-  primaryColor: "#b7d7ea",
-  primaryTextColor: "#000000",
-  primaryBorderColor: "#7fa9c6",
-  activeColor: "#8fb8d1",
-  activeBorderColor: "#5d88a2",
-  doneColor: "#c8d9e6",
-  doneBorderColor: "#7fa9c6",
+  primaryColor: "#4b5563",
+  primaryTextColor: "#ffffff",
+  primaryBorderColor: "#111827",
+  activeColor: "#111827",
+  activeBorderColor: "#000000",
+  doneColor: "#d1d5db",
+  doneBorderColor: "#6b7280",
   critColor: "#111111",
-  critBorderColor: "#111111",
-  gridColor: "#d9d9d9",
-  sectionBkgColor: "#f5f5f5",
-  taskTextColor: "#000000",
+  taskBkgColor: "#4b5563",
+  taskBorderColor: "#111827",
+  taskTextColor: "#ffffff",
   taskTextOutsideColor: "#000000",
   taskTextDarkColor: "#000000",
+  taskTextLightColor: "#ffffff",
+  taskTextClickableColor: "#ffffff",
+  activeTaskBkgColor: "#111827",
+  activeTaskBorderColor: "#000000",
+  doneTaskBkgColor: "#d1d5db",
+  doneTaskBorderColor: "#6b7280",
+  critBkgColor: "#000000",
+  critBorderColor: "#000000",
+  gridColor: "#9ca3af",
+  vertLineColor: "#6b7280",
+  todayLineColor: "#111827",
+  sectionBkgColor: "#f3f4f6",
+  altSectionBkgColor: "#e5e7eb",
+  sectionBkgColor2: "#d1d5db",
   titleColor: "#000000",
   textColor: "#000000",
   fontSize: "10px",
@@ -234,6 +247,12 @@ const DEFAULT_GANTT_TEXT_LINE_HEIGHT = 1.25;
 const DEFAULT_GANTT_BAR_PADDING_Y = 4;
 const DEFAULT_GANTT_MIN_BAR_HEIGHT = 20;
 const DEFAULT_GANTT_MAX_BAR_HEIGHT = 56;
+const GANTT_SECTION_BACKGROUND_COLORS = {
+  section0: "#f9fafb",
+  section1: "#f3f4f6",
+  section2: "#e5e7eb",
+  section3: "#d1d5db",
+} as const;
 
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
@@ -873,6 +892,19 @@ function getSvgRectCenterY(rect: Element): number | undefined {
   return y + height / 2;
 }
 
+function getMermaidGanttTaskElementForText(svgElement: SVGElement, textElement: SVGTextElement): Element | null {
+  const textId = textElement.id;
+  const taskId = textId.endsWith("-text") ? textId.slice(0, -"-text".length) : "";
+
+  if (taskId.length === 0) {
+    return null;
+  }
+
+  const taskElement = findSvgElementById(svgElement, taskId);
+
+  return taskElement?.localName.toLowerCase() === "rect" ? taskElement : null;
+}
+
 function normalizeMermaidGanttTaskTextVerticalAlignment(svgElement: SVGElement): void {
   if (!isMermaidGanttSvg(svgElement)) {
     return;
@@ -883,16 +915,9 @@ function normalizeMermaidGanttTaskTextVerticalAlignment(svgElement: SVGElement):
   );
 
   for (const textElement of Array.from(textElements)) {
-    const textId = textElement.id;
-    const taskId = textId.endsWith("-text") ? textId.slice(0, -"-text".length) : "";
+    const taskElement = getMermaidGanttTaskElementForText(svgElement, textElement);
 
-    if (taskId.length === 0) {
-      continue;
-    }
-
-    const taskElement = findSvgElementById(svgElement, taskId);
-
-    if (taskElement === null || taskElement.localName.toLowerCase() !== "rect") {
+    if (taskElement === null) {
       continue;
     }
 
@@ -907,6 +932,86 @@ function normalizeMermaidGanttTaskTextVerticalAlignment(svgElement: SVGElement):
     textElement.setAttribute("dominant-baseline", "middle");
     textElement.setAttribute("alignment-baseline", "middle");
   }
+}
+
+function resolveMermaidGanttSectionBackgroundColor(sectionElement: Element): string | undefined {
+  for (const [className, color] of Object.entries(GANTT_SECTION_BACKGROUND_COLORS)) {
+    if (sectionElement.classList.contains(className)) {
+      return color;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveMermaidGanttSectionBackgroundColorAtY(svgElement: SVGElement, y: number): string {
+  const sectionElements = svgElement.querySelectorAll("rect.section");
+
+  for (const sectionElement of Array.from(sectionElements)) {
+    const sectionY = parseSvgNumber(sectionElement.getAttribute("y"));
+    const sectionHeight = parseSvgNumber(sectionElement.getAttribute("height"));
+
+    if (sectionY === undefined || sectionHeight === undefined) {
+      continue;
+    }
+
+    if (y >= sectionY && y <= sectionY + sectionHeight) {
+      return resolveMermaidGanttSectionBackgroundColor(sectionElement) ?? "#ffffff";
+    }
+  }
+
+  return "#ffffff";
+}
+
+function parseHexColor(value: string): { readonly red: number; readonly green: number; readonly blue: number } | undefined {
+  const match = value.trim().match(/^#([0-9a-f]{6})$/iu);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const hex = match[1];
+
+  return {
+    red: Number.parseInt(hex.slice(0, 2), 16),
+    green: Number.parseInt(hex.slice(2, 4), 16),
+    blue: Number.parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function resolveContrastTextColor(backgroundColor: string): string {
+  const color = parseHexColor(backgroundColor);
+
+  if (color === undefined) {
+    return "#111827";
+  }
+
+  const luminance = (0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue) / 255;
+
+  return luminance > 0.55 ? "#111827" : "#ffffff";
+}
+
+function createMermaidGanttMilestoneTextContrastRules(svgElement: SVGElement, svgId: string): string {
+  const rules: string[] = [];
+  const milestoneTexts = svgElement.querySelectorAll<SVGTextElement>("text.milestoneText");
+
+  for (const textElement of Array.from(milestoneTexts)) {
+    if (textElement.id.trim().length === 0 || /[^A-Za-z0-9_-]/u.test(textElement.id)) {
+      continue;
+    }
+
+    const textY = parseSvgNumber(textElement.getAttribute("y"));
+
+    if (textY === undefined) {
+      continue;
+    }
+
+    const backgroundColor = resolveMermaidGanttSectionBackgroundColorAtY(svgElement, textY);
+    const textColor = resolveContrastTextColor(backgroundColor);
+    rules.push(`#${svgId} #${textElement.id} { fill: ${textColor} !important; }`);
+  }
+
+  return rules.join("\n");
 }
 
 function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConfig): void {
@@ -925,18 +1030,14 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
   const ownerDocument = svgElement.ownerDocument;
   const styleElement = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "style");
   const gridColor = resolveThemeColor(config, "gridColor", "#d9d9d9");
-  const sectionColor = resolveThemeColor(config, "sectionBkgColor", "#f5f5f5");
   const textColor = resolveThemeColor(config, "textColor", "#000000");
   const taskTextColor = resolveThemeColor(config, "taskTextColor", textColor);
+  const milestoneTextContrastRules = createMermaidGanttMilestoneTextContrastRules(svgElement, svgId);
 
   styleElement.setAttribute(GANTT_POST_STYLE_ATTRIBUTE, "");
   styleElement.textContent = `
 #${svgId} text {
   font-size: var(--kmark-mermaid-font-size) !important;
-  paint-order: stroke;
-  stroke: rgba(255, 255, 255, 0.85);
-  stroke-width: 2px;
-  stroke-linejoin: round;
 }
 #${svgId} .grid .tick line,
 #${svgId} .grid path {
@@ -944,8 +1045,55 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
   opacity: 1 !important;
 }
 #${svgId} .section {
-  fill: ${sectionColor} !important;
   opacity: 1 !important;
+}
+#${svgId} .section0 {
+  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section0} !important;
+}
+#${svgId} .section1 {
+  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section1} !important;
+}
+#${svgId} .section2 {
+  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section2} !important;
+}
+#${svgId} .section3 {
+  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section3} !important;
+}
+#${svgId} .task0,
+#${svgId} .task1,
+#${svgId} .task2,
+#${svgId} .task3 {
+  fill: #4b5563 !important;
+  stroke: #111827 !important;
+}
+#${svgId} .active0,
+#${svgId} .active1,
+#${svgId} .active2,
+#${svgId} .active3,
+#${svgId} .activeCrit0,
+#${svgId} .activeCrit1,
+#${svgId} .activeCrit2,
+#${svgId} .activeCrit3 {
+  fill: #111827 !important;
+  stroke: #000000 !important;
+}
+#${svgId} .done0,
+#${svgId} .done1,
+#${svgId} .done2,
+#${svgId} .done3,
+#${svgId} .doneCrit0,
+#${svgId} .doneCrit1,
+#${svgId} .doneCrit2,
+#${svgId} .doneCrit3 {
+  fill: #d1d5db !important;
+  stroke: #6b7280 !important;
+}
+#${svgId} .crit0,
+#${svgId} .crit1,
+#${svgId} .crit2,
+#${svgId} .crit3 {
+  fill: #000000 !important;
+  stroke: #000000 !important;
 }
 #${svgId} .titleText,
 #${svgId} .sectionTitle,
@@ -957,11 +1105,36 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .taskText {
   fill: ${taskTextColor} !important;
 }
+#${svgId} .doneText0,
+#${svgId} .doneText1,
+#${svgId} .doneText2,
+#${svgId} .doneText3,
+#${svgId} .doneCritText0,
+#${svgId} .doneCritText1,
+#${svgId} .doneCritText2,
+#${svgId} .doneCritText3 {
+  fill: #111827 !important;
+}
+#${svgId} .activeText0,
+#${svgId} .activeText1,
+#${svgId} .activeText2,
+#${svgId} .activeText3,
+#${svgId} .activeCritText0,
+#${svgId} .activeCritText1,
+#${svgId} .activeCritText2,
+#${svgId} .activeCritText3,
+#${svgId} .critText0,
+#${svgId} .critText1,
+#${svgId} .critText2,
+#${svgId} .critText3 {
+  fill: #ffffff !important;
+}
 #${svgId} .taskText,
 #${svgId} .taskTextOutsideRight,
 #${svgId} .taskTextOutsideLeft {
   dominant-baseline: middle;
 }
+${milestoneTextContrastRules}
 `;
 
   svgElement.append(styleElement);

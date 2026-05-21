@@ -241,10 +241,6 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
 
   .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg text {
     font-size: var(--kmark-mermaid-font-size);
-    paint-order: stroke;
-    stroke: rgba(255, 255, 255, 0.85);
-    stroke-width: 1px;
-    stroke-linejoin: round;
   }
 
   .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskText,
