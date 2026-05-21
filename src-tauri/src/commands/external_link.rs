@@ -637,34 +637,38 @@ fn open_sub_window_external_browser_on_blocking_thread(
     let browser_webview =
         WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed_url.clone()))
             .incognito(true)
-            .focused(false)
-            .transparent(true)
-            .background_color(Color(0, 0, 0, 0))
-            .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
-            .data_directory(data_directory)
-            .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
-            .initialization_script(sub_window_browser_initialization_script(&token, fade_ms))
-            .on_page_load(move |_webview, payload| {
-                if payload.event() != PageLoadEvent::Finished {
-                    return;
-                }
+            .focused(false);
 
-                emit_sub_window_browser_host_event(
-                    &bridge_app,
-                    &bridge_window_label,
-                    &bridge_label,
-                    SUB_WINDOW_BROWSER_LOADED_EVENT,
-                );
-            })
-            .on_navigation(|url| is_supported_external_url(url))
-            .on_new_window(|_url, _features| NewWindowResponse::Deny)
-            .on_download(|_webview, event| {
-                if let DownloadEvent::Requested { url, .. } = event {
-                    eprintln!("blocked subwindow browser download: {url}");
-                }
+    #[cfg(not(target_os = "macos"))]
+    let browser_webview = browser_webview.transparent(true);
 
-                false
-            });
+    let browser_webview = browser_webview
+        .background_color(Color(0, 0, 0, 0))
+        .additional_browser_args(SANDBOX_BROWSER_ADDITIONAL_BROWSER_ARGS)
+        .data_directory(data_directory)
+        .initialization_script(SANDBOX_BROWSER_SMOOTH_SCROLL_SCRIPT)
+        .initialization_script(sub_window_browser_initialization_script(&token, fade_ms))
+        .on_page_load(move |_webview, payload| {
+            if payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+
+            emit_sub_window_browser_host_event(
+                &bridge_app,
+                &bridge_window_label,
+                &bridge_label,
+                SUB_WINDOW_BROWSER_LOADED_EVENT,
+            );
+        })
+        .on_navigation(|url| is_supported_external_url(url))
+        .on_new_window(|_url, _features| NewWindowResponse::Deny)
+        .on_download(|_webview, event| {
+            if let DownloadEvent::Requested { url, .. } = event {
+                eprintln!("blocked subwindow browser download: {url}");
+            }
+
+            false
+        });
 
     let browser_webview = window
         .add_child(browser_webview, bounds.position, bounds.size)
