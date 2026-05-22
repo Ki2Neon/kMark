@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 20;
+pub const KMARK_PARAM_SCHEMA_VERSION: u32 = 21;
 
 pub struct KmarkParamSpec {
     pub name: &'static str,
@@ -995,10 +995,13 @@ pub const KMARK_PARAM_SPECS: &[KmarkParamSpec] = &[
         aliases: &[],
         param_type: "enum",
         contexts: &["single", "scope", "mermaid"],
-        values: &["gantt_clean"],
-        insert_text: "mermaid_theme:gantt_clean",
+        values: &["kmark_clean", "gantt_clean"],
+        insert_text: "mermaid_theme:kmark_clean",
         description: "kmark側Mermaid presetを指定する",
-        examples: &["<!-- kmark mermaid_theme:gantt_clean -->"],
+        examples: &[
+            "<!-- kmark mermaid_theme:kmark_clean -->",
+            "<!-- kmark mermaid_theme:gantt_clean -->",
+        ],
         priority: 84,
     },
     KmarkParamSpec {

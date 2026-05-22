@@ -1,6 +1,11 @@
 import mermaid, { type MermaidConfig } from "mermaid";
+import {
+  resolveKmarkMermaidThemeVariables,
+  shouldUsePaperMermaidColors,
+  type KmarkMermaidThemeVariables as MermaidThemeVariables,
+} from "./browserMermaidTheme";
 
-export type MermaidPreviewTheme = "default" | "dark" | "neutral";
+export type MermaidPreviewTheme = "base" | "default" | "dark" | "neutral";
 export type MermaidPreviewSurface = "standard" | "paper";
 type MermaidInitMergeMode = "merge" | "replace" | "user-first" | "kmark-first";
 
@@ -9,8 +14,6 @@ type RenderMermaidHtmlOptions = {
   readonly theme?: MermaidPreviewTheme;
   readonly themeVariables?: MermaidThemeVariables;
 };
-
-type MermaidThemeVariables = Record<string, string>;
 
 type MermaidBlockSizing = {
   readonly sizedWidth: boolean;
@@ -64,119 +67,11 @@ const MERMAID_SIZED_WIDTH_CLASS = "kmark-mermaid-block--sized-width";
 const MERMAID_SIZED_HEIGHT_CLASS = "kmark-mermaid-block--sized-height";
 const MERMAID_EMPTY_ERROR_MESSAGE = "Mermaid diagram is empty";
 const MERMAID_RENDER_ERROR_TITLE = "Mermaid render error";
-const SAFE_MERMAID_THEMES = new Set<MermaidPreviewTheme>(["default", "dark", "neutral"]);
-const DARK_APP_THEME_IDS = new Set(["vscode-dark", "github-dark", "dracula", "night-owl", "monokai"]);
+const SAFE_MERMAID_THEMES = new Set<MermaidPreviewTheme>(["base", "default", "dark", "neutral"]);
 const UNSAFE_SVG_ELEMENT_NAMES = new Set(["script", "iframe", "object", "embed", "audio", "video", "canvas"]);
 const SVG_LINK_ATTRIBUTE_NAMES = new Set(["href", "xlink:href"]);
 const UNSAFE_URL_PATTERN = /^\s*(?:javascript|vbscript|data):/iu;
 const UNSAFE_CSS_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\()/iu;
-const PAPER_MERMAID_THEME_VARIABLES: MermaidThemeVariables = {
-  background: "#ffffff",
-  mainBkg: "#f8fafc",
-  nodeBkg: "#f8fafc",
-  nodeBorder: "#334155",
-  primaryColor: "#dbeafe",
-  primaryTextColor: "#0f172a",
-  primaryBorderColor: "#1d4ed8",
-  secondaryColor: "#dcfce7",
-  secondaryTextColor: "#052e16",
-  secondaryBorderColor: "#15803d",
-  tertiaryColor: "#fef3c7",
-  tertiaryTextColor: "#422006",
-  tertiaryBorderColor: "#b45309",
-  textColor: "#111827",
-  titleColor: "#111827",
-  lineColor: "#334155",
-  defaultLinkColor: "#334155",
-  arrowheadColor: "#334155",
-  border1: "#334155",
-  border2: "#475569",
-  note: "#fef9c3",
-  noteBorderColor: "#a16207",
-  noteBkgColor: "#fef9c3",
-  noteTextColor: "#422006",
-  clusterBkg: "#f8fafc",
-  clusterBorder: "#94a3b8",
-  edgeLabelBackground: "#ffffff",
-  actorBkg: "#f8fafc",
-  actorBorder: "#334155",
-  actorTextColor: "#111827",
-  actorLineColor: "#64748b",
-  signalColor: "#334155",
-  signalTextColor: "#111827",
-  labelBoxBkgColor: "#ffffff",
-  labelBoxBorderColor: "#94a3b8",
-  labelTextColor: "#111827",
-  loopTextColor: "#111827",
-  activationBorderColor: "#475569",
-  activationBkgColor: "#e2e8f0",
-  sequenceNumberColor: "#111827",
-  stateBkg: "#f8fafc",
-  stateBorder: "#334155",
-  stateLabelColor: "#111827",
-  labelBackgroundColor: "#ffffff",
-  transitionColor: "#334155",
-  classText: "#111827",
-  relationColor: "#334155",
-  entityBkg: "#f8fafc",
-  entityBorder: "#334155",
-  attributeBackgroundColorOdd: "#ffffff",
-  attributeBackgroundColorEven: "#f1f5f9",
-  rowOdd: "#ffffff",
-  rowEven: "#f1f5f9",
-  sectionBkgColor: "#f1f5f9",
-  altSectionBkgColor: "#ffffff",
-  sectionBkgColor2: "#ffffff",
-  taskBkgColor: "#475569",
-  taskBorderColor: "#334155",
-  taskTextLightColor: "#ffffff",
-  taskTextColor: "#ffffff",
-  taskTextDarkColor: "#111827",
-  taskTextOutsideColor: "#111827",
-  taskTextClickableColor: "#ffffff",
-  activeTaskBkgColor: "#2563eb",
-  activeTaskBorderColor: "#1d4ed8",
-  doneTaskBkgColor: "#94a3b8",
-  doneTaskBorderColor: "#64748b",
-  critBkgColor: "#dc2626",
-  critBorderColor: "#991b1b",
-  gridColor: "#cbd5e1",
-  vertLineColor: "#94a3b8",
-  todayLineColor: "#dc2626",
-  excludeBkgColor: "#e5e7eb",
-  pie1: "#2563eb",
-  pie2: "#db2777",
-  pie3: "#16a34a",
-  pie4: "#d97706",
-  pie5: "#7c3aed",
-  pie6: "#0891b2",
-  pie7: "#be123c",
-  pie8: "#4d7c0f",
-  pie9: "#c2410c",
-  pie10: "#4338ca",
-  pie11: "#0f766e",
-  pie12: "#a21caf",
-  pieTitleTextSize: "1.25rem",
-  pieTitleTextColor: "#111827",
-  pieSectionTextSize: "1rem",
-  pieSectionTextColor: "#ffffff",
-  pieLegendTextColor: "#111827",
-  pieStrokeColor: "#ffffff",
-  pieOuterStrokeColor: "#334155",
-  cScale0: "#2563eb",
-  cScale1: "#db2777",
-  cScale2: "#16a34a",
-  cScale3: "#d97706",
-  cScale4: "#7c3aed",
-  cScale5: "#0891b2",
-  cScale6: "#be123c",
-  cScale7: "#4d7c0f",
-  cScale8: "#c2410c",
-  cScale9: "#4338ca",
-  cScale10: "#0f766e",
-  cScale11: "#a21caf",
-};
-
 const BASE_MERMAID_CONFIG: MermaidConfig = {
   flowchart: {
     htmlLabels: false,
@@ -185,43 +80,7 @@ const BASE_MERMAID_CONFIG: MermaidConfig = {
   startOnLoad: false,
 };
 
-const GANTT_CLEAN_THEME_VARIABLES: MermaidThemeVariables = {
-  background: "#ffffff",
-  primaryColor: "#4b5563",
-  primaryTextColor: "#ffffff",
-  primaryBorderColor: "#111827",
-  activeColor: "#111827",
-  activeBorderColor: "#000000",
-  doneColor: "#d1d5db",
-  doneBorderColor: "#6b7280",
-  critColor: "#111111",
-  taskBkgColor: "#4b5563",
-  taskBorderColor: "#111827",
-  taskTextColor: "#ffffff",
-  taskTextOutsideColor: "#000000",
-  taskTextDarkColor: "#000000",
-  taskTextLightColor: "#ffffff",
-  taskTextClickableColor: "#ffffff",
-  activeTaskBkgColor: "#111827",
-  activeTaskBorderColor: "#000000",
-  doneTaskBkgColor: "#d1d5db",
-  doneTaskBorderColor: "#6b7280",
-  critBkgColor: "#000000",
-  critBorderColor: "#000000",
-  gridColor: "#9ca3af",
-  vertLineColor: "#6b7280",
-  todayLineColor: "#111827",
-  sectionBkgColor: "#f3f4f6",
-  altSectionBkgColor: "#e5e7eb",
-  sectionBkgColor2: "#d1d5db",
-  titleColor: "#000000",
-  textColor: "#000000",
-  fontSize: "10px",
-};
-
 const GANTT_CLEAN_MERMAID_CONFIG: MermaidConfig = {
-  theme: "base",
-  themeVariables: GANTT_CLEAN_THEME_VARIABLES,
   gantt: {
     fontSize: 10,
     sectionFontSize: 10,
@@ -247,13 +106,6 @@ const DEFAULT_GANTT_TEXT_LINE_HEIGHT = 1.25;
 const DEFAULT_GANTT_BAR_PADDING_Y = 4;
 const DEFAULT_GANTT_MIN_BAR_HEIGHT = 20;
 const DEFAULT_GANTT_MAX_BAR_HEIGHT = 56;
-const GANTT_SECTION_BACKGROUND_COLORS = {
-  section0: "#f9fafb",
-  section1: "#f3f4f6",
-  section2: "#e5e7eb",
-  section3: "#d1d5db",
-} as const;
-
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
 
@@ -263,9 +115,9 @@ function resolveMermaidTheme(value: string | undefined): MermaidPreviewTheme | n
     : null;
 }
 
-export function resolveMermaidPreviewTheme(surface: MermaidPreviewSurface = "standard"): MermaidPreviewTheme {
+export function resolveMermaidPreviewTheme(_surface: MermaidPreviewSurface = "standard"): MermaidPreviewTheme {
   if (typeof document === "undefined") {
-    return "default";
+    return "base";
   }
 
   const explicitTheme = resolveMermaidTheme(document.documentElement.dataset.mermaidTheme);
@@ -274,21 +126,7 @@ export function resolveMermaidPreviewTheme(surface: MermaidPreviewSurface = "sta
     return explicitTheme;
   }
 
-  if (surface === "paper") {
-    return "neutral";
-  }
-
-  if (document.documentElement.dataset.previewColors !== "app") {
-    return "neutral";
-  }
-
-  const appTheme = document.documentElement.dataset.appTheme;
-
-  if (appTheme === "paper") {
-    return "neutral";
-  }
-
-  return appTheme !== undefined && DARK_APP_THEME_IDS.has(appTheme) ? "dark" : "default";
+  return "base";
 }
 
 function enqueueMermaidRender<T>(operation: () => Promise<T>): Promise<T> {
@@ -298,18 +136,6 @@ function enqueueMermaidRender<T>(operation: () => Promise<T>): Promise<T> {
     () => undefined,
   );
   return queued;
-}
-
-function shouldUsePaperMermaidColors(surface: MermaidPreviewSurface = "standard"): boolean {
-  if (surface === "paper") {
-    return true;
-  }
-
-  return typeof document !== "undefined" && document.documentElement.dataset.previewColors !== "app";
-}
-
-function resolveMermaidThemeVariables(surface: MermaidPreviewSurface = "standard"): MermaidThemeVariables | undefined {
-  return shouldUsePaperMermaidColors(surface) ? PAPER_MERMAID_THEME_VARIABLES : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -513,8 +339,14 @@ function createKmarkMermaidParamConfig(params: KmarkMermaidBlockParams, expectsG
 }
 
 function createKmarkMermaidPresetConfig(params: KmarkMermaidBlockParams, expectsGantt: boolean): MermaidConfig | undefined {
-  if (params.themePreset === "gantt_clean" || (params.themePreset === undefined && expectsGantt)) {
+  if (
+    params.themePreset === "gantt_clean"
+    || (expectsGantt && (params.themePreset === undefined || params.themePreset === "kmark_clean"))
+  ) {
     return GANTT_CLEAN_MERMAID_CONFIG;
+  }
+  if (params.themePreset === "kmark_clean") {
+    return { theme: "base" };
   }
 
   return undefined;
@@ -934,17 +766,21 @@ function normalizeMermaidGanttTaskTextVerticalAlignment(svgElement: SVGElement):
   }
 }
 
-function resolveMermaidGanttSectionBackgroundColor(sectionElement: Element): string | undefined {
-  for (const [className, color] of Object.entries(GANTT_SECTION_BACKGROUND_COLORS)) {
-    if (sectionElement.classList.contains(className)) {
-      return color;
-    }
+function resolveMermaidGanttSectionBackgroundColor(sectionElement: Element, config: MermaidConfig): string | undefined {
+  if (sectionElement.classList.contains("section0")) {
+    return resolveThemeColor(config, "sectionBkgColor", "#f9fafb");
+  }
+  if (sectionElement.classList.contains("section1") || sectionElement.classList.contains("section3")) {
+    return resolveThemeColor(config, "altSectionBkgColor", "#ffffff");
+  }
+  if (sectionElement.classList.contains("section2")) {
+    return resolveThemeColor(config, "sectionBkgColor2", "#e5e7eb");
   }
 
   return undefined;
 }
 
-function resolveMermaidGanttSectionBackgroundColorAtY(svgElement: SVGElement, y: number): string {
+function resolveMermaidGanttSectionBackgroundColorAtY(svgElement: SVGElement, y: number, config: MermaidConfig): string {
   const sectionElements = svgElement.querySelectorAll("rect.section");
 
   for (const sectionElement of Array.from(sectionElements)) {
@@ -956,7 +792,7 @@ function resolveMermaidGanttSectionBackgroundColorAtY(svgElement: SVGElement, y:
     }
 
     if (y >= sectionY && y <= sectionY + sectionHeight) {
-      return resolveMermaidGanttSectionBackgroundColor(sectionElement) ?? "#ffffff";
+      return resolveMermaidGanttSectionBackgroundColor(sectionElement, config) ?? "#ffffff";
     }
   }
 
@@ -991,7 +827,7 @@ function resolveContrastTextColor(backgroundColor: string): string {
   return luminance > 0.55 ? "#111827" : "#ffffff";
 }
 
-function createMermaidGanttMilestoneTextContrastRules(svgElement: SVGElement, svgId: string): string {
+function createMermaidGanttMilestoneTextContrastRules(svgElement: SVGElement, svgId: string, config: MermaidConfig): string {
   const rules: string[] = [];
   const milestoneTexts = svgElement.querySelectorAll<SVGTextElement>("text.milestoneText");
 
@@ -1006,7 +842,7 @@ function createMermaidGanttMilestoneTextContrastRules(svgElement: SVGElement, sv
       continue;
     }
 
-    const backgroundColor = resolveMermaidGanttSectionBackgroundColorAtY(svgElement, textY);
+    const backgroundColor = resolveMermaidGanttSectionBackgroundColorAtY(svgElement, textY, config);
     const textColor = resolveContrastTextColor(backgroundColor);
     rules.push(`#${svgId} #${textElement.id} { fill: ${textColor} !important; }`);
   }
@@ -1031,8 +867,22 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
   const styleElement = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "style");
   const gridColor = resolveThemeColor(config, "gridColor", "#d9d9d9");
   const textColor = resolveThemeColor(config, "textColor", "#000000");
+  const outsideTextColor = resolveThemeColor(config, "taskTextOutsideColor", textColor);
   const taskTextColor = resolveThemeColor(config, "taskTextColor", textColor);
-  const milestoneTextContrastRules = createMermaidGanttMilestoneTextContrastRules(svgElement, svgId);
+  const taskFillColor = resolveThemeColor(config, "taskBkgColor", "#4b5563");
+  const taskBorderColor = resolveThemeColor(config, "taskBorderColor", "#111827");
+  const activeTaskFillColor = resolveThemeColor(config, "activeTaskBkgColor", "#111827");
+  const activeTaskBorderColor = resolveThemeColor(config, "activeTaskBorderColor", "#000000");
+  const doneTaskFillColor = resolveThemeColor(config, "doneTaskBkgColor", "#d1d5db");
+  const doneTaskBorderColor = resolveThemeColor(config, "doneTaskBorderColor", "#6b7280");
+  const criticalTaskFillColor = resolveThemeColor(config, "critBkgColor", "#000000");
+  const criticalTaskBorderColor = resolveThemeColor(config, "critBorderColor", "#000000");
+  const lightTaskTextColor = resolveThemeColor(config, "taskTextLightColor", "#ffffff");
+  const darkTaskTextColor = resolveThemeColor(config, "taskTextDarkColor", "#111827");
+  const sectionColor = resolveThemeColor(config, "sectionBkgColor", "#f9fafb");
+  const altSectionColor = resolveThemeColor(config, "altSectionBkgColor", "#ffffff");
+  const sectionColor2 = resolveThemeColor(config, "sectionBkgColor2", "#e5e7eb");
+  const milestoneTextContrastRules = createMermaidGanttMilestoneTextContrastRules(svgElement, svgId, config);
 
   styleElement.setAttribute(GANTT_POST_STYLE_ATTRIBUTE, "");
   styleElement.textContent = `
@@ -1048,23 +898,21 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
   opacity: 1 !important;
 }
 #${svgId} .section0 {
-  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section0} !important;
+  fill: ${sectionColor} !important;
 }
-#${svgId} .section1 {
-  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section1} !important;
+#${svgId} .section1,
+#${svgId} .section3 {
+  fill: ${altSectionColor} !important;
 }
 #${svgId} .section2 {
-  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section2} !important;
-}
-#${svgId} .section3 {
-  fill: ${GANTT_SECTION_BACKGROUND_COLORS.section3} !important;
+  fill: ${sectionColor2} !important;
 }
 #${svgId} .task0,
 #${svgId} .task1,
 #${svgId} .task2,
 #${svgId} .task3 {
-  fill: #4b5563 !important;
-  stroke: #111827 !important;
+  fill: ${taskFillColor} !important;
+  stroke: ${taskBorderColor} !important;
 }
 #${svgId} .active0,
 #${svgId} .active1,
@@ -1074,8 +922,8 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .activeCrit1,
 #${svgId} .activeCrit2,
 #${svgId} .activeCrit3 {
-  fill: #111827 !important;
-  stroke: #000000 !important;
+  fill: ${activeTaskFillColor} !important;
+  stroke: ${activeTaskBorderColor} !important;
 }
 #${svgId} .done0,
 #${svgId} .done1,
@@ -1085,22 +933,24 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .doneCrit1,
 #${svgId} .doneCrit2,
 #${svgId} .doneCrit3 {
-  fill: #d1d5db !important;
-  stroke: #6b7280 !important;
+  fill: ${doneTaskFillColor} !important;
+  stroke: ${doneTaskBorderColor} !important;
 }
 #${svgId} .crit0,
 #${svgId} .crit1,
 #${svgId} .crit2,
 #${svgId} .crit3 {
-  fill: #000000 !important;
-  stroke: #000000 !important;
+  fill: ${criticalTaskFillColor} !important;
+  stroke: ${criticalTaskBorderColor} !important;
 }
 #${svgId} .titleText,
 #${svgId} .sectionTitle,
-#${svgId} .taskTextOutsideLeft,
-#${svgId} .taskTextOutsideRight,
 #${svgId} .milestoneText {
   fill: ${textColor} !important;
+}
+#${svgId} .taskTextOutsideLeft,
+#${svgId} .taskTextOutsideRight {
+  fill: ${outsideTextColor} !important;
 }
 #${svgId} .taskText {
   fill: ${taskTextColor} !important;
@@ -1113,7 +963,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .doneCritText1,
 #${svgId} .doneCritText2,
 #${svgId} .doneCritText3 {
-  fill: #111827 !important;
+  fill: ${darkTaskTextColor} !important;
 }
 #${svgId} .activeText0,
 #${svgId} .activeText1,
@@ -1127,7 +977,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .critText1,
 #${svgId} .critText2,
 #${svgId} .critText3 {
-  fill: #ffffff !important;
+  fill: ${lightTaskTextColor} !important;
 }
 #${svgId} .taskText,
 #${svgId} .taskTextOutsideRight,
@@ -1313,7 +1163,7 @@ export async function renderMermaidBlocks(
 ): Promise<void> {
   const theme = options.theme ?? resolveMermaidPreviewTheme(options.surface);
   const surface = options.surface ?? "standard";
-  const themeVariables = options.themeVariables ?? resolveMermaidThemeVariables(surface);
+  const themeVariables = options.themeVariables ?? resolveKmarkMermaidThemeVariables(surface);
   const blocks = Array.from(root.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
 
   for (const block of blocks) {

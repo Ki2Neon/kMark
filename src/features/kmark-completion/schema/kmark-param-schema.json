@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 20,
+  "schemaVersion": 21,
   "params": [
     {
       "name": "align",
@@ -897,10 +897,10 @@
       "aliases": [],
       "type": "enum",
       "contexts": ["single", "scope", "mermaid"],
-      "values": ["gantt_clean"],
-      "insertText": "mermaid_theme:gantt_clean",
+      "values": ["kmark_clean", "gantt_clean"],
+      "insertText": "mermaid_theme:kmark_clean",
       "description": "kmark側Mermaid presetを指定する",
-      "examples": ["<!-- kmark mermaid_theme:gantt_clean -->"],
+      "examples": ["<!-- kmark mermaid_theme:kmark_clean -->", "<!-- kmark mermaid_theme:gantt_clean -->"],
       "priority": 84
     },
     {
