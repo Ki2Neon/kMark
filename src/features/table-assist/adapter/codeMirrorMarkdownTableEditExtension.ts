@@ -1,6 +1,7 @@
-import { EditorSelection, Prec, type EditorState, type Extension, type Text } from "@codemirror/state";
-import { EditorView, keymap, ViewPlugin } from "@codemirror/view";
+import { EditorSelection, Prec, Transaction, type EditorState, type Extension, type Text } from "@codemirror/state";
+import { EditorView, keymap, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { formatMarkdownTablesInLineRanges } from "../../../adapters/browser/browserRustCore";
+import { resolveMarkdownTableFormatTextChanges } from "./markdownTableFormatTextChanges";
 
 type TableAlignment = "default" | "left" | "center" | "right";
 
@@ -28,6 +29,11 @@ type MarkdownTable = {
   readonly startLineNumber: number;
 };
 
+type MarkdownTableLineRange = {
+  readonly endLineNumber: number;
+  readonly startLineNumber: number;
+};
+
 type ActiveTableCell = {
   readonly cell: MarkdownTableCell;
   readonly columnIndex: number;
@@ -42,12 +48,6 @@ type TableCellSelection = {
   readonly startColumnIndex: number;
   readonly startRowIndex: number;
   readonly table: MarkdownTable;
-};
-
-type MinimalTextChange = {
-  readonly from: number;
-  readonly insert: string;
-  readonly to: number;
 };
 
 type TableContextMenuState = {
@@ -70,12 +70,10 @@ export function createCodeMirrorMarkdownTableEditExtension(): Extension {
   return [
     markdownTableContextMenuTheme,
     ViewPlugin.fromClass(MarkdownTableContextMenuCleanupPlugin),
+    ViewPlugin.fromClass(MarkdownTableCursorExitFormatPlugin),
     EditorView.domEventHandlers({
       contextmenu(event, view) {
         return openEditorContextMenu(event, view);
-      },
-      copy(event, view) {
-        return copySelectedTableCells(event, view);
       },
       paste(event, view) {
         return pasteTabularText(event, view);
@@ -105,6 +103,88 @@ export function createCodeMirrorMarkdownTableEditExtension(): Extension {
       { key: "Mod-Alt-u", run: splitMergedTableCell },
     ])),
   ];
+}
+
+class MarkdownTableCursorExitFormatPlugin {
+  readonly #view: EditorView;
+  #activeTableLineRange: MarkdownTableLineRange | null;
+  #pendingLineRanges: readonly MarkdownTableLineRange[] = [];
+  #timeoutId: number | null = null;
+
+  constructor(view: EditorView) {
+    this.#view = view;
+    this.#activeTableLineRange = resolveSelectionTableLineRange(view.state);
+  }
+
+  update(update: ViewUpdate): void {
+    if (!update.selectionSet) {
+      return;
+    }
+
+    const currentLineRange = resolveSelectionTableLineRange(update.state);
+
+    if (update.docChanged) {
+      if (currentLineRange !== null) {
+        this.#activeTableLineRange = currentLineRange;
+      }
+      return;
+    }
+
+    const previousLineRange = this.#activeTableLineRange;
+
+    if (
+      previousLineRange !== null
+      && (currentLineRange === null || !isSameTableStartLine(previousLineRange, currentLineRange))
+    ) {
+      this.#schedule(previousLineRange);
+    }
+
+    this.#activeTableLineRange = currentLineRange;
+  }
+
+  destroy(): void {
+    this.#clear();
+  }
+
+  #schedule(lineRange: MarkdownTableLineRange): void {
+    if (!this.#pendingLineRanges.some((pendingLineRange) => isSameTableStartLine(pendingLineRange, lineRange))) {
+      this.#pendingLineRanges = [...this.#pendingLineRanges, lineRange];
+    }
+
+    if (this.#timeoutId !== null) {
+      return;
+    }
+
+    this.#timeoutId = window.setTimeout(() => {
+      this.#timeoutId = null;
+      this.#formatPending();
+    }, 0);
+  }
+
+  #formatPending(): void {
+    const pendingLineRanges = this.#pendingLineRanges;
+    this.#pendingLineRanges = [];
+
+    for (const lineRange of pendingLineRanges) {
+      const currentLineRange = resolveSelectionTableLineRange(this.#view.state);
+
+      if (currentLineRange !== null && isSameTableStartLine(currentLineRange, lineRange)) {
+        continue;
+      }
+
+      formatTableLineRange(this.#view, lineRange);
+    }
+  }
+
+  #clear(): void {
+    if (this.#timeoutId === null) {
+      return;
+    }
+
+    window.clearTimeout(this.#timeoutId);
+    this.#timeoutId = null;
+    this.#pendingLineRanges = [];
+  }
 }
 
 class MarkdownTableContextMenuCleanupPlugin {
@@ -352,6 +432,37 @@ function getActiveTableCell(state: EditorState): ActiveTableCell | null {
   }
 
   return getTableCellAtPosition(state, state.selection.main.head);
+}
+
+function resolveSelectionTableLineRange(state: EditorState): MarkdownTableLineRange | null {
+  if (state.selection.ranges.length !== 1) {
+    return null;
+  }
+
+  const range = state.selection.main;
+  const anchorCell = getTableCellAtPosition(state, range.anchor);
+  const headCell = getTableCellAtPosition(state, range.head);
+
+  if (
+    anchorCell === null
+    || headCell === null
+    || anchorCell.table.startLineNumber !== headCell.table.startLineNumber
+  ) {
+    return null;
+  }
+
+  return tableLineRangeFromTable(headCell.table);
+}
+
+function tableLineRangeFromTable(table: MarkdownTable): MarkdownTableLineRange {
+  return {
+    endLineNumber: table.endLineNumber,
+    startLineNumber: table.startLineNumber,
+  };
+}
+
+function isSameTableStartLine(left: MarkdownTableLineRange, right: MarkdownTableLineRange): boolean {
+  return left.startLineNumber === right.startLineNumber;
 }
 
 function getTableCellAtPosition(state: EditorState, position: number): ActiveTableCell | null {
@@ -709,14 +820,19 @@ function replaceTable(
   const startLine = view.state.doc.line(table.startLineNumber);
   const endLine = view.state.doc.line(table.endLineNumber);
   const lines = buildTableLines(cells, alignments);
+  const source = view.state.doc.toString();
+  const replacedSource = `${source.slice(0, startLine.from)}${lines.join("\n")}${source.slice(endLine.to)}`;
+  const result = formatMarkdownTablesInLineRanges(replacedSource, [{
+    endLine: table.startLineNumber + lines.length - 1,
+    startLine: table.startLineNumber,
+  }]);
+  const changes = resolveMarkdownTableFormatTextChanges(source, result.text);
 
-  view.dispatch({
-    changes: {
-      from: startLine.from,
-      insert: lines.join("\n"),
-      to: endLine.to,
-    },
-  });
+  if (changes.length > 0) {
+    view.dispatch({
+      changes: [...changes],
+    });
+  }
 
   selectTableCell(view, table.startLineNumber + targetRowIndex + (targetRowIndex === 0 ? 0 : 1), targetColumnIndex);
   return true;
@@ -819,16 +935,36 @@ function moveActiveTableCellToEdge(view: EditorView, direction: "left" | "right"
     : direction === "right"
       ? activeCell.table.columnCount - 1
       : activeCell.columnIndex;
-  const targetRow = activeCell.table.rows[rowIndex];
-  const targetCell = targetRow.cells[Math.min(columnIndex, targetRow.cells.length - 1)];
 
-  if (targetCell === undefined) {
+  return formatTableAndSelectCell(view, activeCell.table, rowIndex, columnIndex);
+}
+
+function formatTableLineRange(view: EditorView, lineRange: MarkdownTableLineRange): boolean {
+  if (view.state.doc.length === 0) {
+    return false;
+  }
+
+  const startLine = Math.min(view.state.doc.lines, Math.max(1, lineRange.startLineNumber));
+  const endLine = Math.min(view.state.doc.lines, Math.max(startLine, lineRange.endLineNumber));
+  const source = view.state.doc.toString();
+  const result = formatMarkdownTablesInLineRanges(source, [{
+    endLine,
+    startLine,
+  }]);
+
+  if (result.text === source) {
+    return false;
+  }
+
+  const changes = resolveMarkdownTableFormatTextChanges(source, result.text);
+
+  if (changes.length === 0) {
     return false;
   }
 
   view.dispatch({
-    effects: EditorView.scrollIntoView(targetCell.contentFrom, { y: "center" }),
-    selection: EditorSelection.single(targetCell.contentFrom, targetCell.contentTo),
+    annotations: Transaction.addToHistory.of(false),
+    changes: [...changes],
   });
   return true;
 }
@@ -846,15 +982,14 @@ function formatTableAndSelectCell(
   }]);
 
   if (result.text !== source) {
-    const change = resolveMinimalTextChange(source, result.text);
+    const changes = resolveMarkdownTableFormatTextChanges(source, result.text);
 
-    view.dispatch({
-      changes: {
-        from: change.from,
-        insert: change.insert,
-        to: change.to,
-      },
-    });
+    if (changes.length > 0) {
+      view.dispatch({
+        annotations: Transaction.addToHistory.of(false),
+        changes: [...changes],
+      });
+    }
   }
 
   selectTableCell(view, tableRowIndexToLineNumber(table.startLineNumber, rowIndex), columnIndex);
@@ -1217,24 +1352,6 @@ function findMergeRegionFromRoot(table: MarkdownTable, rowIndex: number, columnI
   };
 }
 
-function copySelectedTableCells(event: ClipboardEvent, view: EditorView): boolean {
-  const selection = getSelectedTableCells(view.state);
-
-  if (selection === null || event.clipboardData === null) {
-    return false;
-  }
-
-  const cells = matrixFromTable(selection.table);
-  const text = cells
-    .slice(selection.startRowIndex, selection.endRowIndex + 1)
-    .map((row) => row.slice(selection.startColumnIndex, selection.endColumnIndex + 1).join("\t"))
-    .join("\n");
-
-  event.clipboardData.setData("text/plain", text);
-  event.preventDefault();
-  return true;
-}
-
 function pasteTabularText(event: ClipboardEvent, view: EditorView): boolean {
   const activeCell = getActiveTableCell(view.state);
   const clipboardText = event.clipboardData?.getData("text/plain") ?? "";
@@ -1387,62 +1504,6 @@ function readCodePoint(text: string, offset: number): string {
   }
 
   return String.fromCodePoint(codePoint);
-}
-
-function readPreviousCodePoint(text: string, offset: number): string {
-  const lastCodeUnitOffset = offset - 1;
-  const lastCodeUnit = text.charCodeAt(lastCodeUnitOffset);
-
-  if (
-    lastCodeUnit >= 0xdc00
-    && lastCodeUnit <= 0xdfff
-    && lastCodeUnitOffset > 0
-  ) {
-    const previousCodeUnit = text.charCodeAt(lastCodeUnitOffset - 1);
-
-    if (previousCodeUnit >= 0xd800 && previousCodeUnit <= 0xdbff) {
-      return text.slice(lastCodeUnitOffset - 1, offset);
-    }
-  }
-
-  return text[lastCodeUnitOffset];
-}
-
-function resolveMinimalTextChange(before: string, after: string): MinimalTextChange {
-  let prefix = 0;
-  const maximumPrefix = Math.min(before.length, after.length);
-
-  while (prefix < maximumPrefix) {
-    const beforeCharacter = readCodePoint(before, prefix);
-    const afterCharacter = readCodePoint(after, prefix);
-
-    if (beforeCharacter !== afterCharacter) {
-      break;
-    }
-
-    prefix += beforeCharacter.length;
-  }
-
-  let beforeSuffix = before.length;
-  let afterSuffix = after.length;
-
-  while (beforeSuffix > prefix && afterSuffix > prefix) {
-    const beforeCharacter = readPreviousCodePoint(before, beforeSuffix);
-    const afterCharacter = readPreviousCodePoint(after, afterSuffix);
-
-    if (beforeCharacter !== afterCharacter) {
-      break;
-    }
-
-    beforeSuffix -= beforeCharacter.length;
-    afterSuffix -= afterCharacter.length;
-  }
-
-  return {
-    from: prefix,
-    insert: after.slice(prefix, afterSuffix),
-    to: beforeSuffix,
-  };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
