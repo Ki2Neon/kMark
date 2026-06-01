@@ -1,6 +1,7 @@
-import { EditorSelection, Prec, type EditorState, type Extension, type Text } from "@codemirror/state";
+import { EditorSelection, Prec, Transaction, type EditorState, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap, ViewPlugin } from "@codemirror/view";
 import { formatMarkdownTablesInLineRanges } from "../../../adapters/browser/browserRustCore";
+import { resolveMarkdownTableFormatTextChanges } from "./markdownTableFormatTextChanges";
 
 type TableAlignment = "default" | "left" | "center" | "right";
 
@@ -42,12 +43,6 @@ type TableCellSelection = {
   readonly startColumnIndex: number;
   readonly startRowIndex: number;
   readonly table: MarkdownTable;
-};
-
-type MinimalTextChange = {
-  readonly from: number;
-  readonly insert: string;
-  readonly to: number;
 };
 
 type TableContextMenuState = {
@@ -843,15 +838,14 @@ function formatTableAndSelectCell(
   }]);
 
   if (result.text !== source) {
-    const change = resolveMinimalTextChange(source, result.text);
+    const changes = resolveMarkdownTableFormatTextChanges(source, result.text);
 
-    view.dispatch({
-      changes: {
-        from: change.from,
-        insert: change.insert,
-        to: change.to,
-      },
-    });
+    if (changes.length > 0) {
+      view.dispatch({
+        annotations: Transaction.addToHistory.of(false),
+        changes: [...changes],
+      });
+    }
   }
 
   selectTableCell(view, tableRowIndexToLineNumber(table.startLineNumber, rowIndex), columnIndex);
@@ -1366,62 +1360,6 @@ function readCodePoint(text: string, offset: number): string {
   }
 
   return String.fromCodePoint(codePoint);
-}
-
-function readPreviousCodePoint(text: string, offset: number): string {
-  const lastCodeUnitOffset = offset - 1;
-  const lastCodeUnit = text.charCodeAt(lastCodeUnitOffset);
-
-  if (
-    lastCodeUnit >= 0xdc00
-    && lastCodeUnit <= 0xdfff
-    && lastCodeUnitOffset > 0
-  ) {
-    const previousCodeUnit = text.charCodeAt(lastCodeUnitOffset - 1);
-
-    if (previousCodeUnit >= 0xd800 && previousCodeUnit <= 0xdbff) {
-      return text.slice(lastCodeUnitOffset - 1, offset);
-    }
-  }
-
-  return text[lastCodeUnitOffset];
-}
-
-function resolveMinimalTextChange(before: string, after: string): MinimalTextChange {
-  let prefix = 0;
-  const maximumPrefix = Math.min(before.length, after.length);
-
-  while (prefix < maximumPrefix) {
-    const beforeCharacter = readCodePoint(before, prefix);
-    const afterCharacter = readCodePoint(after, prefix);
-
-    if (beforeCharacter !== afterCharacter) {
-      break;
-    }
-
-    prefix += beforeCharacter.length;
-  }
-
-  let beforeSuffix = before.length;
-  let afterSuffix = after.length;
-
-  while (beforeSuffix > prefix && afterSuffix > prefix) {
-    const beforeCharacter = readPreviousCodePoint(before, beforeSuffix);
-    const afterCharacter = readPreviousCodePoint(after, afterSuffix);
-
-    if (beforeCharacter !== afterCharacter) {
-      break;
-    }
-
-    beforeSuffix -= beforeCharacter.length;
-    afterSuffix -= afterCharacter.length;
-  }
-
-  return {
-    from: prefix,
-    insert: after.slice(prefix, afterSuffix),
-    to: beforeSuffix,
-  };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

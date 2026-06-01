@@ -1,7 +1,8 @@
-import { Annotation, EditorSelection, type EditorState, type Extension } from "@codemirror/state";
+import { Annotation, EditorSelection, Transaction, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { formatMarkdownTablesInLineRanges } from "../../../adapters/browser/browserRustCore";
 import { type TableFormatLineRangePayload } from "../../../wasm/kmarkWeb";
+import { resolveMarkdownTableFormatTextChanges } from "./markdownTableFormatTextChanges";
 
 const TABLE_AUTO_FORMAT_DEBOUNCE_MS = 350;
 const tableAutoFormatAnnotation = Annotation.define<boolean>();
@@ -22,18 +23,13 @@ type EditorScrollPosition = {
   readonly top: number;
 };
 
-type MinimalTextChange = {
-  readonly from: number;
-  readonly insert: string;
-  readonly to: number;
-};
-
 export function createCodeMirrorMarkdownTableAutoFormatExtension(): Extension {
   return ViewPlugin.fromClass(MarkdownTableAutoFormatPlugin);
 }
 
 class MarkdownTableAutoFormatPlugin {
   readonly #view: EditorView;
+  #formatShouldJoinHistory = false;
   #lineRanges: readonly TableFormatLineRangePayload[] = [];
   #timeoutId: number | null = null;
 
@@ -57,9 +53,11 @@ class MarkdownTableAutoFormatPlugin {
     }
 
     this.#lineRanges = mergeLineRanges([...this.#lineRanges, ...lineRanges]);
+    this.#formatShouldJoinHistory ||= isHistorySensitiveChange(update);
 
     if (isWhitespaceOnlyChange(update)) {
       this.#clear();
+      this.#formatShouldJoinHistory = false;
       this.#lineRanges = [];
       return;
     }
@@ -68,7 +66,7 @@ class MarkdownTableAutoFormatPlugin {
       return;
     }
 
-    this.#schedule();
+    this.#schedule(this.#formatShouldJoinHistory ? 0 : TABLE_AUTO_FORMAT_DEBOUNCE_MS);
   }
 
   destroy(): void {
@@ -91,6 +89,8 @@ class MarkdownTableAutoFormatPlugin {
 
     const source = this.#view.state.doc.toString();
     const lineRanges = this.#lineRanges;
+    const shouldJoinHistory = this.#formatShouldJoinHistory;
+    this.#formatShouldJoinHistory = false;
     this.#lineRanges = [];
     const result = formatMarkdownTablesInLineRanges(source, lineRanges);
 
@@ -99,15 +99,22 @@ class MarkdownTableAutoFormatPlugin {
     }
 
     const scrollPosition = captureEditorScroll(this.#view);
-    const textChange = resolveMinimalTextChange(source, result.text);
+    const textChanges = resolveMarkdownTableFormatTextChanges(source, result.text);
+
+    if (textChanges.length === 0) {
+      return;
+    }
+
+    const annotations = shouldJoinHistory
+      ? [tableAutoFormatAnnotation.of(true)]
+      : [
+        tableAutoFormatAnnotation.of(true),
+        Transaction.addToHistory.of(false),
+      ];
 
     this.#view.dispatch({
-      annotations: tableAutoFormatAnnotation.of(true),
-      changes: {
-        from: textChange.from,
-        insert: textChange.insert,
-        to: textChange.to,
-      },
+      annotations,
+      changes: [...textChanges],
       selection: resolveSelectionAfterFormatting(this.#view.state, result.text),
     });
     restoreEditorScroll(this.#view, scrollPosition);
@@ -146,6 +153,25 @@ function isWhitespaceOnlyChange(update: ViewUpdate): boolean {
 
 function isHorizontalWhitespaceOnly(text: string): boolean {
   return /^[ \t]*$/u.test(text);
+}
+
+function isHistorySensitiveChange(update: ViewUpdate): boolean {
+  let sensitive = false;
+
+  update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (sensitive) {
+      return;
+    }
+
+    sensitive = hasTableStructureCharacter(update.startState.doc.sliceString(fromA, toA))
+      || hasTableStructureCharacter(inserted.toString());
+  });
+
+  return sensitive;
+}
+
+function hasTableStructureCharacter(text: string): boolean {
+  return /[\r\n|]/u.test(text);
 }
 
 function collectPotentialTableLineRanges(update: ViewUpdate): readonly TableFormatLineRangePayload[] {
@@ -239,43 +265,6 @@ function restoreEditorScroll(view: EditorView, scrollPosition: EditorScrollPosit
     view.scrollDOM.scrollLeft = scrollPosition.left;
     view.scrollDOM.scrollTop = scrollPosition.top;
   });
-}
-
-function resolveMinimalTextChange(before: string, after: string): MinimalTextChange {
-  let prefix = 0;
-  const maximumPrefix = Math.min(before.length, after.length);
-
-  while (prefix < maximumPrefix) {
-    const beforeCharacter = readCodePoint(before, prefix);
-    const afterCharacter = readCodePoint(after, prefix);
-
-    if (beforeCharacter !== afterCharacter) {
-      break;
-    }
-
-    prefix += beforeCharacter.length;
-  }
-
-  let beforeSuffix = before.length;
-  let afterSuffix = after.length;
-
-  while (beforeSuffix > prefix && afterSuffix > prefix) {
-    const beforeCharacter = readPreviousCodePoint(before, beforeSuffix);
-    const afterCharacter = readPreviousCodePoint(after, afterSuffix);
-
-    if (beforeCharacter !== afterCharacter) {
-      break;
-    }
-
-    beforeSuffix -= beforeCharacter.length;
-    afterSuffix -= afterCharacter.length;
-  }
-
-  return {
-    from: prefix,
-    insert: after.slice(prefix, afterSuffix),
-    to: beforeSuffix,
-  };
 }
 
 function createCursorAnchor(state: EditorState, position: number): CursorAnchor {
@@ -387,21 +376,3 @@ function readCodePoint(text: string, offset: number): string {
   return String.fromCodePoint(codePoint);
 }
 
-function readPreviousCodePoint(text: string, offset: number): string {
-  const lastCodeUnitOffset = offset - 1;
-  const lastCodeUnit = text.charCodeAt(lastCodeUnitOffset);
-
-  if (
-    lastCodeUnit >= 0xdc00
-    && lastCodeUnit <= 0xdfff
-    && lastCodeUnitOffset > 0
-  ) {
-    const previousCodeUnit = text.charCodeAt(lastCodeUnitOffset - 1);
-
-    if (previousCodeUnit >= 0xd800 && previousCodeUnit <= 0xdbff) {
-      return text.slice(lastCodeUnitOffset - 1, offset);
-    }
-  }
-
-  return text[lastCodeUnitOffset];
-}
