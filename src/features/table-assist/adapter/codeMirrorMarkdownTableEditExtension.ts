@@ -811,18 +811,8 @@ function moveActiveTableCellToEdge(view: EditorView, direction: "left" | "right"
     : direction === "right"
       ? activeCell.table.columnCount - 1
       : activeCell.columnIndex;
-  const targetRow = activeCell.table.rows[rowIndex];
-  const targetCell = targetRow.cells[Math.min(columnIndex, targetRow.cells.length - 1)];
 
-  if (targetCell === undefined) {
-    return false;
-  }
-
-  view.dispatch({
-    effects: EditorView.scrollIntoView(targetCell.contentFrom, { y: "center" }),
-    selection: EditorSelection.single(targetCell.contentFrom, targetCell.contentTo),
-  });
-  return true;
+  return formatTableAndSelectCell(view, activeCell.table, rowIndex, columnIndex);
 }
 
 function formatTableAndSelectCell(

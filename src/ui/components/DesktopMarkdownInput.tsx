@@ -11,7 +11,6 @@ import { type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
 import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
 import { createCodeMirrorKmarkScopeDisplayExtension } from "../../features/kmark-scope-display/adapter/codeMirrorKmarkScopeDisplayExtension";
-import { createCodeMirrorMarkdownTableAutoFormatExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableAutoFormatExtension";
 import { createCodeMirrorMarkdownTableEditExtension } from "../../features/table-assist/adapter/codeMirrorMarkdownTableEditExtension";
 import { listMarkdownPathSuggestions } from "../../infra/markdownPathSuggestions";
 import { isTauri, listenRuntimeDragDropEvent, type RuntimeDragDropEvent } from "../../runtime/runtime";
@@ -121,7 +120,6 @@ const MARKDOWN_SNIPPET_COMPLETIONS: readonly Completion[] = MARKDOWN_SNIPPET_DEF
 const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COMPLETIONS);
 const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
 const KMARK_SCOPE_DISPLAY_EXTENSION = createCodeMirrorKmarkScopeDisplayExtension();
-const MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION = createCodeMirrorMarkdownTableAutoFormatExtension();
 const MARKDOWN_TABLE_EDIT_EXTENSION = createCodeMirrorMarkdownTableEditExtension();
 const SUPPORTED_CLIPBOARD_ASSET_EXTENSIONS = new Set([
   "png",
@@ -1108,7 +1106,6 @@ function DesktopMarkdownInputComponent({
       assetDropLineHighlightField,
       KMARK_VALIDATION_EXTENSION,
       MARKDOWN_TABLE_EDIT_EXTENSION,
-      MARKDOWN_TABLE_AUTO_FORMAT_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       KMARK_SCOPE_DISPLAY_EXTENSION,
       Prec.highest(assetPasteExtension),
