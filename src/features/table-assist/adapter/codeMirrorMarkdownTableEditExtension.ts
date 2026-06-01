@@ -701,14 +701,19 @@ function replaceTable(
   const startLine = view.state.doc.line(table.startLineNumber);
   const endLine = view.state.doc.line(table.endLineNumber);
   const lines = buildTableLines(cells, alignments);
+  const source = view.state.doc.toString();
+  const replacedSource = `${source.slice(0, startLine.from)}${lines.join("\n")}${source.slice(endLine.to)}`;
+  const result = formatMarkdownTablesInLineRanges(replacedSource, [{
+    endLine: table.startLineNumber + lines.length - 1,
+    startLine: table.startLineNumber,
+  }]);
+  const changes = resolveMarkdownTableFormatTextChanges(source, result.text);
 
-  view.dispatch({
-    changes: {
-      from: startLine.from,
-      insert: lines.join("\n"),
-      to: endLine.to,
-    },
-  });
+  if (changes.length > 0) {
+    view.dispatch({
+      changes: [...changes],
+    });
+  }
 
   selectTableCell(view, table.startLineNumber + targetRowIndex + (targetRowIndex === 0 ? 0 : 1), targetColumnIndex);
   return true;
