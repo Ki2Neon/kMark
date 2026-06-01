@@ -74,9 +74,6 @@ export function createCodeMirrorMarkdownTableEditExtension(): Extension {
       contextmenu(event, view) {
         return openEditorContextMenu(event, view);
       },
-      copy(event, view) {
-        return copySelectedTableCells(event, view);
-      },
       paste(event, view) {
         return pasteTabularText(event, view);
       },
@@ -1215,24 +1212,6 @@ function findMergeRegionFromRoot(table: MarkdownTable, rowIndex: number, columnI
     startRowIndex: rowIndex,
     table,
   };
-}
-
-function copySelectedTableCells(event: ClipboardEvent, view: EditorView): boolean {
-  const selection = getSelectedTableCells(view.state);
-
-  if (selection === null || event.clipboardData === null) {
-    return false;
-  }
-
-  const cells = matrixFromTable(selection.table);
-  const text = cells
-    .slice(selection.startRowIndex, selection.endRowIndex + 1)
-    .map((row) => row.slice(selection.startColumnIndex, selection.endColumnIndex + 1).join("\t"))
-    .join("\n");
-
-  event.clipboardData.setData("text/plain", text);
-  event.preventDefault();
-  return true;
 }
 
 function pasteTabularText(event: ClipboardEvent, view: EditorView): boolean {
