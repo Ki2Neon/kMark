@@ -249,6 +249,98 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     dominant-baseline: middle;
   }
 
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg :is(
+    text.taskText,
+    text.taskText0,
+    text.taskText1,
+    text.taskText2,
+    text.taskText3,
+    text.activeText0,
+    text.activeText1,
+    text.activeText2,
+    text.activeText3,
+    text.activeCritText0,
+    text.activeCritText1,
+    text.activeCritText2,
+    text.activeCritText3,
+    text.critText0,
+    text.critText1,
+    text.critText2,
+    text.critText3,
+    text.doneText0,
+    text.doneText1,
+    text.doneText2,
+    text.doneText3,
+    text.doneCritText0,
+    text.doneCritText1,
+    text.doneCritText2,
+    text.doneCritText3
+  ):not(#kmark-mermaid-gantt-bar-text-color-override) {
+    fill: #111111 !important;
+    color: #111111 !important;
+  }
+
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg :is(
+    text.taskText,
+    text.taskText0,
+    text.taskText1,
+    text.taskText2,
+    text.taskText3,
+    text.activeText0,
+    text.activeText1,
+    text.activeText2,
+    text.activeText3,
+    text.activeCritText0,
+    text.activeCritText1,
+    text.activeCritText2,
+    text.activeCritText3,
+    text.critText0,
+    text.critText1,
+    text.critText2,
+    text.critText3,
+    text.doneText0,
+    text.doneText1,
+    text.doneText2,
+    text.doneText3,
+    text.doneCritText0,
+    text.doneCritText1,
+    text.doneCritText2,
+    text.doneCritText3
+  ) > tspan:not(#kmark-mermaid-gantt-bar-text-color-override) {
+    fill: #111111 !important;
+    color: #111111 !important;
+  }
+
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg :is(rect, path):is(
+    .task,
+    .task0,
+    .task1,
+    .task2,
+    .task3,
+    .active0,
+    .active1,
+    .active2,
+    .active3,
+    .activeCrit0,
+    .activeCrit1,
+    .activeCrit2,
+    .activeCrit3,
+    .crit0,
+    .crit1,
+    .crit2,
+    .crit3,
+    .done0,
+    .done1,
+    .done2,
+    .done3,
+    .doneCrit0,
+    .doneCrit1,
+    .doneCrit2,
+    .doneCrit3
+  ):not(#kmark-mermaid-gantt-bar-border-color-override) {
+    stroke: #111111 !important;
+  }
+
   .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid .tick line,
   .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid path {
     opacity: 1;
