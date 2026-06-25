@@ -198,11 +198,13 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
 
   .markdown-body .kmark-mermaid-block {
     max-width: 100%;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: visible;
     padding: 0.75em;
     border: 0.75pt solid #d7d7d7;
     border-radius: 4pt;
-    background: #ffffff;
+    background: var(--kmark-mermaid-surface-bg, #ffffff);
+    isolation: isolate;
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -212,7 +214,7 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     justify-content: center;
     align-items: flex-start;
     max-width: 100%;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered {
@@ -230,6 +232,26 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     min-width: 0;
     min-height: 0;
     height: auto;
+    background: var(--kmark-mermaid-svg-bg, transparent);
+  }
+
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg {
+    background: var(--kmark-mermaid-svg-bg, #ffffff);
+  }
+
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg text {
+    font-size: var(--kmark-mermaid-font-size);
+  }
+
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskText,
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskTextOutsideRight,
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskTextOutsideLeft {
+    dominant-baseline: middle;
+  }
+
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid .tick line,
+  .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid path {
+    opacity: 1;
   }
 
   .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {

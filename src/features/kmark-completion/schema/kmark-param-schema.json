@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 18,
+  "schemaVersion": 21,
   "params": [
     {
       "name": "align",
@@ -788,6 +788,142 @@
       "description": "customページの高さを指定する",
       "examples": ["<!-- kmark { page_size:custom page_height:297mm } -->"],
       "priority": 60
+    },
+    {
+      "name": "mermaid_font_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_font_size:",
+      "description": "Mermaid全体の基準font sizeを指定する",
+      "examples": ["<!-- kmark mermaid_font_size:10 -->"],
+      "priority": 87
+    },
+    {
+      "name": "mermaid_gantt_font_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_gantt_font_size:",
+      "description": "Mermaid Ganttのtaskとaxis label用font sizeを指定する",
+      "examples": ["<!-- kmark mermaid_gantt_font_size:10 -->"],
+      "priority": 86
+    },
+    {
+      "name": "mermaid_gantt_section_font_size",
+      "aliases": [],
+      "type": "length",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_gantt_section_font_size:",
+      "description": "Mermaid Ganttのsection名font sizeを指定する",
+      "examples": ["<!-- kmark mermaid_gantt_section_font_size:10 -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_auto_bar_size",
+      "aliases": [],
+      "type": "boolean",
+      "contexts": ["single", "scope", "mermaid"],
+      "values": ["true", "false"],
+      "insertText": "mermaid_gantt_auto_bar_size:true",
+      "description": "Mermaid Ganttのbar height/gapをfont size連動で自動調整する",
+      "examples": ["<!-- kmark mermaid_gantt_auto_bar_size:true -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_bar_height",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope", "mermaid"],
+      "values": ["auto"],
+      "insertText": "mermaid_gantt_bar_height:auto",
+      "description": "Mermaid Ganttのbar heightを指定する auto指定可",
+      "examples": ["<!-- kmark mermaid_gantt_bar_height:40 -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_bar_gap",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope", "mermaid"],
+      "values": ["auto"],
+      "insertText": "mermaid_gantt_bar_gap:auto",
+      "description": "Mermaid Ganttのbar gapを指定する auto指定可",
+      "examples": ["<!-- kmark mermaid_gantt_bar_gap:auto -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_text_line_height",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_gantt_text_line_height:1.25",
+      "description": "Mermaid Ganttのbar内text line-height係数を指定する",
+      "examples": ["<!-- kmark mermaid_gantt_text_line_height:1.25 -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_bar_padding_y",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_gantt_bar_padding_y:4",
+      "description": "Mermaid Ganttのbar内text上下padding pxを指定する",
+      "examples": ["<!-- kmark mermaid_gantt_bar_padding_y:4 -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_min_bar_height",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_gantt_min_bar_height:20",
+      "description": "Mermaid Ganttの自動計算時min bar heightを指定する",
+      "examples": ["<!-- kmark mermaid_gantt_min_bar_height:20 -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_gantt_max_bar_height",
+      "aliases": [],
+      "type": "number",
+      "contexts": ["single", "scope", "mermaid"],
+      "insertText": "mermaid_gantt_max_bar_height:56",
+      "description": "Mermaid Ganttの自動計算時max bar heightを指定する",
+      "examples": ["<!-- kmark mermaid_gantt_max_bar_height:56 -->"],
+      "priority": 85
+    },
+    {
+      "name": "mermaid_theme",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "scope", "mermaid"],
+      "values": ["kmark_clean", "gantt_clean"],
+      "insertText": "mermaid_theme:kmark_clean",
+      "description": "kmark側Mermaid presetを指定する",
+      "examples": ["<!-- kmark mermaid_theme:kmark_clean -->", "<!-- kmark mermaid_theme:gantt_clean -->"],
+      "priority": 84
+    },
+    {
+      "name": "mermaid_background",
+      "aliases": [],
+      "type": "color",
+      "contexts": ["single", "scope", "mermaid"],
+      "values": ["paper", "transparent", "none"],
+      "insertText": "mermaid_background:",
+      "description": "Mermaid表示枠の背景を指定する",
+      "examples": ["<!-- kmark mermaid_background:paper -->"],
+      "priority": 83
+    },
+    {
+      "name": "mermaid_init_merge",
+      "aliases": [],
+      "type": "enum",
+      "contexts": ["single", "scope", "mermaid"],
+      "values": ["merge", "replace", "user-first", "kmark-first"],
+      "insertText": "mermaid_init_merge:merge",
+      "description": "Mermaid initとkmark設定のmerge優先順を指定する",
+      "examples": ["<!-- kmark mermaid_init_merge:kmark-first -->"],
+      "priority": 82
     },
     {
       "name": "font_size",

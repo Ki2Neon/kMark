@@ -1825,12 +1825,14 @@ input:focus-visible,
 
 .markdown-body .kmark-mermaid-block {
   max-width: 100%;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
   padding: 0.75em;
   border: 1px solid color-mix(in srgb, var(--preview-text) 14%, transparent);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--preview-text) 2.5%, var(--preview-surface));
+  background: var(--kmark-mermaid-surface-bg, color-mix(in srgb, var(--preview-text) 2.5%, var(--preview-surface)));
   color: var(--preview-text);
+  isolation: isolate;
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -1841,7 +1843,7 @@ input:focus-visible,
   align-items: flex-start;
   max-width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered {
@@ -1859,6 +1861,26 @@ input:focus-visible,
   min-width: 0;
   min-height: 0;
   height: auto;
+  background: var(--kmark-mermaid-svg-bg, transparent);
+}
+
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg {
+  background: var(--kmark-mermaid-svg-bg, #ffffff);
+}
+
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg text {
+  font-size: var(--kmark-mermaid-font-size);
+}
+
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskText,
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskTextOutsideRight,
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .taskTextOutsideLeft {
+  dominant-baseline: middle;
+}
+
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid .tick line,
+.markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid path {
+  opacity: 1;
 }
 
 .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {

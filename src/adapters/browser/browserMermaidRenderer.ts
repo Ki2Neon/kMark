@@ -1,7 +1,13 @@
-import mermaid from "mermaid";
+import mermaid, { type MermaidConfig } from "mermaid";
+import {
+  resolveKmarkMermaidThemeVariables,
+  shouldUsePaperMermaidColors,
+  type KmarkMermaidThemeVariables as MermaidThemeVariables,
+} from "./browserMermaidTheme";
 
-export type MermaidPreviewTheme = "default" | "dark" | "neutral";
+export type MermaidPreviewTheme = "base" | "default" | "dark" | "neutral";
 export type MermaidPreviewSurface = "standard" | "paper";
+type MermaidInitMergeMode = "merge" | "replace" | "user-first" | "kmark-first";
 
 type RenderMermaidHtmlOptions = {
   readonly surface?: MermaidPreviewSurface;
@@ -9,11 +15,48 @@ type RenderMermaidHtmlOptions = {
   readonly themeVariables?: MermaidThemeVariables;
 };
 
-type MermaidThemeVariables = Record<string, string>;
-
 type MermaidBlockSizing = {
   readonly sizedWidth: boolean;
   readonly sizedHeight: boolean;
+};
+
+type KmarkMermaidBlockParams = {
+  readonly fontSize?: string;
+  readonly ganttFontSize?: string;
+  readonly ganttSectionFontSize?: string;
+  readonly ganttAutoBarSize?: string;
+  readonly ganttBarHeight?: string;
+  readonly ganttBarGap?: string;
+  readonly ganttTextLineHeight?: string;
+  readonly ganttBarPaddingY?: string;
+  readonly ganttMinBarHeight?: string;
+  readonly ganttMaxBarHeight?: string;
+  readonly themePreset?: string;
+  readonly background?: string;
+  readonly initMerge?: MermaidInitMergeMode;
+};
+
+type KmarkMermaidGanttResolvedSize = {
+  readonly fontSizePx: number;
+  readonly sectionFontSizePx: number;
+  readonly barHeight: number;
+  readonly barGap: number;
+  readonly topPadding: number;
+  readonly gridLineStartPadding: number;
+};
+
+type CompletedGanttConfig = {
+  readonly config: MermaidConfig;
+  readonly size?: KmarkMermaidGanttResolvedSize;
+};
+
+type PreparedMermaidRender = {
+  readonly config: MermaidConfig;
+  readonly expectsGantt: boolean;
+  readonly renderSource: string;
+  readonly svgBackground: string;
+  readonly surfaceBackground: string;
+  readonly ganttSize?: KmarkMermaidGanttResolvedSize;
 };
 
 const MERMAID_BLOCK_SELECTOR = ".kmark-mermaid-block";
@@ -24,119 +67,45 @@ const MERMAID_SIZED_WIDTH_CLASS = "kmark-mermaid-block--sized-width";
 const MERMAID_SIZED_HEIGHT_CLASS = "kmark-mermaid-block--sized-height";
 const MERMAID_EMPTY_ERROR_MESSAGE = "Mermaid diagram is empty";
 const MERMAID_RENDER_ERROR_TITLE = "Mermaid render error";
-const SAFE_MERMAID_THEMES = new Set<MermaidPreviewTheme>(["default", "dark", "neutral"]);
-const DARK_APP_THEME_IDS = new Set(["vscode-dark", "github-dark", "dracula", "night-owl", "monokai"]);
+const SAFE_MERMAID_THEMES = new Set<MermaidPreviewTheme>(["base", "default", "dark", "neutral"]);
 const UNSAFE_SVG_ELEMENT_NAMES = new Set(["script", "iframe", "object", "embed", "audio", "video", "canvas"]);
 const SVG_LINK_ATTRIBUTE_NAMES = new Set(["href", "xlink:href"]);
 const UNSAFE_URL_PATTERN = /^\s*(?:javascript|vbscript|data):/iu;
 const UNSAFE_CSS_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\()/iu;
-const PAPER_MERMAID_THEME_VARIABLES: MermaidThemeVariables = {
-  background: "#ffffff",
-  mainBkg: "#f8fafc",
-  nodeBkg: "#f8fafc",
-  nodeBorder: "#334155",
-  primaryColor: "#dbeafe",
-  primaryTextColor: "#0f172a",
-  primaryBorderColor: "#1d4ed8",
-  secondaryColor: "#dcfce7",
-  secondaryTextColor: "#052e16",
-  secondaryBorderColor: "#15803d",
-  tertiaryColor: "#fef3c7",
-  tertiaryTextColor: "#422006",
-  tertiaryBorderColor: "#b45309",
-  textColor: "#111827",
-  titleColor: "#111827",
-  lineColor: "#334155",
-  defaultLinkColor: "#334155",
-  arrowheadColor: "#334155",
-  border1: "#334155",
-  border2: "#475569",
-  note: "#fef9c3",
-  noteBorderColor: "#a16207",
-  noteBkgColor: "#fef9c3",
-  noteTextColor: "#422006",
-  clusterBkg: "#f8fafc",
-  clusterBorder: "#94a3b8",
-  edgeLabelBackground: "#ffffff",
-  actorBkg: "#f8fafc",
-  actorBorder: "#334155",
-  actorTextColor: "#111827",
-  actorLineColor: "#64748b",
-  signalColor: "#334155",
-  signalTextColor: "#111827",
-  labelBoxBkgColor: "#ffffff",
-  labelBoxBorderColor: "#94a3b8",
-  labelTextColor: "#111827",
-  loopTextColor: "#111827",
-  activationBorderColor: "#475569",
-  activationBkgColor: "#e2e8f0",
-  sequenceNumberColor: "#111827",
-  stateBkg: "#f8fafc",
-  stateBorder: "#334155",
-  stateLabelColor: "#111827",
-  labelBackgroundColor: "#ffffff",
-  transitionColor: "#334155",
-  classText: "#111827",
-  relationColor: "#334155",
-  entityBkg: "#f8fafc",
-  entityBorder: "#334155",
-  attributeBackgroundColorOdd: "#ffffff",
-  attributeBackgroundColorEven: "#f1f5f9",
-  rowOdd: "#ffffff",
-  rowEven: "#f1f5f9",
-  sectionBkgColor: "#f1f5f9",
-  altSectionBkgColor: "#ffffff",
-  sectionBkgColor2: "#ffffff",
-  taskBkgColor: "#475569",
-  taskBorderColor: "#334155",
-  taskTextLightColor: "#ffffff",
-  taskTextColor: "#ffffff",
-  taskTextDarkColor: "#111827",
-  taskTextOutsideColor: "#111827",
-  taskTextClickableColor: "#ffffff",
-  activeTaskBkgColor: "#2563eb",
-  activeTaskBorderColor: "#1d4ed8",
-  doneTaskBkgColor: "#94a3b8",
-  doneTaskBorderColor: "#64748b",
-  critBkgColor: "#dc2626",
-  critBorderColor: "#991b1b",
-  gridColor: "#cbd5e1",
-  vertLineColor: "#94a3b8",
-  todayLineColor: "#dc2626",
-  excludeBkgColor: "#e5e7eb",
-  pie1: "#2563eb",
-  pie2: "#db2777",
-  pie3: "#16a34a",
-  pie4: "#d97706",
-  pie5: "#7c3aed",
-  pie6: "#0891b2",
-  pie7: "#be123c",
-  pie8: "#4d7c0f",
-  pie9: "#c2410c",
-  pie10: "#4338ca",
-  pie11: "#0f766e",
-  pie12: "#a21caf",
-  pieTitleTextSize: "1.25rem",
-  pieTitleTextColor: "#111827",
-  pieSectionTextSize: "1rem",
-  pieSectionTextColor: "#ffffff",
-  pieLegendTextColor: "#111827",
-  pieStrokeColor: "#ffffff",
-  pieOuterStrokeColor: "#334155",
-  cScale0: "#2563eb",
-  cScale1: "#db2777",
-  cScale2: "#16a34a",
-  cScale3: "#d97706",
-  cScale4: "#7c3aed",
-  cScale5: "#0891b2",
-  cScale6: "#be123c",
-  cScale7: "#4d7c0f",
-  cScale8: "#c2410c",
-  cScale9: "#4338ca",
-  cScale10: "#0f766e",
-  cScale11: "#a21caf",
+const BASE_MERMAID_CONFIG: MermaidConfig = {
+  flowchart: {
+    htmlLabels: false,
+  },
+  securityLevel: "strict",
+  startOnLoad: false,
 };
 
+const GANTT_CLEAN_MERMAID_CONFIG: MermaidConfig = {
+  gantt: {
+    fontSize: 10,
+    sectionFontSize: 10,
+    barHeight: 20,
+    barGap: 4,
+    topPadding: 50,
+    leftPadding: 75,
+    rightPadding: 75,
+    gridLineStartPadding: 35,
+  },
+};
+
+const INIT_DIRECTIVE_PATTERN = /%%\{\s*(?:init|initialize)\b[\s\S]*?\}%%/giu;
+const INIT_DIRECTIVE_CONFIG_PATTERN = /%%\{\s*(?:init|initialize)\s*:([\s\S]*?)\}%%/giu;
+const JSON_LIKE_UNQUOTED_KEY_PATTERN = /([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/gu;
+const JSON_LIKE_TRAILING_COMMA_PATTERN = /,\s*([}\]])/gu;
+const PX_FONT_SIZE_PATTERN = /^\s*(\d+(?:\.\d+)?)(?:px)?\s*$/iu;
+const NUMBER_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*$/u;
+const CSS_UNSAFE_VALUE_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\(|[;{}<>])/iu;
+const GANTT_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-post-style";
+const DEFAULT_GANTT_FONT_SIZE = 10;
+const DEFAULT_GANTT_TEXT_LINE_HEIGHT = 1.25;
+const DEFAULT_GANTT_BAR_PADDING_Y = 4;
+const DEFAULT_GANTT_MIN_BAR_HEIGHT = 20;
+const DEFAULT_GANTT_MAX_BAR_HEIGHT = 56;
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
 
@@ -146,9 +115,9 @@ function resolveMermaidTheme(value: string | undefined): MermaidPreviewTheme | n
     : null;
 }
 
-export function resolveMermaidPreviewTheme(surface: MermaidPreviewSurface = "standard"): MermaidPreviewTheme {
+export function resolveMermaidPreviewTheme(_surface: MermaidPreviewSurface = "standard"): MermaidPreviewTheme {
   if (typeof document === "undefined") {
-    return "default";
+    return "base";
   }
 
   const explicitTheme = resolveMermaidTheme(document.documentElement.dataset.mermaidTheme);
@@ -157,21 +126,7 @@ export function resolveMermaidPreviewTheme(surface: MermaidPreviewSurface = "sta
     return explicitTheme;
   }
 
-  if (surface === "paper") {
-    return "neutral";
-  }
-
-  if (document.documentElement.dataset.previewColors !== "app") {
-    return "neutral";
-  }
-
-  const appTheme = document.documentElement.dataset.appTheme;
-
-  if (appTheme === "paper") {
-    return "neutral";
-  }
-
-  return appTheme !== undefined && DARK_APP_THEME_IDS.has(appTheme) ? "dark" : "default";
+  return "base";
 }
 
 function enqueueMermaidRender<T>(operation: () => Promise<T>): Promise<T> {
@@ -183,33 +138,474 @@ function enqueueMermaidRender<T>(operation: () => Promise<T>): Promise<T> {
   return queued;
 }
 
-function shouldUsePaperMermaidColors(surface: MermaidPreviewSurface = "standard"): boolean {
-  if (surface === "paper") {
-    return true;
-  }
-
-  return typeof document !== "undefined" && document.documentElement.dataset.previewColors !== "app";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function resolveMermaidThemeVariables(surface: MermaidPreviewSurface = "standard"): MermaidThemeVariables | undefined {
-  return shouldUsePaperMermaidColors(surface) ? PAPER_MERMAID_THEME_VARIABLES : undefined;
+function mergeMermaidConfigValues(base: unknown, override: unknown): unknown {
+  if (override === undefined) {
+    return cloneMermaidConfigValue(base);
+  }
+
+  if (isRecord(base) && isRecord(override)) {
+    return mergeMermaidConfigs(base as MermaidConfig, override as MermaidConfig);
+  }
+
+  return cloneMermaidConfigValue(override);
+}
+
+function cloneMermaidConfigValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(cloneMermaidConfigValue);
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return mergeMermaidConfigs(value as MermaidConfig);
+}
+
+function mergeMermaidConfigs(...configs: readonly (MermaidConfig | undefined)[]): MermaidConfig {
+  const merged: Record<string, unknown> = {};
+
+  for (const config of configs) {
+    if (config === undefined) {
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(config)) {
+      merged[key] = mergeMermaidConfigValues(merged[key], value);
+    }
+  }
+
+  return merged as MermaidConfig;
+}
+
+function resolveBlockParams(block: HTMLElement): KmarkMermaidBlockParams {
+  return {
+    fontSize: block.dataset.kmarkMermaidFontSize,
+    ganttFontSize: block.dataset.kmarkMermaidGanttFontSize,
+    ganttSectionFontSize: block.dataset.kmarkMermaidGanttSectionFontSize,
+    ganttAutoBarSize: block.dataset.kmarkMermaidGanttAutoBarSize,
+    ganttBarHeight: block.dataset.kmarkMermaidGanttBarHeight,
+    ganttBarGap: block.dataset.kmarkMermaidGanttBarGap,
+    ganttTextLineHeight: block.dataset.kmarkMermaidGanttTextLineHeight,
+    ganttBarPaddingY: block.dataset.kmarkMermaidGanttBarPaddingY,
+    ganttMinBarHeight: block.dataset.kmarkMermaidGanttMinBarHeight,
+    ganttMaxBarHeight: block.dataset.kmarkMermaidGanttMaxBarHeight,
+    themePreset: block.dataset.kmarkMermaidThemePreset,
+    background: block.dataset.kmarkMermaidBackground,
+    initMerge: resolveMermaidInitMerge(block.dataset.kmarkMermaidInitMerge),
+  };
+}
+
+function resolveMermaidInitMerge(value: string | undefined): MermaidInitMergeMode | undefined {
+  return value === "merge" || value === "replace" || value === "user-first" || value === "kmark-first"
+    ? value
+    : undefined;
+}
+
+function stripMermaidInitDirectives(source: string): string {
+  return source.replace(INIT_DIRECTIVE_PATTERN, "").trimStart();
+}
+
+function isMermaidGanttSource(source: string): boolean {
+  return stripMermaidInitDirectives(source).trimStart().toLowerCase().startsWith("gantt");
+}
+
+function parseMermaidFontSizeNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(PX_FONT_SIZE_PATTERN);
+
+  if (match === undefined || match === null) {
+    return undefined;
+  }
+
+  const fontSize = Number(match[1]);
+
+  return Number.isFinite(fontSize) && fontSize > 0 ? fontSize : undefined;
+}
+
+function parsePositiveNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(NUMBER_PATTERN);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const number = Number(match[1]);
+
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function parseNonNegativeNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(NUMBER_PATTERN);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const number = Number(match[1]);
+
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function isAutoValue(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "auto";
+}
+
+function isTruthyKmarkBool(value: string | undefined, fallback: boolean): boolean {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+
+  return fallback;
+}
+
+function clampNumber(minimum: number, maximum: number, value: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function createFontSizeThemeVariables(fontSize: string | undefined): MermaidThemeVariables | undefined {
+  return fontSize !== undefined ? { fontSize } : undefined;
+}
+
+function createKmarkMermaidParamConfig(params: KmarkMermaidBlockParams, expectsGantt: boolean): MermaidConfig {
+  const config: MermaidConfig = {};
+
+  if (params.fontSize !== undefined) {
+    config.themeVariables = createFontSizeThemeVariables(params.fontSize);
+  }
+
+  const ganttFontSize = params.ganttFontSize ?? params.fontSize;
+  const ganttFontSizeNumber = parseMermaidFontSizeNumber(ganttFontSize);
+  const ganttSectionFontSizeNumber = parseMermaidFontSizeNumber(params.ganttSectionFontSize);
+  const ganttBarHeight = isAutoValue(params.ganttBarHeight) ? undefined : parsePositiveNumber(params.ganttBarHeight);
+  const ganttBarGap = isAutoValue(params.ganttBarGap) ? undefined : parseNonNegativeNumber(params.ganttBarGap);
+
+  if (
+    expectsGantt
+    && (
+      ganttFontSizeNumber !== undefined
+      || ganttSectionFontSizeNumber !== undefined
+      || ganttBarHeight !== undefined
+      || ganttBarGap !== undefined
+    )
+  ) {
+    config.gantt = {};
+
+    if (ganttFontSizeNumber !== undefined) {
+      config.gantt.fontSize = ganttFontSizeNumber;
+    }
+    if (ganttSectionFontSizeNumber !== undefined) {
+      config.gantt.sectionFontSize = ganttSectionFontSizeNumber;
+    }
+    if (ganttBarHeight !== undefined) {
+      config.gantt.barHeight = ganttBarHeight;
+    }
+    if (ganttBarGap !== undefined) {
+      config.gantt.barGap = ganttBarGap;
+    }
+  }
+
+  return config;
+}
+
+function createKmarkMermaidPresetConfig(params: KmarkMermaidBlockParams, expectsGantt: boolean): MermaidConfig | undefined {
+  if (
+    params.themePreset === "gantt_clean"
+    || (expectsGantt && (params.themePreset === undefined || params.themePreset === "kmark_clean"))
+  ) {
+    return GANTT_CLEAN_MERMAID_CONFIG;
+  }
+  if (params.themePreset === "kmark_clean") {
+    return { theme: "base" };
+  }
+
+  return undefined;
+}
+
+function resolveMermaidGanttFontSizePx(
+  params: KmarkMermaidBlockParams,
+  config: MermaidConfig,
+  userInitConfig: MermaidConfig | undefined,
+): number {
+  return parseMermaidFontSizeNumber(params.ganttFontSize)
+    ?? parseMermaidFontSizeNumber(params.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.gantt?.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.themeVariables?.fontSize)
+    ?? parseMermaidFontSizeNumber(config.gantt?.fontSize)
+    ?? parseMermaidFontSizeNumber(config.themeVariables?.fontSize)
+    ?? DEFAULT_GANTT_FONT_SIZE;
+}
+
+function resolveMermaidGanttSectionFontSizePx(
+  params: KmarkMermaidBlockParams,
+  config: MermaidConfig,
+  userInitConfig: MermaidConfig | undefined,
+  fontSizePx: number,
+): number {
+  return parseMermaidFontSizeNumber(params.ganttSectionFontSize)
+    ?? parseMermaidFontSizeNumber(params.ganttFontSize)
+    ?? parseMermaidFontSizeNumber(params.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.gantt?.sectionFontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.gantt?.fontSize)
+    ?? parseMermaidFontSizeNumber(userInitConfig?.themeVariables?.fontSize)
+    ?? parseMermaidFontSizeNumber(config.gantt?.sectionFontSize)
+    ?? fontSizePx;
+}
+
+function hasExplicitGanttBarHeight(params: KmarkMermaidBlockParams, userInitConfig: MermaidConfig | undefined): boolean {
+  return (
+    params.ganttBarHeight !== undefined
+    && !isAutoValue(params.ganttBarHeight)
+    && parsePositiveNumber(params.ganttBarHeight) !== undefined
+  ) || userInitConfig?.gantt?.barHeight !== undefined;
+}
+
+function hasExplicitGanttBarGap(params: KmarkMermaidBlockParams, userInitConfig: MermaidConfig | undefined): boolean {
+  return (
+    params.ganttBarGap !== undefined
+    && !isAutoValue(params.ganttBarGap)
+    && parseNonNegativeNumber(params.ganttBarGap) !== undefined
+  ) || userInitConfig?.gantt?.barGap !== undefined;
+}
+
+function warnSmallGanttBarHeight(fontSize: number, barHeight: number, recommendedBarHeight: number): void {
+  if (barHeight >= recommendedBarHeight || import.meta.env.DEV !== true) {
+    return;
+  }
+
+  console.warn(
+    "[kmark Mermaid] gantt barHeight may be too small for fontSize.\n"
+    + `fontSize=${fontSize}, barHeight=${barHeight}, recommendedBarHeight=${recommendedBarHeight}`,
+  );
+}
+
+function completeGanttSizeConfig(
+  config: MermaidConfig,
+  expectsGantt: boolean,
+  params: KmarkMermaidBlockParams,
+  userInitConfig: MermaidConfig | undefined,
+): CompletedGanttConfig {
+  if (!expectsGantt) {
+    return { config };
+  }
+
+  const fontSizePx = resolveMermaidGanttFontSizePx(params, config, userInitConfig);
+  const sectionFontSizePx = resolveMermaidGanttSectionFontSizePx(params, config, userInitConfig, fontSizePx);
+  const lineHeight = parsePositiveNumber(params.ganttTextLineHeight) ?? DEFAULT_GANTT_TEXT_LINE_HEIGHT;
+  const paddingY = parseNonNegativeNumber(params.ganttBarPaddingY) ?? DEFAULT_GANTT_BAR_PADDING_Y;
+  const minimumBarHeight = parsePositiveNumber(params.ganttMinBarHeight) ?? DEFAULT_GANTT_MIN_BAR_HEIGHT;
+  const rawMaximumBarHeight = parsePositiveNumber(params.ganttMaxBarHeight) ?? DEFAULT_GANTT_MAX_BAR_HEIGHT;
+  const maximumBarHeight = Math.max(minimumBarHeight, rawMaximumBarHeight);
+  const textHeight = Math.ceil(fontSizePx * lineHeight);
+  const unclampedRecommendedBarHeight = Math.ceil(textHeight + paddingY * 2);
+  const recommendedBarHeight = clampNumber(
+    minimumBarHeight,
+    maximumBarHeight,
+    unclampedRecommendedBarHeight,
+  );
+  const autoBarGap = Math.max(4, Math.ceil(fontSizePx * 0.35));
+  const autoTopPadding = Math.max(50, Math.ceil(fontSizePx * 4.5));
+  const autoGridLineStartPadding = Math.max(10, Math.ceil(recommendedBarHeight * 0.5));
+  const autoBarSizeEnabled = isTruthyKmarkBool(params.ganttAutoBarSize, true);
+
+  const mergedBarHeight = parsePositiveNumber(config.gantt?.barHeight);
+  const mergedBarGap = parseNonNegativeNumber(config.gantt?.barGap);
+  const explicitBarHeight = hasExplicitGanttBarHeight(params, userInitConfig);
+  const explicitBarGap = hasExplicitGanttBarGap(params, userInitConfig);
+  const barHeight = explicitBarHeight && mergedBarHeight !== undefined
+    ? mergedBarHeight
+    : autoBarSizeEnabled
+      ? recommendedBarHeight
+      : mergedBarHeight ?? recommendedBarHeight;
+  const barGap = explicitBarGap && mergedBarGap !== undefined
+    ? mergedBarGap
+    : autoBarSizeEnabled
+      ? autoBarGap
+      : mergedBarGap ?? autoBarGap;
+
+  const gantt = {
+    ...config.gantt,
+    fontSize: fontSizePx,
+    sectionFontSize: sectionFontSizePx,
+  };
+
+  if (autoBarSizeEnabled || explicitBarHeight || gantt.barHeight === undefined) {
+    gantt.barHeight = barHeight;
+  }
+  if (autoBarSizeEnabled || explicitBarGap || gantt.barGap === undefined) {
+    gantt.barGap = barGap;
+  }
+  if ((autoBarSizeEnabled || gantt.topPadding === undefined) && userInitConfig?.gantt?.topPadding === undefined) {
+    gantt.topPadding = autoTopPadding;
+  }
+  if (
+    (autoBarSizeEnabled || gantt.gridLineStartPadding === undefined)
+    && userInitConfig?.gantt?.gridLineStartPadding === undefined
+  ) {
+    gantt.gridLineStartPadding = autoGridLineStartPadding;
+  }
+
+  if (explicitBarHeight) {
+    warnSmallGanttBarHeight(fontSizePx, barHeight, recommendedBarHeight);
+  }
+
+  return {
+    config: {
+      ...config,
+      gantt,
+    },
+    size: {
+      fontSizePx,
+      sectionFontSizePx,
+      barHeight,
+      barGap,
+      topPadding: parsePositiveNumber(gantt.topPadding) ?? autoTopPadding,
+      gridLineStartPadding: parsePositiveNumber(gantt.gridLineStartPadding) ?? autoGridLineStartPadding,
+    },
+  };
+}
+
+function enforceSafeMermaidRuntimeConfig(config: MermaidConfig): MermaidConfig {
+  return {
+    ...config,
+    flowchart: {
+      ...config.flowchart,
+      htmlLabels: false,
+    },
+    securityLevel: "strict",
+    startOnLoad: false,
+  };
+}
+
+function detectMermaidUserInit(source: string): MermaidConfig | undefined {
+  const configs = Array.from(source.matchAll(INIT_DIRECTIVE_CONFIG_PATTERN))
+    .map((match) => parseMermaidInitConfig(match[1]))
+    .filter((config): config is MermaidConfig => config !== undefined);
+
+  if (configs.length === 0) {
+    return undefined;
+  }
+
+  return mergeMermaidConfigs(...configs);
+}
+
+function parseMermaidInitConfig(rawConfig: string): MermaidConfig | undefined {
+  try {
+    const normalizedConfig = rawConfig
+      .trim()
+      .replace(/'/gu, "\"")
+      .replace(JSON_LIKE_UNQUOTED_KEY_PATTERN, "$1\"$2\"$3")
+      .replace(JSON_LIKE_TRAILING_COMMA_PATTERN, "$1");
+    const parsedConfig = JSON.parse(normalizedConfig) as unknown;
+
+    return isRecord(parsedConfig) ? parsedConfig as MermaidConfig : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function createSurfaceMermaidConfig(theme: MermaidPreviewTheme, themeVariables: MermaidThemeVariables | undefined): MermaidConfig {
+  return {
+    theme,
+    themeVariables,
+  };
+}
+
+function prepareMermaidRender(
+  source: string,
+  block: HTMLElement,
+  theme: MermaidPreviewTheme,
+  surface: MermaidPreviewSurface,
+  themeVariables?: MermaidThemeVariables,
+): PreparedMermaidRender {
+  const params = resolveBlockParams(block);
+  const expectsGantt = isMermaidGanttSource(source);
+  const presetConfig = createKmarkMermaidPresetConfig(params, expectsGantt);
+  const kmarkParamConfig = createKmarkMermaidParamConfig(params, expectsGantt);
+  const userInitConfig = detectMermaidUserInit(source);
+  const surfaceConfig = createSurfaceMermaidConfig(theme, themeVariables);
+  const initMerge = params.initMerge ?? "merge";
+  const config = initMerge === "replace"
+    ? mergeMermaidConfigs(BASE_MERMAID_CONFIG, userInitConfig)
+    : initMerge === "kmark-first"
+      ? mergeMermaidConfigs(BASE_MERMAID_CONFIG, surfaceConfig, presetConfig, userInitConfig, kmarkParamConfig)
+      : mergeMermaidConfigs(BASE_MERMAID_CONFIG, surfaceConfig, presetConfig, kmarkParamConfig, userInitConfig);
+  const completedGanttConfig = completeGanttSizeConfig(config, expectsGantt, params, userInitConfig);
+  const background = resolveMermaidBlockBackground(params, expectsGantt, surface);
+
+  return {
+    config: enforceSafeMermaidRuntimeConfig(completedGanttConfig.config),
+    expectsGantt,
+    renderSource: stripMermaidInitDirectives(source),
+    svgBackground: background.svg,
+    surfaceBackground: background.surface,
+    ganttSize: completedGanttConfig.size,
+  };
+}
+
+function resolveMermaidBlockBackground(
+  params: KmarkMermaidBlockParams,
+  expectsGantt: boolean,
+  surface: MermaidPreviewSurface,
+): { readonly surface: string; readonly svg: string } {
+  const background = params.background;
+
+  if (background === "none") {
+    return { surface: "transparent", svg: "transparent" };
+  }
+  if (background === "transparent") {
+    return {
+      surface: "transparent",
+      svg: expectsGantt ? "rgba(255, 255, 255, 0.92)" : "transparent",
+    };
+  }
+  if (background !== undefined && background !== "paper") {
+    return { surface: background, svg: background };
+  }
+
+  if (expectsGantt || surface === "paper") {
+    return { surface: "#ffffff", svg: "#ffffff" };
+  }
+
+  return { surface: "transparent", svg: "transparent" };
 }
 
 async function renderMermaidSvg(
   source: string,
-  theme: MermaidPreviewTheme,
-  themeVariables?: MermaidThemeVariables,
+  config: MermaidConfig,
 ): Promise<string> {
   return enqueueMermaidRender(async () => {
-    mermaid.initialize({
-      flowchart: {
-        htmlLabels: false,
-      },
-      securityLevel: "strict",
-      startOnLoad: false,
-      theme,
-      themeVariables,
-    });
+    mermaid.initialize(config);
 
     mermaidRenderSequence += 1;
     const renderId = `kmark-mermaid-render-${mermaidRenderSequence}`;
@@ -261,10 +657,344 @@ function sanitizeSvgElement(svgElement: Element): void {
   }
 }
 
+function isSafeCssColor(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && !CSS_UNSAFE_VALUE_PATTERN.test(value);
+}
+
+function resolveThemeColor(config: MermaidConfig, key: string, fallback: string): string {
+  const value = config.themeVariables?.[key];
+
+  return isSafeCssColor(value) ? value.trim() : fallback;
+}
+
+function isMermaidGanttSvg(svgElement: SVGElement): boolean {
+  return svgElement.getAttribute("aria-roledescription") === "gantt"
+    || svgElement.querySelector(":scope > g.grid") !== null;
+}
+
+function findMermaidGanttSectionBackgroundGroup(svgElement: SVGElement): Element | null {
+  return Array.from(svgElement.children).find((child) => child.querySelector(":scope > rect.section") !== null) ?? null;
+}
+
+function normalizeMermaidGanttLayerOrder(svgElement: SVGElement): void {
+  if (!isMermaidGanttSvg(svgElement)) {
+    return;
+  }
+
+  const gridGroup = svgElement.querySelector(":scope > g.grid");
+  const sectionBackgroundGroup = findMermaidGanttSectionBackgroundGroup(svgElement);
+
+  if (gridGroup === null || sectionBackgroundGroup === null) {
+    return;
+  }
+
+  const sectionNextSibling = sectionBackgroundGroup.nextSibling;
+
+  if (gridGroup === sectionNextSibling) {
+    return;
+  }
+
+  svgElement.insertBefore(gridGroup, sectionNextSibling);
+}
+
+function parseSvgNumber(value: string | null): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function findSvgElementById(root: SVGElement, id: string): Element | null {
+  return Array.from(root.querySelectorAll("[id]")).find((element) => element.id === id) ?? null;
+}
+
+function getSvgRectCenterY(rect: Element): number | undefined {
+  const y = parseSvgNumber(rect.getAttribute("y"));
+  const height = parseSvgNumber(rect.getAttribute("height"));
+
+  if (y === undefined || height === undefined) {
+    return undefined;
+  }
+
+  return y + height / 2;
+}
+
+function getMermaidGanttTaskElementForText(svgElement: SVGElement, textElement: SVGTextElement): Element | null {
+  const textId = textElement.id;
+  const taskId = textId.endsWith("-text") ? textId.slice(0, -"-text".length) : "";
+
+  if (taskId.length === 0) {
+    return null;
+  }
+
+  const taskElement = findSvgElementById(svgElement, taskId);
+
+  return taskElement?.localName.toLowerCase() === "rect" ? taskElement : null;
+}
+
+function normalizeMermaidGanttTaskTextVerticalAlignment(svgElement: SVGElement): void {
+  if (!isMermaidGanttSvg(svgElement)) {
+    return;
+  }
+
+  const textElements = svgElement.querySelectorAll<SVGTextElement>(
+    "text.taskText, text.taskTextOutsideRight, text.taskTextOutsideLeft",
+  );
+
+  for (const textElement of Array.from(textElements)) {
+    const taskElement = getMermaidGanttTaskElementForText(svgElement, textElement);
+
+    if (taskElement === null) {
+      continue;
+    }
+
+    const centerY = getSvgRectCenterY(taskElement);
+
+    if (centerY === undefined) {
+      continue;
+    }
+
+    textElement.setAttribute("y", `${centerY}`);
+    textElement.setAttribute("dy", "0");
+    textElement.setAttribute("dominant-baseline", "middle");
+    textElement.setAttribute("alignment-baseline", "middle");
+  }
+}
+
+function resolveMermaidGanttSectionBackgroundColor(sectionElement: Element, config: MermaidConfig): string | undefined {
+  if (sectionElement.classList.contains("section0")) {
+    return resolveThemeColor(config, "sectionBkgColor", "#f9fafb");
+  }
+  if (sectionElement.classList.contains("section1") || sectionElement.classList.contains("section3")) {
+    return resolveThemeColor(config, "altSectionBkgColor", "#ffffff");
+  }
+  if (sectionElement.classList.contains("section2")) {
+    return resolveThemeColor(config, "sectionBkgColor2", "#e5e7eb");
+  }
+
+  return undefined;
+}
+
+function resolveMermaidGanttSectionBackgroundColorAtY(svgElement: SVGElement, y: number, config: MermaidConfig): string {
+  const sectionElements = svgElement.querySelectorAll("rect.section");
+
+  for (const sectionElement of Array.from(sectionElements)) {
+    const sectionY = parseSvgNumber(sectionElement.getAttribute("y"));
+    const sectionHeight = parseSvgNumber(sectionElement.getAttribute("height"));
+
+    if (sectionY === undefined || sectionHeight === undefined) {
+      continue;
+    }
+
+    if (y >= sectionY && y <= sectionY + sectionHeight) {
+      return resolveMermaidGanttSectionBackgroundColor(sectionElement, config) ?? "#ffffff";
+    }
+  }
+
+  return "#ffffff";
+}
+
+function parseHexColor(value: string): { readonly red: number; readonly green: number; readonly blue: number } | undefined {
+  const match = value.trim().match(/^#([0-9a-f]{6})$/iu);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const hex = match[1];
+
+  return {
+    red: Number.parseInt(hex.slice(0, 2), 16),
+    green: Number.parseInt(hex.slice(2, 4), 16),
+    blue: Number.parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function resolveContrastTextColor(backgroundColor: string): string {
+  const color = parseHexColor(backgroundColor);
+
+  if (color === undefined) {
+    return "#111827";
+  }
+
+  const luminance = (0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue) / 255;
+
+  return luminance > 0.55 ? "#111827" : "#ffffff";
+}
+
+function createMermaidGanttMilestoneTextContrastRules(svgElement: SVGElement, svgId: string, config: MermaidConfig): string {
+  const rules: string[] = [];
+  const milestoneTexts = svgElement.querySelectorAll<SVGTextElement>("text.milestoneText");
+
+  for (const textElement of Array.from(milestoneTexts)) {
+    if (textElement.id.trim().length === 0 || /[^A-Za-z0-9_-]/u.test(textElement.id)) {
+      continue;
+    }
+
+    const textY = parseSvgNumber(textElement.getAttribute("y"));
+
+    if (textY === undefined) {
+      continue;
+    }
+
+    const backgroundColor = resolveMermaidGanttSectionBackgroundColorAtY(svgElement, textY, config);
+    const textColor = resolveContrastTextColor(backgroundColor);
+    rules.push(`#${svgId} #${textElement.id} { fill: ${textColor} !important; }`);
+  }
+
+  return rules.join("\n");
+}
+
+function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConfig): void {
+  if (!isMermaidGanttSvg(svgElement)) {
+    return;
+  }
+
+  const svgId = svgElement.id.trim();
+
+  if (svgId.length === 0 || /[^A-Za-z0-9_-]/u.test(svgId)) {
+    return;
+  }
+
+  svgElement.querySelector(`style[${GANTT_POST_STYLE_ATTRIBUTE}]`)?.remove();
+
+  const ownerDocument = svgElement.ownerDocument;
+  const styleElement = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "style");
+  const gridColor = resolveThemeColor(config, "gridColor", "#d9d9d9");
+  const textColor = resolveThemeColor(config, "textColor", "#000000");
+  const outsideTextColor = resolveThemeColor(config, "taskTextOutsideColor", textColor);
+  const taskTextColor = resolveThemeColor(config, "taskTextColor", textColor);
+  const taskFillColor = resolveThemeColor(config, "taskBkgColor", "#4b5563");
+  const taskBorderColor = resolveThemeColor(config, "taskBorderColor", "#111827");
+  const activeTaskFillColor = resolveThemeColor(config, "activeTaskBkgColor", "#111827");
+  const activeTaskBorderColor = resolveThemeColor(config, "activeTaskBorderColor", "#000000");
+  const doneTaskFillColor = resolveThemeColor(config, "doneTaskBkgColor", "#d1d5db");
+  const doneTaskBorderColor = resolveThemeColor(config, "doneTaskBorderColor", "#6b7280");
+  const criticalTaskFillColor = resolveThemeColor(config, "critBkgColor", "#000000");
+  const criticalTaskBorderColor = resolveThemeColor(config, "critBorderColor", "#000000");
+  const lightTaskTextColor = resolveThemeColor(config, "taskTextLightColor", "#ffffff");
+  const darkTaskTextColor = resolveThemeColor(config, "taskTextDarkColor", "#111827");
+  const sectionColor = resolveThemeColor(config, "sectionBkgColor", "#f9fafb");
+  const altSectionColor = resolveThemeColor(config, "altSectionBkgColor", "#ffffff");
+  const sectionColor2 = resolveThemeColor(config, "sectionBkgColor2", "#e5e7eb");
+  const milestoneTextContrastRules = createMermaidGanttMilestoneTextContrastRules(svgElement, svgId, config);
+
+  styleElement.setAttribute(GANTT_POST_STYLE_ATTRIBUTE, "");
+  styleElement.textContent = `
+#${svgId} text {
+  font-size: var(--kmark-mermaid-font-size) !important;
+}
+#${svgId} .grid .tick line,
+#${svgId} .grid path {
+  stroke: ${gridColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} .section {
+  opacity: 1 !important;
+}
+#${svgId} .section0 {
+  fill: ${sectionColor} !important;
+}
+#${svgId} .section1,
+#${svgId} .section3 {
+  fill: ${altSectionColor} !important;
+}
+#${svgId} .section2 {
+  fill: ${sectionColor2} !important;
+}
+#${svgId} .task0,
+#${svgId} .task1,
+#${svgId} .task2,
+#${svgId} .task3 {
+  fill: ${taskFillColor} !important;
+  stroke: ${taskBorderColor} !important;
+}
+#${svgId} .active0,
+#${svgId} .active1,
+#${svgId} .active2,
+#${svgId} .active3,
+#${svgId} .activeCrit0,
+#${svgId} .activeCrit1,
+#${svgId} .activeCrit2,
+#${svgId} .activeCrit3 {
+  fill: ${activeTaskFillColor} !important;
+  stroke: ${activeTaskBorderColor} !important;
+}
+#${svgId} .done0,
+#${svgId} .done1,
+#${svgId} .done2,
+#${svgId} .done3,
+#${svgId} .doneCrit0,
+#${svgId} .doneCrit1,
+#${svgId} .doneCrit2,
+#${svgId} .doneCrit3 {
+  fill: ${doneTaskFillColor} !important;
+  stroke: ${doneTaskBorderColor} !important;
+}
+#${svgId} .crit0,
+#${svgId} .crit1,
+#${svgId} .crit2,
+#${svgId} .crit3 {
+  fill: ${criticalTaskFillColor} !important;
+  stroke: ${criticalTaskBorderColor} !important;
+}
+#${svgId} .titleText,
+#${svgId} .sectionTitle,
+#${svgId} .milestoneText {
+  fill: ${textColor} !important;
+}
+#${svgId} .taskTextOutsideLeft,
+#${svgId} .taskTextOutsideRight {
+  fill: ${outsideTextColor} !important;
+}
+#${svgId} .taskText {
+  fill: ${taskTextColor} !important;
+}
+#${svgId} .doneText0,
+#${svgId} .doneText1,
+#${svgId} .doneText2,
+#${svgId} .doneText3,
+#${svgId} .doneCritText0,
+#${svgId} .doneCritText1,
+#${svgId} .doneCritText2,
+#${svgId} .doneCritText3 {
+  fill: ${darkTaskTextColor} !important;
+}
+#${svgId} .activeText0,
+#${svgId} .activeText1,
+#${svgId} .activeText2,
+#${svgId} .activeText3,
+#${svgId} .activeCritText0,
+#${svgId} .activeCritText1,
+#${svgId} .activeCritText2,
+#${svgId} .activeCritText3,
+#${svgId} .critText0,
+#${svgId} .critText1,
+#${svgId} .critText2,
+#${svgId} .critText3 {
+  fill: ${lightTaskTextColor} !important;
+}
+#${svgId} .taskText,
+#${svgId} .taskTextOutsideRight,
+#${svgId} .taskTextOutsideLeft {
+  dominant-baseline: middle;
+}
+${milestoneTextContrastRules}
+`;
+
+  svgElement.append(styleElement);
+}
+
 function parseSafeMermaidSvg(
   svg: string,
   targetDocument: Document,
   sizing: MermaidBlockSizing,
+  config: MermaidConfig,
 ): SVGElement {
   const parsedDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
   const svgElement = parsedDocument.documentElement;
@@ -275,6 +1005,9 @@ function parseSafeMermaidSvg(
 
   sanitizeSvgElement(svgElement);
   const importedSvg = targetDocument.importNode(svgElement, true) as unknown as SVGElement;
+  normalizeMermaidGanttLayerOrder(importedSvg);
+  normalizeMermaidGanttTaskTextVerticalAlignment(importedSvg);
+  injectMermaidGanttPostStyle(importedSvg, config);
   normalizeMermaidSvgSize(importedSvg, sizing);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
@@ -370,6 +1103,20 @@ function renderMermaidError(
   block.dataset.kmarkMermaidState = "error";
 }
 
+function applyMermaidBlockPresentation(block: HTMLElement, prepared: PreparedMermaidRender): void {
+  block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt);
+  block.style.setProperty("--kmark-mermaid-surface-bg", prepared.surfaceBackground);
+  block.style.setProperty("--kmark-mermaid-svg-bg", prepared.svgBackground);
+
+  if (prepared.ganttSize !== undefined) {
+    block.style.setProperty("--kmark-mermaid-font-size", `${prepared.ganttSize.fontSizePx}px`);
+    block.style.setProperty("--kmark-mermaid-gantt-bar-height", `${prepared.ganttSize.barHeight}px`);
+  } else {
+    block.style.removeProperty("--kmark-mermaid-font-size");
+    block.style.removeProperty("--kmark-mermaid-gantt-bar-height");
+  }
+}
+
 async function renderMermaidBlock(
   block: HTMLElement,
   theme: MermaidPreviewTheme,
@@ -397,8 +1144,12 @@ async function renderMermaidBlock(
   }
 
   try {
-    const svg = await renderMermaidSvg(source, theme, themeVariables);
-    const svgElement = parseSafeMermaidSvg(svg, block.ownerDocument, resolveMermaidBlockSizing(block));
+    const prepared = prepareMermaidRender(source, block, theme, surface, themeVariables);
+    block.dataset.kmarkMermaidTheme = String(prepared.config.theme ?? theme);
+    applyMermaidBlockPresentation(block, prepared);
+    const svg = await renderMermaidSvg(prepared.renderSource, prepared.config);
+    const svgElement = parseSafeMermaidSvg(svg, block.ownerDocument, resolveMermaidBlockSizing(block), prepared.config);
+    block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt || isMermaidGanttSvg(svgElement));
     renderedContainer.replaceChildren(svgElement);
     block.dataset.kmarkMermaidState = "rendered";
   } catch (error) {
@@ -412,7 +1163,7 @@ export async function renderMermaidBlocks(
 ): Promise<void> {
   const theme = options.theme ?? resolveMermaidPreviewTheme(options.surface);
   const surface = options.surface ?? "standard";
-  const themeVariables = options.themeVariables ?? resolveMermaidThemeVariables(surface);
+  const themeVariables = options.themeVariables ?? resolveKmarkMermaidThemeVariables(surface);
   const blocks = Array.from(root.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
 
   for (const block of blocks) {
