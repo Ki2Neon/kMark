@@ -11,10 +11,9 @@ import {
   normalizeRecentFilesWithWasm,
   normalizeThemePreferencesWithWasm,
 } from "../wasm/kmarkWeb";
+import { type DesktopLayoutPreferencesPayload } from "../contracts/generated";
 
-export type DesktopLayoutPreferences = {
-  readonly desktopSplitRatio: number;
-};
+export type DesktopLayoutPreferences = Readonly<DesktopLayoutPreferencesPayload>;
 
 export type NormalizedWebState<T> = {
   readonly text: string | null;

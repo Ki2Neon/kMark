@@ -1,4 +1,8 @@
 import { normalizeMarkdownFileName } from "../adapters/browser/browserRustCore";
+import {
+  type MarkdownDocumentPayload,
+  type SavedMarkdownDocumentPayload,
+} from "../contracts/generated";
 import { type ExternalMarkdownDocument } from "../domain/externalMarkdownDocument";
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
@@ -48,17 +52,6 @@ const OPEN_MARKDOWN_DOCUMENT_FOLDER_COMMAND = "open_markdown_document_folder";
 const READ_MARKDOWN_DOCUMENT_AT_PATH_COMMAND = "read_markdown_document_at_path";
 const SAVE_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND = "save_markdown_document_as_dialog";
 
-type TauriMarkdownDocumentPayload = {
-  readonly fileName: string;
-  readonly filePath: string;
-  readonly content: string;
-};
-
-type TauriSavedMarkdownDocumentPayload = {
-  readonly fileName: string;
-  readonly filePath: string;
-};
-
 function getPickerWindow(): PickerWindow {
   return window as PickerWindow;
 }
@@ -78,7 +71,7 @@ export async function pickMarkdownDocument(): Promise<{
   fileHandle: MarkdownFileHandle | null;
 } | null> {
   if (isTauri()) {
-    return invokeTauriCommand<TauriMarkdownDocumentPayload | null>(
+    return invokeTauriCommand<MarkdownDocumentPayload | null>(
       OPEN_MARKDOWN_DOCUMENT_DIALOG_COMMAND,
       {},
       "Markdown ファイルを開けませんでした。",
@@ -155,7 +148,7 @@ export async function readMarkdownDocumentAtPath(filePath: string): Promise<{
     throw new Error("Tauri 環境でのみ利用できます。");
   }
 
-  return invokeTauriCommand<TauriMarkdownDocumentPayload>(
+  return invokeTauriCommand<MarkdownDocumentPayload>(
     READ_MARKDOWN_DOCUMENT_AT_PATH_COMMAND,
     { path: filePath },
     "Markdown ファイルを開けませんでした。",
@@ -240,7 +233,7 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
   const normalizedFileName = normalizeMarkdownFileName(fileName);
 
   if (isTauri()) {
-    return invokeTauriCommand<TauriSavedMarkdownDocumentPayload | null>(
+    return invokeTauriCommand<SavedMarkdownDocumentPayload | null>(
       SAVE_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND,
       {
         fileName: normalizedFileName,

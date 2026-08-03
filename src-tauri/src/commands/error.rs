@@ -1,23 +1,16 @@
 use serde::Serialize;
 
 use crate::infra::{JsonStateStoreError, SubWindowRegistryError};
+use kmark_contract::CommandErrorPayload as ContractCommandErrorPayload;
 use kmark_core::MarkdownDocumentError;
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommandErrorPayload {
-    code: String,
-    message: String,
-    detail: Option<String>,
-}
+#[serde(transparent)]
+pub struct CommandErrorPayload(ContractCommandErrorPayload);
 
 impl CommandErrorPayload {
     pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
-        Self {
-            code: code.to_owned(),
-            message: message.into(),
-            detail: None,
-        }
+        Self(ContractCommandErrorPayload::new(code, message))
     }
 
     pub(crate) fn with_detail(
@@ -25,53 +18,23 @@ impl CommandErrorPayload {
         message: impl Into<String>,
         detail: impl Into<String>,
     ) -> Self {
-        Self {
-            code: code.to_owned(),
-            message: message.into(),
-            detail: Some(detail.into()),
-        }
+        Self(ContractCommandErrorPayload::with_detail(
+            code, message, detail,
+        ))
     }
 
     pub(crate) fn state_poisoned(context: &str) -> Self {
-        Self::new(
-            "state_poisoned",
-            format!("failed to access {context} state"),
-        )
+        Self(ContractCommandErrorPayload::state_poisoned(context))
     }
 
     pub(crate) fn message(&self) -> &str {
-        &self.message
+        self.0.message()
     }
 }
 
 impl From<MarkdownDocumentError> for CommandErrorPayload {
     fn from(error: MarkdownDocumentError) -> Self {
-        match error {
-            MarkdownDocumentError::UnsupportedPath(path) => Self::with_detail(
-                "unsupported_markdown_path",
-                "unsupported markdown file path",
-                path,
-            ),
-            MarkdownDocumentError::NotFound(path) => Self::with_detail(
-                "markdown_document_not_found",
-                "markdown document not found",
-                path,
-            ),
-            MarkdownDocumentError::ReadFailed { path, source } => Self::with_detail(
-                "markdown_document_read_failed",
-                format!("failed to read markdown document: {path}"),
-                source.to_string(),
-            ),
-            MarkdownDocumentError::WriteFailed { path, source } => Self::with_detail(
-                "markdown_document_write_failed",
-                format!("failed to write markdown document: {path}"),
-                source.to_string(),
-            ),
-            MarkdownDocumentError::OpenRequestQueuePoisoned => Self::new(
-                "open_request_queue_poisoned",
-                "failed to access pending markdown open request queue",
-            ),
-        }
+        Self(error.into())
     }
 }
 
@@ -92,6 +55,20 @@ impl From<JsonStateStoreError> for CommandErrorPayload {
                 format!("failed to create {scope} directory: {path}"),
                 source.to_string(),
             ),
+            JsonStateStoreError::OpenLock {
+                scope,
+                path,
+                source,
+            }
+            | JsonStateStoreError::LockState {
+                scope,
+                path,
+                source,
+            } => Self::with_detail(
+                &format!("{scope}_lock_failed"),
+                format!("failed to lock {scope}: {path}"),
+                source.to_string(),
+            ),
             JsonStateStoreError::ReadState {
                 scope,
                 path,
@@ -110,6 +87,15 @@ impl From<JsonStateStoreError> for CommandErrorPayload {
                 format!("failed to write {scope}: {path}"),
                 source.to_string(),
             ),
+            JsonStateStoreError::SyncState {
+                scope,
+                path,
+                source,
+            } => Self::with_detail(
+                &format!("{scope}_sync_failed"),
+                format!("failed to sync {scope}: {path}"),
+                source.to_string(),
+            ),
             JsonStateStoreError::DeserializeState {
                 scope,
                 path,
@@ -123,6 +109,25 @@ impl From<JsonStateStoreError> for CommandErrorPayload {
                 &format!("{scope}_serialize_failed"),
                 format!("failed to serialize {scope}"),
                 source.to_string(),
+            ),
+            JsonStateStoreError::VerifyState { scope, path } => Self::new(
+                &format!("{scope}_verify_failed"),
+                format!("failed to verify {scope}: {path}"),
+            ),
+            JsonStateStoreError::UnsupportedSchemaVersion {
+                scope,
+                path,
+                found,
+                supported,
+            } => Self::new(
+                &format!("{scope}_schema_too_new"),
+                format!(
+                    "{scope} schema {found} is newer than supported schema {supported}: {path}"
+                ),
+            ),
+            JsonStateStoreError::RevisionExhausted { scope } => Self::new(
+                &format!("{scope}_revision_exhausted"),
+                format!("{scope} revision exceeded the supported range"),
             ),
         }
     }

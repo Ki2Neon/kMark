@@ -7,7 +7,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use serde::{Deserialize, Serialize};
+use kmark_contract::{
+    OpenSubWindowExternalBrowserResponsePayload, SubWindowBrowserBoundsPayload,
+    SubWindowBrowserEventPayload,
+};
+use serde::Serialize;
 use tauri::{
     webview::{Color, DownloadEvent, NewWindowResponse},
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
@@ -680,37 +684,11 @@ const SUB_WINDOW_BROWSER_INIT_SCRIPT: &str = r##"
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenSubWindowExternalBrowserResponsePayload {
-    browser_id: String,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubWindowBrowserBoundsPayload {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct SubWindowBrowserHostEventPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     background_color: Option<&'a str>,
     browser_id: &'a str,
     event: &'a str,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubWindowBrowserEventPayload {
-    #[serde(default)]
-    background_color: Option<String>,
-    #[serde(rename = "type")]
-    event_type: String,
-    #[serde(default)]
-    zoom: Option<f64>,
 }
 
 #[tauri::command]

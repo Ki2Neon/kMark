@@ -1,3 +1,7 @@
+import {
+  type OpenSubWindowExternalBrowserResponsePayload,
+  type SubWindowBrowserBoundsPayload,
+} from "../contracts/generated";
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand } from "./tauriCommand";
 
@@ -7,16 +11,7 @@ const BEGIN_SUB_WINDOW_EXTERNAL_BROWSER_CLOSE_COMMAND = "begin_sub_window_extern
 const SHOW_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND = "show_sub_window_external_browser";
 const CLOSE_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND = "close_sub_window_external_browser";
 
-export type SubWindowExternalBrowserBounds = {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-};
-
-type OpenSubWindowExternalBrowserResponse = {
-  readonly browserId: string;
-};
+export type SubWindowExternalBrowserBounds = Readonly<SubWindowBrowserBoundsPayload>;
 
 export function supportsNativeSubWindowExternalBrowser(): boolean {
   return isTauri();
@@ -27,7 +22,7 @@ export async function openSubWindowExternalBrowser(url: string, fadeMs: number):
     throw new Error("この環境ではサブウィンドウ内ブラウザを開けません。");
   }
 
-  const response = await invokeTauriCommand<OpenSubWindowExternalBrowserResponse>(
+  const response = await invokeTauriCommand<OpenSubWindowExternalBrowserResponsePayload>(
     OPEN_SUB_WINDOW_EXTERNAL_BROWSER_COMMAND,
     { fadeMs, url },
     "サブウィンドウ内ブラウザを開けませんでした。",

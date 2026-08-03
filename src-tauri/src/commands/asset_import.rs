@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use kmark_contract::{
+    ImportedAssetKindPayload, ImportedMarkdownAssetPayload, MarkdownAssetDataPayload,
+    MarkdownPathSuggestionEntryKindPayload, MarkdownPathSuggestionFilterPayload,
+    MarkdownPathSuggestionPayload,
+};
 use tauri::State;
 
 use super::error::CommandErrorPayload;
@@ -14,62 +18,11 @@ use crate::{
     AppState,
 };
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportedMarkdownAssetPayload {
-    original_path: String,
-    copied_path: String,
-    relative_path: String,
-    markdown_text: String,
-    asset_kind: ImportedAssetKindPayload,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MarkdownAssetDataPayload {
-    file_name: String,
-    mime_type: String,
-    bytes: Vec<u8>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ImportedAssetKindPayload {
-    Image,
-    Video,
-    Model,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
-pub enum MarkdownPathSuggestionFilterPayload {
-    All,
-    Extensions { extensions: Vec<String> },
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum MarkdownPathSuggestionEntryKindPayload {
-    Directory,
-    File,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MarkdownPathSuggestionPayload {
-    label: String,
-    insert_text: String,
-    relative_path: String,
-    entry_kind: MarkdownPathSuggestionEntryKindPayload,
-}
-
-impl From<ImportedAssetKind> for ImportedAssetKindPayload {
-    fn from(asset_kind: ImportedAssetKind) -> Self {
-        match asset_kind {
-            ImportedAssetKind::Image => Self::Image,
-            ImportedAssetKind::Video => Self::Video,
-            ImportedAssetKind::Model => Self::Model,
-        }
+fn imported_asset_kind_payload(asset_kind: ImportedAssetKind) -> ImportedAssetKindPayload {
+    match asset_kind {
+        ImportedAssetKind::Image => ImportedAssetKindPayload::Image,
+        ImportedAssetKind::Video => ImportedAssetKindPayload::Video,
+        ImportedAssetKind::Model => ImportedAssetKindPayload::Model,
     }
 }
 
@@ -84,35 +37,37 @@ impl From<MarkdownPathSuggestionFilterPayload> for MarkdownPathSuggestionFilter 
     }
 }
 
-impl From<MarkdownPathSuggestionEntryKind> for MarkdownPathSuggestionEntryKindPayload {
-    fn from(entry_kind: MarkdownPathSuggestionEntryKind) -> Self {
-        match entry_kind {
-            MarkdownPathSuggestionEntryKind::Directory => Self::Directory,
-            MarkdownPathSuggestionEntryKind::File => Self::File,
+fn markdown_path_suggestion_entry_kind_payload(
+    entry_kind: MarkdownPathSuggestionEntryKind,
+) -> MarkdownPathSuggestionEntryKindPayload {
+    match entry_kind {
+        MarkdownPathSuggestionEntryKind::Directory => {
+            MarkdownPathSuggestionEntryKindPayload::Directory
         }
+        MarkdownPathSuggestionEntryKind::File => MarkdownPathSuggestionEntryKindPayload::File,
     }
 }
 
-impl From<crate::usecase::MarkdownPathSuggestion> for MarkdownPathSuggestionPayload {
-    fn from(suggestion: crate::usecase::MarkdownPathSuggestion) -> Self {
-        Self {
-            label: suggestion.label,
-            insert_text: suggestion.insert_text,
-            relative_path: suggestion.relative_path,
-            entry_kind: suggestion.entry_kind.into(),
-        }
+fn markdown_path_suggestion_payload(
+    suggestion: crate::usecase::MarkdownPathSuggestion,
+) -> MarkdownPathSuggestionPayload {
+    MarkdownPathSuggestionPayload {
+        label: suggestion.label,
+        insert_text: suggestion.insert_text,
+        relative_path: suggestion.relative_path,
+        entry_kind: markdown_path_suggestion_entry_kind_payload(suggestion.entry_kind),
     }
 }
 
-impl From<crate::usecase::ImportedMarkdownAsset> for ImportedMarkdownAssetPayload {
-    fn from(asset: crate::usecase::ImportedMarkdownAsset) -> Self {
-        Self {
-            original_path: asset.original_path.to_string_lossy().into_owned(),
-            copied_path: asset.copied_path.to_string_lossy().into_owned(),
-            relative_path: asset.relative_path,
-            markdown_text: asset.markdown_text,
-            asset_kind: asset.asset_kind.into(),
-        }
+fn imported_markdown_asset_payload(
+    asset: crate::usecase::ImportedMarkdownAsset,
+) -> ImportedMarkdownAssetPayload {
+    ImportedMarkdownAssetPayload {
+        original_path: asset.original_path.to_string_lossy().into_owned(),
+        copied_path: asset.copied_path.to_string_lossy().into_owned(),
+        relative_path: asset.relative_path,
+        markdown_text: asset.markdown_text,
+        asset_kind: imported_asset_kind_payload(asset.asset_kind),
     }
 }
 
@@ -139,7 +94,12 @@ pub fn import_markdown_asset_files(
         .collect::<Vec<_>>();
 
     import_markdown_assets(&state.asset_repository, &markdown_path, &dropped_paths)
-        .map(|assets| assets.into_iter().map(Into::into).collect())
+        .map(|assets| {
+            assets
+                .into_iter()
+                .map(imported_markdown_asset_payload)
+                .collect()
+        })
         .map_err(CommandErrorPayload::from)
 }
 
@@ -153,7 +113,12 @@ pub fn import_markdown_asset_data(
     let files = files.into_iter().map(Into::into).collect::<Vec<_>>();
 
     import_markdown_asset_data_usecase(&state.asset_repository, &markdown_path, &files)
-        .map(|assets| assets.into_iter().map(Into::into).collect())
+        .map(|assets| {
+            assets
+                .into_iter()
+                .map(imported_markdown_asset_payload)
+                .collect()
+        })
         .map_err(CommandErrorPayload::from)
 }
 
@@ -173,7 +138,7 @@ pub fn list_markdown_path_suggestions(
         filter.into(),
     )
     .into_iter()
-    .map(Into::into)
+    .map(markdown_path_suggestion_payload)
     .collect()
 }
 

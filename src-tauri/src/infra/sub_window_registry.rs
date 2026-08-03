@@ -202,10 +202,9 @@ pub(crate) fn get_sub_window_registry_source_state<R: Runtime>(
     with_registry_lock(app, |base_path| {
         let now = current_epoch_ms();
         let sources = read_sources_locked(base_path, now)?;
-        let source_id = if selection.mode == "source" {
-            selection.source_id.clone()
-        } else {
-            read_active_source_id_locked(base_path, &sources)?
+        let source_id = match selection {
+            SubWindowSelectionPayload::Source { source_id } => Some(source_id.clone()),
+            SubWindowSelectionPayload::Auto => read_active_source_id_locked(base_path, &sources)?,
         };
         let Some(source_id) = source_id else {
             return Ok(SubWindowResolvedSourceStatePayload {

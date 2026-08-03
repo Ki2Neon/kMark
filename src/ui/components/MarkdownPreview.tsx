@@ -92,7 +92,6 @@ type MarkdownPreviewProps = {
   ) => void;
   readonly onSourceLineDoubleClick?: (lineNumber: number) => void;
   readonly onZoomScaleChange?: (zoomScale: number) => void;
-  readonly pageHtmls?: readonly string[];
   readonly pages?: readonly RenderedPreviewPage[];
   readonly pageTransitionFadeMs?: number;
   readonly previewFitMode?: PreviewFitMode;
@@ -3825,7 +3824,6 @@ function MarkdownPreviewComponent({
   onPreviewContextMenu,
   onSourceLineDoubleClick,
   onZoomScaleChange,
-  pageHtmls,
   pages,
   pageTransitionFadeMs = 0,
   previewFitMode = "width",
@@ -3867,16 +3865,14 @@ function MarkdownPreviewComponent({
       return [...pages];
     }
 
-    const htmlSegments = pageHtmls !== undefined && pageHtmls.length > 0 ? pageHtmls : [html];
-
-    return htmlSegments.map((pageHtml) => ({
-      html: pageHtml,
+    return [{
+      html,
       pageStyle: defaultPageStyle,
       textStyle: defaultTextStyle,
       pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
       pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
-    }));
-  }, [defaultPageStyle, defaultTextStyle, html, pageHtmls, pages]);
+    }];
+  }, [defaultPageStyle, defaultTextStyle, html, pages]);
   const a4PaginationSourceKey = useMemo(
     () => normalizedPages.map(previewPageKey).join(A4_PAGINATION_SOURCE_SEPARATOR),
     [normalizedPages],

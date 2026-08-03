@@ -1,10 +1,7 @@
+import { type CommandErrorPayload } from "../contracts/generated";
 import { isTauri, invokeRuntimeCommand, listenRuntimeEvent } from "../runtime/runtime";
 
-export type CommandErrorPayload = {
-  readonly code: string;
-  readonly message: string;
-  readonly detail?: string | null;
-};
+export type { CommandErrorPayload } from "../contracts/generated";
 
 type CommandError = Error & {
   readonly code?: string;

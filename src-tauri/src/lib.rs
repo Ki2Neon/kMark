@@ -20,13 +20,14 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 use infra::{
     load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
     restore_window_state, FileSystemAssetRepository, FileSystemMarkdownDocumentRepository,
-    InMemoryOpenRequestQueue, TrayCommandKind, TrayCoordinator, TrayCoordinatorError,
-    SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL, TRAY_COORDINATOR_POLL_INTERVAL,
+    InMemoryOpenRequestQueue, JsonStateStoreError, TrayCommandKind, TrayCoordinator,
+    TrayCoordinatorError, SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL, TRAY_COORDINATOR_POLL_INTERVAL,
 };
 use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RecentFiles, StoredEdit,
@@ -43,6 +44,26 @@ const TRAY_UNTITLED_WINDOW_URL: &str = "index.html?kmarkInitialDocument=new-unti
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
 const APP_EXIT_REQUESTED_EVENT: &str = "app-exit-requested";
 const WINDOW_CLOSE_REQUESTED_EVENT: &str = "window-close-requested";
+
+fn halt_for_unsupported_state_schema(app: &tauri::App, error: &JsonStateStoreError) -> bool {
+    if !error.is_unsupported_schema_version() {
+        return false;
+    }
+
+    if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = main_window.hide();
+    }
+
+    let app_handle = app.handle().clone();
+    app.dialog()
+        .message(format!(
+            "保存データは新しい版の kMark で作成されています。\nデータを上書きせず終了します。\n\n{error}"
+        ))
+        .title("kMark - 保存データ互換性エラー")
+        .kind(MessageDialogKind::Error)
+        .show(move |_| app_handle.exit(1));
+    true
+}
 
 #[derive(Debug, thiserror::Error)]
 enum TrayRuntimeError {
@@ -431,6 +452,9 @@ pub fn run() {
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
                     eprintln!("failed to load preview preferences: {error}");
                 }
             }
@@ -445,6 +469,9 @@ pub fn run() {
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
                     eprintln!("failed to load theme preferences: {error}");
                 }
             }
@@ -461,6 +488,9 @@ pub fn run() {
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
                     eprintln!("failed to load desktop layout preferences: {error}");
                 }
             }
@@ -482,6 +512,9 @@ pub fn run() {
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
                     eprintln!("failed to load editor preferences: {error}");
                 }
             }
@@ -496,6 +529,9 @@ pub fn run() {
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
                     eprintln!("failed to load editor draft: {error}");
                 }
             }
@@ -510,6 +546,9 @@ pub fn run() {
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
                     eprintln!("failed to load recent files: {error}");
                 }
             }
@@ -554,6 +593,7 @@ pub fn run() {
             commands::preview_preferences::set_preview_preferences,
             commands::recent_files::get_recent_files,
             commands::recent_files::record_recent_file,
+            commands::state_recovery::take_state_recovery_notices,
             commands::sub_window::activate_sub_window_source,
             commands::sub_window::get_sub_window_source_state,
             commands::sub_window::get_sub_window_sources,

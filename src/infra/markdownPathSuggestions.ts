@@ -1,5 +1,9 @@
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand } from "./tauriCommand";
+import {
+  type MarkdownPathSuggestionFilterPayload,
+  type MarkdownPathSuggestionPayload,
+} from "../contracts/generated";
 import { type KmarkPathCompletionFilter } from "../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
 import { type KmarkPathCompletionEntry } from "../features/kmark-completion/core/types";
 
@@ -15,10 +19,13 @@ export async function listMarkdownPathSuggestions(input: {
   }
 
   try {
-    return await invokeTauriCommand<readonly KmarkPathCompletionEntry[]>(
+    const filter: MarkdownPathSuggestionFilterPayload = input.filter.kind === "all"
+      ? { kind: "all" }
+      : { kind: "extensions", extensions: [...input.filter.extensions] };
+    return await invokeTauriCommand<readonly MarkdownPathSuggestionPayload[]>(
       LIST_MARKDOWN_PATH_SUGGESTIONS_COMMAND,
       {
-        filter: input.filter,
+        filter,
         input: input.input,
         markdownFilePath: input.markdownFilePath,
       },

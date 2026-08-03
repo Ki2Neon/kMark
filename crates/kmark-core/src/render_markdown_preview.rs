@@ -17,7 +17,9 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedMarkdownPreview {
+    #[cfg(test)]
     pub html: String,
+    #[cfg(test)]
     pub page_htmls: Vec<String>,
     pub pages: Vec<RenderedPage>,
     pub default_page_style: PageStyle,
@@ -840,13 +842,16 @@ pub fn render_markdown_preview_with_file_path_and_model_assets(
             }
         })
         .collect::<Vec<_>>();
+    #[cfg(test)]
     let page_htmls = pages
         .iter()
         .map(|page| page.html.clone())
         .collect::<Vec<_>>();
 
     RenderedMarkdownPreview {
+        #[cfg(test)]
         html: page_htmls.join(""),
+        #[cfg(test)]
         page_htmls,
         pages,
         default_page_style: document_page_config.default_page_style,

@@ -1,11 +1,12 @@
-use crate::dto::RenderedMarkdownPreviewPayload;
 use crate::usecase::prepare_markdown_model_assets;
-use kmark_core::render_markdown_preview_with_file_path_and_model_assets;
+use kmark_contract::RenderedPreviewPayload;
+use kmark_core::{render_markdown_preview_with_file_path_and_model_assets, PreviewDisplayMode};
 
 fn render_markdown_preview_payload(
     content: String,
     file_path: Option<String>,
-) -> RenderedMarkdownPreviewPayload {
+    display_mode: PreviewDisplayMode,
+) -> RenderedPreviewPayload {
     let model_assets = prepare_markdown_model_assets(file_path.as_deref(), &content);
     let rendered_preview = render_markdown_preview_with_file_path_and_model_assets(
         &content,
@@ -13,16 +14,24 @@ fn render_markdown_preview_payload(
         &model_assets,
     );
 
-    RenderedMarkdownPreviewPayload::from(rendered_preview)
+    RenderedPreviewPayload::from_pages(
+        display_mode,
+        rendered_preview.pages,
+        rendered_preview.default_page_style,
+        rendered_preview.default_text_style,
+    )
 }
 
 #[tauri::command]
 pub async fn render_markdown_preview(
     content: String,
     file_path: Option<String>,
-) -> Result<RenderedMarkdownPreviewPayload, String> {
+    display_mode: String,
+) -> Result<RenderedPreviewPayload, String> {
+    let display_mode = PreviewDisplayMode::from_str(&display_mode)
+        .ok_or_else(|| format!("unsupported preview display mode: {display_mode}"))?;
     tauri::async_runtime::spawn_blocking(move || {
-        render_markdown_preview_payload(content, file_path)
+        render_markdown_preview_payload(content, file_path, display_mode)
     })
     .await
     .map_err(|error| error.to_string())
@@ -41,10 +50,23 @@ mod tests {
     fn tauri_command_payload_matches_core_renderer() {
         let markdown = "| Left | Right |\n| :--- | ----: |\n| ~~a~~ | b |\n\n- [x] done\n\nNote[^alpha].\n\n[^alpha]: Footnote";
         let core_output = kmark_core::render_markdown_preview(markdown);
-        let payload = render_markdown_preview_payload(markdown.to_owned(), None);
+        let payload = render_markdown_preview_payload(
+            markdown.to_owned(),
+            None,
+            kmark_core::PreviewDisplayMode::Standard,
+        );
 
-        assert_eq!(payload.html, core_output.html);
-        assert_eq!(payload.page_htmls, core_output.page_htmls);
+        let kmark_contract::RenderedPreviewPayload::Standard { html, .. } = payload else {
+            panic!("expected standard payload");
+        };
+        assert_eq!(
+            html,
+            core_output
+                .pages
+                .iter()
+                .map(|page| page.html.as_str())
+                .collect::<String>()
+        );
     }
 
     #[test]
@@ -58,15 +80,18 @@ mod tests {
         let payload = render_markdown_preview_payload(
             "<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:1,2,3 3d_camera_target:0,0,0 3d_camera_zoom:1.5 -->\n![基板写真](./gear.glb)".to_owned(),
             Some(markdown_path.to_string_lossy().into_owned()),
+            kmark_core::PreviewDisplayMode::Standard,
         );
 
-        assert!(payload.html.contains("data-kmark-model-source=\""));
-        assert!(payload.html.contains("data-kmark-model-display-src=\""));
-        assert!(payload.html.contains("gear.glb"));
-        assert!(payload.html.contains("aria-label=\"基板写真\""));
-        assert!(payload
-            .html
-            .contains("data-kmark-model-camera-position=\"1,2,3\""));
+        let kmark_contract::RenderedPreviewPayload::Standard { html, .. } = payload else {
+            panic!("expected standard payload");
+        };
+
+        assert!(html.contains("data-kmark-model-source=\""));
+        assert!(html.contains("data-kmark-model-display-src=\""));
+        assert!(html.contains("gear.glb"));
+        assert!(html.contains("aria-label=\"基板写真\""));
+        assert!(html.contains("data-kmark-model-camera-position=\"1,2,3\""));
     }
 
     #[test]
@@ -89,13 +114,15 @@ mod tests {
         let payload = render_markdown_preview_payload(
             "<!--k{ layout:row -->\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:69.42524,69.42524,56.685471 3d_camera_target:0,0,0 -->\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:69.42524,69.42524,56.685471 3d_camera_target:0,0,0 -->\n![1](3x3フック-Body.stl)\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:56.209225,58.217715,44.846884 3d_camera_target:0,0,0 -->\n![](dcdcps_buckle-Body.stl)\n<!-- kmark 3d_projection:perspective 3d_fov:45 3d_camera_position:194.335673,194.335673,158.674412 3d_camera_target:0,0,0 -->\n![](poop_shooter-Body.stl)\n<!--k}-->".to_owned(),
             Some(markdown_path.to_string_lossy().into_owned()),
+            kmark_core::PreviewDisplayMode::Standard,
         );
 
+        let kmark_contract::RenderedPreviewPayload::Standard { html, .. } = payload else {
+            panic!("expected standard payload");
+        };
+
         assert_eq!(
-            payload
-                .html
-                .matches("<span class=\"kmark-model-viewer\"")
-                .count(),
+            html.matches("<span class=\"kmark-model-viewer\"").count(),
             3
         );
     }

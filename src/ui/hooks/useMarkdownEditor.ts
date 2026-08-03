@@ -8,7 +8,6 @@ import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMar
 import { createBrowserRecentFileStore } from "../../adapters/browser/browserRecentFileStore";
 import {
   EditorSessionController,
-  type RenderedPreview,
   toEditorSessionErrorMessage,
   type EditorSessionStore,
 } from "../../application/editorSession/editorSessionController";
@@ -16,7 +15,12 @@ import { type MarkdownAssetDataFile } from "../../application/editorSession/edit
 import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { DEFAULT_PAGE_STYLE, DEFAULT_PREVIEW_TEXT_STYLE, type PreviewDisplayMode } from "../../domain/preview";
+import {
+  DEFAULT_PAGE_STYLE,
+  DEFAULT_PREVIEW_TEXT_STYLE,
+  type PreviewDisplayMode,
+  type RenderedPreview,
+} from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
 
 export type InitialEditorDocumentMode = "stored" | "new-untitled";
@@ -24,13 +28,18 @@ export type InitialEditorDocumentMode = "stored" | "new-untitled";
 type UseMarkdownEditorOptions = {
   readonly initialDocumentMode?: InitialEditorDocumentMode;
   readonly previewColorKey?: string;
+  readonly previewDisplayMode?: PreviewDisplayMode;
 };
 
 export function useMarkdownEditor(
   startupEditMode: StartupEditMode,
   options: UseMarkdownEditorOptions = {},
 ) {
-  const { initialDocumentMode = "stored", previewColorKey = "" } = options;
+  const {
+    initialDocumentMode = "stored",
+    previewColorKey = "",
+    previewDisplayMode = "standard",
+  } = options;
   const renderRequestIdRef = useRef(0);
   const recentFilesRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
@@ -70,11 +79,10 @@ export function useMarkdownEditor(
     dispatch,
     getState: () => stateRef.current,
   }), [dispatch]);
-  const currentDocumentFilePath = controller.getCurrentDocumentFilePath();
+  const currentDocumentFilePath = state.filePath;
   const [renderedPreview, setRenderedPreview] = useState<RenderedPreview>({
+    mode: "standard",
     html: "",
-    pageHtmls: [],
-    pages: [],
     defaultPageStyle: DEFAULT_PAGE_STYLE,
     defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE,
   });
@@ -169,7 +177,7 @@ export function useMarkdownEditor(
     renderRequestIdRef.current = requestId;
     let disposed = false;
 
-    void controller.renderPreview(state.content)
+    void controller.renderPreview(state.content, state.filePath, previewDisplayMode)
       .then((nextRenderedPreview) => {
         if (disposed || renderRequestIdRef.current !== requestId) {
           return;
@@ -190,7 +198,7 @@ export function useMarkdownEditor(
     return () => {
       disposed = true;
     };
-  }, [controller, currentDocumentFilePath, isReady, previewColorKey, state.content, store]);
+  }, [controller, currentDocumentFilePath, isReady, previewColorKey, previewDisplayMode, state.content, state.filePath, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
@@ -221,7 +229,7 @@ export function useMarkdownEditor(
 
   const handleOpenCurrentDocumentFolder = useCallback(async () => {
     await executeWithErrorHandling(async () => {
-      await controller.openCurrentDocumentFolder();
+      await controller.openCurrentDocumentFolder(store);
     });
   }, [controller, executeWithErrorHandling]);
 
@@ -312,7 +320,7 @@ export function useMarkdownEditor(
 
   const handleImportDroppedAssets = useCallback(async (droppedFilePaths: readonly string[]) => {
     try {
-      return await controller.importDroppedAssets(droppedFilePaths);
+      return await controller.importDroppedAssets(store, droppedFilePaths);
     } catch (error) {
       controller.raiseError(store, toEditorSessionErrorMessage(error));
       return null;
@@ -321,7 +329,7 @@ export function useMarkdownEditor(
 
   const handleImportPastedAssets = useCallback(async (files: readonly MarkdownAssetDataFile[]) => {
     try {
-      return await controller.importPastedAssets(files);
+      return await controller.importPastedAssets(store, files);
     } catch (error) {
       controller.raiseError(store, toEditorSessionErrorMessage(error));
       return null;
@@ -357,9 +365,9 @@ export function useMarkdownEditor(
     isDirty: state.isDirty,
     isReady,
     recentFiles,
-    previewHtml: renderedPreview.html,
-    previewPageHtmls: renderedPreview.pageHtmls,
-    previewPages: renderedPreview.pages,
+    previewHtml: renderedPreview.mode === "standard" ? renderedPreview.html : "",
+    previewPages: renderedPreview.mode === "a4" ? renderedPreview.pages : [],
+    renderedPreviewMode: renderedPreview.mode,
     defaultPreviewPageStyle: renderedPreview.defaultPageStyle,
     defaultPreviewTextStyle: renderedPreview.defaultTextStyle,
     confirmDiscard,

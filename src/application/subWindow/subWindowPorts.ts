@@ -1,11 +1,6 @@
-import {
-  type PageStyle,
-  type PreviewDisplayMode,
-  type PreviewTextStyle,
-  type RenderedPreviewPage,
-} from "../../domain/preview";
+import { type RenderedPreview } from "../../domain/preview";
 
-export const SUB_WINDOW_STATE_VERSION = 4;
+export const SUB_WINDOW_STATE_VERSION = 5;
 export const DEFAULT_SUB_WINDOW_BROWSER_FADE_MS = 500;
 export const MAX_SUB_WINDOW_BROWSER_FADE_MS = 5000;
 export const MIN_SUB_WINDOW_BROWSER_FADE_MS = 0;
@@ -18,14 +13,9 @@ export type SubWindowState = {
   readonly revision: number;
   readonly updatedAtEpochMs: number;
   readonly title: string;
-  readonly displayMode: PreviewDisplayMode;
-  readonly html: string;
-  readonly pageHtmls: readonly string[];
+  readonly preview: RenderedPreview;
   readonly browserFadeMs: number;
   readonly pageTransitionFadeMs: number;
-  readonly pages: readonly RenderedPreviewPage[];
-  readonly defaultPageStyle: PageStyle;
-  readonly defaultTextStyle: PreviewTextStyle;
   readonly activeSourceLine: number | null;
 };
 
@@ -35,13 +25,8 @@ export type SubWindowStateRequest = Omit<
 >;
 
 export type SubWindowSelection =
-  | {
-    readonly mode: "auto";
-  }
-  | {
-    readonly mode: "source";
-    readonly sourceId: string;
-  };
+  | { readonly mode: "auto" }
+  | { readonly mode: "source"; readonly sourceId: string };
 
 export type SubWindowSourceSummary = {
   readonly id: string;

@@ -6,6 +6,7 @@ pub const DEFAULT_MARKDOWN: &str = "## 操作説明\n\n- 左で書く\n- 右で�
 pub struct EditorState {
     content: String,
     file_name: String,
+    file_path: Option<String>,
     is_dirty: bool,
     last_saved_at: Option<u64>,
     error_message: Option<String>,
@@ -25,12 +26,14 @@ pub enum EditorStateAction {
     ContentChanged(String),
     DocumentLoaded {
         file_name: String,
+        file_path: Option<String>,
         content: String,
         loaded_at: Option<u64>,
     },
     DocumentReset,
     SaveSucceeded {
         file_name: String,
+        file_path: Option<String>,
         saved_at: u64,
     },
     ErrorRaised(String),
@@ -41,6 +44,7 @@ impl EditorState {
     pub fn new(
         content: impl Into<String>,
         file_name: impl Into<String>,
+        file_path: Option<String>,
         is_dirty: bool,
         last_saved_at: Option<u64>,
         error_message: Option<String>,
@@ -48,6 +52,7 @@ impl EditorState {
         Self {
             content: content.into(),
             file_name: ensure_markdown_file_name(&file_name.into()),
+            file_path: normalize_file_path(file_path),
             is_dirty,
             last_saved_at,
             error_message: error_message
@@ -62,6 +67,10 @@ impl EditorState {
 
     pub fn file_name(&self) -> &str {
         &self.file_name
+    }
+
+    pub fn file_path(&self) -> Option<&str> {
+        self.file_path.as_deref()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -99,6 +108,7 @@ pub fn create_initial_editor_state() -> EditorState {
     EditorState {
         content: DEFAULT_MARKDOWN.to_owned(),
         file_name: ensure_markdown_file_name(""),
+        file_path: None,
         is_dirty: false,
         last_saved_at: None,
         error_message: None,
@@ -109,6 +119,7 @@ pub fn create_blank_editor_state() -> EditorState {
     EditorState {
         content: String::new(),
         file_name: ensure_markdown_file_name(""),
+        file_path: None,
         is_dirty: false,
         last_saved_at: None,
         error_message: None,
@@ -137,6 +148,7 @@ pub fn reduce_editor_state(state: &EditorState, action: &EditorStateAction) -> E
             EditorState {
                 content: content.clone(),
                 file_name: state.file_name.clone(),
+                file_path: state.file_path.clone(),
                 is_dirty: true,
                 last_saved_at: state.last_saved_at,
                 error_message: None,
@@ -144,11 +156,13 @@ pub fn reduce_editor_state(state: &EditorState, action: &EditorStateAction) -> E
         }
         EditorStateAction::DocumentLoaded {
             file_name,
+            file_path,
             content,
             loaded_at,
         } => EditorState {
             content: content.clone(),
             file_name: ensure_markdown_file_name(file_name),
+            file_path: normalize_file_path(file_path.clone()),
             is_dirty: false,
             last_saved_at: *loaded_at,
             error_message: None,
@@ -156,10 +170,12 @@ pub fn reduce_editor_state(state: &EditorState, action: &EditorStateAction) -> E
         EditorStateAction::DocumentReset => create_initial_editor_state(),
         EditorStateAction::SaveSucceeded {
             file_name,
+            file_path,
             saved_at,
         } => EditorState {
             content: state.content.clone(),
             file_name: ensure_markdown_file_name(file_name),
+            file_path: normalize_file_path(file_path.clone()),
             is_dirty: false,
             last_saved_at: Some(*saved_at),
             error_message: None,
@@ -167,6 +183,7 @@ pub fn reduce_editor_state(state: &EditorState, action: &EditorStateAction) -> E
         EditorStateAction::ErrorRaised(message) => EditorState {
             content: state.content.clone(),
             file_name: state.file_name.clone(),
+            file_path: state.file_path.clone(),
             is_dirty: state.is_dirty,
             last_saved_at: state.last_saved_at,
             error_message: Some(message.clone()),
@@ -179,12 +196,19 @@ pub fn reduce_editor_state(state: &EditorState, action: &EditorStateAction) -> E
             EditorState {
                 content: state.content.clone(),
                 file_name: state.file_name.clone(),
+                file_path: state.file_path.clone(),
                 is_dirty: state.is_dirty,
                 last_saved_at: state.last_saved_at,
                 error_message: None,
             }
         }
     }
+}
+
+fn normalize_file_path(file_path: Option<String>) -> Option<String> {
+    file_path
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn derive_editor_stats(content: &str) -> EditorStats {
@@ -246,6 +270,33 @@ mod tests {
         let reset_state = reduce_editor_state(&changed_state, &EditorStateAction::DocumentReset);
 
         assert_eq!(reset_state, create_initial_editor_state());
+    }
+
+    #[test]
+    fn reducer_owns_document_file_path_transitions() {
+        let loaded_state = reduce_editor_state(
+            &create_initial_editor_state(),
+            &EditorStateAction::DocumentLoaded {
+                file_name: "notes".to_owned(),
+                file_path: Some("  C:\\docs\\notes.md  ".to_owned()),
+                content: "loaded".to_owned(),
+                loaded_at: Some(3),
+            },
+        );
+        assert_eq!(loaded_state.file_path(), Some("C:\\docs\\notes.md"));
+
+        let saved_state = reduce_editor_state(
+            &loaded_state,
+            &EditorStateAction::SaveSucceeded {
+                file_name: "saved".to_owned(),
+                file_path: Some("C:\\docs\\saved.md".to_owned()),
+                saved_at: 4,
+            },
+        );
+        assert_eq!(saved_state.file_path(), Some("C:\\docs\\saved.md"));
+
+        let reset_state = reduce_editor_state(&saved_state, &EditorStateAction::DocumentReset);
+        assert_eq!(reset_state.file_path(), None);
     }
 
     #[test]

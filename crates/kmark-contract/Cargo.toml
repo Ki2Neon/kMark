@@ -1,0 +1,12 @@
+[package]
+name = "kmark-contract"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+bindings = ["dep:ts-rs"]
+
+[dependencies]
+kmark-core = { path = "../kmark-core" }
+serde = { version = "1", features = ["derive"] }
+ts-rs = { version = "=12.0.1", optional = true }

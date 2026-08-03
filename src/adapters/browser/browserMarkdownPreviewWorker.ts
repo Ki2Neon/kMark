@@ -2,9 +2,11 @@ import {
   renderMarkdownPreviewWithWasm,
   type RenderedMarkdownPreviewPayload,
 } from "../../wasm/kmarkWeb";
+import { type PreviewDisplayMode } from "../../domain/preview";
 
 export type BrowserMarkdownPreviewWorkerRequest = {
   readonly content: string;
+  readonly displayMode: PreviewDisplayMode;
   readonly filePath: string | null;
   readonly id: number;
 };
@@ -34,7 +36,11 @@ workerScope.onmessage = (event) => {
 
 async function renderMarkdownPreviewInWorker(request: BrowserMarkdownPreviewWorkerRequest): Promise<void> {
   try {
-    const renderedPreview = await renderMarkdownPreviewWithWasm(request.content, request.filePath);
+    const renderedPreview = await renderMarkdownPreviewWithWasm(
+      request.content,
+      request.filePath,
+      request.displayMode,
+    );
 
     workerScope.postMessage({
       id: request.id,

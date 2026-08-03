@@ -3,6 +3,7 @@ export type LayoutMode = "desktop" | "mobile";
 export type EditorState = {
   readonly content: string;
   readonly fileName: string;
+  readonly filePath: string | null;
   readonly isDirty: boolean;
   readonly lastSavedAt: number | null;
   readonly errorMessage: string | null;

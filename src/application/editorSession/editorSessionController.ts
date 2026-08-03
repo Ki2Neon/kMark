@@ -1,7 +1,7 @@
 import { DEFAULT_FILE_NAME, type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PageStyle, type PreviewDisplayMode, type PreviewTextStyle, type RenderedPreviewPage } from "../../domain/preview";
+import { type PreviewDisplayMode, type RenderedPreview } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
 import { type EditorSessionAction } from "./editorSessionAction";
 import {
@@ -25,14 +25,6 @@ export type EditorSessionStore = {
 export type EditorSessionBootstrap = {
   readonly initialState: EditorState;
   readonly shouldSkipInitialPersist: boolean;
-};
-
-export type RenderedPreview = {
-  readonly html: string;
-  readonly pageHtmls: readonly string[];
-  readonly pages: readonly RenderedPreviewPage[];
-  readonly defaultPageStyle: PageStyle;
-  readonly defaultTextStyle: PreviewTextStyle;
 };
 
 type EditorSessionControllerDependencies = {
@@ -63,7 +55,6 @@ export class EditorSessionController {
   readonly #recentFileStore: RecentFileStore;
   readonly #renderer: MarkdownRenderer;
   readonly #rules: EditorStateRules;
-  #currentDocumentFilePath: string | null;
 
   constructor(dependencies: EditorSessionControllerDependencies) {
     this.#assetImporter = dependencies.assetImporter;
@@ -74,11 +65,9 @@ export class EditorSessionController {
     this.#recentFileStore = dependencies.recentFileStore;
     this.#renderer = dependencies.renderer;
     this.#rules = dependencies.rules;
-    this.#currentDocumentFilePath = null;
   }
 
   createInitialState(startupEditMode: StartupEditMode): EditorSessionBootstrap {
-    this.#currentDocumentFilePath = null;
     this.#documentGateway.restoreDocumentReference(null);
     return {
       initialState: this.#rules.createStartupState(startupEditMode, null),
@@ -88,8 +77,7 @@ export class EditorSessionController {
 
   async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
-    this.#currentDocumentFilePath = null;
-    this.#documentGateway.restoreDocumentReference(this.#currentDocumentFilePath);
+    this.#documentGateway.restoreDocumentReference(null);
 
     return {
       initialState: this.#rules.createStartupState(startupEditMode, null),
@@ -101,13 +89,13 @@ export class EditorSessionController {
     const storedEdit = await this.#draftStore.load();
     const startupState = this.#rules.createStartupState(startupEditMode, null);
 
-    this.#currentDocumentFilePath = null;
     this.#documentGateway.restoreDocumentReference(null);
 
     return {
       initialState: {
         ...startupState,
         fileName: DEFAULT_FILE_NAME,
+        filePath: null,
         lastSavedAt: null,
       },
       shouldSkipInitialPersist: storedEdit !== null,
@@ -126,7 +114,7 @@ export class EditorSessionController {
     await this.#draftStore.persist({
       fileName: state.fileName,
       content: state.content,
-      filePath: this.#currentDocumentFilePath,
+      filePath: state.filePath,
       savedAt: state.lastSavedAt,
     });
   }
@@ -146,12 +134,12 @@ export class EditorSessionController {
     return this.#recentFileStore.record({ fileName, filePath });
   }
 
-  async renderPreview(content: string): Promise<RenderedPreview> {
-    return this.#renderer.render(content, this.#currentDocumentFilePath);
-  }
-
-  getCurrentDocumentFilePath(): string | null {
-    return this.#currentDocumentFilePath;
+  async renderPreview(
+    content: string,
+    filePath: string | null,
+    displayMode: PreviewDisplayMode,
+  ): Promise<RenderedPreview> {
+    return this.#renderer.render(content, filePath, displayMode);
   }
 
   changeContent(store: EditorSessionStore, content: string): void {
@@ -165,10 +153,10 @@ export class EditorSessionController {
       return null;
     }
 
-    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: result.fileName,
+      filePath: result.filePath,
       content: result.content,
       loadedAt: null,
     });
@@ -179,10 +167,10 @@ export class EditorSessionController {
   async openDocumentFromFile(store: EditorSessionStore, file: File): Promise<LoadedMarkdownDocument> {
     const result = await this.#documentGateway.openDocumentFromFile(file);
 
-    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: result.fileName,
+      filePath: result.filePath,
       content: result.content,
       loadedAt: null,
     });
@@ -193,10 +181,10 @@ export class EditorSessionController {
   async openDocumentFromRecentFile(store: EditorSessionStore, recentFile: RecentFile): Promise<LoadedMarkdownDocument> {
     const result = await this.#documentGateway.openDocumentFromPath(recentFile.filePath);
 
-    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: result.fileName,
+      filePath: result.filePath,
       content: result.content,
       loadedAt: null,
     });
@@ -204,21 +192,26 @@ export class EditorSessionController {
     return result;
   }
 
-  async openCurrentDocumentFolder(): Promise<void> {
-    if (this.#currentDocumentFilePath === null) {
+  async openCurrentDocumentFolder(store: EditorSessionStore): Promise<void> {
+    const filePath = store.getState().filePath;
+    if (filePath === null) {
       throw new Error("保存済みMarkdownファイルのフォルダーがありません。");
     }
 
-    await this.#documentGateway.openDocumentFolder(this.#currentDocumentFilePath);
+    await this.#documentGateway.openDocumentFolder(filePath);
   }
 
-  async importDroppedAssets(droppedFilePaths: readonly string[]): Promise<string> {
-    if (this.#currentDocumentFilePath === null) {
+  async importDroppedAssets(
+    store: EditorSessionStore,
+    droppedFilePaths: readonly string[],
+  ): Promise<string> {
+    const filePath = store.getState().filePath;
+    if (filePath === null) {
       throw new Error("アセットを取り込むには、先にMarkdownファイルを保存してください。");
     }
 
     const importedAssets = await this.#assetImporter.importAssetFiles({
-      markdownFilePath: this.#currentDocumentFilePath,
+      markdownFilePath: filePath,
       droppedFilePaths,
     });
 
@@ -227,13 +220,17 @@ export class EditorSessionController {
       .join("\n\n");
   }
 
-  async importPastedAssets(files: readonly MarkdownAssetDataFile[]): Promise<string> {
-    if (this.#currentDocumentFilePath === null) {
+  async importPastedAssets(
+    store: EditorSessionStore,
+    files: readonly MarkdownAssetDataFile[],
+  ): Promise<string> {
+    const filePath = store.getState().filePath;
+    if (filePath === null) {
       throw new Error("アセットを取り込むには、先にMarkdownファイルを保存してください。");
     }
 
     const importedAssets = await this.#assetImporter.importAssetData({
-      markdownFilePath: this.#currentDocumentFilePath,
+      markdownFilePath: filePath,
       files,
     });
 
@@ -245,10 +242,10 @@ export class EditorSessionController {
   loadExternalDocument(store: EditorSessionStore, document: ExternalMarkdownDocument): LoadedMarkdownDocument {
     const loadedDocument = this.#documentGateway.loadExternalDocument(document);
 
-    this.#currentDocumentFilePath = loadedDocument.filePath;
     store.dispatch({
       type: "editor/documentLoaded",
       fileName: loadedDocument.fileName,
+      filePath: loadedDocument.filePath,
       content: loadedDocument.content,
       loadedAt: null,
     });
@@ -264,10 +261,10 @@ export class EditorSessionController {
       return false;
     }
 
-    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/saveSucceeded",
       fileName: result.fileName,
+      filePath: result.filePath,
       savedAt: this.#clock.now(),
     });
 
@@ -282,10 +279,10 @@ export class EditorSessionController {
       return false;
     }
 
-    this.#currentDocumentFilePath = result.filePath;
     store.dispatch({
       type: "editor/saveSucceeded",
       fileName: result.fileName,
+      filePath: result.filePath,
       savedAt: this.#clock.now(),
     });
 
@@ -318,7 +315,15 @@ export class EditorSessionController {
       return;
     }
 
-    const renderedPreview = await this.renderPreview(state.content);
+    const renderedPreview = await this.renderPreview(
+      state.content,
+      state.filePath,
+      "standard",
+    );
+
+    if (renderedPreview.mode !== "standard") {
+      throw new Error("標準Previewの生成結果が不正です。");
+    }
 
     await this.#printer.print({
       displayMode: "standard",
@@ -329,7 +334,6 @@ export class EditorSessionController {
 
   resetDocument(store: EditorSessionStore): void {
     this.#documentGateway.reset();
-    this.#currentDocumentFilePath = null;
     store.dispatch({ type: "editor/documentReset" });
   }
 

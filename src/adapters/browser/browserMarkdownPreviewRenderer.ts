@@ -1,14 +1,13 @@
 import { invokeTauriCommand } from "../../infra/tauriCommand";
 import { convertRuntimeFileSrc, isTauri } from "../../runtime/runtime";
 import { renderMarkdownPreviewWithWasm } from "../../wasm/kmarkWeb";
+import { type RenderedPreviewPayload } from "../../contracts/generated";
 import {
   type BrowserMarkdownPreviewWorkerRequest,
   type BrowserMarkdownPreviewWorkerResponse,
 } from "./browserMarkdownPreviewWorker";
 import {
   DEFAULT_PAGE_CHROME_CONFIG,
-  DEFAULT_PAGE_NUMBER_CONFIG,
-  DEFAULT_PAGE_STYLE,
   DEFAULT_PREVIEW_TEXT_STYLE,
   type PageChromeConfig,
   type PageChromeRegionConfig,
@@ -21,27 +20,21 @@ import { renderMermaidPreviewHtml, resolveMermaidPreviewTheme } from "./browserM
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
-type RenderedPreviewPagePayload = Omit<RenderedPreviewPage, "pageChromeConfig" | "pageNumberConfig" | "textStyle"> & {
-  readonly pageChromeConfig?: Partial<PageChromeConfig>;
-  readonly pageNumberConfig?: PageNumberConfig;
-  readonly textStyle?: Partial<PreviewTextStyle>;
-};
+type RenderedMarkdownPreviewPayload = Readonly<RenderedPreviewPayload>;
 
-type RenderedMarkdownPreviewPayload = {
-  readonly html: string;
-  readonly pageHtmls: readonly string[];
-  readonly pages?: readonly RenderedPreviewPagePayload[];
-  readonly defaultPageStyle?: PageStyle;
-  readonly defaultTextStyle?: PreviewTextStyle;
-};
-
-type NormalizedRenderedMarkdownPreviewPayload = {
-  readonly html: string;
-  readonly pageHtmls: readonly string[];
-  readonly pages: readonly RenderedPreviewPage[];
-  readonly defaultPageStyle: PageStyle;
-  readonly defaultTextStyle: PreviewTextStyle;
-};
+type NormalizedRenderedMarkdownPreviewPayload =
+  | {
+      readonly mode: "standard";
+      readonly html: string;
+      readonly defaultPageStyle: PageStyle;
+      readonly defaultTextStyle: PreviewTextStyle;
+    }
+  | {
+      readonly mode: "a4";
+      readonly pages: readonly RenderedPreviewPage[];
+      readonly defaultPageStyle: PageStyle;
+      readonly defaultTextStyle: PreviewTextStyle;
+    };
 
 const FILE_MEDIA_ATTRIBUTE_NAME_PATTERN = [
   "src",
@@ -205,35 +198,38 @@ function normalizePageChromeConfig(config?: Partial<PageChromeConfig>): PageChro
 async function normalizeRenderedMarkdownPreview(
   renderedPreview: RenderedMarkdownPreviewPayload,
 ): Promise<NormalizedRenderedMarkdownPreviewPayload> {
-  const defaultPageStyle = renderedPreview.defaultPageStyle ?? DEFAULT_PAGE_STYLE;
+  const defaultPageStyle = renderedPreview.defaultPageStyle;
   const defaultTextStyle = normalizePreviewTextStyle(renderedPreview.defaultTextStyle);
-  const pages = renderedPreview.pages !== undefined && renderedPreview.pages.length > 0
-    ? renderedPreview.pages
-    : renderedPreview.pageHtmls.map((pageHtml) => ({
-      html: pageHtml,
-      pageStyle: defaultPageStyle,
-      textStyle: defaultTextStyle,
-      pageNumberConfig: DEFAULT_PAGE_NUMBER_CONFIG,
-      pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
-    }));
-  const standardMermaidTheme = resolveMermaidPreviewTheme("standard");
-  const paperMermaidTheme = resolveMermaidPreviewTheme("paper");
-  const html = await normalizePreviewHtmlMediaSources(renderedPreview.html);
-  const pageHtmls = await Promise.all(renderedPreview.pageHtmls.map(normalizePreviewHtmlMediaSources));
-  const normalizedPages = await Promise.all(pages.map(async (page) => ({
+
+  if (renderedPreview.mode === "standard") {
+    const html = await normalizePreviewHtmlMediaSources(renderedPreview.html);
+    return {
+      mode: "standard",
+      html: await renderMermaidPreviewHtml(html, {
+        surface: "standard",
+        theme: resolveMermaidPreviewTheme("standard"),
+      }),
+      defaultPageStyle,
+      defaultTextStyle,
+    };
+  }
+
+  const normalizedPages = await Promise.all(renderedPreview.pages.map(async (page) => ({
     ...page,
     html: await normalizePreviewHtmlMediaSources(page.html),
     textStyle: normalizePreviewTextStyle(page.textStyle),
-    pageNumberConfig: page.pageNumberConfig ?? DEFAULT_PAGE_NUMBER_CONFIG,
+    pageNumberConfig: page.pageNumberConfig as PageNumberConfig,
     pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
   })));
 
   return {
-    html: await renderMermaidPreviewHtml(html, { surface: "standard", theme: standardMermaidTheme }),
-    pageHtmls: await Promise.all(pageHtmls.map((pageHtml) => renderMermaidPreviewHtml(pageHtml, { surface: "paper", theme: paperMermaidTheme }))),
+    mode: "a4",
     pages: await Promise.all(normalizedPages.map(async (page) => ({
       ...page,
-      html: await renderMermaidPreviewHtml(page.html, { surface: "paper", theme: paperMermaidTheme }),
+      html: await renderMermaidPreviewHtml(page.html, {
+        surface: "paper",
+        theme: resolveMermaidPreviewTheme("paper"),
+      }),
     }))),
     defaultPageStyle,
     defaultTextStyle,
@@ -295,14 +291,15 @@ function getPreviewWorker(): Worker {
 
 async function renderMarkdownPreviewWithWorker(
   content: string,
-  filePath?: string | null,
+  filePath: string | null,
+  displayMode: import("../../domain/preview").PreviewDisplayMode,
 ): Promise<RenderedMarkdownPreviewPayload> {
   let worker: Worker;
 
   try {
     worker = getPreviewWorker();
   } catch {
-    return renderMarkdownPreviewWithWasm(content, filePath);
+    return renderMarkdownPreviewWithWasm(content, filePath, displayMode);
   }
 
   const requestId = previewWorkerRequestId + 1;
@@ -313,7 +310,8 @@ async function renderMarkdownPreviewWithWorker(
 
     const request: BrowserMarkdownPreviewWorkerRequest = {
       content,
-      filePath: filePath ?? null,
+      displayMode,
+      filePath,
       id: requestId,
     };
 
@@ -323,15 +321,18 @@ async function renderMarkdownPreviewWithWorker(
 
 export async function renderMarkdownPreview(
   content: string,
-  filePath?: string | null,
+  filePath: string | null,
+  displayMode: import("../../domain/preview").PreviewDisplayMode,
 ): Promise<NormalizedRenderedMarkdownPreviewPayload> {
   if (!isTauri()) {
-    return normalizeRenderedMarkdownPreview(await renderMarkdownPreviewWithWorker(content, filePath));
+    return normalizeRenderedMarkdownPreview(
+      await renderMarkdownPreviewWithWorker(content, filePath, displayMode),
+    );
   }
 
   const renderedPreview = await invokeTauriCommand<RenderedMarkdownPreviewPayload>(
     RENDER_MARKDOWN_PREVIEW_COMMAND,
-    { content, filePath },
+    { content, displayMode, filePath },
     "プレビュー描画に失敗しました。",
   );
 

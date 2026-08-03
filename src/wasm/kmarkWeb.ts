@@ -1,8 +1,11 @@
+import { type PreviewDisplayMode } from "../domain/preview";
 import {
-  type PageStyle,
-  type PreviewTextStyle,
-  type RenderedPreviewPage,
-} from "../domain/preview";
+  type FormatMarkdownTablesPayload as GeneratedFormatMarkdownTablesPayload,
+  type RenderedPreviewPayload,
+  type SourceRangePayload as GeneratedSourceRangePayload,
+  type TableDiagnosticKindPayload,
+  type TableDiagnosticPayload as GeneratedTableDiagnosticPayload,
+} from "../contracts/generated";
 import { type RecentFile } from "../domain/recentFiles";
 
 type KmarkWebModule = typeof import("./pkg/kmark_web");
@@ -10,13 +13,7 @@ type KmarkWebModule = typeof import("./pkg/kmark_web");
 let loadedModule: KmarkWebModule | null = null;
 let pendingModule: Promise<KmarkWebModule> | null = null;
 
-export type RenderedMarkdownPreviewPayload = {
-  readonly html: string;
-  readonly pageHtmls: readonly string[];
-  readonly pages: readonly RenderedPreviewPage[];
-  readonly defaultPageStyle: PageStyle;
-  readonly defaultTextStyle: PreviewTextStyle;
-};
+export type RenderedMarkdownPreviewPayload = Readonly<RenderedPreviewPayload>;
 
 export type TableFormatOptionsPayload = {
   readonly inferNumericAlignment?: boolean;
@@ -30,29 +27,10 @@ export type TableFormatLineRangePayload = {
   readonly endLine: number;
 };
 
-export type TableDiagnosticKind =
-  | "invalidLeftMerge"
-  | "invalidUpMerge"
-  | "nonRectangularMerge"
-  | "columnCountMismatch";
-
-export type SourceRangePayload = {
-  readonly start: number;
-  readonly end: number;
-};
-
-export type TableDiagnosticPayload = {
-  readonly kind: TableDiagnosticKind;
-  readonly message: string;
-  readonly line: number | null;
-  readonly column: number | null;
-  readonly range: SourceRangePayload | null;
-};
-
-export type FormatMarkdownTablesPayload = {
-  readonly text: string;
-  readonly diagnostics: readonly TableDiagnosticPayload[];
-};
+export type TableDiagnosticKind = TableDiagnosticKindPayload;
+export type SourceRangePayload = Readonly<GeneratedSourceRangePayload>;
+export type TableDiagnosticPayload = Readonly<GeneratedTableDiagnosticPayload>;
+export type FormatMarkdownTablesPayload = Readonly<GeneratedFormatMarkdownTablesPayload>;
 
 export function parseJsonPayload<T>(json: string): T {
   return JSON.parse(json) as T;
@@ -90,10 +68,11 @@ export async function initializeKmarkWeb(): Promise<void> {
 export async function renderMarkdownPreviewWithWasm(
   content: string,
   filePath?: string | null,
+  displayMode: PreviewDisplayMode = "standard",
 ): Promise<RenderedMarkdownPreviewPayload> {
   await initializeKmarkWeb();
   return parseJsonPayload<RenderedMarkdownPreviewPayload>(
-    loadKmarkWebModuleSync().render_markdown_preview_json(content, filePath ?? null),
+    loadKmarkWebModuleSync().render_markdown_preview_json(content, filePath ?? null, displayMode),
   );
 }
 

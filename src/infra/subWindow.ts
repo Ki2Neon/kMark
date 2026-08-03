@@ -8,7 +8,18 @@ import {
   type SubWindowSourceSummary,
   type SubWindowState,
 } from "../application/subWindow/subWindowPorts";
-import { isPreviewDisplayMode } from "../domain/preview";
+import {
+  type RegisterSubWindowSourceResponsePayload,
+  type PageChromeRegionConfigPayload,
+  type RenderedPreviewPayload,
+  type SubWindowResolvedSourceStatePayload,
+  type SubWindowSelectionPayload,
+  type SubWindowSourceLineSelectionRequestPayload,
+  type SubWindowSourceStateChangedPayload,
+  type SubWindowSourcesSnapshotPayload,
+  type SubWindowStatePayload,
+} from "../contracts/generated";
+import { type PageChromeRegionConfig } from "../domain/preview";
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 
@@ -63,10 +74,6 @@ export type SubWindowTarget = {
   readonly stateKey: string | null;
 };
 
-type RegisterSubWindowSourceResponse = {
-  readonly sourceId: string;
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -94,8 +101,63 @@ function isPreviewTextStyle(value: unknown): boolean {
   ]);
 }
 
-function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+function isRenderedPreview(value: unknown): boolean {
+  if (
+    !isRecord(value)
+    || !isPageStyle(value.defaultPageStyle)
+    || !isPreviewTextStyle(value.defaultTextStyle)
+  ) {
+    return false;
+  }
+
+  if (value.mode === "standard") {
+    return typeof value.html === "string";
+  }
+
+  return value.mode === "a4" && Array.isArray(value.pages);
+}
+
+function toRenderedPreviewPayload(preview: SubWindowState["preview"]): RenderedPreviewPayload {
+  if (preview.mode === "standard") {
+    return { ...preview };
+  }
+
+  return {
+    ...preview,
+    pages: preview.pages.map((page) => ({
+      ...page,
+      pageChromeConfig: {
+        header: toPageChromeRegionPayload(page.pageChromeConfig.header),
+        footer: toPageChromeRegionPayload(page.pageChromeConfig.footer),
+      },
+    })),
+  };
+}
+
+function toPageChromeRegionPayload(
+  region: PageChromeRegionConfig,
+): PageChromeRegionConfigPayload {
+  return {
+    ...region,
+    left: region.left ?? null,
+    center: region.center ?? null,
+    right: region.right ?? null,
+    offset: region.offset ?? null,
+    borderSize: region.borderSize ?? null,
+    borderColor: region.borderColor ?? null,
+    borderStyle: region.borderStyle ?? null,
+    fontSize: region.fontSize ?? null,
+    fontFamily: region.fontFamily ?? null,
+    fontColor: region.fontColor ?? null,
+    padding: region.padding ?? null,
+  };
+}
+
+function toSubWindowStatePayload(state: SubWindowState): SubWindowStatePayload {
+  return {
+    ...state,
+    preview: toRenderedPreviewPayload(state.preview),
+  };
 }
 
 function isSubWindowState(value: unknown): value is SubWindowState {
@@ -109,19 +171,13 @@ function isSubWindowState(value: unknown): value is SubWindowState {
     && typeof value.updatedAtEpochMs === "number"
     && Number.isFinite(value.updatedAtEpochMs)
     && typeof value.title === "string"
-    && typeof value.displayMode === "string"
-    && isPreviewDisplayMode(value.displayMode)
-    && typeof value.html === "string"
-    && isStringArray(value.pageHtmls)
+    && isRenderedPreview(value.preview)
     && typeof value.browserFadeMs === "number"
     && Number.isInteger(value.browserFadeMs)
     && value.browserFadeMs >= 0
     && typeof value.pageTransitionFadeMs === "number"
     && Number.isInteger(value.pageTransitionFadeMs)
     && value.pageTransitionFadeMs >= 0
-    && Array.isArray(value.pages)
-    && isPageStyle(value.defaultPageStyle)
-    && isPreviewTextStyle(value.defaultTextStyle)
     && (
       value.activeSourceLine === null
       || (
@@ -483,7 +539,7 @@ export async function activateSubWindowSource(sourceId: string): Promise<void> {
 
 export async function getSubWindowSources(): Promise<SubWindowSourcesSnapshot> {
   if (isTauri()) {
-    const snapshot = await invokeTauriCommand<SubWindowSourcesSnapshot>(
+    const snapshot = await invokeTauriCommand<SubWindowSourcesSnapshotPayload>(
       GET_SUB_WINDOW_SOURCES_COMMAND,
       {},
       "サブウィンドウ表示元を読込めませんでした。",
@@ -507,9 +563,10 @@ export async function getSubWindowSourceState(
   }
 
   if (isTauri()) {
-    const resolvedState = await invokeTauriCommand<SubWindowResolvedSourceState>(
+    const contractSelection: SubWindowSelectionPayload = selection;
+    const resolvedState = await invokeTauriCommand<SubWindowResolvedSourceStatePayload>(
       GET_SUB_WINDOW_SOURCE_STATE_COMMAND,
-      { selection },
+      { selection: contractSelection },
       "サブウィンドウデータを読込めませんでした。",
     );
 
@@ -525,9 +582,9 @@ export async function getSubWindowSourceState(
 
 export async function registerSubWindowSource(state: SubWindowState): Promise<string> {
   if (isTauri()) {
-    const response = await invokeTauriCommand<RegisterSubWindowSourceResponse>(
+    const response = await invokeTauriCommand<RegisterSubWindowSourceResponsePayload>(
       REGISTER_SUB_WINDOW_SOURCE_COMMAND,
-      { state },
+      { state: toSubWindowStatePayload(state) },
       "サブウィンドウ表示元を登録できませんでした。",
     );
 
@@ -559,7 +616,7 @@ export async function publishSubWindowSourceState(sourceId: string, state: SubWi
   if (isTauri()) {
     await invokeTauriCommand<void>(
       PUBLISH_SUB_WINDOW_SOURCE_STATE_COMMAND,
-      { sourceId, state },
+      { sourceId, state: toSubWindowStatePayload(state) },
       "サブウィンドウ同期に失敗しました。",
     );
     return;
@@ -606,9 +663,10 @@ export async function requestSubWindowSourceLineSelection(
   request: SubWindowSourceLineSelectionRequest,
 ): Promise<void> {
   if (isTauri()) {
+    const contractRequest: SubWindowSourceLineSelectionRequestPayload = request;
     await invokeTauriCommand<void>(
       REQUEST_SUB_WINDOW_SOURCE_LINE_SELECTION_COMMAND,
-      { request },
+      { request: contractRequest },
       "サブウィンドウから編集行を選択できませんでした。",
     );
     return;
@@ -622,7 +680,7 @@ export async function requestSubWindowSourceLineSelection(
 }
 
 async function takeSubWindowSourceLineSelectionRequests(): Promise<readonly SubWindowSourceLineSelectionRequest[]> {
-  const requests = await invokeTauriCommand<readonly SubWindowSourceLineSelectionRequest[]>(
+  const requests = await invokeTauriCommand<readonly SubWindowSourceLineSelectionRequestPayload[]>(
     TAKE_SUB_WINDOW_SOURCE_LINE_SELECTION_REQUESTS_COMMAND,
     {},
     "サブウィンドウからの編集行選択を読込めませんでした。",
@@ -656,7 +714,7 @@ export async function listenForSubWindowSourcesChanged(
         })
         .catch(() => {});
     };
-    const unlisten = await listenTauriEvent<SubWindowSourcesSnapshot>(
+    const unlisten = await listenTauriEvent<SubWindowSourcesSnapshotPayload>(
       SUB_WINDOW_SOURCES_UPDATED_EVENT,
       (snapshot) => {
         if (isSubWindowSourcesSnapshot(snapshot)) {
@@ -721,7 +779,7 @@ export async function listenForSubWindowSourceStateChanged(
   callback: (change: SubWindowSourceStateChanged) => void,
 ): Promise<() => void> {
   if (isTauri()) {
-    return listenTauriEvent<SubWindowSourceStateChanged>(
+    return listenTauriEvent<SubWindowSourceStateChangedPayload>(
       SUB_WINDOW_SOURCE_STATE_UPDATED_EVENT,
       (change) => {
         if (isSubWindowSourceStateChanged(change)) {
@@ -793,7 +851,7 @@ export async function listenForSubWindowSourceLineSelection(
         })
         .catch(() => {});
     };
-    const unlisten = await listenTauriEvent<SubWindowSourceLineSelectionRequest>(
+    const unlisten = await listenTauriEvent<SubWindowSourceLineSelectionRequestPayload>(
       SUB_WINDOW_SOURCE_LINE_SELECTION_REQUESTED_EVENT,
       (request) => {
         if (isSubWindowSourceLineSelectionRequest(request)) {

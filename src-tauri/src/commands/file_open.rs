@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, path::PathBuf};
 
+use kmark_contract::{MarkdownDocumentPayload, SavedMarkdownDocumentPayload};
 use kmark_core::{is_supported_markdown_path, MarkdownDocument};
-use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
@@ -18,29 +18,12 @@ use crate::{
 const MARKDOWN_DIALOG_FILTER_NAME: &str = "Markdown";
 const MARKDOWN_DIALOG_FILTER_EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "txt"];
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MarkdownDocumentPayload {
-    file_name: String,
-    file_path: String,
-    content: String,
-}
-
-impl From<MarkdownDocument> for MarkdownDocumentPayload {
-    fn from(document: MarkdownDocument) -> Self {
-        Self {
-            file_name: document.file_name().to_owned(),
-            file_path: document.file_path().to_string_lossy().into_owned(),
-            content: document.content().to_owned(),
-        }
+fn markdown_document_payload(document: MarkdownDocument) -> MarkdownDocumentPayload {
+    MarkdownDocumentPayload {
+        file_name: document.file_name().to_owned(),
+        file_path: document.file_path().to_string_lossy().into_owned(),
+        content: document.content().to_owned(),
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SavedMarkdownDocumentPayload {
-    file_name: String,
-    file_path: String,
 }
 
 fn resolve_dialog_path(file_path: FilePath) -> Result<PathBuf, CommandErrorPayload> {
@@ -74,7 +57,12 @@ pub fn take_pending_markdown_open_requests(
         &state.open_request_queue,
         &state.markdown_document_repository,
     )
-    .map(|documents| documents.into_iter().map(Into::into).collect())
+    .map(|documents| {
+        documents
+            .into_iter()
+            .map(markdown_document_payload)
+            .collect()
+    })
     .map_err(CommandErrorPayload::from)
 }
 
@@ -118,7 +106,7 @@ pub async fn open_markdown_document_dialog(
     let file_path = resolve_dialog_path(selected_file)?;
 
     read_markdown_document(&state.markdown_document_repository, &file_path)
-        .map(Into::into)
+        .map(markdown_document_payload)
         .map(Some)
         .map_err(CommandErrorPayload::from)
 }
@@ -131,7 +119,7 @@ pub fn read_markdown_document_at_path(
     let file_path = PathBuf::from(path.trim());
 
     read_markdown_document(&state.markdown_document_repository, &file_path)
-        .map(Into::into)
+        .map(markdown_document_payload)
         .map_err(CommandErrorPayload::from)
 }
 

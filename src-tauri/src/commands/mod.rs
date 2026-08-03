@@ -9,6 +9,7 @@ pub mod file_open;
 pub mod markdown_render;
 pub mod preview_preferences;
 pub mod recent_files;
+pub mod state_recovery;
 pub mod sub_window;
 pub mod system_fonts;
 pub mod theme_preferences;

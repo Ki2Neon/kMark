@@ -20,7 +20,7 @@ pub(crate) use editor_preferences_store::{load_editor_preferences, persist_edito
 pub(crate) use file_system_asset_repository::FileSystemAssetRepository;
 pub(crate) use file_system_markdown_document_repository::FileSystemMarkdownDocumentRepository;
 pub(crate) use in_memory_open_request_queue::InMemoryOpenRequestQueue;
-pub(crate) use json_state_store::JsonStateStoreError;
+pub(crate) use json_state_store::{take_json_state_recovery_notices, JsonStateStoreError};
 pub(crate) use preview_preferences_store::{load_preview_preferences, persist_preview_preferences};
 pub(crate) use recent_files_store::{load_recent_files, persist_recent_files};
 pub(crate) use sub_window_registry::{

@@ -1,22 +1,18 @@
+import {
+  type ImportedMarkdownAssetPayload as ContractImportedMarkdownAssetPayload,
+  type MarkdownAssetDataPayload as ContractMarkdownAssetDataPayload,
+} from "../contracts/generated";
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand } from "./tauriCommand";
 
 const IMPORT_MARKDOWN_ASSET_FILES_COMMAND = "import_markdown_asset_files";
 const IMPORT_MARKDOWN_ASSET_DATA_COMMAND = "import_markdown_asset_data";
 
-export type ImportedMarkdownAssetPayload = {
-  readonly originalPath: string;
-  readonly copiedPath: string;
-  readonly relativePath: string;
-  readonly markdownText: string;
-  readonly assetKind: "image" | "video" | "model";
-};
-
-export type MarkdownAssetDataPayload = {
-  readonly fileName: string;
-  readonly mimeType: string;
-  readonly bytes: readonly number[];
-};
+export type ImportedMarkdownAssetPayload = Readonly<ContractImportedMarkdownAssetPayload>;
+export type MarkdownAssetDataPayload = Readonly<
+  Omit<ContractMarkdownAssetDataPayload, "bytes">
+  & { readonly bytes: readonly number[] }
+>;
 
 export async function importMarkdownAssetFiles(
   markdownFilePath: string,

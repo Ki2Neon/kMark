@@ -8,6 +8,8 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "build:wasm": "node tools/build-wasm.mjs",
+    "generate:contracts": "node tools/generate-contracts.mjs",
+    "check:contracts": "node tools/generate-contracts.mjs --check",
     "dev:vite": "vite",
     "dev": "pnpm run build:wasm && pnpm run dev:vite",
     "build:vite": "tsc && vite build",
@@ -16,7 +18,7 @@
     "check:boundaries": "node tools/architecture/check-boundaries.mjs",
     "check:cycles": "node tools/architecture/check-cycles.mjs",
     "preview": "vite preview",
-    "test:architecture": "node tools/architecture/check-cycles.mjs && node tools/architecture/check-boundaries.mjs",
+    "test:architecture": "node tools/architecture/check-cycles.mjs && node tools/architecture/check-boundaries.mjs && pnpm run check:contracts",
     "test:kmark-completion": "node tools/test-kmark-completion-context.mjs",
     "test:kmark-scope-display": "node tools/test-kmark-scope-display.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",

@@ -145,8 +145,8 @@ export function MarkdownEditorScreen({
     previewHtml,
     recentFiles,
     handleClearPendingExternalDocuments,
-    previewPageHtmls,
     previewPages,
+    renderedPreviewMode,
     defaultPreviewPageStyle,
     defaultPreviewTextStyle,
     confirmDiscard,
@@ -169,6 +169,7 @@ export function MarkdownEditorScreen({
   } = useMarkdownEditor(startupEditMode, {
     initialDocumentMode,
     previewColorKey: previewUsesAppThemeColors ? `app:${appThemeId}` : "fixed",
+    previewDisplayMode,
   });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -317,24 +318,30 @@ export function MarkdownEditorScreen({
   const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
   const subWindowStateRequest = useMemo(() => ({
     activeSourceLine: previewHighlightSourceLine,
-    defaultPageStyle: defaultPreviewPageStyle,
-    defaultTextStyle: defaultPreviewTextStyle,
-    displayMode: previewDisplayMode,
-    html: previewHtml,
-    pageHtmls: previewPageHtmls,
     browserFadeMs: subWindowBrowserFadeMs,
     pageTransitionFadeMs: subWindowPageTransitionFadeMs,
-    pages: previewPages,
+    preview: renderedPreviewMode === "standard"
+      ? {
+          mode: "standard" as const,
+          html: previewHtml,
+          defaultPageStyle: defaultPreviewPageStyle,
+          defaultTextStyle: defaultPreviewTextStyle,
+        }
+      : {
+          mode: "a4" as const,
+          pages: previewPages,
+          defaultPageStyle: defaultPreviewPageStyle,
+          defaultTextStyle: defaultPreviewTextStyle,
+        },
     title: normalizedFileName,
   }), [
     defaultPreviewPageStyle,
     defaultPreviewTextStyle,
     normalizedFileName,
-    previewDisplayMode,
     previewHighlightSourceLine,
     previewHtml,
-    previewPageHtmls,
     previewPages,
+    renderedPreviewMode,
     subWindowBrowserFadeMs,
     subWindowPageTransitionFadeMs,
   ]);
@@ -850,7 +857,7 @@ export function MarkdownEditorScreen({
                 <div className="workspace-grid__panel workspace-grid__panel--preview">
                   <MarkdownPreview
                     activeSourceLine={previewHighlightSourceLine}
-                    displayMode={previewDisplayMode}
+                    displayMode={renderedPreviewMode}
                     enableInteractiveViewportNavigation
                     html={previewHtml}
                     maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
@@ -861,7 +868,6 @@ export function MarkdownEditorScreen({
                     onZoomScaleChange={handlePreviewZoomScaleChange}
                     defaultPageStyle={defaultPreviewPageStyle}
                     defaultTextStyle={defaultPreviewTextStyle}
-                    pageHtmls={previewPageHtmls}
                     pages={previewPages}
                     previewFitMode={previewFitMode}
                     suppressTextSelectionOnDoubleClick
@@ -920,7 +926,7 @@ export function MarkdownEditorScreen({
                   ) : (
                     <MarkdownPreview
                       activeSourceLine={previewHighlightSourceLine}
-                      displayMode={previewDisplayMode}
+                      displayMode={renderedPreviewMode}
                       enableInteractiveViewportNavigation
                       html={previewHtml}
                       maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
@@ -931,7 +937,6 @@ export function MarkdownEditorScreen({
                       onZoomScaleChange={handlePreviewZoomScaleChange}
                       defaultPageStyle={defaultPreviewPageStyle}
                       defaultTextStyle={defaultPreviewTextStyle}
-                      pageHtmls={previewPageHtmls}
                       pages={previewPages}
                       previewFitMode={previewFitMode}
                       suppressTextSelectionOnDoubleClick

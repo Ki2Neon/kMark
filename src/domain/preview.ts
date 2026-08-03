@@ -86,6 +86,20 @@ export type RenderedPreviewPage = {
   readonly pageChromeConfig: PageChromeConfig;
 };
 
+export type RenderedPreview =
+  | {
+      readonly mode: "standard";
+      readonly html: string;
+      readonly defaultPageStyle: PageStyle;
+      readonly defaultTextStyle: PreviewTextStyle;
+    }
+  | {
+      readonly mode: "a4";
+      readonly pages: readonly RenderedPreviewPage[];
+      readonly defaultPageStyle: PageStyle;
+      readonly defaultTextStyle: PreviewTextStyle;
+    };
+
 export const PREVIEW_DISPLAY_MODE_OPTIONS: readonly PreviewDisplayModeOption[] = [
   { id: "standard", label: "通常" },
   { id: "a4", label: "用紙" },

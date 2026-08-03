@@ -2,7 +2,7 @@ import { type StoredEdit } from "../../domain/editor";
 import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
-import { type PageStyle, type PreviewTextStyle, type RenderedPreviewPage } from "../../domain/preview";
+import { type PreviewDisplayMode, type RenderedPreview } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
 import { type EditorSessionAction } from "./editorSessionAction";
 
@@ -72,13 +72,11 @@ export type RecentFileStore = {
 };
 
 export type MarkdownRenderer = {
-  render(content: string, filePath?: string | null): Promise<{
-    readonly html: string;
-    readonly pageHtmls: readonly string[];
-    readonly pages: readonly RenderedPreviewPage[];
-    readonly defaultPageStyle: PageStyle;
-    readonly defaultTextStyle: PreviewTextStyle;
-  }>;
+  render(
+    content: string,
+    filePath: string | null,
+    displayMode: PreviewDisplayMode,
+  ): Promise<RenderedPreview>;
 };
 
 export type MarkdownDocumentGateway = {

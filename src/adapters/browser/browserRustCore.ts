@@ -1,4 +1,8 @@
 import { type EditorSessionAction } from "../../application/editorSession/editorSessionAction";
+import {
+  type EditorStateActionPayload,
+  type EditorStatePayload,
+} from "../../contracts/generated";
 import { type StoredEdit, type EditorState, type EditorStats } from "../../domain/editor";
 import { type EditorPreferences, type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewPreferences } from "../../domain/preview";
@@ -64,8 +68,10 @@ export function createStartupEditorState(
 }
 
 export function reduceEditorState(state: EditorState, action: EditorSessionAction): EditorState {
-  return parseJsonPayload<EditorState>(
-    reduceEditorStateJsonWithWasmSync(JSON.stringify(state), JSON.stringify(action)),
+  const contractState: EditorStatePayload = state;
+  const contractAction: EditorStateActionPayload = action;
+  return parseJsonPayload<EditorStatePayload>(
+    reduceEditorStateJsonWithWasmSync(JSON.stringify(contractState), JSON.stringify(contractAction)),
   );
 }
 

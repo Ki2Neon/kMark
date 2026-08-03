@@ -6,10 +6,16 @@ export type EditorSessionAction =
   | {
       readonly type: "editor/documentLoaded";
       readonly fileName: string;
+      readonly filePath: string | null;
       readonly content: string;
       readonly loadedAt: number | null;
     }
   | { readonly type: "editor/documentReset" }
-  | { readonly type: "editor/saveSucceeded"; readonly fileName: string; readonly savedAt: number }
+  | {
+      readonly type: "editor/saveSucceeded";
+      readonly fileName: string;
+      readonly filePath: string | null;
+      readonly savedAt: number;
+    }
   | { readonly type: "editor/errorRaised"; readonly message: string }
   | { readonly type: "editor/errorCleared" };

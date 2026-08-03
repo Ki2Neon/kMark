@@ -7,6 +7,7 @@ import { MarkdownEditorScreen } from "./ui/screens/MarkdownEditorScreen";
 import { SubWindowScreen } from "./ui/screens/SubWindowScreen";
 import { type InitialEditorDocumentMode } from "./ui/hooks/useMarkdownEditor";
 import { resolveBrowserSubWindowTarget } from "./adapters/browser/browserSubWindowGateway";
+import { useStateStorageIssues } from "./ui/hooks/useStateStorageIssues";
 
 function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
   if (typeof window === "undefined") {
@@ -23,6 +24,8 @@ function detectSubWindowTarget(): { readonly stateKey: string | null } | null {
 }
 
 function App() {
+  const fatalStateStorageError = useStateStorageIssues();
+
   const {
     appThemeId,
     isReady: isThemeReady,
@@ -59,6 +62,15 @@ function App() {
     previewUsesAppThemeColors,
   });
   useBrowserShortcutGuard();
+
+  if (fatalStateStorageError !== null) {
+    return (
+      <main className="state-storage-fatal" role="alert">
+        <h1>保存データ互換性エラー</h1>
+        <p>{fatalStateStorageError}</p>
+      </main>
+    );
+  }
 
   if (!isThemeReady || !isEditorPreferencesReady) {
     return null;

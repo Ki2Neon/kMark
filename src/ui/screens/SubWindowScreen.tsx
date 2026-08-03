@@ -521,8 +521,8 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     fitMode: previewFitMode,
     zoomScale: previewZoomScale,
   } = usePreviewInteraction({
-    contextMenuExtraItemCount: 1 + (state?.displayMode === "a4" ? 1 : 0) + sourceOptions.length,
-    displayMode: state?.displayMode ?? "standard",
+    contextMenuExtraItemCount: 1 + (state?.preview.mode === "a4" ? 1 : 0) + sourceOptions.length,
+    displayMode: state?.preview.mode ?? "standard",
     initialFitMode: "page",
     isAvailable: true,
   });
@@ -794,7 +794,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
       menuRef={previewContextMenuRef}
       onAllModelCamerasReset={handleAllModelCamerasReset}
       onFit={handlePreviewZoomFit}
-      onFullFit={state?.displayMode === "a4" ? handlePreviewZoomFullFit : undefined}
+      onFullFit={state?.preview.mode === "a4" ? handlePreviewZoomFullFit : undefined}
       onFullscreenToggle={handleFullscreenToggle}
       onModelCameraReset={handleModelCameraReset}
       onSourceSelect={handleSourceSelect}
@@ -837,19 +837,18 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
       <MarkdownPreview
         activeSourceLine={state.activeSourceLine}
         activeSourceLineScrollMode="page"
-        displayMode={state.displayMode}
+        displayMode={state.preview.mode}
         enableInteractiveViewportNavigation
-        html={state.html}
+        html={state.preview.mode === "standard" ? state.preview.html : ""}
         maximumZoomScale={MAX_PREVIEW_ZOOM_SCALE}
         minimumZoomScale={MIN_PREVIEW_ZOOM_SCALE}
         onOpenExternalLink={handlePreviewExternalLinkOpen}
         onPreviewContextMenu={handlePreviewContextMenu}
         onSourceLineDoubleClick={handlePreviewSourceLineDoubleClick}
         onZoomScaleChange={handlePreviewZoomScaleChange}
-        defaultPageStyle={state.defaultPageStyle}
-        defaultTextStyle={state.defaultTextStyle}
-        pageHtmls={state.pageHtmls}
-        pages={state.pages}
+        defaultPageStyle={state.preview.defaultPageStyle}
+        defaultTextStyle={state.preview.defaultTextStyle}
+        pages={state.preview.mode === "a4" ? state.preview.pages : []}
         pageTransitionFadeMs={state.pageTransitionFadeMs}
         previewFitMode={previewFitMode}
         previewNavigationRequest={previewNavigationRequest}

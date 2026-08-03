@@ -1971,6 +1971,7 @@ name = "kmark"
 version = "1.0.0"
 dependencies = [
  "fs2",
+ "kmark-contract",
  "kmark-core",
  "serde",
  "serde_json",
@@ -1980,6 +1981,14 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "kmark-contract"
+version = "0.1.0"
+dependencies = [
+ "kmark-core",
+ "serde",
 ]
 
 [[package]]
