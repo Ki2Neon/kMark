@@ -581,6 +581,7 @@ function resolveMermaidBlockBackground(
   surface: MermaidPreviewSurface,
 ): { readonly surface: string; readonly svg: string } {
   const background = params.background;
+  const previewSurfaceBackground = shouldUsePaperMermaidColors(surface) ? "#ffffff" : "var(--preview-surface)";
 
   if (background === "none") {
     return { surface: "transparent", svg: "transparent" };
@@ -588,15 +589,18 @@ function resolveMermaidBlockBackground(
   if (background === "transparent") {
     return {
       surface: "transparent",
-      svg: expectsGantt ? "rgba(255, 255, 255, 0.92)" : "transparent",
+      svg: expectsGantt ? previewSurfaceBackground : "transparent",
     };
   }
-  if (background !== undefined && background !== "paper") {
+  if (background === "paper") {
+    return { surface: "#ffffff", svg: "#ffffff" };
+  }
+  if (background !== undefined) {
     return { surface: background, svg: background };
   }
 
-  if (expectsGantt || surface === "paper") {
-    return { surface: "#ffffff", svg: "#ffffff" };
+  if (expectsGantt) {
+    return { surface: previewSurfaceBackground, svg: previewSurfaceBackground };
   }
 
   return { surface: "transparent", svg: "transparent" };

@@ -49,11 +49,7 @@ const LOW_CHROMA_ACCENTS = [
 const HEX_COLOR_PATTERN = /^#([0-9a-f]{6})$/iu;
 const MAX_THEME_SATURATION = 0.42;
 
-export function shouldUsePaperMermaidColors(surface: KmarkMermaidPreviewSurface = "standard"): boolean {
-  if (surface === "paper") {
-    return true;
-  }
-
+export function shouldUsePaperMermaidColors(_surface: KmarkMermaidPreviewSurface = "standard"): boolean {
   return typeof document === "undefined" || document.documentElement.dataset.previewColors !== "app";
 }
 

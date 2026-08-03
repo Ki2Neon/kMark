@@ -23,13 +23,14 @@ export type InitialEditorDocumentMode = "stored" | "new-untitled";
 
 type UseMarkdownEditorOptions = {
   readonly initialDocumentMode?: InitialEditorDocumentMode;
+  readonly previewColorKey?: string;
 };
 
 export function useMarkdownEditor(
   startupEditMode: StartupEditMode,
   options: UseMarkdownEditorOptions = {},
 ) {
-  const { initialDocumentMode = "stored" } = options;
+  const { initialDocumentMode = "stored", previewColorKey = "" } = options;
   const renderRequestIdRef = useRef(0);
   const recentFilesRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
@@ -189,7 +190,7 @@ export function useMarkdownEditor(
     return () => {
       disposed = true;
     };
-  }, [controller, currentDocumentFilePath, isReady, state.content, store]);
+  }, [controller, currentDocumentFilePath, isReady, previewColorKey, state.content, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
