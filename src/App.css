@@ -303,6 +303,20 @@ input:focus-visible,
   user-select: none;
 }
 
+.editor-shell__mobile-nav,
+.editor-shell__toast,
+.workspace-grid__divider,
+.menu-section,
+.preview-context-menu,
+.unsaved-exit-dialog,
+.mobile-input-helper-bar {
+  user-select: none;
+}
+
+.menu-section :where(input, select, textarea) {
+  user-select: text;
+}
+
 .editor-shell--mobile {
   padding-top: var(--mobile-nav-height);
 }
@@ -1077,6 +1091,7 @@ input:focus-visible,
   min-height: 0;
   overflow: auto;
   background: var(--preview-surface);
+  user-select: none;
 }
 
 .preview-section__body[data-interactive-pan="true"] {

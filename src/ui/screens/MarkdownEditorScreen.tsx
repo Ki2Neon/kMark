@@ -861,6 +861,7 @@ export function MarkdownEditorScreen({
                     pageHtmls={previewPageHtmls}
                     pages={previewPages}
                     previewFitMode={previewFitMode}
+                    suppressTextSelectionOnDoubleClick
                     zoomScale={previewZoomScale}
                   />
                 </div>
@@ -930,6 +931,7 @@ export function MarkdownEditorScreen({
                       pageHtmls={previewPageHtmls}
                       pages={previewPages}
                       previewFitMode={previewFitMode}
+                      suppressTextSelectionOnDoubleClick
                       zoomScale={previewZoomScale}
                     />
                   )}
