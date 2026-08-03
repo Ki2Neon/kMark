@@ -166,7 +166,10 @@ export function MarkdownEditorScreen({
     handleErrorRaise,
     handleImportDroppedAssets,
     handleImportPastedAssets,
-  } = useMarkdownEditor(startupEditMode, { initialDocumentMode });
+  } = useMarkdownEditor(startupEditMode, {
+    initialDocumentMode,
+    previewColorKey: previewUsesAppThemeColors ? `app:${appThemeId}` : "fixed",
+  });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editSelectionRequestIdRef = useRef(0);
