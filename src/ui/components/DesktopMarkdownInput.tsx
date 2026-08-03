@@ -1019,6 +1019,10 @@ function DesktopMarkdownInputComponent({
       backgroundColor: "transparent",
       border: "none",
       color: "var(--text-soft)",
+      userSelect: "none",
+    },
+    ".cm-gutter, .cm-lineNumbers, .cm-lineNumbers .cm-gutterElement": {
+      userSelect: "none",
     },
     ".cm-line": {
       padding: "0",
