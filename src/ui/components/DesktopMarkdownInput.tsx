@@ -689,6 +689,7 @@ type DesktopMarkdownInputProps = {
   readonly content: string;
   readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
+  readonly lineWrappingEnabled: boolean;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
@@ -709,6 +710,7 @@ function DesktopMarkdownInputComponent({
   content,
   currentDocumentFilePath = null,
   editFontId,
+  lineWrappingEnabled,
   multiCursorModifier,
   showLineNumbers,
   onAssetDrop,
@@ -1113,7 +1115,7 @@ function DesktopMarkdownInputComponent({
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       KMARK_SCOPE_DISPLAY_EXTENSION,
       Prec.highest(assetPasteExtension),
-      EditorView.lineWrapping,
+      ...(lineWrappingEnabled ? [EditorView.lineWrapping] : []),
       EDITOR_CONTENT_ATTRIBUTES,
       MARKDOWN_SELECTION_WRAP_EXTENSION,
       KMARK_SHORTCUT_INSERTION_EXTENSION,
@@ -1132,7 +1134,7 @@ function DesktopMarkdownInputComponent({
       )),
       editorTheme,
     ];
-  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, multiCursorModifier, showLineNumbers]);
+  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, lineWrappingEnabled, multiCursorModifier, showLineNumbers]);
 
   return (
     <>

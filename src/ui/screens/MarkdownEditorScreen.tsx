@@ -64,6 +64,7 @@ type MarkdownEditorScreenProps = {
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
   readonly initialDocumentMode: InitialEditorDocumentMode;
+  readonly lineWrappingEnabled: boolean;
   readonly systemFontSizePx: SystemFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
@@ -73,6 +74,7 @@ type MarkdownEditorScreenProps = {
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
   readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
+  readonly onLineWrappingEnabledChange: (lineWrappingEnabled: boolean) => void;
   readonly onSystemFontSizeChange: (systemFontSizePx: SystemFontSizePx) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
@@ -111,6 +113,7 @@ export function MarkdownEditorScreen({
   editFontId,
   editFontSizePx,
   initialDocumentMode,
+  lineWrappingEnabled,
   systemFontSizePx,
   multiCursorModifier,
   showLineNumbers,
@@ -120,6 +123,7 @@ export function MarkdownEditorScreen({
   onAppThemeChange,
   onEditFontChange,
   onEditFontSizeChange,
+  onLineWrappingEnabledChange,
   onSystemFontSizeChange,
   onMultiCursorModifierChange,
   onPreviewUsesAppThemeColorsChange,
@@ -750,11 +754,13 @@ export function MarkdownEditorScreen({
     systemFontSizePx,
     isPreviewVisible,
     layoutMode,
+    lineWrappingEnabled,
     multiCursorModifier,
     onAppFontChange,
     onAppThemeChange,
     onEditFontChange,
     onEditFontSizeChange,
+    onLineWrappingEnabledChange,
     onSystemFontSizeChange,
     onLayoutModeChange: handleLayoutModeChange,
     onMultiCursorModifierChange,
@@ -824,6 +830,7 @@ export function MarkdownEditorScreen({
                 currentDocumentFilePath={currentDocumentFilePath}
                 editFontId={editFontId}
                 layoutMode={layoutMode}
+                lineWrappingEnabled={lineWrappingEnabled}
                 multiCursorModifier={multiCursorModifier}
                 showLineNumbers={showLineNumbers}
                 onAssetDrop={handleImportDroppedAssets}
@@ -913,6 +920,7 @@ export function MarkdownEditorScreen({
                       currentDocumentFilePath={currentDocumentFilePath}
                       editFontId={editFontId}
                       layoutMode={layoutMode}
+                      lineWrappingEnabled={lineWrappingEnabled}
                       multiCursorModifier={multiCursorModifier}
                       showLineNumbers={showLineNumbers}
                       onAssetDrop={handleImportDroppedAssets}

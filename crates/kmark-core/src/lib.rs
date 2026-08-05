@@ -21,8 +21,8 @@ pub use editor_draft::{ensure_markdown_file_name, DEFAULT_FILE_NAME};
 pub use editor_preferences::{
     resolve_app_font_family, resolve_edit_font_family, sanitize_font_preference, AppFontId,
     EditFontId, EditorPreferences, MultiCursorModifier, StartupEditMode, DEFAULT_EDIT_FONT_SIZE_PX,
-    DEFAULT_SYSTEM_FONT_SIZE_PX, MAX_EDIT_FONT_SIZE_PX, MAX_SYSTEM_FONT_SIZE_PX,
-    MIN_EDIT_FONT_SIZE_PX, MIN_SYSTEM_FONT_SIZE_PX,
+    DEFAULT_LINE_WRAPPING_ENABLED, DEFAULT_SYSTEM_FONT_SIZE_PX, MAX_EDIT_FONT_SIZE_PX,
+    MAX_SYSTEM_FONT_SIZE_PX, MIN_EDIT_FONT_SIZE_PX, MIN_SYSTEM_FONT_SIZE_PX,
 };
 pub use editor_state::{
     create_blank_editor_state, create_initial_editor_state, create_startup_editor_state,

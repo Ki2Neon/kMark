@@ -488,6 +488,8 @@ pub struct EditorPreferencesPayload {
     pub system_font_size_px: u32,
     pub edit_font_size_px: u32,
     pub multi_cursor_modifier: String,
+    #[serde(default = "default_line_wrapping_enabled")]
+    pub line_wrapping_enabled: bool,
     pub show_line_numbers: bool,
     pub startup_edit_mode: String,
     pub windows_startup_tray_resident_enabled: bool,
@@ -721,6 +723,7 @@ impl From<EditorPreferencesPayload> for EditorPreferences {
             Some(value.system_font_size_px),
             Some(value.edit_font_size_px),
             Some(&value.multi_cursor_modifier),
+            Some(value.line_wrapping_enabled),
             Some(value.show_line_numbers),
             Some(&value.startup_edit_mode),
             Some(value.windows_startup_tray_resident_enabled),
@@ -736,6 +739,7 @@ impl From<&EditorPreferences> for EditorPreferencesPayload {
             system_font_size_px: value.system_font_size_px(),
             edit_font_size_px: value.edit_font_size_px(),
             multi_cursor_modifier: value.multi_cursor_modifier().as_str().to_owned(),
+            line_wrapping_enabled: value.line_wrapping_enabled(),
             show_line_numbers: value.show_line_numbers(),
             startup_edit_mode: value.startup_edit_mode().as_str().to_owned(),
             windows_startup_tray_resident_enabled: value.windows_startup_tray_resident_enabled(),
@@ -898,4 +902,8 @@ impl From<TableDiagnosticKind> for TableDiagnosticKindPayload {
 
 fn default_system_font_size_px() -> u32 {
     kmark_core::DEFAULT_SYSTEM_FONT_SIZE_PX
+}
+
+fn default_line_wrapping_enabled() -> bool {
+    kmark_core::DEFAULT_LINE_WRAPPING_ENABLED
 }
