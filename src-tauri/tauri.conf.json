@@ -10,16 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "kMark",
-        "width": 1280,
-        "height": 860,
-        "visible": false,
-        "minWidth": 50,
-        "minHeight": 50
-      }
-    ],
+    "windows": [],
     "security": {
       "assetProtocol": {
         "enable": true,

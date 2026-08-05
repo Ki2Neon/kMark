@@ -21,6 +21,8 @@
   - `src/application/desktopWorkspaceSplit/*`
   - `DesktopWorkspaceSplitController` : split clamp keyboard pointer ratio rule
   - `AppShellController` : document theme同期
+  - `src-tauri/src/usecase/app_exit_coordinator.rs`
+  - `AppExitCoordinator` : editor Window保存確認を決定順で逐次処理 `begin -> complete | cancel -> exit`
   - `EditorState` : `content/fileName/filePath/isDirty/lastSavedAt/errorMessage` 正準State
   - document path変更 : Rust `EditorStateAction` Reducer経由のみ
 - `ui`
@@ -42,6 +44,9 @@
   - `src-tauri/src/commands/*`
   - IPC DTO Result Error string 公開
   - `render_markdown_preview` : Rust render command
+  - Window close : `destroy` 固定 Tray resident ProcessとWebView lifecycleを分離
+  - Tray Quit : editor Windowを再表示せず `AppExitCoordinator` 経由で全Window確認 Dirty Windowのみ表示
+  - startup : static hidden Window禁止 通常起動またはTray intent時のみWindow生成
   - UseCase Domain direct UI露出 禁止
 
 # IPC Contract

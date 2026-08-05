@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  cancelAppExit,
   completeAppExit,
   completeWindowClose,
   type ExitRequestKind,
   listenForAppExitRequests,
   listenForWindowCloseRequests,
+  revealAppExitConfirmation,
 } from "../../infra/appExit";
 import { isTauri } from "../../runtime/runtime";
 
@@ -98,6 +100,12 @@ export function useConfirmSaveOnExit({
 
     pendingRequestRef.current = request;
     setPendingRequest(request);
+
+    if (request === "app-exit") {
+      void revealAppExitConfirmation().catch((error) => {
+        onErrorRaiseRef.current(toExitErrorMessage(error));
+      });
+    }
   }, [completeExitRequest]);
 
   useEffect(() => {
@@ -164,8 +172,15 @@ export function useConfirmSaveOnExit({
       return;
     }
 
+    const request = pendingRequestRef.current;
     pendingRequestRef.current = null;
     setPendingRequest(null);
+
+    if (request === "app-exit") {
+      void cancelAppExit().catch((error) => {
+        onErrorRaiseRef.current(toExitErrorMessage(error));
+      });
+    }
   }, []);
 
   const handleDiscard = useCallback(() => {

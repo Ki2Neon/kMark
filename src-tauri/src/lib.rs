@@ -33,16 +33,15 @@ use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RecentFiles, StoredEdit,
     ThemePreferences,
 };
-use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests};
+use usecase::{collect_markdown_file_paths, enqueue_markdown_open_requests, AppExitCoordinator};
 
 pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ICON_ID: &str = "main-tray";
 const TRAY_QUIT_MENU_ITEM_ID: &str = "tray-quit";
-const TRAY_UNTITLED_WINDOW_LABEL_PREFIX: &str = "tray-untitled";
+pub(crate) const TRAY_UNTITLED_WINDOW_LABEL_PREFIX: &str = "tray-untitled";
 pub(crate) const SUB_WINDOW_LABEL_PREFIX: &str = "subwindow-";
 const TRAY_UNTITLED_WINDOW_URL: &str = "index.html?kmarkInitialDocument=new-untitled";
 const AUTOSTART_HIDDEN_ARG: &str = "--autostart-hidden";
-const APP_EXIT_REQUESTED_EVENT: &str = "app-exit-requested";
 const WINDOW_CLOSE_REQUESTED_EVENT: &str = "window-close-requested";
 
 fn halt_for_unsupported_state_schema(app: &tauri::App, error: &JsonStateStoreError) -> bool {
@@ -61,7 +60,13 @@ fn halt_for_unsupported_state_schema(app: &tauri::App, error: &JsonStateStoreErr
         ))
         .title("kMark - 保存データ互換性エラー")
         .kind(MessageDialogKind::Error)
-        .show(move |_| app_handle.exit(1));
+        .show(move |_| {
+            app_handle
+                .state::<AppState>()
+                .should_exit
+                .store(true, Ordering::SeqCst);
+            app_handle.exit(1);
+        });
     true
 }
 
@@ -86,6 +91,7 @@ pub(crate) struct AppState {
     pub(crate) recent_files: Mutex<RecentFiles>,
     pub(crate) sub_window_sources: Mutex<HashMap<String, dto::SubWindowStatePayload>>,
     pub(crate) sub_window_browser_tokens: Mutex<HashMap<String, String>>,
+    pub(crate) app_exit_coordinator: Mutex<AppExitCoordinator>,
     pub(crate) should_exit: AtomicBool,
     pub(crate) next_untitled_window_sequence: AtomicU64,
     pub(crate) next_sub_window_sequence: AtomicU64,
@@ -111,6 +117,17 @@ fn should_start_hidden() -> bool {
     env::args_os()
         .skip(1)
         .any(|arg| arg == OsStr::new(AUTOSTART_HIDDEN_ARG))
+}
+
+fn create_main_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::WebviewWindow<R>> {
+    WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
+        .title("kMark")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(50.0, 50.0)
+        .visible(false)
+        .build()
 }
 
 fn create_new_untitled_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
@@ -140,6 +157,10 @@ fn next_untitled_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> S
 }
 
 fn request_new_untitled_window<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) {
+    if commands::app_exit::is_app_exit_in_progress(app) {
+        return;
+    }
+
     let app_handle = app.clone();
 
     std::thread::spawn(move || {
@@ -147,16 +168,6 @@ fn request_new_untitled_window<R: tauri::Runtime + 'static>(app: &tauri::AppHand
             eprintln!("failed to create tray untitled window: {error}");
         }
     });
-}
-
-fn request_app_exit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    focus_main_window(app);
-
-    if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        if let Err(error) = main_window.emit_to(MAIN_WINDOW_LABEL, APP_EXIT_REQUESTED_EVENT, ()) {
-            eprintln!("failed to request app exit confirmation: {error}");
-        }
-    }
 }
 
 #[cfg(desktop)]
@@ -176,7 +187,7 @@ fn create_tray<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) -> tauri:
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             TRAY_QUIT_MENU_ITEM_ID => {
-                request_app_exit(app);
+                commands::app_exit::request_app_exit(app);
             }
             _ => {}
         })
@@ -226,7 +237,7 @@ fn handle_tray_command<R: tauri::Runtime>(app: &tauri::AppHandle<R>, command: Tr
             // Keep stale commands from older versions inert instead of restoring hidden windows.
         }
         TrayCommandKind::QuitAll => {
-            request_app_exit(app);
+            commands::app_exit::request_app_exit(app);
         }
     }
 }
@@ -435,6 +446,11 @@ pub fn run() {
         })
         .setup(|app| {
             let app_handle = app.handle().clone();
+            let start_hidden = should_start_hidden();
+
+            if !start_hidden {
+                create_main_window(&app_handle)?;
+            }
 
             if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 if let Err(error) = restore_window_state(&app_handle, &main_window) {
@@ -560,15 +576,17 @@ pub fn run() {
 
             handle_startup_markdown_open_requests(&app_handle);
 
-            if !should_start_hidden() {
+            if !start_hidden {
                 focus_main_window(&app_handle);
             }
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_exit::cancel_app_exit,
             commands::app_exit::complete_app_exit,
             commands::app_exit::complete_window_close,
+            commands::app_exit::reveal_app_exit_confirmation,
             commands::asset_import::import_markdown_asset_data,
             commands::asset_import::import_markdown_asset_files,
             commands::asset_import::list_markdown_path_suggestions,
@@ -612,7 +630,20 @@ pub fn run() {
             commands::theme_preferences::set_theme_preferences,
         ]);
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+            let should_exit = app_handle
+                .state::<AppState>()
+                .should_exit
+                .load(Ordering::SeqCst);
+
+            if code.is_none() && app_handle.webview_windows().is_empty() && !should_exit {
+                api.prevent_exit();
+            }
+        }
+    });
 }

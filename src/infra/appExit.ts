@@ -6,6 +6,18 @@ const WINDOW_CLOSE_REQUESTED_EVENT = "window-close-requested";
 
 export type ExitRequestKind = "app-exit" | "window-close";
 
+export async function cancelAppExit(): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+
+  await invokeTauriCommand<void>(
+    "cancel_app_exit",
+    {},
+    "アプリの終了キャンセルに失敗しました。",
+  );
+}
+
 export async function completeAppExit(): Promise<void> {
   if (!isTauri()) {
     return;
@@ -27,6 +39,18 @@ export async function completeWindowClose(): Promise<void> {
     "complete_window_close",
     {},
     "ウィンドウを閉じられませんでした。",
+  );
+}
+
+export async function revealAppExitConfirmation(): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+
+  await invokeTauriCommand<void>(
+    "reveal_app_exit_confirmation",
+    {},
+    "終了確認ウィンドウを表示できませんでした。",
   );
 }
 

@@ -1,3 +1,4 @@
+mod app_exit_coordinator;
 mod collect_markdown_file_paths;
 mod enqueue_markdown_open_requests;
 mod import_markdown_assets;
@@ -7,6 +8,7 @@ mod prepare_markdown_model_assets;
 mod read_markdown_document;
 mod write_markdown_document;
 
+pub(crate) use app_exit_coordinator::{AppExitAction, AppExitCoordinator};
 pub use collect_markdown_file_paths::collect_markdown_file_paths;
 pub use enqueue_markdown_open_requests::enqueue_markdown_open_requests;
 pub use import_markdown_assets::{
