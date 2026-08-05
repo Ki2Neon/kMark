@@ -101,6 +101,7 @@ const PX_FONT_SIZE_PATTERN = /^\s*(\d+(?:\.\d+)?)(?:px)?\s*$/iu;
 const NUMBER_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*$/u;
 const CSS_UNSAFE_VALUE_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\(|[;{}<>])/iu;
 const GANTT_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-post-style";
+const STATE_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-state-post-style";
 const GANTT_BAR_TEXT_COLOR = "#111111";
 const GANTT_BAR_BORDER_COLOR = "#111111";
 const DEFAULT_GANTT_FONT_SIZE = 10;
@@ -681,6 +682,65 @@ function isMermaidGanttSvg(svgElement: SVGElement): boolean {
     || svgElement.querySelector("text.taskText, text[class*=\"taskText\"]") !== null;
 }
 
+function isMermaidStateDiagramSvg(svgElement: SVGElement): boolean {
+  return svgElement.getAttribute("aria-roledescription")?.toLowerCase().startsWith("state") === true
+    || svgElement.querySelector(".statediagram-state, circle.state-start, circle.state-end") !== null;
+}
+
+function injectMermaidStatePostStyle(svgElement: SVGElement, config: MermaidConfig): void {
+  if (!isMermaidStateDiagramSvg(svgElement)) {
+    return;
+  }
+
+  const svgId = svgElement.id.trim();
+
+  if (svgId.length === 0 || /[^A-Za-z0-9_-]/u.test(svgId)) {
+    return;
+  }
+
+  const contrastColor = resolveThemeColor(
+    config,
+    "transitionColor",
+    resolveThemeColor(config, "textColor", "#111111"),
+  );
+  const ownerDocument = svgElement.ownerDocument;
+  const styleElement = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "style");
+
+  svgElement.querySelector(`style[${STATE_POST_STYLE_ATTRIBUTE}]`)?.remove();
+  styleElement.setAttribute(STATE_POST_STYLE_ATTRIBUTE, "");
+  styleElement.textContent = `
+#${svgId} path.transition {
+  stroke: ${contrastColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} marker[id*="-barbEnd"] path {
+  fill: ${contrastColor} !important;
+  stroke: ${contrastColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} circle.state-start {
+  fill: ${contrastColor} !important;
+  stroke: ${contrastColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} circle.state-end {
+  fill: ${contrastColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} .node > g.outer-path > path {
+  stroke: ${contrastColor} !important;
+  opacity: 1 !important;
+}
+#${svgId} .node > g.outer-path > g path {
+  fill: ${contrastColor} !important;
+  stroke: ${contrastColor} !important;
+  opacity: 1 !important;
+}
+`;
+
+  svgElement.append(styleElement);
+}
+
 function findMermaidGanttSectionBackgroundGroup(svgElement: SVGElement): Element | null {
   return Array.from(svgElement.children).find((child) => child.querySelector(":scope > rect.section") !== null) ?? null;
 }
@@ -1074,6 +1134,7 @@ function parseSafeMermaidSvg(
   normalizeMermaidGanttLayerOrder(importedSvg);
   normalizeMermaidGanttTaskTextVerticalAlignment(importedSvg);
   injectMermaidGanttPostStyle(importedSvg, config);
+  injectMermaidStatePostStyle(importedSvg, config);
   forceMermaidGanttBarBorderColor(importedSvg);
   forceMermaidGanttBarTextColor(importedSvg);
   normalizeMermaidSvgSize(importedSvg, sizing);
