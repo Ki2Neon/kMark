@@ -1,7 +1,10 @@
 export type KmarkMermaidPreviewSurface = "standard" | "paper";
-export type KmarkMermaidThemeVariables = Record<string, string>;
+export type KmarkMermaidThemeValue = string | number | boolean | KmarkMermaidThemeVariables;
+export interface KmarkMermaidThemeVariables {
+  [key: string]: KmarkMermaidThemeValue;
+}
 
-type KmarkMermaidThemeTokens = {
+export type KmarkMermaidThemeTokens = {
   readonly surface: string;
   readonly text: string;
   readonly textSoft: string;
@@ -48,6 +51,11 @@ const LOW_CHROMA_ACCENTS = [
 
 const HEX_COLOR_PATTERN = /^#([0-9a-f]{6})$/iu;
 const MAX_THEME_SATURATION = 0.42;
+const MIN_GRAPHIC_CONTRAST_RATIO = 3;
+const MIN_TEXT_CONTRAST_RATIO = 4.5;
+const CONTRAST_SEARCH_STEPS = 255;
+const BLACK = "#000000";
+const WHITE = "#ffffff";
 
 export function shouldUsePaperMermaidColors(_surface: KmarkMermaidPreviewSurface = "standard"): boolean {
   return typeof document === "undefined" || document.documentElement.dataset.previewColors !== "app";
@@ -76,43 +84,65 @@ function resolveKmarkMermaidThemeTokens(surface: KmarkMermaidPreviewSurface): Km
   };
 }
 
-function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): KmarkMermaidThemeVariables {
+export function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): KmarkMermaidThemeVariables {
   const surface = limitSaturation(tokens.surface);
-  const text = limitSaturation(tokens.text);
+  const preferredText = limitSaturation(tokens.text);
   const textSoft = limitSaturation(tokens.textSoft);
   const border = limitSaturation(tokens.border);
   const focus = limitSaturation(tokens.focus);
   const danger = limitSaturation(tokens.danger);
   const isDark = relativeLuminance(surface) < 0.38;
+  const text = readableTextColor([surface], preferredText);
   const panel = mixHex(surface, text, isDark ? 0.10 : 0.04);
   const panelAlt = mixHex(surface, text, isDark ? 0.16 : 0.07);
   const panelStrong = mixHex(surface, text, isDark ? 0.26 : 0.13);
-  const line = mixHex(surface, textSoft, isDark ? 0.58 : 0.42);
-  const lineStrong = mixHex(surface, border, isDark ? 0.85 : 0.92);
   const primary = softenedMix(surface, focus, isDark ? 0.30 : 0.17);
   const secondary = softenedMix(surface, LOW_CHROMA_ACCENTS[1], isDark ? 0.54 : 0.28);
   const tertiary = softenedMix(surface, LOW_CHROMA_ACCENTS[2], isDark ? 0.50 : 0.22);
   const dangerFill = softenedMix(surface, danger, isDark ? 0.28 : 0.14);
-  const dangerBorder = softenedMix(text, danger, 0.18);
+  const structuralBackgrounds = [surface, panel, panelAlt, panelStrong, primary, secondary, tertiary, dangerFill];
+  const structuralTarget = preferredContrastEndpoint(structuralBackgrounds);
+  const line = ensureMinimumContrast(textSoft, structuralBackgrounds, structuralTarget, MIN_GRAPHIC_CONTRAST_RATIO);
+  const lineStrong = ensureMinimumContrast(border, structuralBackgrounds, structuralTarget, MIN_GRAPHIC_CONTRAST_RATIO);
+  const dangerBorder = ensureMinimumContrast(
+    softenedMix(text, danger, 0.18),
+    [surface, dangerFill],
+    structuralTarget,
+    MIN_GRAPHIC_CONTRAST_RATIO,
+  );
   const chartColors = LOW_CHROMA_ACCENTS.map((accent) => (
-    softenedMix(surface, accent, isDark ? 0.62 : 0.38)
+    ensureChartColorContrast(
+      softenedMix(surface, accent, isDark ? 0.62 : 0.38),
+      surface,
+    )
   ));
-  const chartText = isDark ? "#ffffff" : "#111111";
+  const chartPeerColors = chartColors.map((color) => (
+    ensureMinimumContrast(
+      mixHex(color, text, isDark ? 0.16 : 0.10),
+      [surface, BLACK],
+      WHITE,
+      MIN_GRAPHIC_CONTRAST_RATIO,
+    )
+  ));
+  const chartText = BLACK;
   const themeVariables: KmarkMermaidThemeVariables = {
+    darkMode: isDark,
+    useGradient: false,
     background: surface,
     mainBkg: panel,
     nodeBkg: panel,
     nodeBorder: lineStrong,
     primaryColor: primary,
-    primaryTextColor: contrastTextColor(primary),
+    primaryTextColor: readableTextColor([primary], text),
     primaryBorderColor: lineStrong,
     secondaryColor: secondary,
-    secondaryTextColor: contrastTextColor(secondary),
+    secondaryTextColor: readableTextColor([secondary], text),
     secondaryBorderColor: lineStrong,
     tertiaryColor: tertiary,
-    tertiaryTextColor: contrastTextColor(tertiary),
+    tertiaryTextColor: readableTextColor([tertiary], text),
     tertiaryBorderColor: lineStrong,
     textColor: text,
+    nodeTextColor: text,
     titleColor: text,
     lineColor: lineStrong,
     defaultLinkColor: lineStrong,
@@ -122,7 +152,7 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     note: tertiary,
     noteBorderColor: line,
     noteBkgColor: tertiary,
-    noteTextColor: contrastTextColor(tertiary),
+    noteTextColor: readableTextColor([tertiary], text),
     clusterBkg: panel,
     clusterBorder: line,
     edgeLabelBackground: surface,
@@ -139,6 +169,8 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     activationBorderColor: lineStrong,
     activationBkgColor: panelStrong,
     sequenceNumberColor: text,
+    personBorder: lineStrong,
+    personBkg: panel,
     stateBkg: panel,
     stateBorder: lineStrong,
     stateLabelColor: text,
@@ -147,8 +179,15 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     transitionLabelColor: text,
     specialStateColor: text,
     innerEndBackground: text,
+    compositeBackground: surface,
+    compositeTitleBackground: panel,
+    compositeBorder: lineStrong,
+    errorBkgColor: dangerFill,
+    errorTextColor: readableTextColor([dangerFill], text),
     classText: text,
     relationColor: lineStrong,
+    relationLabelBackground: surface,
+    relationLabelColor: text,
     entityBkg: panel,
     entityBorder: lineStrong,
     attributeBackgroundColorOdd: surface,
@@ -159,18 +198,18 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     altSectionBkgColor: surface,
     sectionBkgColor2: panelStrong,
     taskBkgColor: lineStrong,
-    taskBorderColor: "#111111",
-    taskTextLightColor: "#111111",
-    taskTextColor: "#111111",
-    taskTextDarkColor: "#111111",
+    taskBorderColor: lineStrong,
+    taskTextLightColor: readableTextColor([lineStrong], text),
+    taskTextColor: readableTextColor([lineStrong], text),
+    taskTextDarkColor: readableTextColor([lineStrong], text),
     taskTextOutsideColor: text,
-    taskTextClickableColor: "#111111",
+    taskTextClickableColor: readableTextColor([lineStrong], text),
     activeTaskBkgColor: primary,
-    activeTaskBorderColor: "#111111",
+    activeTaskBorderColor: lineStrong,
     doneTaskBkgColor: panelStrong,
-    doneTaskBorderColor: "#111111",
+    doneTaskBorderColor: lineStrong,
     critBkgColor: dangerFill,
-    critBorderColor: "#111111",
+    critBorderColor: lineStrong,
     gridColor: line,
     vertLineColor: lineStrong,
     todayLineColor: dangerBorder,
@@ -181,6 +220,7 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     pieSectionTextColor: chartText,
     pieLegendTextColor: text,
     pieStrokeColor: surface,
+    pieOpacity: "1",
     pieOuterStrokeColor: lineStrong,
     quadrant1Fill: panel,
     quadrant2Fill: panelAlt,
@@ -191,7 +231,7 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     quadrant3TextFill: text,
     quadrant4TextFill: text,
     quadrantPointFill: lineStrong,
-    quadrantPointTextFill: contrastTextColor(lineStrong),
+    quadrantPointTextFill: readableTextColor([lineStrong], text),
     quadrantXAxisTextFill: text,
     quadrantYAxisTextFill: text,
     quadrantInternalBorderStrokeFill: line,
@@ -200,6 +240,63 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
     requirementBackground: panel,
     requirementBorderColor: lineStrong,
     requirementTextColor: text,
+    scaleLabelColor: text,
+    archEdgeColor: lineStrong,
+    archEdgeArrowColor: lineStrong,
+    archGroupBorderColor: lineStrong,
+    radar: {
+      axisColor: lineStrong,
+      graticuleColor: line,
+      graticuleOpacity: 1,
+    },
+    wardley: {
+      backgroundColor: surface,
+      axisColor: lineStrong,
+      axisTextColor: text,
+      gridColor: line,
+      componentFill: panel,
+      componentStroke: lineStrong,
+      componentLabelColor: text,
+      linkStroke: lineStrong,
+      evolutionStroke: dangerBorder,
+      annotationStroke: lineStrong,
+      annotationTextColor: text,
+      annotationFill: surface,
+    },
+    xyChart: {
+      backgroundColor: surface,
+      titleColor: text,
+      dataLabelColor: text,
+      xAxisTitleColor: text,
+      xAxisLabelColor: text,
+      xAxisTickColor: lineStrong,
+      xAxisLineColor: lineStrong,
+      yAxisTitleColor: text,
+      yAxisLabelColor: text,
+      yAxisTickColor: lineStrong,
+      yAxisLineColor: lineStrong,
+      plotColorPalette: chartColors.join(","),
+    },
+    emUiFill: panel,
+    emUiStroke: lineStrong,
+    emProcessorFill: primary,
+    emProcessorStroke: lineStrong,
+    emReadModelFill: secondary,
+    emReadModelStroke: lineStrong,
+    emCommandFill: tertiary,
+    emCommandStroke: lineStrong,
+    emEventFill: dangerFill,
+    emEventStroke: lineStrong,
+    emSwimlaneBackgroundOdd: panel,
+    emSwimlaneBackgroundStroke: line,
+    emArrowhead: lineStrong,
+    emRelationStroke: lineStrong,
+    tagLabelColor: readableTextColor([primary], text),
+    tagLabelBackground: primary,
+    tagLabelBorder: lineStrong,
+    commitLabelColor: readableTextColor([secondary], text),
+    commitLabelBackground: secondary,
+    commitLineColor: lineStrong,
     fillType0: chartColors[0],
     fillType1: chartColors[1],
     fillType2: chartColors[2],
@@ -211,18 +308,24 @@ function createKmarkMermaidThemeVariables(tokens: KmarkMermaidThemeTokens): Kmar
   };
 
   for (const [index, color] of chartColors.entries()) {
+    const peerColor = chartPeerColors[index];
+    const labelColor = readableTextColor([color, peerColor], chartText);
     themeVariables[`pie${index + 1}`] = color;
     themeVariables[`cScale${index}`] = color;
-    themeVariables[`cScaleInv${index}`] = contrastTextColor(color);
-    themeVariables[`cScalePeer${index}`] = mixHex(color, text, isDark ? 0.16 : 0.10);
-    themeVariables[`cScaleLabel${index}`] = text;
+    themeVariables[`cScaleInv${index}`] = labelColor;
+    themeVariables[`cScalePeer${index}`] = peerColor;
+    themeVariables[`cScaleLabel${index}`] = labelColor;
   }
   for (let index = 0; index < 8; index += 1) {
     themeVariables[`git${index}`] = chartColors[index];
+    themeVariables[`gitInv${index}`] = readableTextColor([chartColors[index]], chartText);
+    themeVariables[`gitBranchLabel${index}`] = readableTextColor([chartColors[index]], chartText);
   }
-  for (let index = 0; index < 7; index += 1) {
-    themeVariables[`venn${index + 1}`] = mixHex(chartColors[index], surface, 0.26);
+  for (let index = 0; index < 8; index += 1) {
+    themeVariables[`venn${index + 1}`] = chartColors[index];
   }
+  themeVariables.vennTitleTextColor = text;
+  themeVariables.vennSetTextColor = chartText;
 
   return themeVariables;
 }
@@ -299,8 +402,72 @@ function relativeLuminance(hexColor: string): number {
   return 0.2126 * linearRed + 0.7152 * linearGreen + 0.0722 * linearBlue;
 }
 
-function contrastTextColor(backgroundColor: string): string {
-  return relativeLuminance(backgroundColor) > 0.48 ? "#111111" : "#ffffff";
+export function calculateKmarkMermaidContrastRatio(left: string, right: string): number {
+  const leftLuminance = relativeLuminance(left);
+  const rightLuminance = relativeLuminance(right);
+  const lighter = Math.max(leftLuminance, rightLuminance);
+  const darker = Math.min(leftLuminance, rightLuminance);
+
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function minimumContrastRatio(color: string, backgrounds: readonly string[]): number {
+  return Math.min(...backgrounds.map((background) => calculateKmarkMermaidContrastRatio(color, background)));
+}
+
+function preferredContrastEndpoint(backgrounds: readonly string[]): string {
+  return minimumContrastRatio(BLACK, backgrounds) >= minimumContrastRatio(WHITE, backgrounds)
+    ? BLACK
+    : WHITE;
+}
+
+function ensureMinimumContrast(
+  candidate: string,
+  backgrounds: readonly string[],
+  target: string,
+  minimumRatio: number,
+): string {
+  if (minimumContrastRatio(candidate, backgrounds) >= minimumRatio) {
+    return candidate;
+  }
+
+  let bestColor = candidate;
+  let bestRatio = minimumContrastRatio(candidate, backgrounds);
+
+  for (let step = 1; step <= CONTRAST_SEARCH_STEPS; step += 1) {
+    const adjusted = mixHex(candidate, target, step / CONTRAST_SEARCH_STEPS);
+    const ratio = minimumContrastRatio(adjusted, backgrounds);
+
+    if (ratio > bestRatio) {
+      bestColor = adjusted;
+      bestRatio = ratio;
+    }
+    if (ratio >= minimumRatio) {
+      return adjusted;
+    }
+  }
+
+  return bestColor;
+}
+
+function readableTextColor(backgrounds: readonly string[], preferred: string): string {
+  return ensureMinimumContrast(
+    preferred,
+    backgrounds,
+    preferredContrastEndpoint(backgrounds),
+    MIN_TEXT_CONTRAST_RATIO,
+  );
+}
+
+function ensureChartColorContrast(candidate: string, surface: string): string {
+  const visibleFill = ensureMinimumContrast(
+    candidate,
+    [surface],
+    preferredContrastEndpoint([surface]),
+    MIN_GRAPHIC_CONTRAST_RATIO,
+  );
+
+  return ensureMinimumContrast(visibleFill, [BLACK], WHITE, MIN_TEXT_CONTRAST_RATIO);
 }
 
 function rgbToHsl(color: RgbColor): HslColor {

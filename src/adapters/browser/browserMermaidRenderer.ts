@@ -1,4 +1,5 @@
 import mermaid, { type MermaidConfig } from "mermaid";
+import { normalizeMermaidLineBreakTags } from "./browserMermaidSource";
 import {
   resolveKmarkMermaidThemeVariables,
   shouldUsePaperMermaidColors,
@@ -102,8 +103,6 @@ const NUMBER_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*$/u;
 const CSS_UNSAFE_VALUE_PATTERN = /(?:javascript:|vbscript:|data:|@import|expression\s*\(|[;{}<>])/iu;
 const GANTT_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-post-style";
 const STATE_POST_STYLE_ATTRIBUTE = "data-kmark-mermaid-state-post-style";
-const GANTT_BAR_TEXT_COLOR = "#111111";
-const GANTT_BAR_BORDER_COLOR = "#111111";
 const DEFAULT_GANTT_FONT_SIZE = 10;
 const DEFAULT_GANTT_TEXT_LINE_HEIGHT = 1.25;
 const DEFAULT_GANTT_BAR_PADDING_Y = 4;
@@ -569,7 +568,7 @@ function prepareMermaidRender(
   return {
     config: enforceSafeMermaidRuntimeConfig(completedGanttConfig.config),
     expectsGantt,
-    renderSource: stripMermaidInitDirectives(source),
+    renderSource: normalizeMermaidLineBreakTags(stripMermaidInitDirectives(source)),
     svgBackground: background.svg,
     surfaceBackground: background.surface,
     ganttSize: completedGanttConfig.size,
@@ -856,7 +855,51 @@ function isMermaidGanttBarElement(svgElement: SVGElement): boolean {
   ));
 }
 
-function forceMermaidGanttBarBorderColor(svgElement: SVGElement): void {
+type MermaidGanttBarKind = "task" | "active" | "done" | "critical";
+
+function resolveMermaidGanttBarKind(element: Element): MermaidGanttBarKind {
+  const classNames = Array.from(element.classList);
+
+  if (classNames.some((className) => /^active(?:Crit)?(?:Text)?\d*$/u.test(className))) {
+    return "active";
+  }
+  if (classNames.some((className) => /^done(?:Crit)?(?:Text)?\d*$/u.test(className))) {
+    return "done";
+  }
+  if (classNames.some((className) => /^crit(?:Text)?\d*$/u.test(className))) {
+    return "critical";
+  }
+
+  return "task";
+}
+
+function resolveMermaidGanttBarFillColor(element: Element, config: MermaidConfig): string {
+  switch (resolveMermaidGanttBarKind(element)) {
+    case "active":
+      return resolveThemeColor(config, "activeTaskBkgColor", "#9ca3af");
+    case "done":
+      return resolveThemeColor(config, "doneTaskBkgColor", "#d1d5db");
+    case "critical":
+      return resolveThemeColor(config, "critBkgColor", "#b91c1c");
+    default:
+      return resolveThemeColor(config, "taskBkgColor", "#4b5563");
+  }
+}
+
+function resolveMermaidGanttBarBorderColor(element: Element, config: MermaidConfig): string {
+  switch (resolveMermaidGanttBarKind(element)) {
+    case "active":
+      return resolveThemeColor(config, "activeTaskBorderColor", "#111827");
+    case "done":
+      return resolveThemeColor(config, "doneTaskBorderColor", "#111827");
+    case "critical":
+      return resolveThemeColor(config, "critBorderColor", "#111827");
+    default:
+      return resolveThemeColor(config, "taskBorderColor", "#111827");
+  }
+}
+
+function forceMermaidGanttBarBorderColor(svgElement: SVGElement, config: MermaidConfig): void {
   if (!isMermaidGanttSvg(svgElement)) {
     return;
   }
@@ -868,12 +911,13 @@ function forceMermaidGanttBarBorderColor(svgElement: SVGElement): void {
       continue;
     }
 
-    barElement.setAttribute("stroke", GANTT_BAR_BORDER_COLOR);
-    barElement.style.setProperty("stroke", GANTT_BAR_BORDER_COLOR, "important");
+    const borderColor = resolveMermaidGanttBarBorderColor(barElement, config);
+    barElement.setAttribute("stroke", borderColor);
+    barElement.style.setProperty("stroke", borderColor, "important");
   }
 }
 
-function forceMermaidGanttBarTextColor(svgElement: SVGElement): void {
+function forceMermaidGanttBarTextColor(svgElement: SVGElement, config: MermaidConfig): void {
   if (!isMermaidGanttSvg(svgElement)) {
     return;
   }
@@ -885,12 +929,13 @@ function forceMermaidGanttBarTextColor(svgElement: SVGElement): void {
       continue;
     }
 
-    textElement.setAttribute("fill", GANTT_BAR_TEXT_COLOR);
-    textElement.style.setProperty("fill", GANTT_BAR_TEXT_COLOR, "important");
+    const textColor = resolveContrastTextColor(resolveMermaidGanttBarFillColor(textElement, config));
+    textElement.setAttribute("fill", textColor);
+    textElement.style.setProperty("fill", textColor, "important");
 
     for (const tspanElement of Array.from(textElement.querySelectorAll<SVGTSpanElement>("tspan"))) {
-      tspanElement.setAttribute("fill", GANTT_BAR_TEXT_COLOR);
-      tspanElement.style.setProperty("fill", GANTT_BAR_TEXT_COLOR, "important");
+      tspanElement.setAttribute("fill", textColor);
+      tspanElement.style.setProperty("fill", textColor, "important");
     }
   }
 }
@@ -948,12 +993,24 @@ function resolveContrastTextColor(backgroundColor: string): string {
   const color = parseHexColor(backgroundColor);
 
   if (color === undefined) {
-    return "#111827";
+    return "#000000";
   }
 
-  const luminance = (0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue) / 255;
+  const luminance = 0.2126 * toLinearColorChannel(color.red)
+    + 0.7152 * toLinearColorChannel(color.green)
+    + 0.0722 * toLinearColorChannel(color.blue);
+  const blackContrast = (luminance + 0.05) / 0.05;
+  const whiteContrast = 1.05 / (luminance + 0.05);
 
-  return luminance > 0.55 ? "#111827" : "#ffffff";
+  return blackContrast >= whiteContrast ? "#000000" : "#ffffff";
+}
+
+function toLinearColorChannel(channel: number): number {
+  const normalized = channel / 255;
+
+  return normalized <= 0.03928
+    ? normalized / 12.92
+    : ((normalized + 0.055) / 1.055) ** 2.4;
 }
 
 function createMermaidGanttMilestoneTextContrastRules(svgElement: SVGElement, svgId: string, config: MermaidConfig): string {
@@ -1001,6 +1058,14 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
   const activeTaskFillColor = resolveThemeColor(config, "activeTaskBkgColor", "#111827");
   const doneTaskFillColor = resolveThemeColor(config, "doneTaskBkgColor", "#d1d5db");
   const criticalTaskFillColor = resolveThemeColor(config, "critBkgColor", "#000000");
+  const taskBorderColor = resolveThemeColor(config, "taskBorderColor", "#111827");
+  const activeTaskBorderColor = resolveThemeColor(config, "activeTaskBorderColor", "#111827");
+  const doneTaskBorderColor = resolveThemeColor(config, "doneTaskBorderColor", "#111827");
+  const criticalTaskBorderColor = resolveThemeColor(config, "critBorderColor", "#111827");
+  const taskTextColor = resolveContrastTextColor(taskFillColor);
+  const activeTaskTextColor = resolveContrastTextColor(activeTaskFillColor);
+  const doneTaskTextColor = resolveContrastTextColor(doneTaskFillColor);
+  const criticalTaskTextColor = resolveContrastTextColor(criticalTaskFillColor);
   const sectionColor = resolveThemeColor(config, "sectionBkgColor", "#f9fafb");
   const altSectionColor = resolveThemeColor(config, "altSectionBkgColor", "#ffffff");
   const sectionColor2 = resolveThemeColor(config, "sectionBkgColor2", "#e5e7eb");
@@ -1034,7 +1099,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .task2,
 #${svgId} .task3 {
   fill: ${taskFillColor} !important;
-  stroke: ${GANTT_BAR_BORDER_COLOR} !important;
+  stroke: ${taskBorderColor} !important;
 }
 #${svgId} .active0,
 #${svgId} .active1,
@@ -1045,7 +1110,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .activeCrit2,
 #${svgId} .activeCrit3 {
   fill: ${activeTaskFillColor} !important;
-  stroke: ${GANTT_BAR_BORDER_COLOR} !important;
+  stroke: ${activeTaskBorderColor} !important;
 }
 #${svgId} .done0,
 #${svgId} .done1,
@@ -1056,14 +1121,14 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .doneCrit2,
 #${svgId} .doneCrit3 {
   fill: ${doneTaskFillColor} !important;
-  stroke: ${GANTT_BAR_BORDER_COLOR} !important;
+  stroke: ${doneTaskBorderColor} !important;
 }
 #${svgId} .crit0,
 #${svgId} .crit1,
 #${svgId} .crit2,
 #${svgId} .crit3 {
   fill: ${criticalTaskFillColor} !important;
-  stroke: ${GANTT_BAR_BORDER_COLOR} !important;
+  stroke: ${criticalTaskBorderColor} !important;
 }
 #${svgId} .titleText,
 #${svgId} .sectionTitle,
@@ -1079,7 +1144,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .taskText1,
 #${svgId} .taskText2,
 #${svgId} .taskText3 {
-  fill: ${GANTT_BAR_TEXT_COLOR} !important;
+  fill: ${taskTextColor} !important;
 }
 #${svgId} .doneText0,
 #${svgId} .doneText1,
@@ -1089,7 +1154,7 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .doneCritText1,
 #${svgId} .doneCritText2,
 #${svgId} .doneCritText3 {
-  fill: ${GANTT_BAR_TEXT_COLOR} !important;
+  fill: ${doneTaskTextColor} !important;
 }
 #${svgId} .activeText0,
 #${svgId} .activeText1,
@@ -1098,12 +1163,14 @@ function injectMermaidGanttPostStyle(svgElement: SVGElement, config: MermaidConf
 #${svgId} .activeCritText0,
 #${svgId} .activeCritText1,
 #${svgId} .activeCritText2,
-#${svgId} .activeCritText3,
+#${svgId} .activeCritText3 {
+  fill: ${activeTaskTextColor} !important;
+}
 #${svgId} .critText0,
 #${svgId} .critText1,
 #${svgId} .critText2,
 #${svgId} .critText3 {
-  fill: ${GANTT_BAR_TEXT_COLOR} !important;
+  fill: ${criticalTaskTextColor} !important;
 }
 #${svgId} .taskText,
 #${svgId} .taskTextOutsideRight,
@@ -1122,7 +1189,8 @@ function parseSafeMermaidSvg(
   sizing: MermaidBlockSizing,
   config: MermaidConfig,
 ): SVGElement {
-  const parsedDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const xmlCompatibleSvg = normalizeMermaidLineBreakTags(svg);
+  const parsedDocument = new DOMParser().parseFromString(xmlCompatibleSvg, "image/svg+xml");
   const svgElement = parsedDocument.documentElement;
 
   if (svgElement.localName.toLowerCase() !== "svg" || svgElement.querySelector("parsererror") !== null) {
@@ -1135,8 +1203,8 @@ function parseSafeMermaidSvg(
   normalizeMermaidGanttTaskTextVerticalAlignment(importedSvg);
   injectMermaidGanttPostStyle(importedSvg, config);
   injectMermaidStatePostStyle(importedSvg, config);
-  forceMermaidGanttBarBorderColor(importedSvg);
-  forceMermaidGanttBarTextColor(importedSvg);
+  forceMermaidGanttBarBorderColor(importedSvg, config);
+  forceMermaidGanttBarTextColor(importedSvg, config);
   normalizeMermaidSvgSize(importedSvg, sizing);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
