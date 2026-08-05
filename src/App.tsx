@@ -38,6 +38,7 @@ function App() {
     canControlWindowsStartupTrayResident,
     editFontId,
     editFontSizePx,
+    lineWrappingEnabled,
     multiCursorModifier,
     showLineNumbers,
     startupEditMode,
@@ -47,6 +48,7 @@ function App() {
     onAppFontChange,
     onEditFontChange,
     onEditFontSizeChange,
+    onLineWrappingEnabledChange,
     onMultiCursorModifierChange,
     onShowLineNumbersChange,
     onStartupEditModeChange,
@@ -90,6 +92,7 @@ function App() {
       editFontId={editFontId}
       editFontSizePx={editFontSizePx}
       initialDocumentMode={detectInitialEditorDocumentMode()}
+      lineWrappingEnabled={lineWrappingEnabled}
       multiCursorModifier={multiCursorModifier}
       showLineNumbers={showLineNumbers}
       startupEditMode={startupEditMode}
@@ -99,6 +102,7 @@ function App() {
       onAppThemeChange={onAppThemeChange}
       onEditFontChange={onEditFontChange}
       onEditFontSizeChange={onEditFontSizeChange}
+      onLineWrappingEnabledChange={onLineWrappingEnabledChange}
       onMultiCursorModifierChange={onMultiCursorModifierChange}
       onPreviewUsesAppThemeColorsChange={onPreviewUsesAppThemeColorsChange}
       onShowLineNumbersChange={onShowLineNumbersChange}

@@ -36,6 +36,7 @@ export type EditorPreferences = {
   readonly systemFontSizePx: SystemFontSizePx;
   readonly editFontSizePx: EditFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
+  readonly lineWrappingEnabled: boolean;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
   readonly windowsStartupTrayResidentEnabled: boolean;

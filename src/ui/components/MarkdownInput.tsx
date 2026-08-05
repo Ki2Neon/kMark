@@ -17,6 +17,7 @@ type MarkdownInputProps = {
   readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
   readonly layoutMode: LayoutMode;
+  readonly lineWrappingEnabled: boolean;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
@@ -43,6 +44,7 @@ function MarkdownInputComponent({
   currentDocumentFilePath = null,
   editFontId,
   layoutMode,
+  lineWrappingEnabled,
   multiCursorModifier,
   showLineNumbers,
   onAssetDrop,
@@ -63,6 +65,7 @@ function MarkdownInputComponent({
             content={content}
             currentDocumentFilePath={currentDocumentFilePath}
             editFontId={editFontId}
+            lineWrappingEnabled={lineWrappingEnabled}
             multiCursorModifier={multiCursorModifier}
             showLineNumbers={showLineNumbers}
             onAssetDrop={onAssetDrop}

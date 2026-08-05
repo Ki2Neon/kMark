@@ -130,6 +130,20 @@ export class EditorPreferencesController {
     });
   }
 
+  changeLineWrappingEnabled(
+    currentPreferences: EditorPreferences,
+    lineWrappingEnabled: boolean,
+  ): EditorPreferences {
+    if (currentPreferences.lineWrappingEnabled === lineWrappingEnabled) {
+      return currentPreferences;
+    }
+
+    return this.#preferencesGateway.normalize({
+      ...currentPreferences,
+      lineWrappingEnabled,
+    });
+  }
+
   changeStartupEditMode(currentPreferences: EditorPreferences, startupEditMode: StartupEditMode): EditorPreferences {
     if (currentPreferences.startupEditMode === startupEditMode) {
       return currentPreferences;

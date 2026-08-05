@@ -7,6 +7,7 @@ pub const MAX_SYSTEM_FONT_SIZE_PX: u32 = 24;
 pub const DEFAULT_EDIT_FONT_SIZE_PX: u32 = 15;
 pub const MIN_EDIT_FONT_SIZE_PX: u32 = 10;
 pub const MAX_EDIT_FONT_SIZE_PX: u32 = 36;
+pub const DEFAULT_LINE_WRAPPING_ENABLED: bool = true;
 
 const DEFAULT_APP_FONT_ID: &str = "Aptos";
 const DEFAULT_EDIT_FONT_ID: &str = "Iosevka Term";
@@ -78,6 +79,7 @@ pub struct EditorPreferences {
     system_font_size_px: u32,
     edit_font_size_px: u32,
     multi_cursor_modifier: MultiCursorModifier,
+    line_wrapping_enabled: bool,
     show_line_numbers: bool,
     startup_edit_mode: StartupEditMode,
     windows_startup_tray_resident_enabled: bool,
@@ -91,6 +93,7 @@ impl Default for EditorPreferences {
             system_font_size_px: DEFAULT_SYSTEM_FONT_SIZE_PX,
             edit_font_size_px: DEFAULT_EDIT_FONT_SIZE_PX,
             multi_cursor_modifier: MultiCursorModifier::Alt,
+            line_wrapping_enabled: DEFAULT_LINE_WRAPPING_ENABLED,
             show_line_numbers: false,
             startup_edit_mode: StartupEditMode::StartPage,
             windows_startup_tray_resident_enabled: true,
@@ -106,6 +109,7 @@ impl EditorPreferences {
         system_font_size_px: Option<u32>,
         edit_font_size_px: Option<u32>,
         multi_cursor_modifier: Option<&str>,
+        line_wrapping_enabled: Option<bool>,
         show_line_numbers: Option<bool>,
         startup_edit_mode: Option<&str>,
         windows_startup_tray_resident_enabled: Option<bool>,
@@ -145,6 +149,7 @@ impl EditorPreferences {
             multi_cursor_modifier: multi_cursor_modifier
                 .and_then(MultiCursorModifier::from_str)
                 .unwrap_or(defaults.multi_cursor_modifier),
+            line_wrapping_enabled: line_wrapping_enabled.unwrap_or(defaults.line_wrapping_enabled),
             show_line_numbers: show_line_numbers.unwrap_or(defaults.show_line_numbers),
             startup_edit_mode: startup_edit_mode
                 .and_then(StartupEditMode::from_str)
@@ -172,6 +177,10 @@ impl EditorPreferences {
 
     pub fn multi_cursor_modifier(&self) -> MultiCursorModifier {
         self.multi_cursor_modifier
+    }
+
+    pub fn line_wrapping_enabled(&self) -> bool {
+        self.line_wrapping_enabled
     }
 
     pub fn show_line_numbers(&self) -> bool {
@@ -369,8 +378,19 @@ mod tests {
     }
 
     #[test]
+    fn defaults_to_line_wrapping_and_accepts_horizontal_scrolling() {
+        assert!(EditorPreferences::default().line_wrapping_enabled());
+
+        let preferences =
+            EditorPreferences::new(None, None, None, None, None, Some(false), None, None, None);
+
+        assert!(!preferences.line_wrapping_enabled());
+    }
+
+    #[test]
     fn normalizes_legacy_last_opened_startup_mode_to_start_page() {
         let preferences = EditorPreferences::new(
+            None,
             None,
             None,
             None,

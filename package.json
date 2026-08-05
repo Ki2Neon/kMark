@@ -19,6 +19,7 @@
     "check:cycles": "node tools/architecture/check-cycles.mjs",
     "preview": "vite preview",
     "test:architecture": "node tools/architecture/check-cycles.mjs && node tools/architecture/check-boundaries.mjs && pnpm run check:contracts",
+    "test:editor-scroll": "node --experimental-strip-types --test tools/test-editor-shift-wheel.mjs",
     "test:kmark-completion": "node tools/test-kmark-completion-context.mjs",
     "test:kmark-scope-display": "node tools/test-kmark-scope-display.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",

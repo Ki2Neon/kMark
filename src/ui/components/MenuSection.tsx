@@ -43,6 +43,7 @@ type MenuSectionProps = {
   readonly recentFiles: readonly RecentFile[];
   readonly isPreviewVisible: boolean;
   readonly layoutMode: LayoutMode;
+  readonly lineWrappingEnabled: boolean;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly startupEditMode: StartupEditMode;
@@ -55,6 +56,7 @@ type MenuSectionProps = {
   readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
   readonly onSystemFontSizeChange: (systemFontSizePx: SystemFontSizePx) => void;
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
+  readonly onLineWrappingEnabledChange: (lineWrappingEnabled: boolean) => void;
   readonly onMultiCursorModifierChange: (multiCursorModifier: MultiCursorModifier) => void;
   readonly onNewDocument: () => void;
   readonly onOpenCurrentDocumentFolder: () => void;
@@ -114,6 +116,7 @@ function MenuSectionComponent({
   recentFiles,
   isPreviewVisible,
   layoutMode,
+  lineWrappingEnabled,
   multiCursorModifier,
   showLineNumbers,
   startupEditMode,
@@ -126,6 +129,7 @@ function MenuSectionComponent({
   onEditFontSizeChange,
   onSystemFontSizeChange,
   onLayoutModeChange,
+  onLineWrappingEnabledChange,
   onMultiCursorModifierChange,
   onNewDocument,
   onOpenCurrentDocumentFolder,
@@ -212,13 +216,19 @@ function MenuSectionComponent({
     || subWindowBrowserFadeVisible;
   const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
   const showLineNumbersVisible = editGroupMatched || matchesMenuSearch("行番号", "line number");
+  const lineWrappingVisible =
+    editGroupMatched || matchesMenuSearch("長い行", "折り返し", "横スクロール", "line wrapping", "horizontal scroll");
   const editFontSizeVisible = editGroupMatched || matchesMenuSearch("エディタフォントサイズ", "font size", "editor");
   const startupEditModeVisible = editGroupMatched || matchesMenuSearch("起動時の表示", "startup");
   const windowsStartupTrayResidentVisible =
     canControlWindowsStartupTrayResident &&
     (editGroupMatched || matchesMenuSearch("Windows 起動時の常駐", "タスクトレイ", "autostart"));
   const editGroupVisible =
-    showLineNumbersVisible || editFontSizeVisible || startupEditModeVisible || windowsStartupTrayResidentVisible;
+    showLineNumbersVisible
+    || lineWrappingVisible
+    || editFontSizeVisible
+    || startupEditModeVisible
+    || windowsStartupTrayResidentVisible;
   const fontGroupMatched = matchesMenuSearch("フォント", "font", "family");
   const editFontVisible = fontGroupMatched || matchesMenuSearch("Edit フォント", "edit font");
   const appFontVisible = fontGroupMatched || matchesMenuSearch("アプリフォント", "app font");
@@ -586,6 +596,10 @@ function MenuSectionComponent({
     onShowLineNumbersChange(event.currentTarget.checked);
   };
 
+  const handleLineWrappingSwitch = (event: ChangeEvent<HTMLInputElement>) => {
+    onLineWrappingEnabledChange(event.currentTarget.checked);
+  };
+
   const handleStartupEditModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextStartupEditMode = event.currentTarget.value;
 
@@ -871,6 +885,34 @@ function MenuSectionComponent({
                 <span className="menu-section__switch" aria-hidden="true" />
                 <span className={showLineNumbers ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>
                   表示
+                </span>
+              </span>
+            </label>
+          ) : null}
+
+          {lineWrappingVisible ? (
+            <label className="menu-section__mode-switch">
+              <span className="menu-section__mode-switch-meta">
+                <span className="menu-section__field-label">長い行</span>
+              </span>
+              <span className="menu-section__mode-switch-values">
+                <span
+                  className={!lineWrappingEnabled ? "menu-section__mode-label is-active" : "menu-section__mode-label"}
+                >
+                  横スクロール
+                </span>
+                <input
+                  type="checkbox"
+                  className="menu-section__switch-input"
+                  checked={lineWrappingEnabled}
+                  onChange={handleLineWrappingSwitch}
+                  aria-label="長い行の折り返しを切り替え"
+                />
+                <span className="menu-section__switch" aria-hidden="true" />
+                <span
+                  className={lineWrappingEnabled ? "menu-section__mode-label is-active" : "menu-section__mode-label"}
+                >
+                  折り返し
                 </span>
               </span>
             </label>

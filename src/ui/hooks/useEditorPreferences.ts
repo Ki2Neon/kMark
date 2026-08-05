@@ -161,6 +161,20 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
     });
   }, [controller]);
 
+  const handleLineWrappingEnabledChange = useCallback((lineWrappingEnabled: boolean) => {
+    setEditorPreferences((currentPreferences) => {
+      const nextPreferences = controller.changeLineWrappingEnabled(currentPreferences, lineWrappingEnabled);
+
+      if (nextPreferences !== currentPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreferences).catch(() => {
+          void controller.load().then(setEditorPreferences).catch(() => {});
+        });
+      }
+
+      return nextPreferences;
+    });
+  }, [controller]);
+
   const handleStartupEditModeChange = useCallback((startupEditMode: StartupEditMode) => {
     setEditorPreferences((currentPreferences) => {
       const nextPreferences = controller.changeStartupEditMode(currentPreferences, startupEditMode);
@@ -198,6 +212,7 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
     editFontId: editorPreferences.editFontId,
     editFontSizePx: editorPreferences.editFontSizePx,
     isReady,
+    lineWrappingEnabled: editorPreferences.lineWrappingEnabled,
     multiCursorModifier: editorPreferences.multiCursorModifier,
     showLineNumbers: editorPreferences.showLineNumbers,
     startupEditMode: editorPreferences.startupEditMode,
@@ -206,6 +221,7 @@ export function useEditorPreferences(options: UseEditorPreferencesOptions = {}) 
     onAppFontChange: handleAppFontChange,
     onEditFontChange: handleEditFontChange,
     onEditFontSizeChange: handleEditFontSizeChange,
+    onLineWrappingEnabledChange: handleLineWrappingEnabledChange,
     onSystemFontSizeChange: handleSystemFontSizeChange,
     onMultiCursorModifierChange: handleMultiCursorModifierChange,
     onShowLineNumbersChange: handleShowLineNumbersChange,

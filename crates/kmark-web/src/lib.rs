@@ -37,6 +37,7 @@ struct EditorPreferencesInput {
     system_font_size_px: Option<u32>,
     edit_font_size_px: Option<u32>,
     multi_cursor_modifier: Option<String>,
+    line_wrapping_enabled: Option<bool>,
     show_line_numbers: Option<bool>,
     startup_edit_mode: Option<String>,
     windows_startup_tray_resident_enabled: Option<bool>,
@@ -139,6 +140,9 @@ pub fn normalize_editor_preferences_json(input: Option<String>) -> String {
         payload
             .as_ref()
             .and_then(|value| value.multi_cursor_modifier.as_deref()),
+        payload
+            .as_ref()
+            .and_then(|value| value.line_wrapping_enabled),
         payload.as_ref().and_then(|value| value.show_line_numbers),
         payload
             .as_ref()

@@ -8,6 +8,8 @@ import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownSelectionWrapAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
+import { createCodeMirrorFixedGutterScrollbarMaskExtension } from "../../features/editor-scroll/adapter/codeMirrorFixedGutterScrollbarMaskExtension";
+import { createCodeMirrorShiftWheelHorizontalScrollExtension } from "../../features/editor-scroll/adapter/codeMirrorShiftWheelHorizontalScrollExtension";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
 import { createCodeMirrorKmarkValidationExtension } from "../../features/kmark-completion/adapter/codeMirrorKmarkValidationExtension";
 import { createCodeMirrorKmarkScopeDisplayExtension } from "../../features/kmark-scope-display/adapter/codeMirrorKmarkScopeDisplayExtension";
@@ -121,6 +123,8 @@ const MARKDOWN_SNIPPET_COMPLETION_SOURCE = completeFromList(MARKDOWN_SNIPPET_COM
 const KMARK_VALIDATION_EXTENSION = createCodeMirrorKmarkValidationExtension();
 const KMARK_SCOPE_DISPLAY_EXTENSION = createCodeMirrorKmarkScopeDisplayExtension();
 const MARKDOWN_TABLE_EDIT_EXTENSION = createCodeMirrorMarkdownTableEditExtension();
+const FIXED_GUTTER_SCROLLBAR_MASK_EXTENSION = createCodeMirrorFixedGutterScrollbarMaskExtension();
+const SHIFT_WHEEL_HORIZONTAL_SCROLL_EXTENSION = createCodeMirrorShiftWheelHorizontalScrollExtension();
 const SUPPORTED_CLIPBOARD_ASSET_EXTENSIONS = new Set([
   "png",
   "jpg",
@@ -689,6 +693,7 @@ type DesktopMarkdownInputProps = {
   readonly content: string;
   readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
+  readonly lineWrappingEnabled: boolean;
   readonly multiCursorModifier: MultiCursorModifier;
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
@@ -709,6 +714,7 @@ function DesktopMarkdownInputComponent({
   content,
   currentDocumentFilePath = null,
   editFontId,
+  lineWrappingEnabled,
   multiCursorModifier,
   showLineNumbers,
   onAssetDrop,
@@ -1015,8 +1021,10 @@ function DesktopMarkdownInputComponent({
     ".cm-focused": {
       outline: "none",
     },
+    "&.cm-editor .cm-gutters": {
+      backgroundColor: "var(--surface)",
+    },
     ".cm-gutters": {
-      backgroundColor: "transparent",
       border: "none",
       color: "var(--text-soft)",
       userSelect: "none",
@@ -1042,7 +1050,8 @@ function DesktopMarkdownInputComponent({
     ".cm-scroller": {
       fontFamily: "inherit",
       lineHeight: "1.7",
-      overflow: "auto",
+      overflowX: lineWrappingEnabled ? "auto" : "scroll",
+      overflowY: "auto",
       padding: showMobileInputHelperBar
         ? "16px 0 calc(16px + var(--mobile-input-helper-height) + env(safe-area-inset-bottom))"
         : "16px 0",
@@ -1064,7 +1073,7 @@ function DesktopMarkdownInputComponent({
     },
   }, {
     dark: isDarkEditorTheme(appThemeId),
-  }), [appThemeId, editFontId, showMobileInputHelperBar]);
+  }), [appThemeId, editFontId, lineWrappingEnabled, showMobileInputHelperBar]);
 
   const extensions = useMemo<Extension[]>(() => {
     const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();
@@ -1110,10 +1119,12 @@ function DesktopMarkdownInputComponent({
       assetDropLineHighlightField,
       KMARK_VALIDATION_EXTENSION,
       MARKDOWN_TABLE_EDIT_EXTENSION,
+      FIXED_GUTTER_SCROLLBAR_MASK_EXTENSION,
+      SHIFT_WHEEL_HORIZONTAL_SCROLL_EXTENSION,
       ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       KMARK_SCOPE_DISPLAY_EXTENSION,
       Prec.highest(assetPasteExtension),
-      EditorView.lineWrapping,
+      ...(lineWrappingEnabled ? [EditorView.lineWrapping] : []),
       EDITOR_CONTENT_ATTRIBUTES,
       MARKDOWN_SELECTION_WRAP_EXTENSION,
       KMARK_SHORTCUT_INSERTION_EXTENSION,
@@ -1132,7 +1143,7 @@ function DesktopMarkdownInputComponent({
       )),
       editorTheme,
     ];
-  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, multiCursorModifier, showLineNumbers]);
+  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, lineWrappingEnabled, multiCursorModifier, showLineNumbers]);
 
   return (
     <>
