@@ -1022,22 +1022,24 @@ input:focus-visible,
 .edit-section__editor {
   display: flex;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
 .edit-section__editor > * {
   flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
 .edit-section__editor .cm-editor,
-.edit-section__editor .cm-scroller,
-.edit-section__editor .cm-gutters {
+.edit-section__editor .cm-scroller {
   background: transparent;
 }
 
 .edit-section__editor .cm-editor {
+  min-width: 0;
   height: 100%;
 }
 
