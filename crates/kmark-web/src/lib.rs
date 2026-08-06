@@ -85,12 +85,6 @@ struct RecentFileInput {
     file_path: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PlantUmlSourceResult {
-    sources: Vec<String>,
-}
-
 #[wasm_bindgen]
 pub fn render_markdown_preview_json(
     content: String,
@@ -108,9 +102,8 @@ pub fn render_markdown_preview_json(
 }
 
 #[wasm_bindgen]
-pub fn split_plantuml_source_json(source: String) -> Result<String, JsValue> {
-    kmark_core::split_plantuml_source(&source)
-        .map(|sources| stringify(&PlantUmlSourceResult { sources }))
+pub fn normalize_plantuml_source(source: String) -> Result<String, JsValue> {
+    kmark_core::normalize_plantuml_source(&source)
         .map_err(|error| JsValue::from_str(&format!("{}:{}", error.code(), error)))
 }
 
@@ -408,7 +401,7 @@ impl From<TableFormatLineRangeInput> for TableFormatLineRange {
 mod tests {
     use super::{
         finalize_generated_svg_json, format_markdown_tables_in_line_ranges_json,
-        format_markdown_tables_json, render_markdown_preview_json, split_plantuml_source_json,
+        format_markdown_tables_json, normalize_plantuml_source, render_markdown_preview_json,
         FinalizeGeneratedSvgResultPayload, FormatMarkdownTablesPayload,
     };
 
@@ -467,13 +460,11 @@ mod tests {
     }
 
     #[test]
-    fn wasm_plantuml_split_and_svg_finalizer_match_boundary_contracts() {
-        let sources = serde_json::from_str::<serde_json::Value>(
-            &split_plantuml_source_json("@startuml\nAlice -> Bob\n@enduml".to_owned())
-                .expect("PlantUML split failed"),
-        )
-        .expect("PlantUML split payload parse failed");
-        assert_eq!(sources["sources"].as_array().map(Vec::len), Some(1));
+    fn wasm_plantuml_normalization_and_svg_finalizer_match_boundary_contracts() {
+        let source =
+            normalize_plantuml_source(" \n@startuml\nAlice -> Bob\n@enduml\n\n".to_owned())
+                .expect("PlantUML normalization failed");
+        assert_eq!(source, "@startuml\nAlice -> Bob\n@enduml\n");
 
         let finalized = serde_json::from_str::<FinalizeGeneratedSvgResultPayload>(
             &finalize_generated_svg_json(

@@ -149,7 +149,7 @@ console.log = () => {};
 await import("../node_modules/@plantuml/core/viz-global.js");
 const { renderToString } = await import("../node_modules/@plantuml/core/plantuml.js");
 
-async function render(source, dark) {
+export async function renderPlantUmlTestSource(source, dark) {
   return new Promise((resolve, reject) => {
     const outputs = [];
     let idleTimeout = null;
@@ -210,7 +210,7 @@ const samples = [
 export const renderedPlantUmlSamples = [];
 
 for (const sample of samples) {
-  const outputs = await render(sample.source, sample.dark);
+  const outputs = await renderPlantUmlTestSource(sample.source, sample.dark);
   const svg = outputs.join("\n");
   assert.match(svg, /^<svg\b/u, `${sample.name} must return SVG`);
   assert.ok(svg.includes(sample.expectedText), `${sample.name} text is missing`);

@@ -37,7 +37,7 @@ pub use generated_svg::{
 pub use kmark_param_schema::{kmark_param_schema_json, KMARK_PARAM_SCHEMA_VERSION};
 pub use markdown_document::{is_supported_markdown_path, MarkdownDocument};
 pub use markdown_document_error::MarkdownDocumentError;
-pub use plantuml::{split_plantuml_source, PlantUmlSourceError, MAX_PLANTUML_SOURCE_BYTES};
+pub use plantuml::{normalize_plantuml_source, PlantUmlSourceError, MAX_PLANTUML_SOURCE_BYTES};
 pub use preview_preferences::{
     normalize_plantuml_https_hosts, PreviewDisplayMode, PreviewPreferences,
 };

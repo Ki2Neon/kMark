@@ -4,7 +4,7 @@ import {
   type PlantUmlDiagramSnapshotDescriptor,
   type PlannedPlantUmlDiagram,
 } from "../../application/plantuml/plantUmlRenderPlanner";
-import { splitPlantUmlSourceWithWasm } from "../../wasm/kmarkWeb";
+import { normalizePlantUmlSourceWithWasm } from "../../wasm/kmarkWeb";
 import { finalizeGeneratedSvg } from "./browserGeneratedSvgFinalizer";
 import {
   getPlantUmlEngine,
@@ -63,15 +63,15 @@ type PlantUmlDiagramRecord = {
 
 type PreparedBlock = {
   readonly block: HTMLElement;
+  diagram: PreparedDiagram | null;
+  readonly normalizationError: unknown | null;
   readonly rendered: HTMLElement | null;
-  readonly sources: readonly string[];
-  readonly splitError: unknown | null;
+  readonly source: string | null;
 };
 
 type PreparedDiagram = {
   readonly block: PreparedBlock;
   readonly descriptor: PlantUmlDiagramDescriptor;
-  readonly diagramIndex: number;
   element: HTMLElement | null;
   plan: PlannedPlantUmlDiagram | null;
   readonly presentation: ReturnType<typeof presentationFor>;
@@ -381,7 +381,7 @@ function syncDiagramElement(diagram: PreparedDiagram): void {
 }
 
 function updateBlockState(block: PreparedBlock): void {
-  if (block.rendered === null || block.splitError !== null) {
+  if (block.rendered === null || block.normalizationError !== null) {
     return;
   }
   if (block.rendered.querySelector('[data-kmark-plantuml-diagram-state="error"]') !== null) {
@@ -452,36 +452,39 @@ export async function renderPlantUmlPreviewHtmlDocuments(
     try {
       return {
         block,
+        diagram: null,
+        normalizationError: null,
         rendered: block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR),
-        sources: await splitPlantUmlSourceWithWasm(source),
-        splitError: null,
+        source: await normalizePlantUmlSourceWithWasm(source),
       };
     } catch (error) {
       return {
         block,
+        diagram: null,
+        normalizationError: error,
         rendered: block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR),
-        sources: [],
-        splitError: error,
+        source: null,
       };
     }
   }));
   assertActiveRenderRequest(scope, options.signal);
   const dark = isDarkSurface(surface);
-  const diagramsByBlock = new Map<PreparedBlock, PreparedDiagram[]>();
   const preparedDiagrams: PreparedDiagram[] = [];
   for (const block of preparedBlocks) {
-    const blockDiagrams = block.sources.map((source, diagramIndex): PreparedDiagram => ({
+    if (block.source === null) {
+      continue;
+    }
+    const diagram: PreparedDiagram = {
       block,
-      descriptor: descriptorFor(source, block.block, dark, options.httpsHosts),
-      diagramIndex,
+      descriptor: descriptorFor(block.source, block.block, dark, options.httpsHosts),
       element: null,
       plan: null,
       presentation: presentationFor(block.block),
       record: null,
       waitPromise: null,
-    }));
-    diagramsByBlock.set(block, blockDiagrams);
-    preparedDiagrams.push(...blockDiagrams);
+    };
+    block.diagram = diagram;
+    preparedDiagrams.push(diagram);
   }
   const diagramPlans = planPlantUmlDiagramUpdates(
     preparedDiagrams.map((diagram) => diagram.descriptor),
@@ -503,21 +506,20 @@ export async function renderPlantUmlPreviewHtmlDocuments(
       continue;
     }
     block.rendered.replaceChildren();
-    if (block.splitError !== null) {
+    if (block.normalizationError !== null) {
       block.rendered.append(createStatus(
         block.block.ownerDocument,
         "kmark-plantuml-error-message",
-        errorMessage(block.splitError),
+        errorMessage(block.normalizationError),
       ));
       block.block.dataset.kmarkPlantumlState = "error";
       continue;
     }
-    for (const diagram of diagramsByBlock.get(block) ?? []) {
+    if (block.diagram !== null) {
       const element = block.block.ownerDocument.createElement("div");
       element.className = "kmark-plantuml-diagram";
-      element.dataset.kmarkPlantumlDiagramIndex = String(diagram.diagramIndex);
-      diagram.element = element;
-      syncDiagramElement(diagram);
+      block.diagram.element = element;
+      syncDiagramElement(block.diagram);
       block.rendered.append(element);
     }
     updateBlockState(block);
@@ -525,31 +527,31 @@ export async function renderPlantUmlPreviewHtmlDocuments(
 
   const renderOrder = prioritizePlantUmlItems(preparedBlocks, options.activeSourceLine, sourceRange);
   for (const block of renderOrder) {
-    for (const diagram of diagramsByBlock.get(block) ?? []) {
-      const { plan, record } = diagram;
-      if (plan === null || record === null) {
-        continue;
-      }
-      if (plan.action === "render" || plan.action === "finalize") {
-        diagram.waitPromise = startDiagramTask(
-          record,
-          plan.action,
-          dark,
-          options.httpsHosts,
-          scope,
-          diagram.presentation,
-        ).promise;
-      } else if (plan.action === "reuse-inflight") {
-        diagram.waitPromise = record.task?.promise ?? null;
-      }
+    const diagram = block.diagram;
+    if (diagram === null || diagram.plan === null || diagram.record === null) {
+      continue;
+    }
+    if (diagram.plan.action === "render" || diagram.plan.action === "finalize") {
+      diagram.waitPromise = startDiagramTask(
+        diagram.record,
+        diagram.plan.action,
+        dark,
+        options.httpsHosts,
+        scope,
+        diagram.presentation,
+      ).promise;
+    } else if (diagram.plan.action === "reuse-inflight") {
+      diagram.waitPromise = diagram.record.task?.promise ?? null;
     }
   }
 
   options.onUpdate?.(serializeTemplates(templates));
 
-  const splitFailure = preparedBlocks.find((block) => block.splitError !== null)?.splitError;
-  if (options.strict === true && splitFailure !== null && splitFailure !== undefined) {
-    throw splitFailure;
+  const normalizationFailure = preparedBlocks.find(
+    (block) => block.normalizationError !== null,
+  )?.normalizationError;
+  if (options.strict === true && normalizationFailure !== null && normalizationFailure !== undefined) {
+    throw normalizationFailure;
   }
   const cachedFailure = preparedDiagrams.find((diagram) => (
     diagram.record?.failedSignature === diagram.descriptor.finalizeSignature
@@ -560,22 +562,21 @@ export async function renderPlantUmlPreviewHtmlDocuments(
   }
 
   for (const block of renderOrder) {
-    for (const diagram of diagramsByBlock.get(block) ?? []) {
-      if (diagram.waitPromise === null) {
-        continue;
-      }
-      await waitForTask(diagram.waitPromise, options.signal);
-      syncDiagramElement(diagram);
-      updateBlockState(block);
-      if (
-        options.strict === true
-        && diagram.record?.failedSignature === diagram.descriptor.finalizeSignature
-        && diagram.record.error !== null
-      ) {
-        throw new Error(diagram.record.error);
-      }
-      options.onUpdate?.(serializeTemplates(templates));
+    const diagram = block.diagram;
+    if (diagram === null || diagram.waitPromise === null) {
+      continue;
     }
+    await waitForTask(diagram.waitPromise, options.signal);
+    syncDiagramElement(diagram);
+    updateBlockState(block);
+    if (
+      options.strict === true
+      && diagram.record?.failedSignature === diagram.descriptor.finalizeSignature
+      && diagram.record.error !== null
+    ) {
+      throw new Error(diagram.record.error);
+    }
+    options.onUpdate?.(serializeTemplates(templates));
   }
 
   preparedBlocks.forEach(updateBlockState);

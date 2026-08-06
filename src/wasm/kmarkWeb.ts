@@ -78,12 +78,9 @@ export async function renderMarkdownPreviewWithWasm(
   );
 }
 
-export async function splitPlantUmlSourceWithWasm(source: string): Promise<readonly string[]> {
+export async function normalizePlantUmlSourceWithWasm(source: string): Promise<string> {
   await initializeKmarkWeb();
-  const result = parseJsonPayload<{ readonly sources: readonly string[] }>(
-    loadKmarkWebModuleSync().split_plantuml_source_json(source),
-  );
-  return result.sources;
+  return loadKmarkWebModuleSync().normalize_plantuml_source(source);
 }
 
 export async function finalizeGeneratedSvgWithWasm(

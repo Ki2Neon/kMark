@@ -9,10 +9,6 @@ pub enum PlantUmlSourceError {
         line: usize,
         directive: String,
     },
-    UnexpectedEnd {
-        line: usize,
-        directive: String,
-    },
     MismatchedEnd {
         line: usize,
         expected: String,
@@ -39,23 +35,30 @@ impl PlantUmlSourceError {
 impl fmt::Display for PlantUmlSourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingDiagram => write!(formatter, "PlantUML source requires an explicit @start/@end diagram"),
+            Self::MissingDiagram => write!(
+                formatter,
+                "PlantUML code block requires exactly one explicit @start/@end diagram with only whitespace outside it"
+            ),
             Self::UnmatchedStart { line, directive } => {
                 write!(formatter, "unclosed {directive} at line {line}")
             }
-            Self::UnexpectedEnd { line, directive } => {
-                write!(formatter, "unexpected {directive} at line {line}")
-            }
-            Self::MismatchedEnd { line, expected, actual } => {
-                write!(formatter, "expected {expected} but found {actual} at line {line}")
+            Self::MismatchedEnd {
+                line,
+                expected,
+                actual,
+            } => {
+                write!(
+                    formatter,
+                    "expected {expected} but found {actual} at line {line}"
+                )
             }
             Self::UnsupportedDirective { line, directive } => write!(
                 formatter,
-                "{directive} at line {line} is unsupported by the bundled PlantUML renderer; use separate explicit diagrams"
+                "{directive} at line {line} is unsupported; use one diagram per PlantUML code block"
             ),
             Self::SourceTooLarge { bytes } => write!(
                 formatter,
-                "expanded PlantUML source is {bytes} bytes; maximum is {MAX_PLANTUML_SOURCE_BYTES} bytes"
+                "PlantUML source is {bytes} bytes; maximum is {MAX_PLANTUML_SOURCE_BYTES} bytes"
             ),
         }
     }
@@ -63,131 +66,123 @@ impl fmt::Display for PlantUmlSourceError {
 
 impl std::error::Error for PlantUmlSourceError {}
 
-#[derive(Debug)]
-struct OpenDiagram {
-    start_line: usize,
-    start_directive: String,
-    end_directive: String,
-    source: String,
-}
-
-pub fn split_plantuml_source(source: &str) -> Result<Vec<String>, PlantUmlSourceError> {
+pub fn normalize_plantuml_source(source: &str) -> Result<String, PlantUmlSourceError> {
     if source.len() > MAX_PLANTUML_SOURCE_BYTES {
         return Err(PlantUmlSourceError::SourceTooLarge {
             bytes: source.len(),
         });
     }
-    let mut preamble = String::new();
-    let mut diagrams = Vec::new();
-    let mut open_diagram: Option<OpenDiagram> = None;
+
+    let lines = lines_with_endings(source);
+    let Some(start_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return Err(PlantUmlSourceError::MissingDiagram);
+    };
+    let start_line = start_index + 1;
+    let start_text = lines[start_index].trim();
+    let Some((DirectiveKind::Start, diagram_kind)) = parse_directive(start_text) else {
+        return Err(PlantUmlSourceError::MissingDiagram);
+    };
+    if diagram_kind.eq_ignore_ascii_case("def") {
+        return Err(PlantUmlSourceError::MissingDiagram);
+    }
+
+    let start_directive = format!("@start{diagram_kind}");
+    let end_directive = format!("@end{diagram_kind}");
+    let mut normalized = String::new();
     let mut definition_depth = 0usize;
+    let mut definition_start_line = None;
+    let mut closed = false;
 
-    for (line_index, line_with_ending) in lines_with_endings(source).into_iter().enumerate() {
-        let line_number = line_index + 1;
+    for (index, line_with_ending) in lines.iter().enumerate().skip(start_index) {
+        let line_number = index + 1;
         let trimmed = line_with_ending.trim();
-        let directive = parse_directive(trimmed);
 
-        if let Some(diagram) = open_diagram.as_mut() {
-            diagram.source.push_str(line_with_ending);
-            if definition_depth == 0 && is_newpage_directive(trimmed) {
-                return Err(PlantUmlSourceError::UnsupportedDirective {
-                    line: line_number,
-                    directive: "newpage".to_owned(),
-                });
+        if closed {
+            if trimmed.is_empty() {
+                continue;
             }
-            if let Some((kind, name)) = directive {
-                if name.eq_ignore_ascii_case("def") {
-                    match kind {
-                        DirectiveKind::Start => definition_depth += 1,
-                        DirectiveKind::End if definition_depth > 0 => definition_depth -= 1,
-                        DirectiveKind::End => {
-                            return Err(PlantUmlSourceError::MismatchedEnd {
-                                line: line_number,
-                                expected: diagram.end_directive.clone(),
-                                actual: "@enddef".to_owned(),
-                            });
-                        }
+            return Err(PlantUmlSourceError::UnsupportedDirective {
+                line: line_number,
+                directive: first_token(trimmed).to_owned(),
+            });
+        }
+
+        normalized.push_str(line_with_ending);
+        if index == start_index {
+            continue;
+        }
+        if definition_depth == 0 && is_newpage_directive(trimmed) {
+            return Err(PlantUmlSourceError::UnsupportedDirective {
+                line: line_number,
+                directive: "newpage".to_owned(),
+            });
+        }
+
+        let Some((kind, name)) = parse_directive(trimmed) else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("def") {
+            match kind {
+                DirectiveKind::Start => {
+                    if definition_depth == 0 {
+                        definition_start_line = Some(line_number);
                     }
-                } else if kind == DirectiveKind::End && definition_depth == 0 {
-                    let actual = format!("@end{name}");
-                    if !name.eq_ignore_ascii_case(&diagram.end_directive[4..]) {
-                        return Err(PlantUmlSourceError::MismatchedEnd {
-                            line: line_number,
-                            expected: diagram.end_directive.clone(),
-                            actual,
-                        });
+                    definition_depth += 1;
+                }
+                DirectiveKind::End if definition_depth > 0 => {
+                    definition_depth -= 1;
+                    if definition_depth == 0 {
+                        definition_start_line = None;
                     }
-                    diagrams.push(std::mem::take(&mut diagram.source));
-                    open_diagram = None;
-                    continue;
+                }
+                DirectiveKind::End => {
+                    return Err(PlantUmlSourceError::MismatchedEnd {
+                        line: line_number,
+                        expected: end_directive.clone(),
+                        actual: "@enddef".to_owned(),
+                    });
                 }
             }
             continue;
         }
+        if definition_depth > 0 {
+            continue;
+        }
 
-        match directive {
-            Some((DirectiveKind::Start, name)) if name.eq_ignore_ascii_case("def") => {
-                definition_depth += 1;
-                preamble.push_str(line_with_ending);
-            }
-            Some((DirectiveKind::End, name)) if name.eq_ignore_ascii_case("def") => {
-                if definition_depth == 0 {
-                    return Err(PlantUmlSourceError::UnexpectedEnd {
-                        line: line_number,
-                        directive: "@enddef".to_owned(),
-                    });
-                }
-                definition_depth -= 1;
-                preamble.push_str(line_with_ending);
-            }
-            Some((DirectiveKind::Start, name)) if definition_depth == 0 => {
-                let end_directive = format!("@end{name}");
-                open_diagram = Some(OpenDiagram {
-                    start_line: line_number,
-                    start_directive: format!("@start{name}"),
-                    end_directive,
-                    source: line_with_ending.to_owned(),
-                });
-            }
-            Some((DirectiveKind::End, name)) if definition_depth == 0 => {
-                return Err(PlantUmlSourceError::UnexpectedEnd {
+        match kind {
+            DirectiveKind::Start => {
+                return Err(PlantUmlSourceError::UnsupportedDirective {
                     line: line_number,
-                    directive: format!("@end{name}"),
+                    directive: format!("@start{name}"),
                 });
             }
-            _ => preamble.push_str(line_with_ending),
+            DirectiveKind::End if name.eq_ignore_ascii_case(diagram_kind) => {
+                closed = true;
+            }
+            DirectiveKind::End => {
+                return Err(PlantUmlSourceError::MismatchedEnd {
+                    line: line_number,
+                    expected: end_directive.clone(),
+                    actual: format!("@end{name}"),
+                });
+            }
         }
     }
 
-    if let Some(diagram) = open_diagram {
+    if let Some(line) = definition_start_line {
         return Err(PlantUmlSourceError::UnmatchedStart {
-            line: diagram.start_line,
-            directive: diagram.start_directive,
-        });
-    }
-    if definition_depth != 0 {
-        return Err(PlantUmlSourceError::UnmatchedStart {
-            line: 1,
+            line,
             directive: "@startdef".to_owned(),
         });
     }
-    if diagrams.is_empty() {
-        return Err(PlantUmlSourceError::MissingDiagram);
+    if !closed {
+        return Err(PlantUmlSourceError::UnmatchedStart {
+            line: start_line,
+            directive: start_directive,
+        });
     }
 
-    diagrams
-        .into_iter()
-        .map(|diagram| {
-            let expanded = format!("{preamble}{diagram}");
-            if expanded.len() > MAX_PLANTUML_SOURCE_BYTES {
-                Err(PlantUmlSourceError::SourceTooLarge {
-                    bytes: expanded.len(),
-                })
-            } else {
-                Ok(expanded)
-            }
-        })
-        .collect()
+    Ok(normalized)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +208,10 @@ fn parse_directive(line: &str) -> Option<(DirectiveKind, &str)> {
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '_'))
     .then_some((kind, name))
+}
+
+fn first_token(line: &str) -> &str {
+    line.split_ascii_whitespace().next().unwrap_or("content")
 }
 
 fn is_newpage_directive(line: &str) -> bool {
@@ -253,23 +252,65 @@ fn lines_with_endings(source: &str) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{split_plantuml_source, PlantUmlSourceError};
+    use super::{normalize_plantuml_source, PlantUmlSourceError};
 
     #[test]
-    fn splits_multiple_explicit_diagrams_and_prepends_all_preamble() {
-        let source = "!define COLOR blue\n@startuml\nAlice -> Bob\n@enduml\n@startdef common\n!define X 1\n@enddef\n@startmindmap\n* Root\n@endmindmap\nskinparam shadowing false\n";
-        let diagrams = split_plantuml_source(source).expect("split failed");
+    fn removes_whitespace_outside_one_diagram_and_preserves_internal_lines() {
+        for newline in ["\n", "\r\n", "\r"] {
+            let source = format!(
+                " \t{newline}{newline}@startuml{newline}{newline}Alice -> Bob{newline}@enduml{newline} \t{newline}"
+            );
+            let expected =
+                format!("@startuml{newline}{newline}Alice -> Bob{newline}@enduml{newline}");
 
-        assert_eq!(diagrams.len(), 2);
-        assert!(diagrams[0].starts_with("!define COLOR blue\n@startdef common"));
-        assert!(diagrams[0].contains("skinparam shadowing false\n@startuml"));
-        assert!(diagrams[1].ends_with("@startmindmap\n* Root\n@endmindmap\n"));
+            assert_eq!(normalize_plantuml_source(&source), Ok(expected));
+        }
     }
 
     #[test]
-    fn rejects_newpage_instead_of_silently_dropping_later_pages() {
+    fn accepts_named_non_uml_diagram() {
+        let source = "@startmindmap map\n* Root\n@endmindmap";
+        assert_eq!(normalize_plantuml_source(source), Ok(source.to_owned()));
+    }
+
+    #[test]
+    fn keeps_nested_definitions_inside_diagram() {
+        let source = "@startuml\n@startdef common\n\n!define X 1\n@enddef\nAlice -> Bob\n@enduml";
+        assert_eq!(normalize_plantuml_source(source), Ok(source.to_owned()));
+    }
+
+    #[test]
+    fn rejects_non_whitespace_outside_diagram() {
+        assert_eq!(
+            normalize_plantuml_source("!define X 1\n@startuml\nAlice -> Bob\n@enduml"),
+            Err(PlantUmlSourceError::MissingDiagram)
+        );
         assert!(matches!(
-            split_plantuml_source(
+            normalize_plantuml_source("@startuml\nAlice -> Bob\n@enduml\nfooter"),
+            Err(PlantUmlSourceError::UnsupportedDirective { line: 4, .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_multiple_or_nested_diagrams() {
+        assert!(matches!(
+            normalize_plantuml_source(
+                "@startuml\nAlice -> Bob\n@enduml\n@startmindmap\n* Root\n@endmindmap"
+            ),
+            Err(PlantUmlSourceError::UnsupportedDirective { line: 4, .. })
+        ));
+        assert!(matches!(
+            normalize_plantuml_source(
+                "@startuml\nAlice -> Bob\n@startmindmap\n* Root\n@endmindmap\n@enduml"
+            ),
+            Err(PlantUmlSourceError::UnsupportedDirective { line: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_newpage() {
+        assert!(matches!(
+            normalize_plantuml_source(
                 "@startuml\nAlice -> Bob\nnewpage Second page\nBob -> Alice\n@enduml"
             ),
             Err(PlantUmlSourceError::UnsupportedDirective { line: 3, .. })
@@ -277,37 +318,31 @@ mod tests {
     }
 
     #[test]
-    fn accepts_all_supported_line_endings_without_changing_them() {
-        for newline in ["\n", "\r\n", "\r"] {
-            let source = format!("@startuml{newline}Alice -> Bob{newline}@enduml");
-            assert_eq!(split_plantuml_source(&source), Ok(vec![source]));
-        }
-    }
-
-    #[test]
-    fn keeps_nested_definition_inside_diagram() {
-        let source = "@startuml\n@startdef common\n!define X 1\n@enddef\nAlice -> Bob\n@enduml";
-        assert_eq!(split_plantuml_source(source), Ok(vec![source.to_owned()]));
-    }
-
-    #[test]
-    fn rejects_total_source_above_limit_before_splitting() {
-        let source = "x".repeat(super::MAX_PLANTUML_SOURCE_BYTES + 1);
+    fn rejects_missing_mismatched_or_unclosed_diagram() {
+        assert_eq!(
+            normalize_plantuml_source("Alice -> Bob"),
+            Err(PlantUmlSourceError::MissingDiagram)
+        );
         assert!(matches!(
-            split_plantuml_source(&source),
-            Err(PlantUmlSourceError::SourceTooLarge { .. })
+            normalize_plantuml_source("@startuml\nAlice -> Bob\n@endmindmap"),
+            Err(PlantUmlSourceError::MismatchedEnd { line: 3, .. })
+        ));
+        assert!(matches!(
+            normalize_plantuml_source("@startuml\nAlice -> Bob"),
+            Err(PlantUmlSourceError::UnmatchedStart { line: 1, .. })
+        ));
+        assert!(matches!(
+            normalize_plantuml_source("@startuml\n@startdef common\nAlice -> Bob\n@enduml"),
+            Err(PlantUmlSourceError::UnmatchedStart { line: 2, .. })
         ));
     }
 
     #[test]
-    fn rejects_missing_or_unmatched_diagram() {
-        assert_eq!(
-            split_plantuml_source("Alice -> Bob"),
-            Err(PlantUmlSourceError::MissingDiagram)
-        );
+    fn rejects_source_above_limit() {
+        let source = "x".repeat(super::MAX_PLANTUML_SOURCE_BYTES + 1);
         assert!(matches!(
-            split_plantuml_source("@startuml\nAlice -> Bob"),
-            Err(PlantUmlSourceError::UnmatchedStart { .. })
+            normalize_plantuml_source(&source),
+            Err(PlantUmlSourceError::SourceTooLarge { .. })
         ));
     }
 }

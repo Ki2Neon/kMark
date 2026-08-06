@@ -3,19 +3,38 @@ import { readFile } from "node:fs/promises";
 
 import initKmarkWeb, {
   finalize_generated_svg_json as finalizeGeneratedSvgJson,
+  normalize_plantuml_source as normalizePlantUmlSource,
   render_markdown_preview_json as renderMarkdownPreviewJson,
-  split_plantuml_source_json as splitPlantUmlSourceJson,
 } from "../src/wasm/pkg/kmark_web.js";
-import { renderedPlantUmlSamples } from "./test-plantuml-rendering.mjs";
+import {
+  renderedPlantUmlSamples,
+  renderPlantUmlTestSource,
+} from "./test-plantuml-rendering.mjs";
 
 const wasmBytes = await readFile(new URL("../src/wasm/pkg/kmark_web_bg.wasm", import.meta.url));
 await initKmarkWeb({ module_or_path: wasmBytes });
 
 const crSource = "@startuml\rAlice -> Bob\r@enduml";
-assert.deepEqual(JSON.parse(splitPlantUmlSourceJson(crSource)).sources, [crSource]);
+assert.equal(normalizePlantUmlSource(crSource), crSource);
+const whitespaceSource = " \t\n\n@startuml\nAlice -> Bob\n@enduml\n \t\n";
+const normalizedWhitespaceSource = normalizePlantUmlSource(whitespaceSource);
+assert.equal(normalizedWhitespaceSource, "@startuml\nAlice -> Bob\n@enduml\n");
+const whitespaceOutputs = await renderPlantUmlTestSource(normalizedWhitespaceSource, false);
+const whitespaceSvg = whitespaceOutputs.join("\n");
+assert.ok(whitespaceSvg.includes("Alice"), "outer whitespace prevented PlantUML rendering");
+assert.ok(
+  !whitespaceSvg.includes("Diagram not supported by this release of PlantUML"),
+  "outer whitespace produced a PlantUML error diagram",
+);
 assert.throws(
-  () => splitPlantUmlSourceJson("@startuml\nAlice -> Bob\nnewpage\nBob -> Alice\n@enduml"),
+  () => normalizePlantUmlSource("@startuml\nAlice -> Bob\nnewpage\nBob -> Alice\n@enduml"),
   /newpage.*unsupported/u,
+);
+assert.throws(
+  () => normalizePlantUmlSource(
+    "@startuml\nAlice -> Bob\n@enduml\n@startmindmap\n* Root\n@endmindmap",
+  ),
+  /one diagram per PlantUML code block/u,
 );
 
 for (const [index, sample] of renderedPlantUmlSamples.entries()) {
