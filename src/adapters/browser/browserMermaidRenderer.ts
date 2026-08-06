@@ -1,4 +1,5 @@
 import mermaid, { type MermaidConfig } from "mermaid";
+import { tightenMermaidSequenceMessageSpacing } from "./browserMermaidSequence";
 import { normalizeMermaidLineBreakTags } from "./browserMermaidSource";
 import {
   resolveKmarkMermaidThemeVariables,
@@ -1199,6 +1200,7 @@ function parseSafeMermaidSvg(
 
   sanitizeSvgElement(svgElement);
   const importedSvg = targetDocument.importNode(svgElement, true) as unknown as SVGElement;
+  tightenMermaidSequenceMessageSpacing(importedSvg);
   normalizeMermaidGanttLayerOrder(importedSvg);
   normalizeMermaidGanttTaskTextVerticalAlignment(importedSvg);
   injectMermaidGanttPostStyle(importedSvg, config);
