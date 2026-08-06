@@ -1,6 +1,7 @@
 import { EditorSelection, Prec, Transaction, type EditorState, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { formatMarkdownTablesInLineRanges } from "../../../adapters/browser/browserRustCore";
+import { buildInsertedMarkdownTable } from "../core/markdownTableInsert";
 import { resolveMarkdownTableFormatTextChanges } from "./markdownTableFormatTextChanges";
 
 type TableAlignment = "default" | "left" | "center" | "right";
@@ -63,8 +64,20 @@ type TableContextMenuItem = {
   readonly run: (view: EditorView) => boolean;
 };
 
+type TableInsertDialogState = {
+  readonly cleanup: () => void;
+  readonly element: HTMLDivElement;
+  readonly view: EditorView;
+};
+
 let activeTableContextMenu: TableContextMenuState | null = null;
-const INSERTED_MARKDOWN_TABLE = "| 列1 | 列2 |\n| --- | --- |\n|  |  |";
+let activeTableInsertDialog: TableInsertDialogState | null = null;
+const DEFAULT_INSERTED_TABLE_ROW_COUNT = 2;
+const DEFAULT_INSERTED_TABLE_COLUMN_COUNT = 2;
+const INITIAL_TABLE_INSERT_GRID_ROW_COUNT = 20;
+const INITIAL_TABLE_INSERT_GRID_COLUMN_COUNT = 20;
+const TABLE_INSERT_GRID_CELL_PITCH_PX = 21;
+const TABLE_INSERT_DIMENSION_LABEL_GAP_PX = 8;
 
 export function createCodeMirrorMarkdownTableEditExtension(): Extension {
   return [
@@ -198,6 +211,9 @@ class MarkdownTableContextMenuCleanupPlugin {
     if (activeTableContextMenu?.view === this.#view) {
       closeActiveTableContextMenu();
     }
+    if (activeTableInsertDialog?.view === this.#view) {
+      closeActiveTableInsertDialog();
+    }
   }
 }
 
@@ -231,6 +247,7 @@ function openEditorContextMenu(event: MouseEvent, view: EditorView): boolean {
     ? null
     : getTableCellAtPosition(view.state, clickedCell.cell.contentFrom) ?? clickedCell;
   closeActiveTableContextMenu();
+  closeActiveTableInsertDialog();
 
   const menu = createEditorContextMenu(view, activeCell);
   view.dom.append(menu);
@@ -284,7 +301,7 @@ function createEditorContextMenu(view: EditorView, activeCell: ActiveTableCell |
   const groups: (readonly TableContextMenuItem[])[] = [];
 
   if (activeCell === null) {
-    groups.push([{ icon: "+", label: "表を追加", run: insertMarkdownTable }]);
+    groups.push([{ icon: "+", label: "表を追加", run: openTableInsertDialog }]);
   }
 
   if (activeCell !== null) {
@@ -411,6 +428,176 @@ function closeActiveTableContextMenu(): void {
   activeTableContextMenu = null;
   menu.cleanup();
   menu.element.remove();
+}
+
+function openTableInsertDialog(view: EditorView): boolean {
+  closeActiveTableInsertDialog();
+
+  const ownerDocument = view.dom.ownerDocument;
+  const backdrop = ownerDocument.createElement("div");
+  backdrop.className = "cm-markdownTableInsertBackdrop";
+  const dialog = ownerDocument.createElement("div");
+  dialog.className = "cm-markdownTableInsertDialog";
+  dialog.role = "dialog";
+  dialog.setAttribute("aria-modal", "true");
+  const dimensionLabel = ownerDocument.createElement("div");
+  dimensionLabel.className = "cm-markdownTableInsertDialog__dimensionLabel";
+  dimensionLabel.setAttribute("aria-hidden", "true");
+  const grid = ownerDocument.createElement("div");
+  grid.className = "cm-markdownTableInsertDialog__grid";
+  grid.role = "grid";
+  grid.tabIndex = 0;
+  const selection = ownerDocument.createElement("div");
+  selection.className = "cm-markdownTableInsertDialog__selection";
+  selection.setAttribute("aria-hidden", "true");
+  grid.append(selection);
+
+  let selectedRowCount = DEFAULT_INSERTED_TABLE_ROW_COUNT;
+  let selectedColumnCount = DEFAULT_INSERTED_TABLE_COLUMN_COUNT;
+  let visibleRowCount = INITIAL_TABLE_INSERT_GRID_ROW_COUNT;
+  let visibleColumnCount = INITIAL_TABLE_INSERT_GRID_COLUMN_COUNT;
+
+  const updateSelection = (rowCount: number, columnCount: number): void => {
+    selectedRowCount = clamp(rowCount, 1, visibleRowCount);
+    selectedColumnCount = clamp(columnCount, 1, visibleColumnCount);
+    const label = `表 (${selectedRowCount} 行 × ${selectedColumnCount} 列)`;
+
+    dialog.setAttribute("aria-label", label);
+    grid.setAttribute("aria-label", label);
+    dimensionLabel.textContent = `${selectedRowCount}×${selectedColumnCount}`;
+    selection.style.height = `${selectedRowCount * TABLE_INSERT_GRID_CELL_PITCH_PX}px`;
+    selection.style.width = `${selectedColumnCount * TABLE_INSERT_GRID_CELL_PITCH_PX}px`;
+  };
+
+  const insertSelectedTable = (): void => {
+    closeActiveTableInsertDialog();
+    view.focus();
+    insertMarkdownTable(view, selectedRowCount, selectedColumnCount);
+  };
+
+  const updateSelectionFromPointer = (event: MouseEvent): void => {
+    const bounds = grid.getBoundingClientRect();
+    const row = Math.floor((event.clientY - bounds.top) / TABLE_INSERT_GRID_CELL_PITCH_PX) + 1;
+    const column = Math.floor((event.clientX - bounds.left) / TABLE_INSERT_GRID_CELL_PITCH_PX) + 1;
+
+    updateSelection(row, column);
+  };
+
+  grid.addEventListener("pointermove", updateSelectionFromPointer);
+  grid.addEventListener("click", (event) => {
+    updateSelectionFromPointer(event);
+    insertSelectedTable();
+  });
+
+  grid.addEventListener("keydown", (event) => {
+    let nextRow = selectedRowCount;
+    let nextColumn = selectedColumnCount;
+
+    switch (event.key) {
+      case "ArrowLeft":
+        nextColumn -= 1;
+        break;
+      case "ArrowRight":
+        nextColumn += 1;
+        break;
+      case "ArrowUp":
+        nextRow -= 1;
+        break;
+      case "ArrowDown":
+        nextRow += 1;
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        insertSelectedTable();
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    updateSelection(nextRow, nextColumn);
+  });
+
+  updateSelection(selectedRowCount, selectedColumnCount);
+  dialog.append(grid);
+  backdrop.append(dialog, dimensionLabel);
+  view.dom.append(backdrop);
+  positionTableInsertDialog(dialog, dimensionLabel);
+
+  const resizeObserver = new ResizeObserver((entries) => {
+    const bounds = entries[0]?.contentRect;
+
+    if (bounds === undefined) {
+      return;
+    }
+
+    visibleRowCount = Math.max(1, Math.floor(bounds.height / TABLE_INSERT_GRID_CELL_PITCH_PX));
+    visibleColumnCount = Math.max(1, Math.floor(bounds.width / TABLE_INSERT_GRID_CELL_PITCH_PX));
+    grid.setAttribute("aria-rowcount", `${visibleRowCount}`);
+    grid.setAttribute("aria-colcount", `${visibleColumnCount}`);
+    updateSelection(selectedRowCount, selectedColumnCount);
+  });
+  resizeObserver.observe(dialog);
+
+  const closeAndRestoreEditorFocus = (): void => {
+    closeActiveTableInsertDialog();
+    view.focus();
+  };
+  const closeOnBackdropPointer = (event: PointerEvent): void => {
+    if (event.target === backdrop) {
+      closeAndRestoreEditorFocus();
+    }
+  };
+  const closeOnKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeAndRestoreEditorFocus();
+    }
+  };
+
+  backdrop.addEventListener("pointerdown", closeOnBackdropPointer);
+  ownerDocument.addEventListener("keydown", closeOnKeyDown, true);
+  activeTableInsertDialog = {
+    cleanup: () => {
+      resizeObserver.disconnect();
+      backdrop.removeEventListener("pointerdown", closeOnBackdropPointer);
+      ownerDocument.removeEventListener("keydown", closeOnKeyDown, true);
+    },
+    element: backdrop,
+    view,
+  };
+  grid.focus();
+
+  return true;
+}
+
+function closeActiveTableInsertDialog(): void {
+  const dialog = activeTableInsertDialog;
+
+  if (dialog === null) {
+    return;
+  }
+
+  activeTableInsertDialog = null;
+  dialog.cleanup();
+  dialog.element.remove();
+}
+
+function positionTableInsertDialog(dialog: HTMLDivElement, dimensionLabel: HTMLDivElement): void {
+  const margin = 12;
+  const ownerWindow = dialog.ownerDocument.defaultView ?? window;
+  const left = Math.max(margin, (ownerWindow.innerWidth - dialog.offsetWidth) / 2);
+  const groupHeight = dimensionLabel.offsetHeight + TABLE_INSERT_DIMENSION_LABEL_GAP_PX + dialog.offsetHeight;
+  const labelTop = Math.max(margin, (ownerWindow.innerHeight - groupHeight) / 2);
+  const dialogTop = labelTop + dimensionLabel.offsetHeight + TABLE_INSERT_DIMENSION_LABEL_GAP_PX;
+
+  dialog.style.left = `${left}px`;
+  dialog.style.maxHeight = `${Math.max(TABLE_INSERT_GRID_CELL_PITCH_PX * 2, ownerWindow.innerHeight - dialogTop - margin)}px`;
+  dialog.style.maxWidth = `${Math.max(TABLE_INSERT_GRID_CELL_PITCH_PX * 2, ownerWindow.innerWidth - left - margin)}px`;
+  dialog.style.top = `${dialogTop}px`;
+  dimensionLabel.style.left = `${left}px`;
+  dimensionLabel.style.top = `${labelTop}px`;
 }
 
 function isCellInsideSelectedTableRange(state: EditorState, activeCell: ActiveTableCell): boolean {
@@ -857,15 +1044,16 @@ function selectTableCell(view: EditorView, sourceLineNumber: number, columnIndex
   });
 }
 
-function insertMarkdownTable(view: EditorView): boolean {
+function insertMarkdownTable(view: EditorView, rowCount: number, columnCount: number): boolean {
   const position = view.state.selection.main.head;
   const line = view.state.doc.lineAt(position);
   const insertsInsideBlankLine = line.text.trim().length === 0;
   const from = insertsInsideBlankLine ? line.from : line.to;
   const to = insertsInsideBlankLine ? line.to : line.to;
+  const table = buildInsertedMarkdownTable(rowCount, columnCount);
   const insert = insertsInsideBlankLine
-    ? INSERTED_MARKDOWN_TABLE
-    : `\n\n${INSERTED_MARKDOWN_TABLE}${line.to < view.state.doc.length ? "\n" : ""}`;
+    ? table
+    : `\n\n${table}${line.to < view.state.doc.length ? "\n" : ""}`;
   const tableStartLineNumber = insertsInsideBlankLine ? line.number : line.number + 2;
 
   view.dispatch({
@@ -875,7 +1063,7 @@ function insertMarkdownTable(view: EditorView): boolean {
       to,
     },
   });
-  selectTableCell(view, tableStartLineNumber + 2, 0);
+  selectTableCell(view, tableStartLineNumber + (rowCount > 1 ? 2 : 0), 0);
 
   return true;
 }
@@ -1568,5 +1756,66 @@ const markdownTableContextMenuTheme = EditorView.theme({
   },
   ".cm-markdownTableContextMenu__item:disabled:hover": {
     backgroundColor: "transparent",
+  },
+  ".cm-markdownTableInsertBackdrop": {
+    backgroundColor: "rgb(0 0 0 / 28%)",
+    inset: "0",
+    position: "fixed",
+    zIndex: "70",
+  },
+  ".cm-markdownTableInsertDialog": {
+    backgroundColor: "var(--surface-muted)",
+    border: "1px solid var(--border)",
+    borderRadius: "3px",
+    boxShadow: "0 14px 36px rgb(0 0 0 / 30%)",
+    color: "var(--text)",
+    minHeight: `${TABLE_INSERT_GRID_CELL_PITCH_PX * 2}px`,
+    minWidth: `${TABLE_INSERT_GRID_CELL_PITCH_PX * 2}px`,
+    overflow: "hidden",
+    position: "absolute",
+    resize: "both",
+    height: `${INITIAL_TABLE_INSERT_GRID_ROW_COUNT * TABLE_INSERT_GRID_CELL_PITCH_PX}px`,
+    width: `${INITIAL_TABLE_INSERT_GRID_COLUMN_COUNT * TABLE_INSERT_GRID_CELL_PITCH_PX}px`,
+  },
+  ".cm-markdownTableInsertDialog__grid": {
+    backgroundColor: "var(--surface)",
+    backgroundImage: [
+      "linear-gradient(to right, var(--border) 1px, transparent 1px)",
+      "linear-gradient(to bottom, var(--border) 1px, transparent 1px)",
+    ].join(", "),
+    backgroundSize: `${TABLE_INSERT_GRID_CELL_PITCH_PX}px ${TABLE_INSERT_GRID_CELL_PITCH_PX}px`,
+    cursor: "pointer",
+    height: "100%",
+    outline: "none",
+    overflow: "hidden",
+    position: "relative",
+    width: "100%",
+  },
+  ".cm-markdownTableInsertDialog__dimensionLabel": {
+    color: "var(--text)",
+    fontFamily: "var(--app-font-family)",
+    fontSize: "calc(var(--app-font-size) + var(--app-font-size) + var(--app-font-size))",
+    fontWeight: "700",
+    lineHeight: "1",
+    pointerEvents: "none",
+    position: "absolute",
+    zIndex: "1",
+  },
+  ".cm-markdownTableInsertDialog__selection": {
+    backgroundColor: "color-mix(in srgb, var(--focus) 20%, var(--surface))",
+    backgroundImage: [
+      "linear-gradient(to right, var(--focus) 1px, transparent 1px)",
+      "linear-gradient(to bottom, var(--focus) 1px, transparent 1px)",
+    ].join(", "),
+    backgroundSize: `${TABLE_INSERT_GRID_CELL_PITCH_PX}px ${TABLE_INSERT_GRID_CELL_PITCH_PX}px`,
+    boxShadow: "inset -1px -1px var(--focus)",
+    left: "0",
+    pointerEvents: "none",
+    position: "absolute",
+    top: "0",
+  },
+  ".cm-markdownTableInsertDialog__grid:focus-visible": {
+    outline: "2px solid var(--focus)",
+    outlineOffset: "-2px",
   },
 });

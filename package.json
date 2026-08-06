@@ -22,6 +22,7 @@
     "test:mermaid-source": "node --experimental-strip-types --test tools/test-mermaid-source.mjs",
     "test:mermaid-theme": "node --experimental-strip-types --test tools/test-mermaid-theme-contrast.mjs",
     "test:editor-scroll": "node --experimental-strip-types --test tools/test-editor-shift-wheel.mjs",
+    "test:table-insert": "node --experimental-strip-types --test tools/test-table-insert.mjs",
     "test:kmark-completion": "node tools/test-kmark-completion-context.mjs",
     "test:kmark-scope-display": "node tools/test-kmark-scope-display.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
