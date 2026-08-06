@@ -2,6 +2,8 @@ import {
   PlantUmlRawSvgCache,
   shouldCachePlantUmlSource,
 } from "./browserPlantUmlPolicy";
+import { resolveBundledStdlibListingSource } from "./browserPlantUmlStdlib";
+import plantUmlStdlibManifest from "./plantumlStdlibManifest.json";
 
 const PLANTUML_VERSION = "1.2026.6";
 const PLANTUML_RENDER_TIMEOUT_MS = 15_000;
@@ -157,9 +159,13 @@ class PlantUmlEngine {
       throw new PlantUmlTaskCancelledError();
     }
     this.#knownJobIds.add(jobId);
-    const cacheKey = `${PLANTUML_VERSION}:${dark ? "dark" : "light"}:${source.length}:${hashSource(source)}`;
-    if (shouldCachePlantUmlSource(source)) {
-      const cached = this.#cache.get(cacheKey, source);
+    const renderSource = resolveBundledStdlibListingSource(
+      source,
+      plantUmlStdlibManifest.assets,
+    );
+    const cacheKey = `${PLANTUML_VERSION}:${dark ? "dark" : "light"}:${renderSource.length}:${hashSource(renderSource)}`;
+    if (shouldCachePlantUmlSource(renderSource)) {
+      const cached = this.#cache.get(cacheKey, renderSource);
       if (cached !== null) {
         this.#knownJobIds.delete(jobId);
         return cached;
@@ -181,12 +187,12 @@ class PlantUmlEngine {
       }
       try {
         this.#currentJobId = jobId;
-        const svg = await this.#renderInFrame(source, dark, jobId, httpsHosts);
+        const svg = await this.#renderInFrame(renderSource, dark, jobId, httpsHosts);
         if (this.#cancelledJobIds.has(jobId)) {
           throw new PlantUmlTaskCancelledError();
         }
-        if (shouldCachePlantUmlSource(source)) {
-          this.#cache.put(cacheKey, { bytes: svg.length * 2, source, svg });
+        if (shouldCachePlantUmlSource(renderSource)) {
+          this.#cache.put(cacheKey, { bytes: svg.length * 2, source: renderSource, svg });
         }
         resolveResult(svg);
       } catch (error) {

@@ -14,6 +14,23 @@ import {
 const wasmBytes = await readFile(new URL("../src/wasm/pkg/kmark_web_bg.wasm", import.meta.url));
 await initKmarkWeb({ module_or_path: wasmBytes });
 
+function decodeHtmlText(value) {
+  return value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+function extractPlantUmlSource(markdown) {
+  const preview = JSON.parse(renderMarkdownPreviewJson(markdown, null, "a4"));
+  const html = preview.pages.map((page) => page.html).join("");
+  const match = html.match(/kmark-plantuml-source[\s\S]*?<pre><code>([\s\S]*?)<\/code>/u);
+  assert.ok(match, "PlantUML hidden source is missing");
+  return decodeHtmlText(match[1]);
+}
+
 const crSource = "@startuml\rAlice -> Bob\r@enduml";
 assert.equal(normalizePlantUmlSource(crSource), crSource);
 const whitespaceSource = " \t\n\n@startuml\nAlice -> Bob\n@enduml\n \t\n";
@@ -36,6 +53,44 @@ assert.throws(
   ),
   /one diagram per PlantUML code block/u,
 );
+
+for (const sample of [
+  {
+    expectedText: "Receive request",
+    source: [
+      "@startuml",
+      "title Activity Diagram",
+      "start",
+      ":Receive request;",
+      "if (Request is valid?) then (yes)",
+      "  :Process request;",
+      "else (no)",
+      "  :Return error;",
+      "endif",
+      "stop",
+      "@enduml",
+    ].join("\n"),
+  },
+  {
+    expectedText: "Receive signal",
+    source: [
+      "@startuml",
+      "title SDL Diagram",
+      "start",
+      ":Receive signal; <<input>>",
+      ":Validate data; <<procedure>>",
+      "stop",
+      "@enduml",
+    ].join("\n"),
+  },
+]) {
+  const extracted = extractPlantUmlSource(`\`\`\`plantuml\n${sample.source}\n\`\`\``);
+  assert.ok(!extracted.includes("\u001f"), "Markdown leaked its definition marker sentinel");
+  assert.ok(extracted.includes(`:${sample.expectedText};`));
+  const svg = (await renderPlantUmlTestSource(normalizePlantUmlSource(extracted), false)).join("\n");
+  assert.ok(svg.includes(sample.expectedText));
+  assert.ok(!/Syntax Error|Fatal parsing error/u.test(svg));
+}
 
 for (const [index, sample] of renderedPlantUmlSamples.entries()) {
   const result = JSON.parse(finalizeGeneratedSvgJson(JSON.stringify({

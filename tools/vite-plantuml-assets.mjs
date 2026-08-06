@@ -2,8 +2,19 @@ import { readFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
 
 const PACKAGE_DIRECTORY = resolve("node_modules/@plantuml/core");
+const STDLIB_DIRECTORY = resolve("vendor/plantuml-stdlib");
+const STDLIB_MANIFEST = JSON.parse(readFileSync(
+  resolve("src/adapters/browser/plantumlStdlibManifest.json"),
+  "utf8",
+));
 const ASSET_DIRECTORY = "plantuml-core";
-const ASSET_FILES = ["plantuml.js", "viz-global.js", "emoji.js", "openiconic.js", "LICENSE"];
+const ASSETS = [
+  ...["plantuml.js", "viz-global.js", "emoji.js", "openiconic.js", "LICENSE"]
+    .map((fileName) => [fileName, resolve(PACKAGE_DIRECTORY, fileName)]),
+  ...STDLIB_MANIFEST.assets
+    .map(({ file }) => [file, resolve(STDLIB_DIRECTORY, file)]),
+];
+const ASSET_PATHS = new Map(ASSETS);
 
 function contentType(fileName) {
   switch (extname(fileName)) {
@@ -21,14 +32,18 @@ function serveAsset(request, response, next) {
     return;
   }
   const fileName = pathName.slice(markerIndex + marker.length);
-  if (!ASSET_FILES.includes(fileName)) {
-    next();
+  const assetPath = ASSET_PATHS.get(fileName);
+  if (assetPath === undefined) {
+    response.statusCode = 404;
+    response.setHeader("Content-Type", "text/plain; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
+    response.end("PlantUML asset not found");
     return;
   }
   response.statusCode = 200;
   response.setHeader("Content-Type", contentType(fileName));
   response.setHeader("Cache-Control", "no-cache");
-  response.end(readFileSync(resolve(PACKAGE_DIRECTORY, fileName)));
+  response.end(readFileSync(assetPath));
 }
 
 export function plantUmlAssetsPlugin() {
@@ -49,11 +64,11 @@ export function plantUmlBuildAssetsPlugin() {
     name: "kmark-plantuml-build-assets",
     apply: "build",
     buildStart() {
-      for (const fileName of ASSET_FILES) {
+      for (const [fileName, assetPath] of ASSETS) {
         this.emitFile({
           type: "asset",
           fileName: `${ASSET_DIRECTORY}/${fileName}`,
-          source: readFileSync(resolve(PACKAGE_DIRECTORY, fileName)),
+          source: readFileSync(assetPath),
         });
       }
     },

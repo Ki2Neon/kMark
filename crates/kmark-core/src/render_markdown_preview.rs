@@ -6,8 +6,8 @@ use std::{
 };
 
 use pulldown_cmark::{
-    Alignment, CodeBlockKind, Event, HeadingLevel, LinkType, MetadataBlockKind, Options, Parser,
-    Tag, TagEnd,
+    Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, LinkType, MetadataBlockKind, Options,
+    Parser, Tag, TagEnd,
 };
 
 use crate::{
@@ -907,7 +907,7 @@ fn collect_markdown_events(content: &str) -> Vec<OwnedEvent> {
     Parser::new_ext(parser_content.as_ref(), markdown_options())
         .into_offset_iter()
         .map(|(event, range)| OwnedEvent {
-            event: event.into_static(),
+            event: restore_escaped_definition_markers_in_event(event.into_static()),
             range: normalize_source_range(parser_content.as_ref(), range),
             source_line_range: None,
         })
@@ -1249,11 +1249,25 @@ fn invalid_definition_marker_offset(
         .then_some(marker_offset)
 }
 
-fn restore_escaped_definition_marker_colons(value: &str) -> Cow<'_, str> {
+fn restore_escaped_definition_marker_colons(value: CowStr<'static>) -> CowStr<'static> {
     if value.contains(ESCAPED_DEFINITION_MARKER_COLON) {
-        Cow::Owned(value.replace(ESCAPED_DEFINITION_MARKER_COLON, ":"))
+        value.replace(ESCAPED_DEFINITION_MARKER_COLON, ":").into()
     } else {
-        Cow::Borrowed(value)
+        value
+    }
+}
+
+fn restore_escaped_definition_markers_in_event(event: Event<'static>) -> Event<'static> {
+    match event {
+        Event::Text(value) => Event::Text(restore_escaped_definition_marker_colons(value)),
+        Event::Code(value) => Event::Code(restore_escaped_definition_marker_colons(value)),
+        Event::InlineMath(value) => {
+            Event::InlineMath(restore_escaped_definition_marker_colons(value))
+        }
+        Event::DisplayMath(value) => {
+            Event::DisplayMath(restore_escaped_definition_marker_colons(value))
+        }
+        event => event,
     }
 }
 
@@ -3498,9 +3512,6 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_text(&mut self, text: &str) {
-        let text = restore_escaped_definition_marker_colons(text);
-        let text = text.as_ref();
-
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -3518,9 +3529,6 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn push_code(&mut self, text: &str) {
-        let text = restore_escaped_definition_marker_colons(text);
-        let text = text.as_ref();
-
         if let Some(image_context) = self.image_stack.last_mut() {
             image_context.alt_text.push_str(text);
             return;
@@ -9599,6 +9607,7 @@ mod tests {
     use super::{
         render_markdown_preview, render_markdown_preview_with_file_path,
         resolve_image_destination_url, CssLength, PageNumberPosition, PageNumberStyle,
+        ESCAPED_DEFINITION_MARKER_COLON,
     };
 
     fn extract_toc_html(html: &str) -> &str {
@@ -10769,6 +10778,26 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("<code class=\"language-puml\">"));
+    }
+
+    #[test]
+    fn preserves_leading_colons_in_generated_diagram_sources() {
+        for (language, source, expected) in [
+            (
+                "plantuml",
+                "@startuml\nstart\n:Receive request;\n@enduml",
+                ":Receive request;",
+            ),
+            ("mermaid", "flowchart TD\n:literal label", ":literal label"),
+        ] {
+            let rendered_preview =
+                render_markdown_preview(&format!("```{language}\n{source}\n```"));
+
+            assert!(rendered_preview.html.contains(expected));
+            assert!(!rendered_preview
+                .html
+                .contains(ESCAPED_DEFINITION_MARKER_COLON));
+        }
     }
 
     #[test]

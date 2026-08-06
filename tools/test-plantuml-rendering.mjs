@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function escapeXmlText(value) {
   return String(value)
@@ -85,6 +87,27 @@ class RawTestElement extends TestElement {
   }
 }
 
+class TestHeadElement extends TestElement {
+  constructor(baseUrl) {
+    super("head");
+    this.baseUrl = baseUrl;
+  }
+
+  appendChild(child) {
+    const result = super.appendChild(child);
+    if (child.nodeName === "script") {
+      try {
+        const scriptUrl = new URL(String(child.src), this.baseUrl);
+        Function(readFileSync(fileURLToPath(scriptUrl), "utf8"))();
+        child.onload?.();
+      } catch (error) {
+        child.onerror?.(error);
+      }
+    }
+    return result;
+  }
+}
+
 function serializeElement(element) {
   if (element instanceof RawTestElement) {
     return element.rawXml;
@@ -101,7 +124,15 @@ const originalConsoleLog = console.log;
 const testLocation = {
   href: new URL("../node_modules/@plantuml/core/viz-global.js", import.meta.url).href,
 };
+const stdlibBaseUrl = new URL("../vendor/plantuml-stdlib/", import.meta.url).href;
 const canvasContext = {
+  createImageData(width, height) {
+    return {
+      data: new Uint8ClampedArray(Number(width) * Number(height) * 4),
+      height: Number(height),
+      width: Number(width),
+    };
+  },
   font: "",
   measureText(text) {
     return {
@@ -110,16 +141,21 @@ const canvasContext = {
       width: Array.from(String(text)).length * 7.2,
     };
   },
+  putImageData() {},
 };
 
 globalThis.window = globalThis;
 globalThis.location = testLocation;
 globalThis.document = {
-  baseURI: testLocation.href,
+  baseURI: stdlibBaseUrl,
   body: new TestElement("body"),
   createElement(name) {
     if (name === "canvas") {
-      return { getContext: () => canvasContext, style: {} };
+      return {
+        getContext: () => canvasContext,
+        style: {},
+        toDataURL: () => "data:image/png;base64,iVBORw0KGgo=",
+      };
     }
     return new TestElement(name);
   },
@@ -130,6 +166,7 @@ globalThis.document = {
   getElementById() {
     return null;
   },
+  head: new TestHeadElement(stdlibBaseUrl),
   importNode(element) {
     return element;
   },
@@ -188,6 +225,37 @@ const samples = [
     ].join("\n"),
   },
   {
+    expectedText: "Return success",
+    dark: false,
+    name: "activity-legacy",
+    source: [
+      "@startuml",
+      "(*) --> \"Receive request\"",
+      "if \"Valid?\" then",
+      "  -->[yes] \"Process request\"",
+      "  --> \"Return success\"",
+      "  --> (*)",
+      "else",
+      "  -->[no] \"Return error\"",
+      "  --> (*)",
+      "endif",
+      "@enduml",
+    ].join("\n"),
+  },
+  {
+    expectedText: "Receive signal",
+    dark: false,
+    name: "sdl",
+    source: [
+      "@startuml",
+      "start",
+      ":Receive signal; <<input>>",
+      ":Validate data; <<procedure>>",
+      "stop",
+      "@enduml",
+    ].join("\n"),
+  },
+  {
     expectedText: "OrderService",
     dark: false,
     name: "class",
@@ -204,6 +272,22 @@ const samples = [
     dark: true,
     name: "mindmap",
     source: "@startmindmap\n* Root\n** Child\n@endmindmap",
+  },
+  {
+    expectedText: "Sample System",
+    dark: false,
+    name: "c4-stdlib",
+    source: [
+      "@startuml",
+      "!include <C4/C4_Container>",
+      "title C4 Container Diagram",
+      "Person(user, \"User\", \"Uses the system\")",
+      "System_Boundary(system, \"Sample System\") {",
+      "  Container(web, \"Web Application\", \"TypeScript\", \"User interface\")",
+      "}",
+      "Rel(user, web, \"Uses\")",
+      "@enduml",
+    ].join("\n"),
   },
 ];
 
