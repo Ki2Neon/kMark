@@ -489,8 +489,10 @@ struct KmarkRootDecoration {
 struct KmarkMermaidDecoration {
     root: KmarkRootDecoration,
     params: KmarkMermaidParams,
-    sized_width: bool,
-    sized_height: bool,
+    svg_style: Option<String>,
+    position: Option<String>,
+    align: Option<KmarkAlign>,
+    has_image_params: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3042,8 +3044,14 @@ impl<'a> HtmlEmitter<'a> {
                 page_valign,
             },
             params: params.mermaid.clone(),
-            sized_width: params.image.has_width_directive(),
-            sized_height: params.image.has_height_directive(),
+            svg_style: params.to_mermaid_svg_style(),
+            position: params.image.position.clone(),
+            align: params
+                .layout
+                .has_plain_text_align()
+                .then_some(params.layout.align)
+                .flatten(),
+            has_image_params: params.image.has_image_directives(),
         };
         self.clear_pending_kmark_render_state();
         self.active_mermaid_block = Some(ActiveMermaidBlock {
@@ -4838,19 +4846,13 @@ impl KmarkParams {
     }
 
     fn to_mermaid_block_root_style(&self) -> Option<String> {
-        let mut rules = Vec::new();
+        self.layout.to_single_block_style()
+    }
 
-        if let Some(image_style) = self.image.to_box_style() {
-            rules.push(image_style);
-        }
-        if let Some(width_style) = self.to_mermaid_block_width_style(true) {
-            rules.push(width_style);
-        }
-        if let Some(layout_style) = self.layout.to_single_block_style() {
-            rules.push(layout_style);
-        }
-
-        (!rules.is_empty()).then(|| rules.join(""))
+    fn to_mermaid_svg_style(&self) -> Option<String> {
+        let mut image = self.image.clone();
+        image.position = None;
+        image.to_style(&self.layout)
     }
 
     fn to_table_root_style(&self) -> Option<String> {
@@ -4920,37 +4922,6 @@ impl KmarkParams {
 
         if should_fit_content {
             rules.push("display:table".to_owned());
-            rules.push("width:fit-content".to_owned());
-            rules.push("max-width:100%".to_owned());
-            rules.push("box-sizing:border-box".to_owned());
-        }
-
-        if self.layout.has_plain_text_align()
-            && !self.image.has_page_fit_dimension()
-            && (should_fit_content || self.image.has_explicit_width())
-        {
-            match self.layout.align {
-                Some(KmarkAlign::Center) => {
-                    rules.push("margin-left:auto".to_owned());
-                    rules.push("margin-right:auto".to_owned());
-                }
-                Some(KmarkAlign::Right) => {
-                    rules.push("margin-left:auto".to_owned());
-                }
-                Some(KmarkAlign::Left) | None => {}
-            }
-        }
-
-        (!rules.is_empty()).then(|| format!("{};", rules.join(";")))
-    }
-
-    fn to_mermaid_block_width_style(&self, fit_plain_align: bool) -> Option<String> {
-        let mut rules = Vec::new();
-        let should_fit_content = !self.image.has_explicit_width()
-            && (self.image.has_box_directives()
-                || (fit_plain_align && self.layout.has_plain_text_align()));
-
-        if should_fit_content {
             rules.push("width:fit-content".to_owned());
             rules.push("max-width:100%".to_owned());
             rules.push("box-sizing:border-box".to_owned());
@@ -5050,22 +5021,32 @@ impl KmarkMermaidDecoration {
     fn class_suffix(&self) -> String {
         let mut class_suffix = self.root.class_suffix();
 
-        if self.sized_width {
-            class_suffix.push_str(" kmark-mermaid-block--sized-width");
-        }
-        if self.sized_height {
-            class_suffix.push_str(" kmark-mermaid-block--sized-height");
+        if self.has_image_params {
+            class_suffix.push_str(" kmark-mermaid-block--image-params");
         }
 
         class_suffix
     }
 
     fn data_and_style_attributes(&self) -> String {
-        format!(
-            "{}{}",
-            self.root.data_and_style_attributes(),
-            self.params.data_attributes(),
-        )
+        let mut attributes = self.root.data_and_style_attributes();
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-svg-style",
+            self.svg_style.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-position",
+            self.position.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-align",
+            self.align.map(KmarkAlign::css_text_value),
+        );
+        attributes.push_str(&self.params.data_attributes());
+        attributes
     }
 }
 
@@ -6312,14 +6293,6 @@ impl KmarkImageParams {
 
     fn has_explicit_width(&self) -> bool {
         self.width.is_some()
-    }
-
-    fn has_width_directive(&self) -> bool {
-        self.width.is_some()
-    }
-
-    fn has_height_directive(&self) -> bool {
-        self.height.is_some()
     }
 
     fn has_page_fit_dimension(&self) -> bool {
@@ -10649,11 +10622,11 @@ mod tests {
              ```mermaid\nflowchart TD\n  A --> B\n```",
         );
 
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
         assert!(rendered_preview.html.contains(
-            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-width kmark-mermaid-block--sized-height\""
-        ));
-        assert!(rendered_preview.html.contains(
-            "style=\"width:200px;height:120px;border-radius:4px;margin-left:auto;margin-right:auto;text-align:center\""
+            "style=\"text-align:center\" data-kmark-mermaid-svg-style=\"width:200px;height:120px;border-radius:4px;\" data-kmark-mermaid-align=\"center\""
         ));
         assert!(!rendered_preview.html.contains("font-size:20pt"));
         assert!(!rendered_preview.html.contains("color:red"));
@@ -10668,11 +10641,11 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--sized-height\""));
-        assert!(rendered_preview.html.contains(
-            "style=\"height:100px;width:fit-content;max-width:100%;box-sizing:border-box;\""
-        ));
-        assert!(!rendered_preview.html.contains("display:table"));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-svg-style=\"height:100px;\""));
+        assert!(!rendered_preview.html.contains(" style=\"height:100px"));
     }
 
     #[test]
@@ -10685,9 +10658,9 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--sized-width\""));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
         assert!(rendered_preview.html.contains(
-            "style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;\""
+            "data-kmark-mermaid-svg-style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;\""
         ));
     }
 
@@ -10699,12 +10672,51 @@ mod tests {
              ```mermaid\nflowchart TD\n  A --> B\n```",
         );
 
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
         assert!(rendered_preview.html.contains(
-            "class=\"kmark-mermaid-block kmark-mermaid-block--sized-width kmark-mermaid-block--sized-height\""
+            "data-kmark-mermaid-svg-style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""
+        ));
+    }
+
+    #[test]
+    fn emits_all_image_visual_params_for_mermaid_svg() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:40mm h:12mm pos:top_right border_size:2px border_color:#123456 border_style:dashed radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:sm margin:2mm padding:2mm 4mm align:right -->\n\
+             ```mermaid\nflowchart TD\n  A --> B\n```",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+        assert!(rendered_preview.html.contains(
+            "data-kmark-mermaid-svg-style=\"width:40mm;height:12mm;border-width:2px;border-style:dashed;border-color:#123456;border-radius:4px;background:#fff0f0;opacity:0.8;transform:rotate(-10deg);box-shadow:0 1px 3px #0002;margin:2mm;padding:2mm 4mm;\""
         ));
         assert!(rendered_preview
             .html
-            .contains("style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""));
+            .contains("data-kmark-mermaid-position=\"top right\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-align=\"right\""));
+        assert!(!rendered_preview
+            .html
+            .contains(" style=\"width:40mm;height:12mm"));
+    }
+
+    #[test]
+    fn emits_page_fit_contain_params_for_mermaid_svg() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:page_fit_contain h:page_fit_contain pos:bottom_left align:center -->\n\
+             ```mermaid\nflowchart TD\n  A --> B\n```",
+        );
+
+        assert!(rendered_preview.html.contains(
+            "data-kmark-mermaid-svg-style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\""
+        ));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-mermaid-position=\"bottom left\""));
     }
 
     #[test]

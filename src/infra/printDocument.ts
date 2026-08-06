@@ -209,6 +209,14 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     page-break-inside: avoid;
   }
 
+  .markdown-body .kmark-mermaid-block--image-params:not(.kmark-mermaid-error) {
+    overflow: visible;
+    padding: 0;
+    border-width: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
   .markdown-body .kmark-mermaid-rendered {
     display: flex;
     justify-content: center;
@@ -217,12 +225,12 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     overflow: visible;
   }
 
-  .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered {
-    width: 100%;
+  .markdown-body .kmark-mermaid-block[data-kmark-mermaid-align="left"] .kmark-mermaid-rendered {
+    justify-content: flex-start;
   }
 
-  .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered {
-    height: 100%;
+  .markdown-body .kmark-mermaid-block[data-kmark-mermaid-align="right"] .kmark-mermaid-rendered {
+    justify-content: flex-end;
   }
 
   .markdown-body .kmark-mermaid-rendered svg {
@@ -344,26 +352,6 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
   .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid .tick line,
   .markdown-body .kmark-mermaid-block--gantt .kmark-mermaid-rendered svg .grid path {
     opacity: 1;
-  }
-
-  .markdown-body .kmark-mermaid-block--sized-width .kmark-mermaid-rendered svg {
-    width: 100% !important;
-    max-width: none !important;
-    max-height: none !important;
-  }
-
-  .markdown-body .kmark-mermaid-block--sized-height .kmark-mermaid-rendered svg {
-    height: 100% !important;
-    max-width: none !important;
-    max-height: none !important;
-  }
-
-  .markdown-body .kmark-mermaid-block--sized-height:not(.kmark-mermaid-block--sized-width) .kmark-mermaid-rendered svg {
-    width: auto !important;
-  }
-
-  .markdown-body .kmark-mermaid-block--sized-width:not(.kmark-mermaid-block--sized-height) .kmark-mermaid-rendered svg {
-    height: auto !important;
   }
 
   .markdown-body .kmark-mermaid-error {

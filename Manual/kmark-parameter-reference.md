@@ -229,17 +229,20 @@
 
 | 対象 | 使用可能param | 例 | 注意 |
 | --- | --- | --- | --- |
-| Mermaid code block | `w` `h` `align` `valign` `page_valign` | `w:120mm align:center` | `w`/`h` 指定時 SVG表示sizeも枠へ追従 |
-| Mermaid code block | `margin` `padding` | `padding:2mm` | kmark wrapperへ適用 |
-| Mermaid code block | `border_size` `border_color` `border_style` `radius` | `border_size:1px radius:4px` | 枠線style省略時 `solid` |
-| Mermaid code block | `bg` `background` `opacity` `rotate` `shadow` | `bg:#fff shadow:sm` | Mermaid SVG内部themeは変更しない |
+| Mermaid code block | `w` `h` `pos` `align` `valign` `page_valign` | `w:120mm pos:top_right align:center` | `w`/`h`/`pos` は縦横比を維持して生成SVGへ適用 |
+| Mermaid code block | `margin` `padding` | `padding:2mm` | 生成SVGへ適用 |
+| Mermaid code block | `border_size` `border_color` `border_style` `radius` | `border_size:1px radius:4px` | 生成SVGへ適用 枠線style省略時 `solid` |
+| Mermaid code block | `bg` `background` `opacity` `rotate` `shadow` | `bg:#fff shadow:sm` | 生成SVGへ適用 Mermaid SVG内部themeは変更しない |
 
 - 構文: 直前 `<!-- kmark ... -->` scope `<!-- kmark { ... -->` define/use を使用
+- 画像param使用時: Mermaid標準wrapperの枠 背景 paddingは透明化
+- `bg`/`background` と `mermaid_background` 併用時: `mermaid_background`優先
+- 画像param未使用時: Mermaid標準wrapper表示を維持
 - 対象外: `font_size` `color` `font_family` `line_height` `table_*` `video_*`
 - fence info: ` ```mermaid w:200 ` 形式は未対応
 
 ````markdown
-<!-- kmark w:120mm h:70mm align:center radius:3mm shadow:sm -->
+<!-- kmark w:120mm h:70mm pos:top_right align:center radius:3mm shadow:sm -->
 ```mermaid
 flowchart TD
   A --> B

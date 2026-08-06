@@ -1,4 +1,8 @@
 import mermaid, { type MermaidConfig } from "mermaid";
+import {
+  applyKmarkMermaidSvgPresentation,
+  type KmarkMermaidSvgPresentation,
+} from "./browserMermaidPresentation";
 import { tightenMermaidSequenceMessageSpacing } from "./browserMermaidSequence";
 import { normalizeMermaidLineBreakTags } from "./browserMermaidSource";
 import {
@@ -17,11 +21,6 @@ type RenderMermaidHtmlOptions = {
   readonly themeVariables?: MermaidThemeVariables;
 };
 
-type MermaidBlockSizing = {
-  readonly sizedWidth: boolean;
-  readonly sizedHeight: boolean;
-};
-
 type KmarkMermaidBlockParams = {
   readonly fontSize?: string;
   readonly ganttFontSize?: string;
@@ -36,6 +35,8 @@ type KmarkMermaidBlockParams = {
   readonly themePreset?: string;
   readonly background?: string;
   readonly initMerge?: MermaidInitMergeMode;
+  readonly svgStyle?: string;
+  readonly position?: string;
 };
 
 type KmarkMermaidGanttResolvedSize = {
@@ -59,14 +60,13 @@ type PreparedMermaidRender = {
   readonly svgBackground: string;
   readonly surfaceBackground: string;
   readonly ganttSize?: KmarkMermaidGanttResolvedSize;
+  readonly svgPresentation: KmarkMermaidSvgPresentation;
 };
 
 const MERMAID_BLOCK_SELECTOR = ".kmark-mermaid-block";
 const MERMAID_RENDERED_SELECTOR = ".kmark-mermaid-rendered";
 const MERMAID_SOURCE_SELECTOR = ".kmark-mermaid-source";
 const MERMAID_SOURCE_CODE_SELECTOR = ".kmark-mermaid-source code";
-const MERMAID_SIZED_WIDTH_CLASS = "kmark-mermaid-block--sized-width";
-const MERMAID_SIZED_HEIGHT_CLASS = "kmark-mermaid-block--sized-height";
 const MERMAID_EMPTY_ERROR_MESSAGE = "Mermaid diagram is empty";
 const MERMAID_RENDER_ERROR_TITLE = "Mermaid render error";
 const SAFE_MERMAID_THEMES = new Set<MermaidPreviewTheme>(["base", "default", "dark", "neutral"]);
@@ -200,6 +200,16 @@ function resolveBlockParams(block: HTMLElement): KmarkMermaidBlockParams {
     themePreset: block.dataset.kmarkMermaidThemePreset,
     background: block.dataset.kmarkMermaidBackground,
     initMerge: resolveMermaidInitMerge(block.dataset.kmarkMermaidInitMerge),
+    svgStyle: block.dataset.kmarkMermaidSvgStyle,
+    position: block.dataset.kmarkMermaidPosition,
+  };
+}
+
+function resolveSvgPresentation(params: KmarkMermaidBlockParams): KmarkMermaidSvgPresentation {
+  return {
+    style: params.svgStyle,
+    position: params.position,
+    preferMermaidBackground: params.background !== undefined,
   };
 }
 
@@ -573,6 +583,7 @@ function prepareMermaidRender(
     svgBackground: background.svg,
     surfaceBackground: background.surface,
     ganttSize: completedGanttConfig.size,
+    svgPresentation: resolveSvgPresentation(params),
   };
 }
 
@@ -1187,8 +1198,8 @@ ${milestoneTextContrastRules}
 function parseSafeMermaidSvg(
   svg: string,
   targetDocument: Document,
-  sizing: MermaidBlockSizing,
   config: MermaidConfig,
+  presentation: KmarkMermaidSvgPresentation,
 ): SVGElement {
   const xmlCompatibleSvg = normalizeMermaidLineBreakTags(svg);
   const parsedDocument = new DOMParser().parseFromString(xmlCompatibleSvg, "image/svg+xml");
@@ -1207,14 +1218,15 @@ function parseSafeMermaidSvg(
   injectMermaidStatePostStyle(importedSvg, config);
   forceMermaidGanttBarBorderColor(importedSvg, config);
   forceMermaidGanttBarTextColor(importedSvg, config);
-  normalizeMermaidSvgSize(importedSvg, sizing);
+  normalizeMermaidSvgSize(importedSvg);
+  applyKmarkMermaidSvgPresentation(importedSvg, presentation);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
 
   return importedSvg;
 }
 
-function normalizeMermaidSvgSize(svgElement: SVGElement, sizing: MermaidBlockSizing): void {
+function normalizeMermaidSvgSize(svgElement: SVGElement): void {
   const viewBox = svgElement.getAttribute("viewBox")?.trim();
   const viewBoxParts = viewBox?.split(/\s+/u).map(Number) ?? [];
   const width = viewBoxParts[2];
@@ -1225,29 +1237,10 @@ function normalizeMermaidSvgSize(svgElement: SVGElement, sizing: MermaidBlockSiz
     svgElement.setAttribute("height", `${height}`);
   }
 
-  if (sizing.sizedWidth || sizing.sizedHeight) {
-    svgElement.style.setProperty("max-width", "none", "important");
-    svgElement.style.setProperty("max-height", "none", "important");
-    svgElement.style.setProperty("min-width", "0", "important");
-    svgElement.style.setProperty("min-height", "0", "important");
-  } else {
-    svgElement.style.removeProperty("max-width");
-    svgElement.style.removeProperty("max-height");
-    svgElement.style.removeProperty("min-width");
-    svgElement.style.removeProperty("min-height");
-  }
-
-  if (sizing.sizedWidth) {
-    svgElement.style.setProperty("width", "100%", "important");
-  } else if (sizing.sizedHeight) {
-    svgElement.style.setProperty("width", "auto", "important");
-  }
-
-  if (sizing.sizedHeight) {
-    svgElement.style.setProperty("height", "100%", "important");
-  } else if (sizing.sizedWidth) {
-    svgElement.style.setProperty("height", "auto", "important");
-  }
+  svgElement.style.removeProperty("max-width");
+  svgElement.style.removeProperty("max-height");
+  svgElement.style.removeProperty("min-width");
+  svgElement.style.removeProperty("min-height");
 
   if ((svgElement.getAttribute("style") ?? "").trim().length === 0) {
     svgElement.removeAttribute("style");
@@ -1264,13 +1257,6 @@ function toMermaidErrorMessage(error: unknown): string {
 
 function findMermaidSource(block: Element): string {
   return block.querySelector<HTMLElement>(MERMAID_SOURCE_CODE_SELECTOR)?.textContent ?? "";
-}
-
-function resolveMermaidBlockSizing(block: HTMLElement): MermaidBlockSizing {
-  return {
-    sizedWidth: block.classList.contains(MERMAID_SIZED_WIDTH_CLASS),
-    sizedHeight: block.classList.contains(MERMAID_SIZED_HEIGHT_CLASS),
-  };
 }
 
 function showMermaidSource(sourceDetails: HTMLElement | null): void {
@@ -1347,7 +1333,12 @@ async function renderMermaidBlock(
     block.dataset.kmarkMermaidTheme = String(prepared.config.theme ?? theme);
     applyMermaidBlockPresentation(block, prepared);
     const svg = await renderMermaidSvg(prepared.renderSource, prepared.config);
-    const svgElement = parseSafeMermaidSvg(svg, block.ownerDocument, resolveMermaidBlockSizing(block), prepared.config);
+    const svgElement = parseSafeMermaidSvg(
+      svg,
+      block.ownerDocument,
+      prepared.config,
+      prepared.svgPresentation,
+    );
     block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt || isMermaidGanttSvg(svgElement));
     renderedContainer.replaceChildren(svgElement);
     block.dataset.kmarkMermaidState = "rendered";
@@ -1367,6 +1358,13 @@ export async function renderMermaidBlocks(
 
   for (const block of blocks) {
     await renderMermaidBlock(block, theme, surface, themeVariables);
+  }
+
+  for (const block of blocks) {
+    const svgElement = block.querySelector<SVGElement>(`${MERMAID_RENDERED_SELECTOR} svg`);
+    if (svgElement !== null) {
+      applyKmarkMermaidSvgPresentation(svgElement, resolveSvgPresentation(resolveBlockParams(block)));
+    }
   }
 }
 

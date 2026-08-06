@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {
+  resolveKmarkMermaidSvgStyle,
+  resolveMermaidPreserveAspectRatio,
+} from "../src/adapters/browser/browserMermaidPresentation.ts";
 import { tightenMermaidSequenceMessageSpacing } from "../src/adapters/browser/browserMermaidSequence.ts";
 import { normalizeMermaidLineBreakTags } from "../src/adapters/browser/browserMermaidSource.ts";
 
@@ -30,6 +34,31 @@ test("makes Mermaid foreignObject line breaks XML-compatible", () => {
 test("leaves escaped and unrelated tags unchanged", () => {
   const source = "&lt;/br&gt; <brake> </b> <br data-kind='manual'>";
   assert.equal(normalizeMermaidLineBreakTags(source), source);
+});
+
+test("maps KMark image positions to Mermaid preserveAspectRatio", () => {
+  assert.equal(resolveMermaidPreserveAspectRatio("center"), "xMidYMid meet");
+  assert.equal(resolveMermaidPreserveAspectRatio("top_right"), "xMaxYMin meet");
+  assert.equal(resolveMermaidPreserveAspectRatio("left bottom"), "xMinYMax meet");
+  assert.equal(resolveMermaidPreserveAspectRatio("left right"), undefined);
+});
+
+test("allows only safe KMark image styles on Mermaid SVG", () => {
+  assert.deepEqual(
+    resolveKmarkMermaidSvgStyle(
+      "width:40mm;background:#fff;padding:2mm 4mm;position:fixed;color:red;transform:url(data:text/html,x);",
+      false,
+    ),
+    [
+      { property: "width", value: "40mm" },
+      { property: "background", value: "#fff" },
+      { property: "padding", value: "2mm 4mm" },
+    ],
+  );
+  assert.deepEqual(
+    resolveKmarkMermaidSvgStyle("background:#fff;width:80%;", true),
+    [{ property: "width", value: "80%" }],
+  );
 });
 
 function createSvgElement(className, attributes = {}, textContent = "") {
