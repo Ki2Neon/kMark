@@ -49,11 +49,7 @@ impl CommandErrorPayload {
         }
     }
 
-    pub fn with_detail(
-        code: &str,
-        message: impl Into<String>,
-        detail: impl Into<String>,
-    ) -> Self {
+    pub fn with_detail(code: &str, message: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             code: code.to_owned(),
             message: message.into(),
@@ -71,6 +67,38 @@ impl CommandErrorPayload {
     pub fn message(&self) -> &str {
         &self.message
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct GeneratedSvgPresentationPayload {
+    pub root_style: Option<String>,
+    pub position: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct FinalizeGeneratedSvgRequestPayload {
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub revision: u64,
+    pub render_id: String,
+    pub raw_svg: String,
+    pub presentation: GeneratedSvgPresentationPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct FinalizeGeneratedSvgResultPayload {
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub revision: u64,
+    pub render_id: String,
+    pub svg: String,
 }
 
 impl From<MarkdownDocumentError> for CommandErrorPayload {
@@ -336,7 +364,11 @@ pub struct RenderedPagePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "mode", rename_all = "lowercase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "mode",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 #[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "bindings", ts(export))]
 pub enum RenderedPreviewPayload {
@@ -502,6 +534,8 @@ pub struct EditorPreferencesPayload {
 pub struct PreviewPreferencesPayload {
     pub preview_display_mode: String,
     pub is_preview_visible: bool,
+    #[serde(default)]
+    pub plantuml_https_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -634,7 +668,11 @@ pub struct RegisterSubWindowSourceResponsePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "mode", rename_all = "lowercase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "mode",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 #[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "bindings", ts(export))]
 pub enum SubWindowSelectionPayload {
@@ -752,6 +790,7 @@ impl From<PreviewPreferencesPayload> for PreviewPreferences {
         Self::new(
             Some(&value.preview_display_mode),
             Some(value.is_preview_visible),
+            Some(&value.plantuml_https_hosts),
         )
     }
 }
@@ -761,13 +800,19 @@ impl From<&PreviewPreferences> for PreviewPreferencesPayload {
         Self {
             preview_display_mode: value.preview_display_mode().as_str().to_owned(),
             is_preview_visible: value.is_preview_visible(),
+            plantuml_https_hosts: value.plantuml_https_hosts().to_vec(),
         }
     }
 }
 
 impl From<EditorDraftPayload> for StoredEdit {
     fn from(value: EditorDraftPayload) -> Self {
-        Self::new(value.file_name, value.content, value.file_path, value.saved_at)
+        Self::new(
+            value.file_name,
+            value.content,
+            value.file_path,
+            value.saved_at,
+        )
     }
 }
 

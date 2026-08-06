@@ -132,9 +132,12 @@ export function MarkdownEditorScreen({
   onWindowsStartupTrayResidentChange,
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
+  const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const {
     isPreviewVisible,
     previewDisplayMode,
+    plantumlHttpsHosts,
+    onPlantUmlHttpsHostsChange,
     onPreviewDisplayModeChange,
     onPreviewVisibilityChange: onStoredPreviewVisibilityChange,
   } = usePreviewPreferences({ manageVisibilityByAppInstance: true });
@@ -174,6 +177,8 @@ export function MarkdownEditorScreen({
     initialDocumentMode,
     previewColorKey: previewUsesAppThemeColors ? `app:${appThemeId}` : "fixed",
     previewDisplayMode,
+    plantumlHttpsHosts,
+    activeSourceLine: activeEditCursorLine,
   });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -189,7 +194,6 @@ export function MarkdownEditorScreen({
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => detectLayoutMode());
   const [isEditFocused, setIsEditFocused] = useState(false);
-  const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
   const [editSelectionRequest, setEditSelectionRequest] = useState<{ readonly lineNumber: number; readonly requestId: number } | null>(null);
   const [subWindowBrowserFadeMs, setSubWindowBrowserFadeMs] = useState(DEFAULT_SUB_WINDOW_BROWSER_FADE_MS);
   const [subWindowPageTransitionFadeMs, setSubWindowPageTransitionFadeMs] = useState(DEFAULT_SUB_WINDOW_PAGE_TRANSITION_FADE_MS);
@@ -770,6 +774,7 @@ export function MarkdownEditorScreen({
     onOpenSubWindow: handleRequestOpenSubWindow,
     onOpenRecentFile: handleRequestOpenRecentFile,
     onOverwriteSaveDocument: handleRequestOverwriteSave,
+    onPlantUmlHttpsHostsChange,
     onPreviewDisplayModeChange,
     onPreviewUsesAppThemeColorsChange,
     onPreviewVisibilityChange: handlePreviewVisibilityChange,
@@ -781,6 +786,7 @@ export function MarkdownEditorScreen({
     onSubWindowPageTransitionFadeMsChange: setSubWindowPageTransitionFadeMs,
     onWindowsStartupTrayResidentChange,
     previewDisplayMode,
+    plantumlHttpsHosts,
     recentFiles,
     previewUsesAppThemeColors,
     showLineNumbers,

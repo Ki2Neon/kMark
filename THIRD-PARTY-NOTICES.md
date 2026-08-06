@@ -2,7 +2,7 @@
 
 kMark itself is licensed under MIT. Third-party components keep their own licenses.
 
-This file records the dependency licenses confirmed in this repository on 2026-05-16.
+This file records the dependency licenses confirmed in this repository on 2026-08-06.
 
 ## Notes
 
@@ -21,6 +21,7 @@ This file records the dependency licenses confirmed in this repository on 2026-0
 | @codemirror/state | MIT |
 | @codemirror/view | MIT |
 | @lezer/highlight | MIT |
+| @plantuml/core | MIT |
 | @tauri-apps/api | Apache-2.0 OR MIT |
 | @tauri-apps/plugin-opener | Apache-2.0 OR MIT |
 | @uiw/react-codemirror | MIT |
@@ -35,6 +36,8 @@ This file records the dependency licenses confirmed in this repository on 2026-0
 | Package | License |
 | --- | --- |
 | fs2 | MIT OR Apache-2.0 |
+| cssparser | MPL-2.0 |
+| quick-xml | MIT |
 | serde | MIT OR Apache-2.0 |
 | serde_json | MIT OR Apache-2.0 |
 | tauri | Apache-2.0 OR MIT |

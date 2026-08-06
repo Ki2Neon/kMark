@@ -90,10 +90,27 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
     });
   }, [controller]);
 
+  const handlePlantUmlHttpsHostsChange = useCallback((plantumlHttpsHosts: readonly string[]) => {
+    setPreviewPreferences((currentPreviewPreferences) => {
+      const nextPreviewPreferences = controller.changePlantUmlHttpsHosts(
+        currentPreviewPreferences,
+        plantumlHttpsHosts,
+      );
+      if (nextPreviewPreferences !== currentPreviewPreferences && isLoadedRef.current) {
+        void controller.persist(nextPreviewPreferences).catch(() => {
+          void controller.loadPreferences().then(setPreviewPreferences).catch(() => {});
+        });
+      }
+      return nextPreviewPreferences;
+    });
+  }, [controller]);
+
   return {
     isPreviewVisible: previewPreferences.isPreviewVisible,
     previewDisplayMode: previewPreferences.previewDisplayMode,
+    plantumlHttpsHosts: previewPreferences.plantumlHttpsHosts,
     onPreviewDisplayModeChange: handlePreviewDisplayModeChange,
     onPreviewVisibilityChange: handlePreviewVisibilityChange,
+    onPlantUmlHttpsHostsChange: handlePlantUmlHttpsHostsChange,
   };
 }

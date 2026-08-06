@@ -17,6 +17,8 @@ import {
   type RenderedPreviewPage,
 } from "../../domain/preview";
 import { renderMermaidPreviewHtml, resolveMermaidPreviewTheme } from "./browserMermaidRenderer";
+import { renderPlantUmlPreviewHtml } from "./browserPlantUmlRenderer";
+import { type PreviewRenderOptions } from "../../application/editorSession/editorSessionPorts";
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
 
@@ -197,21 +199,43 @@ function normalizePageChromeConfig(config?: Partial<PageChromeConfig>): PageChro
 
 async function normalizeRenderedMarkdownPreview(
   renderedPreview: RenderedMarkdownPreviewPayload,
+  options?: PreviewRenderOptions,
 ): Promise<NormalizedRenderedMarkdownPreviewPayload> {
   const defaultPageStyle = renderedPreview.defaultPageStyle;
   const defaultTextStyle = normalizePreviewTextStyle(renderedPreview.defaultTextStyle);
 
   if (renderedPreview.mode === "standard") {
     const html = await normalizePreviewHtmlMediaSources(renderedPreview.html);
-    return {
+    const basePreview: NormalizedRenderedMarkdownPreviewPayload = {
       mode: "standard",
-      html: await renderMermaidPreviewHtml(html, {
-        surface: "standard",
-        theme: resolveMermaidPreviewTheme("standard"),
-      }),
+      html,
       defaultPageStyle,
       defaultTextStyle,
     };
+    options?.onUpdate?.(basePreview);
+    const plantUmlHtml = await renderPlantUmlPreviewHtml(html, {
+      revision: options?.revision ?? 0,
+      documentKey: options?.documentKey ?? "preview",
+      httpsHosts: options?.plantumlHttpsHosts ?? [],
+      activeSourceLine: options?.activeSourceLine,
+      signal: options?.signal,
+      strict: options?.strictGeneratedSvg,
+      surface: "standard",
+      onUpdate: (updatedHtml) => options?.onUpdate?.({ ...basePreview, html: updatedHtml }),
+    });
+    const hydratedPreview: NormalizedRenderedMarkdownPreviewPayload = {
+      ...basePreview,
+      html: await renderMermaidPreviewHtml(plantUmlHtml, {
+        surface: "standard",
+        theme: resolveMermaidPreviewTheme("standard"),
+        revision: options?.revision ?? 0,
+        httpsHosts: options?.plantumlHttpsHosts ?? [],
+        signal: options?.signal,
+        strict: options?.strictGeneratedSvg,
+      }),
+    };
+    options?.onUpdate?.(hydratedPreview);
+    return hydratedPreview;
   }
 
   const normalizedPages = await Promise.all(renderedPreview.pages.map(async (page) => ({
@@ -222,15 +246,42 @@ async function normalizeRenderedMarkdownPreview(
     pageChromeConfig: normalizePageChromeConfig(page.pageChromeConfig),
   })));
 
-  return {
+  const basePreview: NormalizedRenderedMarkdownPreviewPayload = {
     mode: "a4",
-    pages: await Promise.all(normalizedPages.map(async (page) => ({
-      ...page,
-      html: await renderMermaidPreviewHtml(page.html, {
+    pages: normalizedPages,
+    defaultPageStyle,
+    defaultTextStyle,
+  };
+  options?.onUpdate?.(basePreview);
+  const hydratedPages = [...normalizedPages];
+  for (let pageIndex = 0; pageIndex < hydratedPages.length; pageIndex += 1) {
+    const page = hydratedPages[pageIndex];
+    const updatePage = (updatedHtml: string) => {
+      hydratedPages[pageIndex] = { ...hydratedPages[pageIndex], html: updatedHtml };
+      options?.onUpdate?.({ ...basePreview, pages: [...hydratedPages] });
+    };
+    const plantUmlHtml = await renderPlantUmlPreviewHtml(page.html, {
+      revision: options?.revision ?? 0,
+      documentKey: `${options?.documentKey ?? "preview"}:page:${pageIndex}`,
+      httpsHosts: options?.plantumlHttpsHosts ?? [],
+      activeSourceLine: options?.activeSourceLine,
+      signal: options?.signal,
+      strict: options?.strictGeneratedSvg,
+      surface: "paper",
+      onUpdate: updatePage,
+    });
+    updatePage(await renderMermaidPreviewHtml(plantUmlHtml, {
         surface: "paper",
         theme: resolveMermaidPreviewTheme("paper"),
-      }),
-    }))),
+        revision: options?.revision ?? 0,
+        httpsHosts: options?.plantumlHttpsHosts ?? [],
+        signal: options?.signal,
+        strict: options?.strictGeneratedSvg,
+      }));
+  }
+  return {
+    ...basePreview,
+    pages: hydratedPages,
     defaultPageStyle,
     defaultTextStyle,
   };
@@ -323,10 +374,12 @@ export async function renderMarkdownPreview(
   content: string,
   filePath: string | null,
   displayMode: import("../../domain/preview").PreviewDisplayMode,
+  options?: PreviewRenderOptions,
 ): Promise<NormalizedRenderedMarkdownPreviewPayload> {
   if (!isTauri()) {
     return normalizeRenderedMarkdownPreview(
       await renderMarkdownPreviewWithWorker(content, filePath, displayMode),
+      options,
     );
   }
 
@@ -336,5 +389,5 @@ export async function renderMarkdownPreview(
     "プレビュー描画に失敗しました。",
   );
 
-  return normalizeRenderedMarkdownPreview(renderedPreview);
+  return normalizeRenderedMarkdownPreview(renderedPreview, options);
 }

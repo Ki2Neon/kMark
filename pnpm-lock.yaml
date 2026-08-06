@@ -29,6 +29,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
+      '@plantuml/core':
+        specifier: 1.2026.6
+        version: 1.2026.6
       '@tauri-apps/api':
         specifier: ^2
         version: 2.10.1
@@ -411,6 +414,9 @@ packages:
 
   '@mermaid-js/parser@1.1.1':
     resolution: {integrity: sha512-VuHdsYMK1bT6X2JbcAaWAhugTRvRBRyuZgd+c22swUeI9g/ntaxF7CY7dYarhZovofCbUNO0G7JesfmNtjYOCw==}
+
+  '@plantuml/core@1.2026.6':
+    resolution: {integrity: sha512-e+s8jtAKT6kb7yvOCXv0exXOp7FvyKYDcpv+aQrThwXUQgdTGP+fb9hPZQr7jbeEMuUHbxjH1HYLwNZZxw3hJg==}
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -1608,6 +1614,8 @@ snapshots:
   '@mermaid-js/parser@1.1.1':
     dependencies:
       '@chevrotain/types': 11.1.2
+
+  '@plantuml/core@1.2026.6': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 

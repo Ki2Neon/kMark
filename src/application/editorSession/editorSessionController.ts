@@ -14,6 +14,7 @@ import {
   type MarkdownDocumentGateway,
   type MarkdownDocumentPrinter,
   type MarkdownRenderer,
+  type PreviewRenderOptions,
   type RecentFileStore,
 } from "./editorSessionPorts";
 
@@ -138,8 +139,9 @@ export class EditorSessionController {
     content: string,
     filePath: string | null,
     displayMode: PreviewDisplayMode,
+    options?: PreviewRenderOptions,
   ): Promise<RenderedPreview> {
-    return this.#renderer.render(content, filePath, displayMode);
+    return this.#renderer.render(content, filePath, displayMode, options);
   }
 
   changeContent(store: EditorSessionStore, content: string): void {
@@ -304,22 +306,50 @@ export class EditorSessionController {
   async printDocument(
     store: EditorSessionStore,
     previewDisplayMode: PreviewDisplayMode,
+    plantumlHttpsHosts: readonly string[],
   ): Promise<void> {
     const state = store.getState();
 
+    const printAbortController = new AbortController();
+    let printTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let renderedPreview: RenderedPreview;
+    try {
+      const renderPromise = this.renderPreview(
+        state.content,
+        state.filePath,
+        previewDisplayMode,
+        {
+          revision: this.#clock.now(),
+          documentKey: state.filePath ?? state.fileName,
+          plantumlHttpsHosts,
+          signal: printAbortController.signal,
+          strictGeneratedSvg: true,
+        },
+      );
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        printTimeoutId = setTimeout(() => {
+          printAbortController.abort();
+          reject(new Error("印刷用Diagram生成が30秒以内に完了しませんでした。"));
+        }, 30_000);
+      });
+      renderedPreview = await Promise.race([renderPromise, timeoutPromise]);
+    } finally {
+      if (printTimeoutId !== null) {
+        clearTimeout(printTimeoutId);
+      }
+    }
+
     if (previewDisplayMode === "a4") {
+      if (renderedPreview.mode !== "a4") {
+        throw new Error("用紙Previewの生成結果が不正です。");
+      }
       await this.#printer.print({
         displayMode: "a4",
         title: state.fileName,
+        pages: renderedPreview.pages,
       });
       return;
     }
-
-    const renderedPreview = await this.renderPreview(
-      state.content,
-      state.filePath,
-      "standard",
-    );
 
     if (renderedPreview.mode !== "standard") {
       throw new Error("標準Previewの生成結果が不正です。");

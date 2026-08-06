@@ -1,8 +1,5 @@
 import mermaid, { type MermaidConfig } from "mermaid";
-import {
-  applyKmarkMermaidSvgPresentation,
-  type KmarkMermaidSvgPresentation,
-} from "./browserMermaidPresentation";
+import { finalizeGeneratedSvg } from "./browserGeneratedSvgFinalizer";
 import { tightenMermaidSequenceMessageSpacing } from "./browserMermaidSequence";
 import { normalizeMermaidLineBreakTags } from "./browserMermaidSource";
 import {
@@ -15,10 +12,15 @@ export type MermaidPreviewTheme = "base" | "default" | "dark" | "neutral";
 export type MermaidPreviewSurface = "standard" | "paper";
 type MermaidInitMergeMode = "merge" | "replace" | "user-first" | "kmark-first";
 
-type RenderMermaidHtmlOptions = {
+export type RenderMermaidHtmlOptions = {
   readonly surface?: MermaidPreviewSurface;
   readonly theme?: MermaidPreviewTheme;
   readonly themeVariables?: MermaidThemeVariables;
+  readonly revision?: number;
+  readonly httpsHosts?: readonly string[];
+  readonly signal?: AbortSignal;
+  readonly strict?: boolean;
+  readonly onUpdate?: (html: string) => void;
 };
 
 type KmarkMermaidBlockParams = {
@@ -60,7 +62,6 @@ type PreparedMermaidRender = {
   readonly svgBackground: string;
   readonly surfaceBackground: string;
   readonly ganttSize?: KmarkMermaidGanttResolvedSize;
-  readonly svgPresentation: KmarkMermaidSvgPresentation;
 };
 
 const MERMAID_BLOCK_SELECTOR = ".kmark-mermaid-block";
@@ -81,6 +82,10 @@ const BASE_MERMAID_CONFIG: MermaidConfig = {
   securityLevel: "strict",
   startOnLoad: false,
 };
+
+function isAbortRequested(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
+}
 
 const GANTT_CLEAN_MERMAID_CONFIG: MermaidConfig = {
   gantt: {
@@ -200,16 +205,8 @@ function resolveBlockParams(block: HTMLElement): KmarkMermaidBlockParams {
     themePreset: block.dataset.kmarkMermaidThemePreset,
     background: block.dataset.kmarkMermaidBackground,
     initMerge: resolveMermaidInitMerge(block.dataset.kmarkMermaidInitMerge),
-    svgStyle: block.dataset.kmarkMermaidSvgStyle,
-    position: block.dataset.kmarkMermaidPosition,
-  };
-}
-
-function resolveSvgPresentation(params: KmarkMermaidBlockParams): KmarkMermaidSvgPresentation {
-  return {
-    style: params.svgStyle,
-    position: params.position,
-    preferMermaidBackground: params.background !== undefined,
+    svgStyle: block.dataset.kmarkGeneratedSvgStyle ?? block.dataset.kmarkMermaidSvgStyle,
+    position: block.dataset.kmarkGeneratedSvgPosition ?? block.dataset.kmarkMermaidPosition,
   };
 }
 
@@ -583,7 +580,6 @@ function prepareMermaidRender(
     svgBackground: background.svg,
     surfaceBackground: background.surface,
     ganttSize: completedGanttConfig.size,
-    svgPresentation: resolveSvgPresentation(params),
   };
 }
 
@@ -1199,7 +1195,6 @@ function parseSafeMermaidSvg(
   svg: string,
   targetDocument: Document,
   config: MermaidConfig,
-  presentation: KmarkMermaidSvgPresentation,
 ): SVGElement {
   const xmlCompatibleSvg = normalizeMermaidLineBreakTags(svg);
   const parsedDocument = new DOMParser().parseFromString(xmlCompatibleSvg, "image/svg+xml");
@@ -1219,7 +1214,6 @@ function parseSafeMermaidSvg(
   forceMermaidGanttBarBorderColor(importedSvg, config);
   forceMermaidGanttBarTextColor(importedSvg, config);
   normalizeMermaidSvgSize(importedSvg);
-  applyKmarkMermaidSvgPresentation(importedSvg, presentation);
   importedSvg.setAttribute("role", "img");
   importedSvg.setAttribute("aria-label", "Mermaid diagram");
 
@@ -1307,6 +1301,9 @@ async function renderMermaidBlock(
   theme: MermaidPreviewTheme,
   surface: MermaidPreviewSurface,
   themeVariables?: MermaidThemeVariables,
+  revision = 0,
+  httpsHosts: readonly string[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
   const renderedContainer = block.querySelector<HTMLElement>(MERMAID_RENDERED_SELECTOR);
   const sourceDetails = block.querySelector<HTMLElement>(MERMAID_SOURCE_SELECTOR);
@@ -1337,12 +1334,35 @@ async function renderMermaidBlock(
       svg,
       block.ownerDocument,
       prepared.config,
-      prepared.svgPresentation,
     );
-    block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt || isMermaidGanttSvg(svgElement));
-    renderedContainer.replaceChildren(svgElement);
+    if (isAbortRequested(signal)) {
+      throw new DOMException("Mermaid render superseded", "AbortError");
+    }
+    const finalized = await finalizeGeneratedSvg({
+      revision,
+      renderId: `mermaid-r${revision}-b${block.dataset.kmarkMermaidIndex ?? "0"}`,
+      rawSvg: new XMLSerializer().serializeToString(svgElement),
+      presentation: {
+        rootStyle: block.dataset.kmarkGeneratedSvgStyle ?? block.dataset.kmarkMermaidSvgStyle ?? null,
+        position: block.dataset.kmarkGeneratedSvgPosition ?? block.dataset.kmarkMermaidPosition ?? null,
+      },
+    }, httpsHosts);
+    if (isAbortRequested(signal) || finalized.revision !== revision) {
+      throw new DOMException("Mermaid render superseded", "AbortError");
+    }
+    const finalizedDocument = new DOMParser().parseFromString(finalized.svg, "image/svg+xml");
+    const finalizedSvg = finalizedDocument.documentElement;
+    if (finalizedSvg.localName.toLowerCase() !== "svg" || finalizedSvg.querySelector("parsererror") !== null) {
+      throw new Error("Rust SVG finalizer returned invalid SVG");
+    }
+    const importedFinalizedSvg = block.ownerDocument.importNode(finalizedSvg, true) as unknown as SVGElement;
+    block.classList.toggle("kmark-mermaid-block--gantt", prepared.expectsGantt || isMermaidGanttSvg(importedFinalizedSvg));
+    renderedContainer.replaceChildren(importedFinalizedSvg);
     block.dataset.kmarkMermaidState = "rendered";
   } catch (error) {
+    if ((error instanceof DOMException && error.name === "AbortError") || signal?.aborted === true) {
+      throw error;
+    }
     renderMermaidError(block, renderedContainer, sourceDetails, toMermaidErrorMessage(error));
   }
 }
@@ -1357,13 +1377,17 @@ export async function renderMermaidBlocks(
   const blocks = Array.from(root.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
 
   for (const block of blocks) {
-    await renderMermaidBlock(block, theme, surface, themeVariables);
-  }
-
-  for (const block of blocks) {
-    const svgElement = block.querySelector<SVGElement>(`${MERMAID_RENDERED_SELECTOR} svg`);
-    if (svgElement !== null) {
-      applyKmarkMermaidSvgPresentation(svgElement, resolveSvgPresentation(resolveBlockParams(block)));
+    await renderMermaidBlock(
+      block,
+      theme,
+      surface,
+      themeVariables,
+      options.revision ?? 0,
+      options.httpsHosts ?? [],
+      options.signal,
+    );
+    if (options.strict === true && block.dataset.kmarkMermaidState === "error") {
+      throw new Error(block.querySelector<HTMLElement>(".kmark-mermaid-error-message")?.textContent ?? "Mermaid render failed");
     }
   }
 }
@@ -1379,6 +1403,7 @@ export async function renderMermaidPreviewHtml(
   const template = document.createElement("template");
   template.innerHTML = html;
   await renderMermaidBlocks(template.content, options);
+  options.onUpdate?.(template.innerHTML);
 
   return template.innerHTML;
 }

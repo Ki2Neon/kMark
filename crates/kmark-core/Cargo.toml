@@ -8,6 +8,8 @@ name = "kmark_core"
 path = "src/lib.rs"
 
 [dependencies]
+cssparser = "=0.37.0"
 pulldown-cmark = "0.13"
+quick-xml = "=0.41.0"
 unicode-segmentation = "1"
 unicode-width = "0.2"

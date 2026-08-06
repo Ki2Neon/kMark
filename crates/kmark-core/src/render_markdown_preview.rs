@@ -229,6 +229,15 @@ struct ActiveMermaidBlock {
     decoration: KmarkMermaidDecoration,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActivePlantUmlBlock {
+    index: usize,
+    source: String,
+    source_line_start: usize,
+    source_line_end: usize,
+    decoration: KmarkGeneratedSvgDecoration,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockQuoteRenderKind {
     Normal,
@@ -487,8 +496,13 @@ struct KmarkRootDecoration {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct KmarkMermaidDecoration {
-    root: KmarkRootDecoration,
+    generated_svg: KmarkGeneratedSvgDecoration,
     params: KmarkMermaidParams,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct KmarkGeneratedSvgDecoration {
+    root: KmarkRootDecoration,
     svg_style: Option<String>,
     position: Option<String>,
     align: Option<KmarkAlign>,
@@ -768,6 +782,7 @@ struct HtmlEmitter<'a> {
     pending_kmark_page_valign: Option<KmarkPageValign>,
     pending_kmark_table_fit: Option<KmarkTableFit>,
     active_mermaid_block: Option<ActiveMermaidBlock>,
+    active_plantuml_block: Option<ActivePlantUmlBlock>,
     next_mermaid_block_index: usize,
     definition_list_title_line: Option<usize>,
 }
@@ -2477,6 +2492,7 @@ impl<'a> HtmlEmitter<'a> {
             pending_kmark_page_valign: None,
             pending_kmark_table_fit: None,
             active_mermaid_block: None,
+            active_plantuml_block: None,
             next_mermaid_block_index,
             definition_list_title_line: None,
         }
@@ -2747,6 +2763,10 @@ impl<'a> HtmlEmitter<'a> {
                     self.start_mermaid_block(range);
                     return;
                 }
+                if is_plantuml_code_block(&kind) {
+                    self.start_plantuml_block(range);
+                    return;
+                }
 
                 let mut html = format!(
                     "<pre{}{}><code",
@@ -2970,6 +2990,8 @@ impl<'a> HtmlEmitter<'a> {
             TagEnd::CodeBlock => {
                 if self.active_mermaid_block.is_some() {
                     self.finish_mermaid_block();
+                } else if self.active_plantuml_block.is_some() {
+                    self.finish_plantuml_block();
                 } else {
                     self.push_raw("</code></pre>");
                 }
@@ -3039,19 +3061,21 @@ impl<'a> HtmlEmitter<'a> {
             .then_some(params.page.valign)
             .flatten();
         let decoration = KmarkMermaidDecoration {
-            root: KmarkRootDecoration {
-                style: params.to_mermaid_block_root_style(),
-                page_valign,
+            generated_svg: KmarkGeneratedSvgDecoration {
+                root: KmarkRootDecoration {
+                    style: params.to_mermaid_block_root_style(),
+                    page_valign,
+                },
+                svg_style: params.to_generated_svg_style(params.mermaid.background.is_some()),
+                position: params.image.position.clone(),
+                align: params
+                    .layout
+                    .has_plain_text_align()
+                    .then_some(params.layout.align)
+                    .flatten(),
+                has_image_params: params.image.has_image_directives(),
             },
             params: params.mermaid.clone(),
-            svg_style: params.to_mermaid_svg_style(),
-            position: params.image.position.clone(),
-            align: params
-                .layout
-                .has_plain_text_align()
-                .then_some(params.layout.align)
-                .flatten(),
-            has_image_params: params.image.has_image_directives(),
         };
         self.clear_pending_kmark_render_state();
         self.active_mermaid_block = Some(ActiveMermaidBlock {
@@ -3064,12 +3088,15 @@ impl<'a> HtmlEmitter<'a> {
     }
 
     fn append_mermaid_source(&mut self, text: &str) -> bool {
-        let Some(block) = self.active_mermaid_block.as_mut() else {
-            return false;
-        };
-
-        block.source.push_str(text);
-        true
+        if let Some(block) = self.active_mermaid_block.as_mut() {
+            block.source.push_str(text);
+            return true;
+        }
+        if let Some(block) = self.active_plantuml_block.as_mut() {
+            block.source.push_str(text);
+            return true;
+        }
+        false
     }
 
     fn finish_mermaid_block(&mut self) {
@@ -3078,9 +3105,57 @@ impl<'a> HtmlEmitter<'a> {
         };
 
         self.push_raw(&format!(
-            "<div id=\"kmark-mermaid-{index}\" class=\"kmark-mermaid-block{class_suffix}\" data-kmark-mermaid-index=\"{index}\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"{source_line_start}\" data-source-line-end=\"{source_line_end}\"{decoration_attributes}><div class=\"kmark-mermaid-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source\" hidden><summary>source</summary><pre><code>{source}</code></pre></details></div>",
+            "<div id=\"kmark-mermaid-{index}\" class=\"kmark-mermaid-block{class_suffix} kmark-generated-svg-block\" data-kmark-generated-svg-engine=\"mermaid\" data-kmark-generated-svg-index=\"{index}\" data-kmark-mermaid-index=\"{index}\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"{source_line_start}\" data-source-line-end=\"{source_line_end}\"{decoration_attributes}><div class=\"kmark-mermaid-rendered kmark-generated-svg-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source kmark-generated-svg-source\" hidden><summary>source</summary><pre><code>{source}</code></pre></details></div>",
             index = block.index,
             class_suffix = block.decoration.class_suffix(),
+            source_line_start = block.source_line_start,
+            source_line_end = block.source_line_end,
+            decoration_attributes = block.decoration.data_and_style_attributes(),
+            source = escape_html(&block.source),
+        ));
+    }
+
+    fn start_plantuml_block(&mut self, range: &Range<usize>) {
+        let index = self.next_mermaid_block_index;
+        self.next_mermaid_block_index += 1;
+        let params = self.resolve_active_block_params();
+        let page_valign = self
+            .active_kmark_single_block
+            .is_some()
+            .then_some(params.page.valign)
+            .flatten();
+        let decoration = KmarkGeneratedSvgDecoration {
+            root: KmarkRootDecoration {
+                style: params.to_mermaid_block_root_style(),
+                page_valign,
+            },
+            svg_style: params.to_generated_svg_style(false),
+            position: params.image.position.clone(),
+            align: params
+                .layout
+                .has_plain_text_align()
+                .then_some(params.layout.align)
+                .flatten(),
+            has_image_params: params.image.has_image_directives(),
+        };
+        self.clear_pending_kmark_render_state();
+        self.active_plantuml_block = Some(ActivePlantUmlBlock {
+            index,
+            source: String::new(),
+            source_line_start: self.resolve_range_start_line(range.clone()),
+            source_line_end: self.resolve_range_end_line(range.clone()),
+            decoration,
+        });
+    }
+
+    fn finish_plantuml_block(&mut self) {
+        let Some(block) = self.active_plantuml_block.take() else {
+            return;
+        };
+        self.push_raw(&format!(
+            "<div id=\"kmark-plantuml-{index}\" class=\"kmark-generated-svg-block kmark-plantuml-block{class_suffix}\" data-kmark-generated-svg-engine=\"plantuml\" data-kmark-generated-svg-index=\"{index}\" data-kmark-plantuml-state=\"pending\" data-source-line-start=\"{source_line_start}\" data-source-line-end=\"{source_line_end}\"{decoration_attributes}><div class=\"kmark-generated-svg-rendered kmark-plantuml-rendered\" aria-live=\"polite\"></div><details class=\"kmark-generated-svg-source kmark-plantuml-source\" hidden><summary>source</summary><pre><code>{source}</code></pre></details></div>",
+            index = block.index,
+            class_suffix = block.decoration.class_suffix("kmark-plantuml-block--image-params"),
             source_line_start = block.source_line_start,
             source_line_end = block.source_line_end,
             decoration_attributes = block.decoration.data_and_style_attributes(),
@@ -4849,9 +4924,12 @@ impl KmarkParams {
         self.layout.to_single_block_style()
     }
 
-    fn to_mermaid_svg_style(&self) -> Option<String> {
+    fn to_generated_svg_style(&self, prefer_engine_background: bool) -> Option<String> {
         let mut image = self.image.clone();
         image.position = None;
+        if prefer_engine_background {
+            image.background = None;
+        }
         image.to_style(&self.layout)
     }
 
@@ -5019,34 +5097,65 @@ impl KmarkRootDecoration {
 
 impl KmarkMermaidDecoration {
     fn class_suffix(&self) -> String {
+        self.generated_svg
+            .class_suffix("kmark-mermaid-block--image-params")
+    }
+
+    fn data_and_style_attributes(&self) -> String {
+        let mut attributes = self.generated_svg.root.data_and_style_attributes();
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-svg-style",
+            self.generated_svg.svg_style.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-position",
+            self.generated_svg.position.as_deref(),
+        );
+        push_optional_data_attribute(
+            &mut attributes,
+            "data-kmark-mermaid-align",
+            self.generated_svg.align.map(KmarkAlign::css_text_value),
+        );
+        attributes.push_str(&self.params.data_attributes());
+        self.generated_svg.push_data_attributes(&mut attributes);
+        attributes
+    }
+}
+
+impl KmarkGeneratedSvgDecoration {
+    fn class_suffix(&self, image_params_class: &str) -> String {
         let mut class_suffix = self.root.class_suffix();
-
         if self.has_image_params {
-            class_suffix.push_str(" kmark-mermaid-block--image-params");
+            class_suffix.push(' ');
+            class_suffix.push_str(image_params_class);
         }
-
         class_suffix
     }
 
     fn data_and_style_attributes(&self) -> String {
         let mut attributes = self.root.data_and_style_attributes();
+        self.push_data_attributes(&mut attributes);
+        attributes
+    }
+
+    fn push_data_attributes(&self, attributes: &mut String) {
         push_optional_data_attribute(
-            &mut attributes,
-            "data-kmark-mermaid-svg-style",
+            attributes,
+            "data-kmark-generated-svg-style",
             self.svg_style.as_deref(),
         );
         push_optional_data_attribute(
-            &mut attributes,
-            "data-kmark-mermaid-position",
+            attributes,
+            "data-kmark-generated-svg-position",
             self.position.as_deref(),
         );
         push_optional_data_attribute(
-            &mut attributes,
-            "data-kmark-mermaid-align",
+            attributes,
+            "data-kmark-generated-svg-align",
             self.align.map(KmarkAlign::css_text_value),
         );
-        attributes.push_str(&self.params.data_attributes());
-        attributes
     }
 }
 
@@ -6327,6 +6436,13 @@ impl KmarkImageParams {
             rules.push(format!("object-position:{position}"));
         }
         self.push_decoration_style_rules(&mut rules);
+        if self.rotate.is_some() {
+            rules.push("transform-box:border-box".to_owned());
+            rules.push("transform-origin:center".to_owned());
+        }
+        if self.radius.is_some() {
+            rules.push("overflow:hidden".to_owned());
+        }
         self.push_fit_box_style_rules(&mut rules);
         self.push_page_fit_align_style_rules(layout, &mut rules);
 
@@ -6774,6 +6890,10 @@ fn code_block_language(kind: &CodeBlockKind<'_>) -> Option<String> {
 
 fn is_mermaid_code_block(kind: &CodeBlockKind<'_>) -> bool {
     code_block_language(kind).is_some_and(|language| language.eq_ignore_ascii_case("mermaid"))
+}
+
+fn is_plantuml_code_block(kind: &CodeBlockKind<'_>) -> bool {
+    code_block_language(kind).is_some_and(|language| language.eq_ignore_ascii_case("plantuml"))
 }
 
 fn collect_line_starts(content: &str) -> Vec<usize> {
@@ -10611,8 +10731,32 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<div id=\"kmark-mermaid-1\" class=\"kmark-mermaid-block\" data-kmark-mermaid-index=\"1\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"0\" data-source-line-end=\"3\"><div class=\"kmark-mermaid-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source\" hidden><summary>source</summary><pre><code>flowchart TD\n  A[&quot;&lt;script&gt;&quot;] --&gt; B\n</code></pre></details></div>"
+            "<div id=\"kmark-mermaid-1\" class=\"kmark-mermaid-block kmark-generated-svg-block\" data-kmark-generated-svg-engine=\"mermaid\" data-kmark-generated-svg-index=\"1\" data-kmark-mermaid-index=\"1\" data-kmark-mermaid-state=\"pending\" data-source-line-start=\"0\" data-source-line-end=\"3\"><div class=\"kmark-mermaid-rendered kmark-generated-svg-rendered\" aria-live=\"polite\"></div><details class=\"kmark-mermaid-source kmark-generated-svg-source\" hidden><summary>source</summary><pre><code>flowchart TD\n  A[&quot;&lt;script&gt;&quot;] --&gt; B\n</code></pre></details></div>"
         );
+    }
+
+    #[test]
+    fn renders_only_plantuml_fences_as_generated_svg_placeholders() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:200 pos:top_right align:right -->\n```PlantUML title=sample\n@startuml\nAlice -> Bob: <unsafe>\n@enduml\n```\n\n```puml\n@startuml\n@enduml\n```",
+        );
+
+        assert!(rendered_preview.html.contains("class=\"kmark-generated-svg-block kmark-plantuml-block kmark-plantuml-block--image-params\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-generated-svg-style=\"width:200px;\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-generated-svg-position=\"top right\""));
+        assert!(rendered_preview
+            .html
+            .contains("data-kmark-generated-svg-align=\"right\""));
+        assert!(rendered_preview
+            .html
+            .contains("Alice -&gt; Bob: &lt;unsafe&gt;"));
+        assert!(rendered_preview
+            .html
+            .contains("<code class=\"language-puml\">"));
     }
 
     #[test]
@@ -10624,9 +10768,9 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview.html.contains(
-            "style=\"text-align:center\" data-kmark-mermaid-svg-style=\"width:200px;height:120px;border-radius:4px;\" data-kmark-mermaid-align=\"center\""
+            "style=\"text-align:center\" data-kmark-mermaid-svg-style=\"width:200px;height:120px;border-radius:4px;overflow:hidden;\" data-kmark-mermaid-align=\"center\""
         ));
         assert!(!rendered_preview.html.contains("font-size:20pt"));
         assert!(!rendered_preview.html.contains("color:red"));
@@ -10641,7 +10785,7 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-mermaid-svg-style=\"height:100px;\""));
@@ -10658,7 +10802,7 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview.html.contains(
             "data-kmark-mermaid-svg-style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;\""
         ));
@@ -10674,7 +10818,7 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview.html.contains(
             "data-kmark-mermaid-svg-style=\"width:160px;height:90px;box-shadow:0 1px 3px #0002;\""
         ));
@@ -10689,9 +10833,9 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params\""));
+            .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview.html.contains(
-            "data-kmark-mermaid-svg-style=\"width:40mm;height:12mm;border-width:2px;border-style:dashed;border-color:#123456;border-radius:4px;background:#fff0f0;opacity:0.8;transform:rotate(-10deg);box-shadow:0 1px 3px #0002;margin:2mm;padding:2mm 4mm;\""
+            "data-kmark-mermaid-svg-style=\"width:40mm;height:12mm;border-width:2px;border-style:dashed;border-color:#123456;border-radius:4px;background:#fff0f0;opacity:0.8;transform:rotate(-10deg);box-shadow:0 1px 3px #0002;margin:2mm;padding:2mm 4mm;transform-box:border-box;transform-origin:center;overflow:hidden;\""
         ));
         assert!(rendered_preview
             .html
@@ -11861,7 +12005,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:40mm;height:12mm;border-radius:4px;background:#fff0f0;opacity:0.8;transform:rotate(-10deg);box-shadow:0 2px 8px #0003;margin:2mm;padding:2mm 4mm;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:40mm;height:12mm;border-radius:4px;background:#fff0f0;opacity:0.8;transform:rotate(-10deg);box-shadow:0 2px 8px #0003;margin:2mm;padding:2mm 4mm;transform-box:border-box;transform-origin:center;overflow:hidden;\" /></p>"
         );
     }
 

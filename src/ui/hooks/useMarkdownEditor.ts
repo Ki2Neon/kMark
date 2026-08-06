@@ -25,10 +25,14 @@ import { type RecentFile } from "../../domain/recentFiles";
 
 export type InitialEditorDocumentMode = "stored" | "new-untitled";
 
+const EMPTY_PLANTUML_HTTPS_HOSTS: readonly string[] = [];
+
 type UseMarkdownEditorOptions = {
   readonly initialDocumentMode?: InitialEditorDocumentMode;
   readonly previewColorKey?: string;
   readonly previewDisplayMode?: PreviewDisplayMode;
+  readonly plantumlHttpsHosts?: readonly string[];
+  readonly activeSourceLine?: number | null;
 };
 
 export function useMarkdownEditor(
@@ -39,6 +43,8 @@ export function useMarkdownEditor(
     initialDocumentMode = "stored",
     previewColorKey = "",
     previewDisplayMode = "standard",
+    plantumlHttpsHosts = EMPTY_PLANTUML_HTTPS_HOSTS,
+    activeSourceLine = null,
   } = options;
   const renderRequestIdRef = useRef(0);
   const recentFilesRequestIdRef = useRef(0);
@@ -176,19 +182,32 @@ export function useMarkdownEditor(
     const requestId = renderRequestIdRef.current + 1;
     renderRequestIdRef.current = requestId;
     let disposed = false;
+    const abortController = new AbortController();
+    const applyRenderedPreview = (nextRenderedPreview: RenderedPreview) => {
+      if (disposed || renderRequestIdRef.current !== requestId) {
+        return;
+      }
+      startTransition(() => {
+        setRenderedPreview(nextRenderedPreview);
+      });
+    };
 
-    void controller.renderPreview(state.content, state.filePath, previewDisplayMode)
+    void controller.renderPreview(state.content, state.filePath, previewDisplayMode, {
+      revision: requestId,
+      documentKey: state.filePath ?? state.fileName,
+      plantumlHttpsHosts,
+      activeSourceLine,
+      signal: abortController.signal,
+      onUpdate: applyRenderedPreview,
+    })
       .then((nextRenderedPreview) => {
-        if (disposed || renderRequestIdRef.current !== requestId) {
-          return;
-        }
-
-        startTransition(() => {
-          setRenderedPreview(nextRenderedPreview);
-        });
+        applyRenderedPreview(nextRenderedPreview);
       })
       .catch((error) => {
         if (disposed || renderRequestIdRef.current !== requestId) {
+          return;
+        }
+        if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
 
@@ -197,8 +216,9 @@ export function useMarkdownEditor(
 
     return () => {
       disposed = true;
+      abortController.abort();
     };
-  }, [controller, currentDocumentFilePath, isReady, previewColorKey, previewDisplayMode, state.content, state.filePath, store]);
+  }, [controller, currentDocumentFilePath, isReady, plantumlHttpsHosts, previewColorKey, previewDisplayMode, state.content, state.fileName, state.filePath, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
@@ -314,9 +334,9 @@ export function useMarkdownEditor(
     previewDisplayMode: PreviewDisplayMode,
   ) => {
     await executeWithErrorHandling(async () => {
-      await controller.printDocument(store, previewDisplayMode);
+      await controller.printDocument(store, previewDisplayMode, plantumlHttpsHosts);
     });
-  }, [controller, executeWithErrorHandling, store]);
+  }, [controller, executeWithErrorHandling, plantumlHttpsHosts, store]);
 
   const handleImportDroppedAssets = useCallback(async (droppedFilePaths: readonly string[]) => {
     try {

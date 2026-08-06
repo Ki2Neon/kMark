@@ -1,4 +1,4 @@
-import { type PreviewPreferences } from "../domain/preview";
+import { normalizePlantUmlHttpsHostsText, type PreviewPreferences } from "../domain/preview";
 import { isTauri } from "../runtime/runtime";
 import { invokeTauriCommand, listenTauriEvent } from "./tauriCommand";
 import { createWebJsonStateStore } from "./webStateStore";
@@ -31,13 +31,18 @@ export async function loadPreviewPreferences(): Promise<PreviewPreferences> {
 export async function persistPreviewPreferences(
   previewPreferences: PreviewPreferences,
 ): Promise<PreviewPreferences> {
+  const normalizedHosts = normalizePlantUmlHttpsHostsText(previewPreferences.plantumlHttpsHosts.join("\n"));
+  const normalizedPreferences = {
+    ...previewPreferences,
+    plantumlHttpsHosts: normalizedHosts,
+  };
   if (!isTauri()) {
-    return previewPreferencesStore.persist(previewPreferences);
+    return previewPreferencesStore.persist(normalizedPreferences);
   }
 
   return invokeTauriCommand<PreviewPreferences>(
     SET_PREVIEW_PREFERENCES_COMMAND,
-    { previewPreferences },
+    { previewPreferences: normalizedPreferences },
     "プレビュー設定の保存に失敗しました。",
   );
 }

@@ -1,6 +1,7 @@
 pub use kmark_contract::{
     recent_file_from_payload, recent_file_payloads_from_recent_files, recent_files_from_payloads,
     DesktopLayoutPreferencesPayload, EditorDraftPayload, EditorPreferencesPayload,
+    FinalizeGeneratedSvgRequestPayload, FinalizeGeneratedSvgResultPayload,
     PreviewPreferencesPayload, RecentFilePayload, RegisterSubWindowSourceResponsePayload,
     SubWindowResolvedSourceStatePayload, SubWindowSelectionPayload,
     SubWindowSourceLineSelectionRequestPayload, SubWindowSourceStateChangedPayload,
@@ -10,7 +11,7 @@ pub use kmark_contract::{
 
 #[cfg(test)]
 mod tests {
-    use super::EditorPreferencesPayload;
+    use super::{EditorPreferencesPayload, PreviewPreferencesPayload};
 
     #[test]
     fn defaults_legacy_editor_preferences_to_line_wrapping() {
@@ -29,5 +30,15 @@ mod tests {
         .expect("legacy editor preferences should deserialize");
 
         assert!(payload.line_wrapping_enabled);
+    }
+
+    #[test]
+    fn defaults_legacy_preview_preferences_to_empty_plantuml_host_list() {
+        let payload = serde_json::from_str::<PreviewPreferencesPayload>(
+            r#"{"previewDisplayMode":"standard","isPreviewVisible":true}"#,
+        )
+        .expect("legacy preview preferences should deserialize");
+
+        assert!(payload.plantuml_https_hosts.is_empty());
     }
 }

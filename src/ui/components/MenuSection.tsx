@@ -19,6 +19,7 @@ import {
   type SystemFontSizePx,
 } from "../../domain/editorPreferences";
 import {
+  normalizePlantUmlHttpsHostsText,
   type PreviewDisplayMode,
 } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
@@ -39,6 +40,7 @@ type MenuSectionProps = {
   readonly editFontSizePx: EditFontSizePx;
   readonly systemFontSizePx: SystemFontSizePx;
   readonly previewDisplayMode: PreviewDisplayMode;
+  readonly plantumlHttpsHosts: readonly string[];
   readonly previewUsesAppThemeColors: boolean;
   readonly recentFiles: readonly RecentFile[];
   readonly isPreviewVisible: boolean;
@@ -66,6 +68,7 @@ type MenuSectionProps = {
   readonly onOverwriteSaveDocument: () => void;
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
+  readonly onPlantUmlHttpsHostsChange: (plantumlHttpsHosts: readonly string[]) => void;
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
   readonly onPreviewVisibilityChange: (isPreviewVisible: boolean) => void;
   readonly onSaveDocumentAs: () => void;
@@ -112,6 +115,7 @@ function MenuSectionComponent({
   editFontSizePx,
   systemFontSizePx,
   previewDisplayMode,
+  plantumlHttpsHosts,
   previewUsesAppThemeColors,
   recentFiles,
   isPreviewVisible,
@@ -139,6 +143,7 @@ function MenuSectionComponent({
   onOverwriteSaveDocument,
   onPrintDocument,
   onPreviewDisplayModeChange,
+  onPlantUmlHttpsHostsChange,
   onPreviewUsesAppThemeColorsChange,
   onPreviewVisibilityChange,
   onSaveDocumentAs,
@@ -156,6 +161,8 @@ function MenuSectionComponent({
   const [subWindowBrowserFadeDraft, setSubWindowBrowserFadeDraft] = useState(() => String(subWindowBrowserFadeMs));
   const [subWindowPageTransitionFadeDraft, setSubWindowPageTransitionFadeDraft] = useState(() => String(subWindowPageTransitionFadeMs));
   const [systemFontSizeDraft, setSystemFontSizeDraft] = useState(() => String(systemFontSizePx));
+  const [plantumlHttpsHostsDraft, setPlantUmlHttpsHostsDraft] = useState(() => plantumlHttpsHosts.join("\n"));
+  const [plantumlHttpsHostsError, setPlantUmlHttpsHostsError] = useState<string | null>(null);
   const [focusedFontField, setFocusedFontField] = useState<"app" | "edit" | null>(null);
   const [focusedNumberField, setFocusedNumberField] = useState<NumberDraftField | null>(null);
   const discardNextFontBlurRef = useRef(false);
@@ -199,6 +206,9 @@ function MenuSectionComponent({
     "フェード",
     "fade",
     "transition",
+    "PlantUML",
+    "HTTPS",
+    "Host",
   );
   const previewVisibilityVisible = previewGroupMatched || matchesMenuSearch("表示", "非表示", "visible");
   const previewDisplayModeVisible =
@@ -208,12 +218,15 @@ function MenuSectionComponent({
     previewGroupMatched || matchesMenuSearch("サブウィンドウ", "フェード", "fade", "transition", "ms");
   const subWindowBrowserFadeVisible =
     previewGroupMatched || matchesMenuSearch("サブウィンドウ", "ブラウザ", "browser", "フェード", "fade", "ms");
+  const plantumlHttpsHostsVisible =
+    previewGroupMatched || matchesMenuSearch("PlantUML", "HTTPS", "Host", "外部Resource");
   const previewGroupVisible =
     previewVisibilityVisible
     || previewDisplayModeVisible
     || previewColorVisible
     || subWindowPageTransitionFadeVisible
-    || subWindowBrowserFadeVisible;
+    || subWindowBrowserFadeVisible
+    || plantumlHttpsHostsVisible;
   const editGroupMatched = matchesMenuSearch("Edit", "編集", "起動時", "編集表示");
   const showLineNumbersVisible = editGroupMatched || matchesMenuSearch("行番号", "line number");
   const lineWrappingVisible =
@@ -275,6 +288,11 @@ function MenuSectionComponent({
       setSubWindowPageTransitionFadeDraft(String(subWindowPageTransitionFadeMs));
     }
   }, [focusedNumberField, subWindowPageTransitionFadeMs]);
+
+  useEffect(() => {
+    setPlantUmlHttpsHostsDraft(plantumlHttpsHosts.join("\n"));
+    setPlantUmlHttpsHostsError(null);
+  }, [plantumlHttpsHosts]);
 
   useEffect(() => {
     if (focusedNumberField !== "system-font-size") {
@@ -342,6 +360,30 @@ function MenuSectionComponent({
 
   const handlePreviewUsesAppThemeColorsSwitch = (event: ChangeEvent<HTMLInputElement>) => {
     onPreviewUsesAppThemeColorsChange(event.currentTarget.checked);
+  };
+
+  const commitPlantUmlHttpsHosts = () => {
+    try {
+      const hosts = normalizePlantUmlHttpsHostsText(plantumlHttpsHostsDraft);
+      setPlantUmlHttpsHostsDraft(hosts.join("\n"));
+      setPlantUmlHttpsHostsError(null);
+      onPlantUmlHttpsHostsChange(hosts);
+    } catch (error) {
+      setPlantUmlHttpsHostsError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handlePlantUmlHttpsHostsInput = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    setPlantUmlHttpsHostsDraft(event.currentTarget.value);
+    setPlantUmlHttpsHostsError(null);
+  };
+
+  const handlePlantUmlHttpsHostsKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape") {
+      setPlantUmlHttpsHostsDraft(plantumlHttpsHosts.join("\n"));
+      setPlantUmlHttpsHostsError(null);
+      event.currentTarget.blur();
+    }
   };
 
   const handleAppFontInput = (event: ChangeEvent<HTMLInputElement>) => {
@@ -767,6 +809,31 @@ function MenuSectionComponent({
                 aria-label="サブウィンドウ内ブラウザのフェード時間 ms"
                 className="menu-section__select"
               />
+            </label>
+          ) : null}
+
+          {plantumlHttpsHostsVisible ? (
+            <label className="menu-section__label menu-section__label--multiline">
+              <span className="menu-section__field-label">PlantUML HTTPS Host</span>
+              <span className="menu-section__field-stack">
+                <textarea
+                  value={plantumlHttpsHostsDraft}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder="cdn.example.com"
+                  aria-label="PlantUML外部Resource許可Host"
+                  aria-invalid={plantumlHttpsHostsError !== null}
+                  onChange={handlePlantUmlHttpsHostsInput}
+                  onBlur={() => {
+                    commitPlantUmlHttpsHosts();
+                  }}
+                  onKeyDown={handlePlantUmlHttpsHostsKeyDown}
+                  className="menu-section__select menu-section__textarea"
+                />
+                {plantumlHttpsHostsError !== null ? (
+                  <span className="menu-section__field-error" role="alert">{plantumlHttpsHostsError}</span>
+                ) : null}
+              </span>
             </label>
           ) : null}
 

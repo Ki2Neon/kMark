@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { plantUmlAssetsPlugin, plantUmlBuildAssetsPlugin } from "./tools/vite-plantuml-assets.mjs";
 
 // @ts-expect-error process is a nodejs global
 const env = process.env;
@@ -9,7 +10,7 @@ const base = env.KMARK_BASE_PATH ?? "./";
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   base,
-  plugins: [react()],
+  plugins: [react(), plantUmlAssetsPlugin(), plantUmlBuildAssetsPlugin()],
   build: {
     rollupOptions: {
       output: {

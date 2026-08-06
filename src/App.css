@@ -1854,6 +1854,28 @@ input:focus-visible,
   page-break-inside: avoid;
 }
 
+.menu-section__label--multiline {
+  align-items: start;
+}
+
+.menu-section__field-stack {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.menu-section__textarea {
+  min-height: 4.8em;
+  resize: vertical;
+  font-family: var(--edit-font-family);
+}
+
+.menu-section__field-error {
+  color: var(--danger);
+  font-size: 0.72em;
+  overflow-wrap: anywhere;
+}
+
 .markdown-body .kmark-mermaid-block--image-params:not(.kmark-mermaid-error) {
   overflow: visible;
   padding: 0;
@@ -1877,6 +1899,16 @@ input:focus-visible,
 
 .markdown-body .kmark-mermaid-block[data-kmark-mermaid-align="right"] .kmark-mermaid-rendered {
   justify-content: flex-end;
+}
+
+.markdown-body .kmark-generated-svg-block[data-kmark-generated-svg-align="left"] .kmark-generated-svg-rendered {
+  justify-content: flex-start;
+  justify-items: start;
+}
+
+.markdown-body .kmark-generated-svg-block[data-kmark-generated-svg-align="right"] .kmark-generated-svg-rendered {
+  justify-content: flex-end;
+  justify-items: end;
 }
 
 .markdown-body .kmark-mermaid-rendered svg {
@@ -2028,6 +2060,55 @@ input:focus-visible,
 .markdown-body .kmark-mermaid-source pre {
   margin-top: 0.5em;
   margin-bottom: 0;
+}
+
+.markdown-body .kmark-plantuml-block {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.75em;
+  border: 1px solid color-mix(in srgb, var(--preview-text) 14%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--preview-text) 2.5%, var(--preview-surface));
+  color: var(--preview-text);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.markdown-body .kmark-plantuml-block--image-params {
+  overflow: visible;
+  padding: 0;
+  border-width: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.markdown-body .kmark-plantuml-rendered {
+  display: grid;
+  gap: 0.75em;
+  justify-items: center;
+  max-width: 100%;
+}
+
+.markdown-body .kmark-plantuml-diagram {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.markdown-body .kmark-plantuml-diagram > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body .kmark-plantuml-loading {
+  color: var(--preview-text-soft);
+}
+
+.markdown-body .kmark-plantuml-error-message {
+  margin-top: 0.5em;
+  color: color-mix(in srgb, #b91c1c 82%, var(--preview-text));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body .kmark-toc {

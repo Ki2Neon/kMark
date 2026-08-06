@@ -1,16 +1,18 @@
 use kmark_contract::{
     DesktopLayoutPreferencesPayload, EditorDraftPayload, EditorPreferencesPayload,
     EditorStateActionPayload, EditorStateInput, EditorStatePayload, EditorStatsPayload,
+    FinalizeGeneratedSvgRequestPayload, FinalizeGeneratedSvgResultPayload,
     FormatMarkdownTablesPayload, PreviewPreferencesPayload, RecentFilePayload,
     RenderedPreviewPayload, TableDiagnosticPayload, ThemePreferencesPayload,
 };
 use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
-    format_markdown_tables, format_markdown_tables_in_line_ranges, reduce_editor_state,
-    render_markdown_preview_with_file_path, resolve_app_font_family, resolve_edit_font_family,
-    DesktopLayoutPreferences, EditorPreferences, EditorState, EditorStateAction,
-    PreviewDisplayMode, PreviewPreferences, RecentFile, RecentFiles, StoredEdit,
-    TableFormatLineRange, TableFormatOptions, ThemePreferences,
+    finalize_generated_svg, format_markdown_tables, format_markdown_tables_in_line_ranges,
+    normalize_plantuml_https_hosts, reduce_editor_state, render_markdown_preview_with_file_path,
+    resolve_app_font_family, resolve_edit_font_family, DesktopLayoutPreferences, EditorPreferences,
+    EditorState, EditorStateAction, GeneratedSvgPresentation, PreviewDisplayMode,
+    PreviewPreferences, RecentFile, RecentFiles, StoredEdit, TableFormatLineRange,
+    TableFormatOptions, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -64,6 +66,7 @@ struct TableFormatLineRangeInput {
 struct PreviewPreferencesInput {
     preview_display_mode: Option<String>,
     is_preview_visible: Option<bool>,
+    plantuml_https_hosts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +85,12 @@ struct RecentFileInput {
     file_path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlantUmlSourceResult {
+    sources: Vec<String>,
+}
+
 #[wasm_bindgen]
 pub fn render_markdown_preview_json(
     content: String,
@@ -96,6 +105,43 @@ pub fn render_markdown_preview_json(
         rendered_preview.default_page_style,
         rendered_preview.default_text_style,
     ))
+}
+
+#[wasm_bindgen]
+pub fn split_plantuml_source_json(source: String) -> Result<String, JsValue> {
+    kmark_core::split_plantuml_source(&source)
+        .map(|sources| stringify(&PlantUmlSourceResult { sources }))
+        .map_err(|error| JsValue::from_str(&format!("{}:{}", error.code(), error)))
+}
+
+#[wasm_bindgen]
+pub fn finalize_generated_svg_json(
+    request_input: String,
+    https_hosts_input: String,
+) -> Result<String, JsValue> {
+    let request = serde_json::from_str::<FinalizeGeneratedSvgRequestPayload>(&request_input)
+        .map_err(|error| JsValue::from_str(&format!("generated_svg_invalid_request:{error}")))?;
+    let https_hosts = serde_json::from_str::<Vec<String>>(&https_hosts_input)
+        .map_err(|error| JsValue::from_str(&format!("generated_svg_invalid_hosts:{error}")))?;
+    let https_hosts = normalize_plantuml_https_hosts(&https_hosts)
+        .map_err(|error| JsValue::from_str(&format!("generated_svg_invalid_hosts:{error}")))?;
+    let presentation = GeneratedSvgPresentation {
+        root_style: request.presentation.root_style,
+        position: request.presentation.position,
+    };
+    let svg = finalize_generated_svg(
+        &request.raw_svg,
+        &request.render_id,
+        &presentation,
+        &https_hosts,
+    )
+    .map_err(|error| JsValue::from_str(&format!("{}:{error}", error.code())))?;
+
+    Ok(stringify(&FinalizeGeneratedSvgResultPayload {
+        revision: request.revision,
+        render_id: request.render_id,
+        svg,
+    }))
 }
 
 #[wasm_bindgen]
@@ -262,6 +308,9 @@ pub fn normalize_preview_preferences_json(input: Option<String>) -> String {
             .as_ref()
             .and_then(|value| value.preview_display_mode.as_deref()),
         payload.as_ref().and_then(|value| value.is_preview_visible),
+        payload
+            .as_ref()
+            .and_then(|value| value.plantuml_https_hosts.as_deref()),
     );
     stringify(&PreviewPreferencesPayload::from(&preview_preferences))
 }
@@ -295,8 +344,8 @@ pub fn record_recent_file_json(current_input: Option<String>, recent_file_input:
             .into_iter()
             .filter_map(recent_file_from_input),
     );
-    let recent_file = parse_json::<RecentFileInput>(Some(recent_file_input))
-        .and_then(recent_file_from_input);
+    let recent_file =
+        parse_json::<RecentFileInput>(Some(recent_file_input)).and_then(recent_file_from_input);
 
     match recent_file {
         Some(recent_file) => stringify_recent_files(&recent_files.record(recent_file)),
@@ -363,8 +412,9 @@ impl From<TableFormatLineRangeInput> for TableFormatLineRange {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_markdown_tables_in_line_ranges_json, format_markdown_tables_json,
-        render_markdown_preview_json, FormatMarkdownTablesPayload,
+        finalize_generated_svg_json, format_markdown_tables_in_line_ranges_json,
+        format_markdown_tables_json, render_markdown_preview_json, split_plantuml_source_json,
+        FinalizeGeneratedSvgResultPayload, FormatMarkdownTablesPayload,
     };
 
     #[test]
@@ -419,5 +469,27 @@ mod tests {
             "|a|b|\n|-|-|\n|x|y|\n\n|    c |    d |\n| ---: | ---: |\n|    1 |    2 |"
         );
         assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn wasm_plantuml_split_and_svg_finalizer_match_boundary_contracts() {
+        let sources = serde_json::from_str::<serde_json::Value>(
+            &split_plantuml_source_json("@startuml\nAlice -> Bob\n@enduml".to_owned())
+                .expect("PlantUML split failed"),
+        )
+        .expect("PlantUML split payload parse failed");
+        assert_eq!(sources["sources"].as_array().map(Vec::len), Some(1));
+
+        let finalized = serde_json::from_str::<FinalizeGeneratedSvgResultPayload>(
+            &finalize_generated_svg_json(
+                r#"{"revision":7,"renderId":"wasm-7","rawSvg":"<svg><text>ok</text></svg>","presentation":{"rootStyle":"width:100px;","position":"center"}}"#.to_owned(),
+                "[]".to_owned(),
+            )
+            .expect("SVG finalization failed"),
+        )
+        .expect("SVG finalizer payload parse failed");
+        assert_eq!(finalized.revision, 7);
+        assert!(finalized.svg.contains("width:100px"));
+        assert!(finalized.svg.contains("role=\"img\""));
     }
 }

@@ -1,6 +1,8 @@
 import { type PreviewDisplayMode } from "../domain/preview";
 import {
   type FormatMarkdownTablesPayload as GeneratedFormatMarkdownTablesPayload,
+  type FinalizeGeneratedSvgRequestPayload,
+  type FinalizeGeneratedSvgResultPayload,
   type RenderedPreviewPayload,
   type SourceRangePayload as GeneratedSourceRangePayload,
   type TableDiagnosticKindPayload,
@@ -73,6 +75,27 @@ export async function renderMarkdownPreviewWithWasm(
   await initializeKmarkWeb();
   return parseJsonPayload<RenderedMarkdownPreviewPayload>(
     loadKmarkWebModuleSync().render_markdown_preview_json(content, filePath ?? null, displayMode),
+  );
+}
+
+export async function splitPlantUmlSourceWithWasm(source: string): Promise<readonly string[]> {
+  await initializeKmarkWeb();
+  const result = parseJsonPayload<{ readonly sources: readonly string[] }>(
+    loadKmarkWebModuleSync().split_plantuml_source_json(source),
+  );
+  return result.sources;
+}
+
+export async function finalizeGeneratedSvgWithWasm(
+  request: FinalizeGeneratedSvgRequestPayload,
+  httpsHosts: readonly string[],
+): Promise<FinalizeGeneratedSvgResultPayload> {
+  await initializeKmarkWeb();
+  return parseJsonPayload<FinalizeGeneratedSvgResultPayload>(
+    loadKmarkWebModuleSync().finalize_generated_svg_json(
+      JSON.stringify(request),
+      JSON.stringify(httpsHosts),
+    ),
   );
 }
 

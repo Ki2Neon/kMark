@@ -24,6 +24,7 @@ export type PreviewDisplayModeOption = {
 export type PreviewPreferences = {
   readonly previewDisplayMode: PreviewDisplayMode;
   readonly isPreviewVisible: boolean;
+  readonly plantumlHttpsHosts: readonly string[];
 };
 
 export type PageStyle = {
@@ -166,4 +167,41 @@ const PREVIEW_DISPLAY_MODE_SET = new Set<PreviewDisplayMode>(
 
 export function isPreviewDisplayMode(value: string): value is PreviewDisplayMode {
   return PREVIEW_DISPLAY_MODE_SET.has(value as PreviewDisplayMode);
+}
+
+export function normalizePlantUmlHttpsHostsText(text: string): readonly string[] {
+  const normalized: string[] = [];
+  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
+    const host = rawLine.trim().toLowerCase();
+    if (host.length === 0) {
+      continue;
+    }
+    if (!isValidPlantUmlHttpsHost(host)) {
+      throw new Error(`無効なHost: ${rawLine}`);
+    }
+    const canonicalHost = host.endsWith(":443") ? host.slice(0, -4) : host;
+    if (!normalized.includes(canonicalHost)) {
+      normalized.push(canonicalHost);
+    }
+  }
+  return normalized;
+}
+
+function isValidPlantUmlHttpsHost(value: string): boolean {
+  if (/[\\/@*?#\s]/u.test(value)) {
+    return false;
+  }
+  const separator = value.lastIndexOf(":");
+  const hostname = separator >= 0 ? value.slice(0, separator) : value;
+  const port = separator >= 0 ? value.slice(separator + 1) : null;
+  if (port !== null && (!/^\d+$/u.test(port) || Number(port) < 1 || Number(port) > 65_535)) {
+    return false;
+  }
+  return hostname.length <= 253 && hostname.split(".").every((label) => (
+    label.length >= 1
+    && label.length <= 63
+    && !label.startsWith("-")
+    && !label.endsWith("-")
+    && /^[a-z0-9-]+$/u.test(label)
+  ));
 }

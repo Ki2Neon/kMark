@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 
 use super::error::CommandErrorPayload;
 use crate::{dto::PreviewPreferencesPayload, infra::persist_preview_preferences, AppState};
-use kmark_core::PreviewPreferences;
+use kmark_core::{normalize_plantuml_https_hosts, PreviewPreferences};
 
 const PREVIEW_PREFERENCES_UPDATED_EVENT: &str = "preview-preferences-updated";
 
@@ -24,6 +24,8 @@ pub fn set_preview_preferences<R: Runtime>(
     state: State<'_, AppState>,
     preview_preferences: PreviewPreferencesPayload,
 ) -> Result<PreviewPreferencesPayload, CommandErrorPayload> {
+    normalize_plantuml_https_hosts(&preview_preferences.plantuml_https_hosts)
+        .map_err(|message| CommandErrorPayload::new("preview_preferences_invalid", message))?;
     let next_preview_preferences: PreviewPreferences = preview_preferences.into();
 
     {

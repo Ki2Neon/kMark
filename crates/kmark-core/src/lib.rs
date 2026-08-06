@@ -2,10 +2,12 @@ mod desktop_layout;
 mod editor_draft;
 mod editor_preferences;
 mod editor_state;
+mod generated_svg;
 mod kmark_param_schema;
 mod markdown_document;
 mod markdown_document_error;
 mod math_render;
+mod plantuml;
 mod preview_preferences;
 mod recent_files;
 mod render_markdown_preview;
@@ -29,10 +31,16 @@ pub use editor_state::{
     derive_editor_stats, reduce_editor_state, EditorState, EditorStateAction, EditorStats,
     DEFAULT_MARKDOWN,
 };
+pub use generated_svg::{
+    finalize_generated_svg, GeneratedSvgError, GeneratedSvgPresentation, MAX_GENERATED_SVG_BYTES,
+};
 pub use kmark_param_schema::{kmark_param_schema_json, KMARK_PARAM_SCHEMA_VERSION};
 pub use markdown_document::{is_supported_markdown_path, MarkdownDocument};
 pub use markdown_document_error::MarkdownDocumentError;
-pub use preview_preferences::{PreviewDisplayMode, PreviewPreferences};
+pub use plantuml::{split_plantuml_source, PlantUmlSourceError, MAX_PLANTUML_SOURCE_BYTES};
+pub use preview_preferences::{
+    normalize_plantuml_https_hosts, PreviewDisplayMode, PreviewPreferences,
+};
 pub use recent_files::{RecentFile, RecentFiles, MAX_RECENT_FILES};
 pub use render_markdown_preview::{
     render_markdown_preview, render_markdown_preview_with_file_path,

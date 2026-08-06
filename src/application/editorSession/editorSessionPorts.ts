@@ -50,6 +50,7 @@ export type PrintMarkdownDocumentRequest =
   | {
     readonly displayMode: "a4";
     readonly title: string;
+    readonly pages: readonly { readonly html: string }[];
   };
 
 export type Clock = {
@@ -76,7 +77,18 @@ export type MarkdownRenderer = {
     content: string,
     filePath: string | null,
     displayMode: PreviewDisplayMode,
+    options?: PreviewRenderOptions,
   ): Promise<RenderedPreview>;
+};
+
+export type PreviewRenderOptions = {
+  readonly revision: number;
+  readonly documentKey: string;
+  readonly plantumlHttpsHosts: readonly string[];
+  readonly activeSourceLine?: number | null;
+  readonly signal?: AbortSignal;
+  readonly strictGeneratedSvg?: boolean;
+  readonly onUpdate?: (preview: RenderedPreview) => void;
 };
 
 export type MarkdownDocumentGateway = {

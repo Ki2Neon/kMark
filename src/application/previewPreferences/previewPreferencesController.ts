@@ -60,4 +60,18 @@ export class PreviewPreferencesController {
       isPreviewVisible,
     });
   }
+
+  changePlantUmlHttpsHosts(
+    currentPreviewPreferences: PreviewPreferences,
+    plantumlHttpsHosts: readonly string[],
+  ): PreviewPreferences {
+    if (currentPreviewPreferences.plantumlHttpsHosts.length === plantumlHttpsHosts.length
+      && currentPreviewPreferences.plantumlHttpsHosts.every((host, index) => host === plantumlHttpsHosts[index])) {
+      return currentPreviewPreferences;
+    }
+    return this.#preferencesGateway.normalize({
+      ...currentPreviewPreferences,
+      plantumlHttpsHosts,
+    });
+  }
 }

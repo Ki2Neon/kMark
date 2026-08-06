@@ -604,6 +604,7 @@ pub fn run() {
             commands::external_link::close_sub_window_external_browser,
             commands::external_link::sub_window_browser_event,
             commands::file_open::clear_pending_markdown_open_requests,
+            commands::generated_svg::finalize_generated_svg,
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,
             commands::markdown_render::render_markdown_preview,

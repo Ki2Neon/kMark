@@ -17,6 +17,7 @@ type StandardPrintMarkdownDocumentOptions = {
 type A4PrintMarkdownDocumentOptions = {
   readonly displayMode: Extract<PreviewDisplayMode, "a4">;
   readonly title: string;
+  readonly pages: readonly { readonly html: string }[];
 };
 
 type A4PrintPreviewPage = {
@@ -233,6 +234,16 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     justify-content: flex-end;
   }
 
+  .markdown-body .kmark-generated-svg-block[data-kmark-generated-svg-align="left"] .kmark-generated-svg-rendered {
+    justify-content: flex-start;
+    justify-items: start;
+  }
+
+  .markdown-body .kmark-generated-svg-block[data-kmark-generated-svg-align="right"] .kmark-generated-svg-rendered {
+    justify-content: flex-end;
+    justify-items: end;
+  }
+
   .markdown-body .kmark-mermaid-rendered svg {
     display: block;
     flex: 0 1 auto;
@@ -377,6 +388,31 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
   .markdown-body .kmark-mermaid-source pre {
     margin-top: 0.5em;
     margin-bottom: 0;
+  }
+
+  .markdown-body .kmark-plantuml-block {
+    max-width: 100%;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .markdown-body .kmark-plantuml-rendered {
+    display: grid;
+    gap: 0.75em;
+    justify-items: center;
+    max-width: 100%;
+  }
+
+  .markdown-body .kmark-plantuml-diagram,
+  .markdown-body .kmark-plantuml-diagram > svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .markdown-body .kmark-plantuml-error-message {
+    color: #991b1b;
+    white-space: pre-wrap;
   }
 
   .markdown-body dt {
@@ -1166,9 +1202,45 @@ function getDisplayedStandardPreviewContent(
   }
 
   return {
-    html: previewContent.innerHTML,
+    html: options.html,
     style: getElementCustomPropertyStyle(previewContent),
   };
+}
+
+function generatedSvgBlockKey(block: Element): string | null {
+  const engine = block.getAttribute("data-kmark-generated-svg-engine");
+  const index = block.getAttribute("data-kmark-generated-svg-index");
+  return engine === null || index === null ? null : `${engine}:${index}`;
+}
+
+function mergeGeneratedSvgIntoA4Pages(
+  pages: readonly A4PrintPreviewPage[],
+  renderedPages: readonly { readonly html: string }[],
+): readonly A4PrintPreviewPage[] {
+  const generatedBlocks = new Map<string, Element>();
+  for (const renderedPage of renderedPages) {
+    const source = document.createElement("template");
+    source.innerHTML = renderedPage.html;
+    for (const block of source.content.querySelectorAll(".kmark-generated-svg-block")) {
+      const key = generatedSvgBlockKey(block);
+      if (key !== null) {
+        generatedBlocks.set(key, block);
+      }
+    }
+  }
+
+  return pages.map((page) => {
+    const target = document.createElement("template");
+    target.innerHTML = page.html;
+    for (const block of target.content.querySelectorAll(".kmark-generated-svg-block")) {
+      const key = generatedSvgBlockKey(block);
+      const replacement = key === null ? undefined : generatedBlocks.get(key);
+      if (replacement !== undefined) {
+        block.replaceWith(replacement.cloneNode(true));
+      }
+    }
+    return { ...page, html: target.innerHTML };
+  });
 }
 
 function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pages: readonly A4PrintPreviewPage[]): string {
@@ -1202,7 +1274,7 @@ function printA4MarkdownDocument(
   options: A4PrintMarkdownDocumentOptions,
   runtimeOptions: PrintMarkdownDocumentRuntimeOptions,
 ): Promise<void> {
-  const pages = getDisplayedPreviewA4Pages();
+  const pages = mergeGeneratedSvgIntoA4Pages(getDisplayedPreviewA4Pages(), options.pages);
 
   if (pages.length === 0) {
     return Promise.reject(new Error("表示中のA4プレビューページがありません。"));
