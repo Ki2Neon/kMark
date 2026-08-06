@@ -175,9 +175,7 @@ function snapshotDescriptor(record: PlantUmlDiagramRecord): PlantUmlDiagramSnaps
     hasRawSvg: record.rawSvg !== null,
     inFlightSignature: record.task?.signature ?? null,
     instanceId: record.instanceId,
-    order: record.descriptor.order,
     rawSignature: record.rawSignature ?? "",
-    source: record.descriptor.source,
   };
 }
 
@@ -368,15 +366,13 @@ function syncDiagramElement(diagram: PreparedDiagram): void {
     element.dataset.kmarkPlantumlDiagramState = "rendered";
     return;
   }
-  if (record.finalizedSvg !== null) {
-    element.innerHTML = record.finalizedSvg;
-  }
   if (record.failedSignature === record.descriptor.finalizeSignature && record.error !== null) {
     element.append(createStatus(element.ownerDocument, "kmark-plantuml-error-message", record.error));
     element.dataset.kmarkPlantumlDiagramState = "error";
     return;
   }
   if (record.finalizedSvg !== null) {
+    element.innerHTML = record.finalizedSvg;
     element.dataset.kmarkPlantumlDiagramState = "stale";
     return;
   }
@@ -412,7 +408,6 @@ function sourceRange(block: PreparedBlock): readonly [number, number] | null {
 function descriptorFor(
   source: string,
   block: HTMLElement,
-  order: number,
   dark: boolean,
   httpsHosts: readonly string[],
 ): PlantUmlDiagramDescriptor {
@@ -429,7 +424,6 @@ function descriptorFor(
       presentation,
       rawSignature,
     }),
-    order,
     rawSignature,
     source,
   };
@@ -473,13 +467,12 @@ export async function renderPlantUmlPreviewHtmlDocuments(
   }));
   assertActiveRenderRequest(scope, options.signal);
   const dark = isDarkSurface(surface);
-  let diagramOrder = 0;
   const diagramsByBlock = new Map<PreparedBlock, PreparedDiagram[]>();
   const preparedDiagrams: PreparedDiagram[] = [];
   for (const block of preparedBlocks) {
     const blockDiagrams = block.sources.map((source, diagramIndex): PreparedDiagram => ({
       block,
-      descriptor: descriptorFor(source, block.block, diagramOrder += 1, dark, options.httpsHosts),
+      descriptor: descriptorFor(source, block.block, dark, options.httpsHosts),
       diagramIndex,
       element: null,
       plan: null,
@@ -490,26 +483,19 @@ export async function renderPlantUmlPreviewHtmlDocuments(
     diagramsByBlock.set(block, blockDiagrams);
     preparedDiagrams.push(...blockDiagrams);
   }
-  const renderPlan = planPlantUmlDiagramUpdates(
+  const diagramPlans = planPlantUmlDiagramUpdates(
     preparedDiagrams.map((diagram) => diagram.descriptor),
     previousRecords.map(snapshotDescriptor),
     () => crypto.randomUUID(),
   );
-  const nextRecords = renderPlan.diagrams.map((diagramPlan, index) => {
-    const previousRecord = diagramPlan.previousIndex === null
-      ? null
-      : previousRecords[diagramPlan.previousIndex] ?? null;
+  const nextRecords = diagramPlans.map((diagramPlan, index) => {
+    const previousRecord = previousRecords[index] ?? null;
     const record = createRecord(diagramPlan, previousRecord);
     preparedDiagrams[index].plan = diagramPlan;
     preparedDiagrams[index].record = record;
     return record;
   });
-  renderPlan.obsoletePreviousIndexes.forEach((index) => {
-    const record = previousRecords[index];
-    if (record !== undefined) {
-      cancelRecordTask(record);
-    }
-  });
+  previousRecords.slice(nextRecords.length).forEach(cancelRecordTask);
   scope.recordsBySurface.set(surface, nextRecords);
 
   for (const block of preparedBlocks) {

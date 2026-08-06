@@ -11,11 +11,10 @@ import { planPlantUmlDiagramUpdates } from "../src/application/plantuml/plantUml
 import { normalizePlantUmlHttpsHostsText } from "../src/domain/preview.ts";
 import { shouldPreservePlantUmlDiagramDom } from "../src/ui/components/plantUmlPreviewPolicy.ts";
 
-function descriptor(source, order, presentation = "default", rawContext = "light") {
+function descriptor(source, presentation = "default", rawContext = "light") {
   const rawSignature = `${rawContext}\u0000${source}`;
   return {
     finalizeSignature: `${rawSignature}\u0000${presentation}`,
-    order,
     rawSignature,
     source,
   };
@@ -23,13 +22,14 @@ function descriptor(source, order, presentation = "default", rawContext = "light
 
 function snapshot(next, instanceId, overrides = {}) {
   return {
-    ...next,
     failedSignature: null,
+    finalizeSignature: next.finalizeSignature,
     generation: 1,
     hasFinalizedSvg: true,
     hasRawSvg: true,
     inFlightSignature: null,
     instanceId,
+    rawSignature: next.rawSignature,
     ...overrides,
   };
 }
@@ -81,91 +81,94 @@ test("normalizes exact HTTPS hosts and rejects wildcards atomically", () => {
   assert.throws(() => normalizePlantUmlHttpsHostsText("good.test\n*.bad.test"));
 });
 
-test("plans only the changed diagram and tracks unchanged diagrams across moves", () => {
+test("retains the indexed record while PlantUML source changes", () => {
   const previous = [
-    snapshot(descriptor("A", 0), "a"),
-    snapshot(descriptor("B", 1), "b"),
-    snapshot(descriptor("C", 2), "c"),
+    snapshot(descriptor("A"), "a"),
+    snapshot(descriptor("B"), "b"),
+    snapshot(descriptor("C"), "c"),
   ];
-  let nextId = 0;
   const plan = planPlantUmlDiagramUpdates(
-    [descriptor("C", 0), descriptor("B2", 1), descriptor("A", 2)],
+    [descriptor("A"), descriptor("B2"), descriptor("C")],
     previous,
-    () => `new-${nextId += 1}`,
+    () => "unused",
   );
 
-  assert.deepEqual(plan.diagrams.map((item) => [item.instanceId, item.action]), [
-    ["c", "reuse-finalized"],
-    ["new-1", "render"],
-    ["a", "reuse-finalized"],
+  assert.deepEqual(plan.map((item) => [item.instanceId, item.action, item.generation]), [
+    ["a", "reuse-finalized", 1],
+    ["b", "render", 2],
+    ["c", "reuse-finalized", 1],
   ]);
-  assert.deepEqual(plan.obsoletePreviousIndexes, [1]);
+});
+
+test("does not track reordered diagrams beyond their display index", () => {
+  const first = descriptor("A");
+  const second = descriptor("B");
+  const plan = planPlantUmlDiagramUpdates(
+    [second, first],
+    [snapshot(first, "slot-1"), snapshot(second, "slot-2")],
+    () => "unused",
+  );
+
+  assert.deepEqual(plan.map((item) => [item.instanceId, item.action]), [
+    ["slot-1", "render"],
+    ["slot-2", "render"],
+  ]);
 });
 
 test("reuses raw SVG for Kmark-only changes and rerenders raw-context changes", () => {
-  const previousDescriptor = descriptor("A", 0, "width=10", "light");
+  const previousDescriptor = descriptor("A", "width=10", "light");
   const previous = [snapshot(previousDescriptor, "a")];
 
   const presentationPlan = planPlantUmlDiagramUpdates(
-    [descriptor("A", 0, "width=20", "light")],
+    [descriptor("A", "width=20", "light")],
     previous,
     () => "unused",
   );
-  assert.equal(presentationPlan.diagrams[0].action, "finalize");
+  assert.equal(presentationPlan[0].action, "finalize");
 
   const darkPlan = planPlantUmlDiagramUpdates(
-    [descriptor("A", 0, "width=10", "dark")],
+    [descriptor("A", "width=10", "dark")],
     previous,
     () => "unused",
   );
-  assert.equal(darkPlan.diagrams[0].action, "render");
+  assert.equal(darkPlan[0].action, "render");
 });
 
-test("matches duplicate sources one-to-one and retains a stable failure", () => {
-  const first = descriptor("same", 0);
-  const second = descriptor("same", 1);
+test("retains stable completed, failed, and in-flight states by index", () => {
+  const first = descriptor("first");
+  const second = descriptor("second");
+  const third = descriptor("third");
   const previous = [
-    snapshot(first, "same-1"),
-    snapshot(second, "same-2", { failedSignature: second.finalizeSignature, hasFinalizedSvg: false }),
-  ];
-  const plan = planPlantUmlDiagramUpdates([second, first], previous, () => "unused");
-
-  assert.equal(new Set(plan.diagrams.map((item) => item.instanceId)).size, 2);
-  assert.deepEqual(plan.diagrams.map((item) => item.action), ["reuse-error", "reuse-finalized"]);
-});
-
-test("keeps an unchanged in-flight diagram across Markdown revisions", () => {
-  const item = descriptor("A", 0);
-  const previous = [snapshot(item, "a", {
-    hasFinalizedSvg: false,
-    hasRawSvg: false,
-    inFlightSignature: item.finalizeSignature,
-  })];
-  const plan = planPlantUmlDiagramUpdates([item], previous, () => "unused");
-
-  assert.equal(plan.diagrams[0].action, "reuse-inflight");
-  assert.equal(plan.diagrams[0].generation, 1);
-});
-
-test("matches duplicate sources to the same presentation before position", () => {
-  const narrow = descriptor("same", 0, "width=10");
-  const wide = descriptor("same", 1, "width=20");
-  const previous = [
-    snapshot(narrow, "narrow", { failedSignature: narrow.finalizeSignature, hasFinalizedSvg: false }),
-    snapshot(wide, "wide", {
+    snapshot(first, "first"),
+    snapshot(second, "second", { failedSignature: second.finalizeSignature, hasFinalizedSvg: false }),
+    snapshot(third, "third", {
       hasFinalizedSvg: false,
       hasRawSvg: false,
-      inFlightSignature: wide.finalizeSignature,
+      inFlightSignature: third.finalizeSignature,
     }),
   ];
-  const plan = planPlantUmlDiagramUpdates(
-    [{ ...wide, order: 0 }, { ...narrow, order: 1 }],
-    previous,
-    () => "unused",
-  );
+  const plan = planPlantUmlDiagramUpdates([first, second, third], previous, () => "unused");
 
-  assert.deepEqual(plan.diagrams.map((item) => [item.instanceId, item.action]), [
-    ["wide", "reuse-inflight"],
-    ["narrow", "reuse-error"],
+  assert.deepEqual(plan.map((item) => item.action), ["reuse-finalized", "reuse-error", "reuse-inflight"]);
+  assert.deepEqual(plan.map((item) => item.generation), [1, 1, 1]);
+});
+
+test("creates records only for appended diagrams and drops removed indexes", () => {
+  const first = descriptor("first");
+  const second = descriptor("second");
+  const previous = [snapshot(first, "first"), snapshot(second, "second")];
+  let nextId = 0;
+  const appendedPlan = planPlantUmlDiagramUpdates(
+    [first, second, descriptor("third")],
+    previous,
+    () => `new-${nextId += 1}`,
+  );
+  const reducedPlan = planPlantUmlDiagramUpdates([first], previous, () => "unused");
+
+  assert.deepEqual(appendedPlan.map((item) => [item.instanceId, item.action]), [
+    ["first", "reuse-finalized"],
+    ["second", "reuse-finalized"],
+    ["new-1", "render"],
   ]);
+  assert.equal(reducedPlan.length, 1);
 });
