@@ -69,6 +69,7 @@ type MenuSectionProps = {
   readonly onPrintDocument: () => void;
   readonly onPreviewDisplayModeChange: (previewDisplayMode: PreviewDisplayMode) => void;
   readonly onPlantUmlHttpsHostsChange: (plantumlHttpsHosts: readonly string[]) => void;
+  readonly onReloadPlantUml: () => void;
   readonly onPreviewUsesAppThemeColorsChange: (previewUsesAppThemeColors: boolean) => void;
   readonly onPreviewVisibilityChange: (isPreviewVisible: boolean) => void;
   readonly onSaveDocumentAs: () => void;
@@ -144,6 +145,7 @@ function MenuSectionComponent({
   onPrintDocument,
   onPreviewDisplayModeChange,
   onPlantUmlHttpsHostsChange,
+  onReloadPlantUml,
   onPreviewUsesAppThemeColorsChange,
   onPreviewVisibilityChange,
   onSaveDocumentAs,
@@ -207,6 +209,7 @@ function MenuSectionComponent({
     "fade",
     "transition",
     "PlantUML",
+    "再生成",
     "HTTPS",
     "Host",
   );
@@ -769,6 +772,10 @@ function MenuSectionComponent({
             <button type="button" onClick={onOpenSubWindow}>
               <MenuIcon name="subwindow" />
               <span>サブウィンドウを開く</span>
+            </button>
+            <button type="button" onClick={onReloadPlantUml}>
+              <MenuIcon name="reload" />
+              <span>PlantUMLを再生成</span>
             </button>
           </div>
 

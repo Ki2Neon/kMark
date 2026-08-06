@@ -17,7 +17,10 @@ import {
   type RenderedPreviewPage,
 } from "../../domain/preview";
 import { renderMermaidPreviewHtml, resolveMermaidPreviewTheme } from "./browserMermaidRenderer";
-import { renderPlantUmlPreviewHtml } from "./browserPlantUmlRenderer";
+import {
+  renderPlantUmlPreviewHtml,
+  renderPlantUmlPreviewHtmlDocuments,
+} from "./browserPlantUmlRenderer";
 import { type PreviewRenderOptions } from "../../application/editorSession/editorSessionPorts";
 
 const RENDER_MARKDOWN_PREVIEW_COMMAND = "render_markdown_preview";
@@ -212,10 +215,10 @@ async function normalizeRenderedMarkdownPreview(
       defaultPageStyle,
       defaultTextStyle,
     };
-    options?.onUpdate?.(basePreview);
     const plantUmlHtml = await renderPlantUmlPreviewHtml(html, {
       revision: options?.revision ?? 0,
       documentKey: options?.documentKey ?? "preview",
+      plantumlRenderEpoch: options?.plantumlRenderEpoch ?? 0,
       httpsHosts: options?.plantumlHttpsHosts ?? [],
       activeSourceLine: options?.activeSourceLine,
       signal: options?.signal,
@@ -252,32 +255,47 @@ async function normalizeRenderedMarkdownPreview(
     defaultPageStyle,
     defaultTextStyle,
   };
-  options?.onUpdate?.(basePreview);
   const hydratedPages = [...normalizedPages];
-  for (let pageIndex = 0; pageIndex < hydratedPages.length; pageIndex += 1) {
-    const page = hydratedPages[pageIndex];
-    const updatePage = (updatedHtml: string) => {
-      hydratedPages[pageIndex] = { ...hydratedPages[pageIndex], html: updatedHtml };
-      options?.onUpdate?.({ ...basePreview, pages: [...hydratedPages] });
-    };
-    const plantUmlHtml = await renderPlantUmlPreviewHtml(page.html, {
+  const plantUmlPages = await renderPlantUmlPreviewHtmlDocuments(
+    hydratedPages.map((page) => page.html),
+    {
       revision: options?.revision ?? 0,
-      documentKey: `${options?.documentKey ?? "preview"}:page:${pageIndex}`,
+      documentKey: options?.documentKey ?? "preview",
+      plantumlRenderEpoch: options?.plantumlRenderEpoch ?? 0,
       httpsHosts: options?.plantumlHttpsHosts ?? [],
       activeSourceLine: options?.activeSourceLine,
       signal: options?.signal,
       strict: options?.strictGeneratedSvg,
       surface: "paper",
-      onUpdate: updatePage,
-    });
-    updatePage(await renderMermaidPreviewHtml(plantUmlHtml, {
+      onUpdate: (updatedPages) => {
+        updatedPages.forEach((html, pageIndex) => {
+          if (hydratedPages[pageIndex] !== undefined) {
+            hydratedPages[pageIndex] = { ...hydratedPages[pageIndex], html };
+          }
+        });
+        options?.onUpdate?.({ ...basePreview, pages: [...hydratedPages] });
+      },
+    },
+  );
+  plantUmlPages.forEach((html, pageIndex) => {
+    if (hydratedPages[pageIndex] !== undefined) {
+      hydratedPages[pageIndex] = { ...hydratedPages[pageIndex], html };
+    }
+  });
+  for (let pageIndex = 0; pageIndex < hydratedPages.length; pageIndex += 1) {
+    const page = hydratedPages[pageIndex];
+    hydratedPages[pageIndex] = {
+      ...page,
+      html: await renderMermaidPreviewHtml(page.html, {
         surface: "paper",
         theme: resolveMermaidPreviewTheme("paper"),
         revision: options?.revision ?? 0,
         httpsHosts: options?.plantumlHttpsHosts ?? [],
         signal: options?.signal,
         strict: options?.strictGeneratedSvg,
-      }));
+      }),
+    };
+    options?.onUpdate?.({ ...basePreview, pages: [...hydratedPages] });
   }
   return {
     ...basePreview,

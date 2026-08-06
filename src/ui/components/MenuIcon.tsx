@@ -12,6 +12,7 @@ export type MenuIconName =
   | "new-file"
   | "open-file"
   | "print"
+  | "reload"
   | "reset"
   | "reset-all"
   | "save"
@@ -64,6 +65,13 @@ function renderMenuIconPath(name: MenuIconName): ReactNode {
       return <path d="M4.5 5.5h4l1.5 2h5.5v7H4.5zM10 10.5h6l-1.2 4H4.5" />;
     case "print":
       return <path d="M6.5 7V3.5h7V7M6.5 14.5H4V8h12v6.5h-2.5M6.5 12h7v4.5h-7z" />;
+    case "reload":
+      return (
+        <>
+          <path d="M5 7.5H2.5V5" />
+          <path d="M4.3 7.2A6 6 0 1 1 5.8 14" />
+        </>
+      );
     case "reset":
       return (
         <>

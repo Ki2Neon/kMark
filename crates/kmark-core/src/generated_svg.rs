@@ -13,6 +13,12 @@ pub struct GeneratedSvgPresentation {
     pub position: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct SvgIdPlan {
+    mapped_ids: HashMap<String, String>,
+    retained_occurrences: HashMap<String, usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GeneratedSvgError {
     TooLarge { bytes: usize },
@@ -66,19 +72,18 @@ pub fn finalize_generated_svg(
         ));
     }
 
-    let id_map = inspect_svg(raw_svg, render_id)?;
-    rewrite_svg(raw_svg, render_id, presentation, https_hosts, &id_map)
+    let id_plan = inspect_svg(raw_svg, render_id)?;
+    rewrite_svg(raw_svg, render_id, presentation, https_hosts, &id_plan)
 }
 
-fn inspect_svg(
-    raw_svg: &str,
-    render_id: &str,
-) -> Result<HashMap<String, String>, GeneratedSvgError> {
+fn inspect_svg(raw_svg: &str, render_id: &str) -> Result<SvgIdPlan, GeneratedSvgError> {
     let mut reader = Reader::from_str(raw_svg);
     reader.config_mut().trim_text(false);
     let mut depth = 0usize;
     let mut root_count = 0usize;
-    let mut id_map = HashMap::new();
+    let mut id_plan = SvgIdPlan::default();
+    let mut id_occurrences = HashMap::new();
+    let mut retained_expanded = HashMap::new();
     let mut next_id = 0usize;
 
     loop {
@@ -92,9 +97,12 @@ fn inspect_svg(
                     &reader,
                     &element,
                     depth == 0,
+                    false,
                     render_id,
                     &mut next_id,
-                    &mut id_map,
+                    &mut id_plan,
+                    &mut id_occurrences,
+                    &mut retained_expanded,
                 )?;
                 depth += 1;
             }
@@ -107,9 +115,12 @@ fn inspect_svg(
                     &reader,
                     &element,
                     depth == 0,
+                    true,
                     render_id,
                     &mut next_id,
-                    &mut id_map,
+                    &mut id_plan,
+                    &mut id_occurrences,
+                    &mut retained_expanded,
                 )?;
             }
             Ok(Event::End(_)) => {
@@ -165,7 +176,7 @@ fn inspect_svg(
         ));
     }
 
-    Ok(id_map)
+    Ok(id_plan)
 }
 
 fn validate_root(element: &BytesStart<'_>) -> Result<(), GeneratedSvgError> {
@@ -181,9 +192,12 @@ fn collect_element_id(
     reader: &Reader<&[u8]>,
     element: &BytesStart<'_>,
     is_root: bool,
+    is_self_closing: bool,
     render_id: &str,
     next_id: &mut usize,
-    id_map: &mut HashMap<String, String>,
+    id_plan: &mut SvgIdPlan,
+    id_occurrences: &mut HashMap<String, usize>,
+    retained_expanded: &mut HashMap<String, bool>,
 ) -> Result<(), GeneratedSvgError> {
     for attribute in element.attributes().with_checks(true) {
         let attribute =
@@ -195,16 +209,36 @@ fn collect_element_id(
             .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
             .map_err(|error| GeneratedSvgError::InvalidXml(error.to_string()))?
             .into_owned();
-        if value.is_empty() || id_map.contains_key(&value) {
-            return Err(GeneratedSvgError::Unsafe(
-                "generated SVG contains an empty or duplicate id".to_owned(),
-            ));
+        if value.is_empty() {
+            continue;
         }
-        if is_root {
-            id_map.insert(value, format!("kmark-svg-{render_id}"));
-        } else {
-            *next_id += 1;
-            id_map.insert(value, format!("kmark-{render_id}-id-{next_id}"));
+
+        let occurrence = id_occurrences.entry(value.clone()).or_default();
+        let occurrence_index = *occurrence;
+        *occurrence += 1;
+        let is_expanded = !is_self_closing;
+
+        if !id_plan.mapped_ids.contains_key(&value) {
+            let mapped_id = if is_root {
+                format!("kmark-svg-{render_id}")
+            } else {
+                *next_id += 1;
+                format!("kmark-{render_id}-id-{next_id}")
+            };
+            id_plan.mapped_ids.insert(value.clone(), mapped_id);
+            id_plan
+                .retained_occurrences
+                .insert(value.clone(), occurrence_index);
+            retained_expanded.insert(value, is_expanded);
+        } else if is_expanded && !retained_expanded.get(&value).copied().unwrap_or(false) {
+            // TeaVM PlantUML emits an empty metadata group before the rendered
+            // sequence-message group and assigns both the same id. Retain the
+            // first expanded occurrence so fragment references remain valid
+            // without leaking a duplicate id into the document.
+            id_plan
+                .retained_occurrences
+                .insert(value.clone(), occurrence_index);
+            retained_expanded.insert(value, true);
         }
     }
     Ok(())
@@ -215,7 +249,7 @@ fn rewrite_svg(
     render_id: &str,
     presentation: &GeneratedSvgPresentation,
     https_hosts: &[String],
-    id_map: &HashMap<String, String>,
+    id_plan: &SvgIdPlan,
 ) -> Result<String, GeneratedSvgError> {
     let mut reader = Reader::from_str(raw_svg);
     reader.config_mut().trim_text(false);
@@ -226,6 +260,7 @@ fn rewrite_svg(
     let mut foreign_depth = 0usize;
     let mut style_depth: Option<usize> = None;
     let mut style_text = String::new();
+    let mut id_occurrences = HashMap::new();
 
     loop {
         match reader.read_event() {
@@ -253,7 +288,8 @@ fn rewrite_svg(
                     &root_id,
                     presentation,
                     https_hosts,
-                    id_map,
+                    id_plan,
+                    &mut id_occurrences,
                 )?;
                 writer
                     .write_event(Event::Start(rewritten))
@@ -285,7 +321,8 @@ fn rewrite_svg(
                     &root_id,
                     presentation,
                     https_hosts,
-                    id_map,
+                    id_plan,
+                    &mut id_occurrences,
                 )?;
                 writer
                     .write_event(Event::Empty(rewritten))
@@ -305,8 +342,12 @@ fn rewrite_svg(
                 let qualified_name = element.name();
                 let name = local_name(qualified_name.as_ref()).to_ascii_lowercase();
                 if style_depth == Some(depth) {
-                    let stylesheet =
-                        sanitize_stylesheet(&style_text, &root_id, id_map, https_hosts)?;
+                    let stylesheet = sanitize_stylesheet(
+                        &style_text,
+                        &root_id,
+                        &id_plan.mapped_ids,
+                        https_hosts,
+                    )?;
                     if !stylesheet.is_empty() {
                         writer
                             .write_event(Event::Text(BytesText::new(&stylesheet)))
@@ -423,7 +464,8 @@ fn rewrite_start(
     root_id: &str,
     presentation: &GeneratedSvgPresentation,
     https_hosts: &[String],
-    id_map: &HashMap<String, String>,
+    id_plan: &SvgIdPlan,
+    id_occurrences: &mut HashMap<String, usize>,
 ) -> Result<BytesStart<'static>, GeneratedSvgError> {
     let element_name = String::from_utf8_lossy(element.name().as_ref()).into_owned();
     let local_element_name =
@@ -447,24 +489,42 @@ fn rewrite_start(
 
         match local_attribute_name.as_str() {
             "id" => {
+                if value.is_empty() {
+                    continue;
+                }
+                let occurrence = id_occurrences.entry(value.clone()).or_default();
+                let occurrence_index = *occurrence;
+                *occurrence += 1;
                 if is_root {
                     continue;
                 }
-                value = id_map.get(&value).cloned().ok_or_else(|| {
+                if id_plan.retained_occurrences.get(&value) != Some(&occurrence_index) {
+                    continue;
+                }
+                value = id_plan.mapped_ids.get(&value).cloned().ok_or_else(|| {
                     GeneratedSvgError::Unsafe("generated SVG id mapping is inconsistent".to_owned())
                 })?;
             }
             "href" | "src" => {
-                value = sanitize_href(&local_element_name, &value, https_hosts, id_map)?;
+                value = sanitize_href(
+                    &local_element_name,
+                    &value,
+                    https_hosts,
+                    &id_plan.mapped_ids,
+                )?;
             }
             "style" => {
-                existing_style = Some(sanitize_declarations(&value, id_map, https_hosts)?);
+                existing_style = Some(sanitize_declarations(
+                    &value,
+                    &id_plan.mapped_ids,
+                    https_hosts,
+                )?);
                 continue;
             }
             "aria-labelledby" | "aria-describedby" => {
                 value = value
                     .split_ascii_whitespace()
-                    .filter_map(|id| id_map.get(id))
+                    .filter_map(|id| id_plan.mapped_ids.get(id))
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(" ");
@@ -473,7 +533,7 @@ fn rewrite_start(
                 }
             }
             _ => {
-                value = rewrite_fragment_urls(&value, id_map, https_hosts)?;
+                value = rewrite_fragment_urls(&value, &id_plan.mapped_ids, https_hosts)?;
             }
         }
         attributes.push((name, value));
@@ -493,7 +553,7 @@ fn rewrite_start(
         let mut root_style = existing_style.unwrap_or_default();
         if let Some(presentation_style) = presentation.root_style.as_deref() {
             let presentation_style =
-                sanitize_declarations(presentation_style, id_map, https_hosts)?;
+                sanitize_declarations(presentation_style, &id_plan.mapped_ids, https_hosts)?;
             if !root_style.is_empty()
                 && !presentation_style.is_empty()
                 && !root_style.ends_with(';')
@@ -1112,6 +1172,22 @@ mod tests {
         assert!(finalized.contains("transform-box:border-box"));
         assert!(finalized.contains("overflow:hidden"));
         assert!(finalized.contains("preserveAspectRatio=\"xMaxYMin meet\""));
+    }
+
+    #[test]
+    fn normalizes_teavm_sequence_duplicate_and_empty_ids() {
+        let svg = r##"<svg id=""><g><g id="msg1" class="message"/><g id="msg1" class="message"><line marker-end="url(#marker)"/></g><defs><marker id="marker"/></defs><use href="#msg1"/><rect id=""/></g></svg>"##;
+        let finalized =
+            finalize_generated_svg(svg, "sequence", &GeneratedSvgPresentation::default(), &[])
+                .expect("finalization failed");
+
+        assert_eq!(finalized.matches("id=\"kmark-sequence-id-1\"").count(), 1);
+        assert!(finalized.contains("<g class=\"message\"/>"));
+        assert!(finalized.contains(
+            "<g id=\"kmark-sequence-id-1\" class=\"message\"><line marker-end=\"url(#kmark-sequence-id-2)\"/>"
+        ));
+        assert!(finalized.contains("<use href=\"#kmark-sequence-id-1\"/>"));
+        assert!(finalized.contains("<rect/>"));
     }
 
     #[test]

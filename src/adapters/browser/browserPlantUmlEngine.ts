@@ -1,5 +1,4 @@
 import {
-  isCurrentPlantUmlRevision,
   PlantUmlRawSvgCache,
   shouldCachePlantUmlSource,
 } from "./browserPlantUmlPolicy";
@@ -16,14 +15,15 @@ type PlantUmlFrameResult = {
 };
 
 type PendingRender = {
+  readonly jobId: string;
   readonly reject: (error: Error) => void;
   readonly resolve: (svg: string) => void;
   readonly timeoutId: number;
 };
 
-class PlantUmlRevisionError extends Error {
+class PlantUmlTaskCancelledError extends Error {
   constructor() {
-    super("PlantUML render superseded by a newer revision");
+    super("PlantUML render task cancelled");
     this.name = "AbortError";
   }
 }
@@ -50,7 +50,7 @@ function createFrameDocument(nonce: string, httpsHosts: readonly string[]): stri
   const serializedNonce = JSON.stringify(nonce);
   const serializedPlantUmlUrl = JSON.stringify(plantUmlUrl);
 
-  return `<!doctype html><html><head><meta charset="utf-8"><base href="${escapeHtmlAttribute(assetBaseUrl)}"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; connect-src ${escapeHtmlAttribute(connectSource)}; img-src 'self' data: ${escapeHtmlAttribute(allowedOrigins)}"></head><body><script>
+  return `<!doctype html><html><head><meta charset="utf-8"><base href="${escapeHtmlAttribute(assetBaseUrl)}"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src ${escapeHtmlAttribute(connectSource)}; img-src 'self' data: ${escapeHtmlAttribute(allowedOrigins)}"></head><body><script>
   (() => {
     const NativeXHR = window.XMLHttpRequest;
     const allowedHosts = new Set(${serializedHosts});
@@ -107,12 +107,13 @@ function hashSource(source: string): string {
 }
 
 class PlantUmlEngine {
-  #activeJobId = "";
   #cache = new PlantUmlRawSvgCache();
+  #cancelledJobIds = new Set<string>();
   #frame: HTMLIFrameElement | null = null;
   #frameHostsKey = "";
   #frameNonce = "";
   #frameReady: Promise<void> | null = null;
+  #knownJobIds = new Set<string>();
   #pending = new Map<string, PendingRender>();
   #queue: Promise<void> = Promise.resolve();
   #requestSequence = 0;
@@ -121,23 +122,17 @@ class PlantUmlEngine {
     window.addEventListener("message", this.#handleMessage);
   }
 
-  beginRevision(jobId: string): void {
-    if (jobId === this.#activeJobId) {
-      return;
-    }
-    this.#activeJobId = jobId;
-    if (this.#pending.size > 0) {
-      this.#resetFrame(new PlantUmlRevisionError());
-    }
+  invalidateCache(): void {
+    this.#cache.clear();
   }
 
-  cancelRevision(jobId: string): void {
-    if (jobId !== this.#activeJobId) {
+  cancel(jobId: string): void {
+    if (!this.#knownJobIds.has(jobId)) {
       return;
     }
-    this.#activeJobId = "";
-    if (this.#pending.size > 0) {
-      this.#resetFrame(new PlantUmlRevisionError());
+    this.#cancelledJobIds.add(jobId);
+    if ([...this.#pending.values()].some((pending) => pending.jobId === jobId)) {
+      this.#resetFrame(new PlantUmlTaskCancelledError());
     }
   }
 
@@ -147,13 +142,15 @@ class PlantUmlEngine {
     jobId: string,
     httpsHosts: readonly string[],
   ): Promise<string> {
-    if (!isCurrentPlantUmlRevision(jobId, this.#activeJobId)) {
-      throw new PlantUmlRevisionError();
+    if (this.#cancelledJobIds.has(jobId)) {
+      throw new PlantUmlTaskCancelledError();
     }
+    this.#knownJobIds.add(jobId);
     const cacheKey = `${PLANTUML_VERSION}:${dark ? "dark" : "light"}:${source.length}:${hashSource(source)}`;
     if (shouldCachePlantUmlSource(source)) {
       const cached = this.#cache.get(cacheKey, source);
       if (cached !== null) {
+        this.#knownJobIds.delete(jobId);
         return cached;
       }
     }
@@ -165,14 +162,16 @@ class PlantUmlEngine {
       rejectResult = reject;
     });
     const operation = async () => {
-      if (!isCurrentPlantUmlRevision(jobId, this.#activeJobId)) {
-        rejectResult(new PlantUmlRevisionError());
+      if (this.#cancelledJobIds.has(jobId)) {
+        rejectResult(new PlantUmlTaskCancelledError());
+        this.#cancelledJobIds.delete(jobId);
+        this.#knownJobIds.delete(jobId);
         return;
       }
       try {
         const svg = await this.#renderInFrame(source, dark, jobId, httpsHosts);
-        if (!isCurrentPlantUmlRevision(jobId, this.#activeJobId)) {
-          throw new PlantUmlRevisionError();
+        if (this.#cancelledJobIds.has(jobId)) {
+          throw new PlantUmlTaskCancelledError();
         }
         if (shouldCachePlantUmlSource(source)) {
           this.#cache.put(cacheKey, { bytes: svg.length * 2, source, svg });
@@ -180,6 +179,9 @@ class PlantUmlEngine {
         resolveResult(svg);
       } catch (error) {
         rejectResult(error);
+      } finally {
+        this.#cancelledJobIds.delete(jobId);
+        this.#knownJobIds.delete(jobId);
       }
     };
     this.#queue = this.#queue.then(operation, operation);
@@ -193,8 +195,8 @@ class PlantUmlEngine {
     httpsHosts: readonly string[],
   ): Promise<string> {
     await this.#ensureFrame(httpsHosts);
-    if (!isCurrentPlantUmlRevision(jobId, this.#activeJobId) || this.#frame?.contentWindow === null) {
-      throw new PlantUmlRevisionError();
+    if (this.#cancelledJobIds.has(jobId) || this.#frame?.contentWindow === null) {
+      throw new PlantUmlTaskCancelledError();
     }
     const requestId = `puml-${this.#requestSequence += 1}`;
     return new Promise<string>((resolve, reject) => {
@@ -204,7 +206,7 @@ class PlantUmlEngine {
         this.#resetFrame(error);
         reject(error);
       }, PLANTUML_RENDER_TIMEOUT_MS);
-      this.#pending.set(requestId, { reject, resolve, timeoutId });
+      this.#pending.set(requestId, { jobId, reject, resolve, timeoutId });
       this.#frame!.contentWindow!.postMessage({
         type: "kmark-plantuml-render",
         nonce: this.#frameNonce,
@@ -220,7 +222,7 @@ class PlantUmlEngine {
     if (this.#frame !== null && this.#frameHostsKey === hostsKey && this.#frameReady !== null) {
       return this.#frameReady;
     }
-    this.#resetFrame(new PlantUmlRevisionError());
+    this.#resetFrame(new PlantUmlTaskCancelledError());
     this.#frameHostsKey = hostsKey;
     this.#frameNonce = crypto.randomUUID();
     const frame = document.createElement("iframe");
@@ -298,4 +300,4 @@ export function getPlantUmlEngine(): PlantUmlEngine {
   return engine;
 }
 
-export { PLANTUML_VERSION, PlantUmlRevisionError };
+export { PLANTUML_VERSION };

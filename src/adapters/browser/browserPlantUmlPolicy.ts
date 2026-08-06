@@ -51,6 +51,11 @@ export class PlantUmlRawSvgCache {
     }
   }
 
+  clear(): void {
+    this.#entries.clear();
+    this.#bytes = 0;
+  }
+
   get entryCount(): number {
     return this.#entries.size;
   }
@@ -81,11 +86,4 @@ export function prioritizePlantUmlItems<T>(
     };
     return Number(contains(right)) - Number(contains(left));
   });
-}
-
-export function isCurrentPlantUmlRevision(
-  requestRevision: string | number,
-  activeRevision: string | number,
-): boolean {
-  return requestRevision === activeRevision;
 }

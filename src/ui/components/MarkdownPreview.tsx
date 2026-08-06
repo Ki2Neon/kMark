@@ -22,6 +22,7 @@ import {
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../../domain/preview";
+import { shouldPreservePlantUmlDiagramDom } from "./plantUmlPreviewPolicy";
 
 const A4_PAGE_WIDTH_FOR_FIT_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
 const MIN_A4_SCALE = 0.1;
@@ -35,6 +36,7 @@ const KMARK_VIDEO_FRAME_CLASS_NAME = "kmark-video-frame";
 const KMARK_VIDEO_ERROR_CLASS_NAME = "kmark-video-error";
 const KMARK_VIDEO_POSTER_IMAGE_CLASS_NAME = "kmark-video-poster-image";
 const KMARK_MODEL_VIEWER_CLASS_NAME = "kmark-model-viewer";
+const KMARK_PLANTUML_REUSE_SELECTOR = ".kmark-plantuml-diagram[data-kmark-plantuml-reuse-key]";
 const KMARK_MODEL_ERROR_CLASS_NAME = "kmark-model-error";
 const PREVIEW_INTERACTIVE_ELEMENT_SELECTOR = `a, button, input, textarea, select, video, .${KMARK_MODEL_VIEWER_CLASS_NAME}`;
 const KMARK_VIDEO_FAILED_STATE = "failed";
@@ -3556,12 +3558,53 @@ function restorePreviewVideoSnapshots(
   }
 }
 
+function syncReusablePlantUmlDiagramAttributes(target: HTMLElement, source: HTMLElement): void {
+  for (const attribute of Array.from(target.attributes)) {
+    if (!source.hasAttribute(attribute.name)) {
+      target.removeAttribute(attribute.name);
+    }
+  }
+  for (const attribute of Array.from(source.attributes)) {
+    target.setAttribute(attribute.name, attribute.value);
+  }
+}
+
+function preserveReusablePlantUmlDiagrams(currentRoot: ParentNode, nextRoot: ParentNode): void {
+  const reusableDiagrams = new Map<string, HTMLElement>();
+  for (const diagram of currentRoot.querySelectorAll<HTMLElement>(KMARK_PLANTUML_REUSE_SELECTOR)) {
+    const reuseKey = diagram.dataset.kmarkPlantumlReuseKey;
+    if (reuseKey !== undefined) {
+      reusableDiagrams.set(reuseKey, diagram);
+    }
+  }
+  for (const nextDiagram of nextRoot.querySelectorAll<HTMLElement>(KMARK_PLANTUML_REUSE_SELECTOR)) {
+    const reuseKey = nextDiagram.dataset.kmarkPlantumlReuseKey;
+    if (reuseKey === undefined) {
+      continue;
+    }
+    const reusableDiagram = reusableDiagrams.get(reuseKey);
+    if (reusableDiagram === undefined || !reusableDiagram.isConnected) {
+      continue;
+    }
+    reusableDiagrams.delete(reuseKey);
+    if (!shouldPreservePlantUmlDiagramDom(
+      reusableDiagram.dataset.kmarkPlantumlDiagramState,
+      nextDiagram.dataset.kmarkPlantumlDiagramState,
+    )) {
+      continue;
+    }
+    syncReusablePlantUmlDiagramAttributes(reusableDiagram, nextDiagram);
+    nextDiagram.replaceWith(reusableDiagram);
+  }
+}
+
 function applyPreviewSurfaceHtml(surface: HTMLElement, html: string): void {
   const videoSnapshots = collectPreviewVideoSnapshots(surface);
   const template = document.createElement("template");
 
   template.innerHTML = html;
   persistKmarkModelViewerSnapshots(surface);
+  preserveReusablePlantUmlDiagrams(surface, template.content);
   preserveReusableKmarkModelViewers(surface, template.content);
   surface.replaceChildren(...Array.from(template.content.childNodes));
   hardenPreviewSurfaceNavigation(surface);

@@ -47,10 +47,16 @@ export function useMarkdownEditor(
     activeSourceLine = null,
   } = options;
   const renderRequestIdRef = useRef(0);
+  const plantUmlDocumentKeyRef = useRef<string | null>(null);
   const recentFilesRequestIdRef = useRef(0);
   const shouldSkipInitialEditPersistRef = useRef(false);
   const rulesRef = useRef<ReturnType<typeof createBrowserEditorStateRules> | null>(null);
   const controllerRef = useRef<EditorSessionController | null>(null);
+
+  if (plantUmlDocumentKeyRef.current === null) {
+    plantUmlDocumentKeyRef.current = crypto.randomUUID();
+  }
+  const plantUmlDocumentKey = plantUmlDocumentKeyRef.current;
 
   if (rulesRef.current === null) {
     rulesRef.current = createBrowserEditorStateRules();
@@ -75,6 +81,7 @@ export function useMarkdownEditor(
   const reducer = useMemo(() => createEditorSessionReducer(rulesRef.current!), []);
   const [isReady, setIsReady] = useState(false);
   const [recentFiles, setRecentFiles] = useState<readonly RecentFile[]>([]);
+  const [plantumlRenderEpoch, reloadPlantUml] = useReducer((epoch: number) => epoch + 1, 0);
   const [state, dispatch] = useReducer(
     reducer,
     startupEditMode,
@@ -194,7 +201,8 @@ export function useMarkdownEditor(
 
     void controller.renderPreview(state.content, state.filePath, previewDisplayMode, {
       revision: requestId,
-      documentKey: state.filePath ?? state.fileName,
+      documentKey: plantUmlDocumentKey,
+      plantumlRenderEpoch,
       plantumlHttpsHosts,
       activeSourceLine,
       signal: abortController.signal,
@@ -218,7 +226,7 @@ export function useMarkdownEditor(
       disposed = true;
       abortController.abort();
     };
-  }, [controller, currentDocumentFilePath, isReady, plantumlHttpsHosts, previewColorKey, previewDisplayMode, state.content, state.fileName, state.filePath, store]);
+  }, [controller, currentDocumentFilePath, isReady, plantUmlDocumentKey, plantumlHttpsHosts, plantumlRenderEpoch, previewColorKey, previewDisplayMode, state.content, state.fileName, state.filePath, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
@@ -239,10 +247,13 @@ export function useMarkdownEditor(
     await executeWithErrorHandling(async () => {
       const loadedDocument = await controller.openDocumentFromPicker(store);
 
-      if (loadedDocument !== null && loadedDocument.filePath !== null) {
-        await applyRecentFilesRequest(() => (
-          controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
-        ));
+      if (loadedDocument !== null) {
+        reloadPlantUml();
+        if (loadedDocument.filePath !== null) {
+          await applyRecentFilesRequest(() => (
+            controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+          ));
+        }
       }
     });
   }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
@@ -260,6 +271,7 @@ export function useMarkdownEditor(
 
     await executeWithErrorHandling(async () => {
       const loadedDocument = await controller.openDocumentFromFile(store, file);
+      reloadPlantUml();
 
       if (loadedDocument.filePath !== null) {
         await applyRecentFilesRequest(() => (
@@ -272,6 +284,7 @@ export function useMarkdownEditor(
   const handleOpenRecentFile = useCallback(async (recentFile: RecentFile) => {
     await executeWithErrorHandling(async () => {
       const loadedDocument = await controller.openDocumentFromRecentFile(store, recentFile);
+      reloadPlantUml();
 
       if (loadedDocument.filePath !== null) {
         await applyRecentFilesRequest(() => (
@@ -303,6 +316,7 @@ export function useMarkdownEditor(
 
   const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {
     const loadedDocument = controller.loadExternalDocument(store, document);
+    reloadPlantUml();
 
     void applyRecentFilesRequest(() => (
       controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
@@ -334,9 +348,15 @@ export function useMarkdownEditor(
     previewDisplayMode: PreviewDisplayMode,
   ) => {
     await executeWithErrorHandling(async () => {
-      await controller.printDocument(store, previewDisplayMode, plantumlHttpsHosts);
+      await controller.printDocument(
+        store,
+        previewDisplayMode,
+        plantumlHttpsHosts,
+        plantUmlDocumentKey,
+        plantumlRenderEpoch,
+      );
     });
-  }, [controller, executeWithErrorHandling, plantumlHttpsHosts, store]);
+  }, [controller, executeWithErrorHandling, plantUmlDocumentKey, plantumlHttpsHosts, plantumlRenderEpoch, store]);
 
   const handleImportDroppedAssets = useCallback(async (droppedFilePaths: readonly string[]) => {
     try {
@@ -358,7 +378,12 @@ export function useMarkdownEditor(
 
   const handleResetDocument = useCallback(() => {
     controller.resetDocument(store);
+    reloadPlantUml();
   }, [controller, store]);
+
+  const handleReloadPlantUml = useCallback(() => {
+    reloadPlantUml();
+  }, []);
 
   const handleErrorRaise = useCallback((message: string) => {
     controller.raiseError(store, message);
@@ -402,6 +427,7 @@ export function useMarkdownEditor(
     handleOpenDocumentFromPicker,
     handleOpenRecentFile,
     handlePickedFile,
+    handleReloadPlantUml,
     handleResetDocument,
     handleOverwriteSaveDocument,
     handlePrintDocument,

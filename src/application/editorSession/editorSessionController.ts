@@ -307,6 +307,8 @@ export class EditorSessionController {
     store: EditorSessionStore,
     previewDisplayMode: PreviewDisplayMode,
     plantumlHttpsHosts: readonly string[],
+    plantumlDocumentKey: string,
+    plantumlRenderEpoch: number,
   ): Promise<void> {
     const state = store.getState();
 
@@ -320,7 +322,8 @@ export class EditorSessionController {
         previewDisplayMode,
         {
           revision: this.#clock.now(),
-          documentKey: state.filePath ?? state.fileName,
+          documentKey: plantumlDocumentKey,
+          plantumlRenderEpoch,
           plantumlHttpsHosts,
           signal: printAbortController.signal,
           strictGeneratedSvg: true,

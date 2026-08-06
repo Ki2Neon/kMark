@@ -84,6 +84,7 @@ export type MarkdownRenderer = {
 export type PreviewRenderOptions = {
   readonly revision: number;
   readonly documentKey: string;
+  readonly plantumlRenderEpoch: number;
   readonly plantumlHttpsHosts: readonly string[];
   readonly activeSourceLine?: number | null;
   readonly signal?: AbortSignal;

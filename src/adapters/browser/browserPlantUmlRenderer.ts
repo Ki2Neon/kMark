@@ -1,13 +1,21 @@
+import {
+  planPlantUmlDiagramUpdates,
+  type PlantUmlDiagramDescriptor,
+  type PlantUmlDiagramSnapshotDescriptor,
+  type PlannedPlantUmlDiagram,
+} from "../../application/plantuml/plantUmlRenderPlanner";
 import { splitPlantUmlSourceWithWasm } from "../../wasm/kmarkWeb";
 import { finalizeGeneratedSvg } from "./browserGeneratedSvgFinalizer";
-import { getPlantUmlEngine } from "./browserPlantUmlEngine";
+import {
+  getPlantUmlEngine,
+  PLANTUML_VERSION,
+} from "./browserPlantUmlEngine";
 import { resolveKmarkMermaidThemeVariables } from "./browserMermaidTheme";
 import {
   PLANTUML_DEBOUNCE_MS,
   PLANTUML_RAW_CACHE_MAX_BYTES,
   PLANTUML_RAW_CACHE_MAX_ENTRIES,
   prioritizePlantUmlItems,
-  shouldCachePlantUmlSource,
 } from "./browserPlantUmlPolicy";
 
 const PLANTUML_BLOCK_SELECTOR = ".kmark-plantuml-block";
@@ -19,6 +27,7 @@ export type PlantUmlPreviewSurface = "standard" | "paper";
 export type RenderPlantUmlHtmlOptions = {
   readonly revision: number;
   readonly documentKey: string;
+  readonly plantumlRenderEpoch: number;
   readonly httpsHosts: readonly string[];
   readonly activeSourceLine?: number | null;
   readonly strict?: boolean;
@@ -27,77 +36,95 @@ export type RenderPlantUmlHtmlOptions = {
   readonly onUpdate?: (html: string) => void;
 };
 
-type LastRenderedDiagram = {
-  readonly bytes: number;
-  readonly svg: string;
+export type RenderPlantUmlHtmlDocumentsOptions = Omit<RenderPlantUmlHtmlOptions, "onUpdate"> & {
+  readonly onUpdate?: (htmlDocuments: readonly string[]) => void;
 };
 
-const lastRenderedDiagrams = new Map<string, LastRenderedDiagram>();
-let lastRenderedDiagramBytes = 0;
+type PlantUmlDiagramTask = {
+  readonly cancel: () => void;
+  readonly id: string;
+  readonly promise: Promise<void>;
+  readonly signature: string;
+};
 
-function getLastRenderedDiagram(identity: string): LastRenderedDiagram | undefined {
-  const value = lastRenderedDiagrams.get(identity);
-  if (value !== undefined) {
-    lastRenderedDiagrams.delete(identity);
-    lastRenderedDiagrams.set(identity, value);
-  }
-  return value;
-}
+type PlantUmlDiagramRecord = {
+  descriptor: PlantUmlDiagramDescriptor;
+  error: string | null;
+  failedSignature: string | null;
+  finalizedSignature: string | null;
+  finalizedSvg: string | null;
+  generation: number;
+  readonly instanceId: string;
+  lastUsed: number;
+  rawSignature: string | null;
+  rawSvg: string | null;
+  task: PlantUmlDiagramTask | null;
+};
 
-function setLastRenderedDiagram(identity: string, svg: string): void {
-  const existing = lastRenderedDiagrams.get(identity);
-  if (existing !== undefined) {
-    lastRenderedDiagramBytes -= existing.bytes;
-    lastRenderedDiagrams.delete(identity);
-  }
-  const value = { bytes: svg.length * 2, svg };
-  lastRenderedDiagrams.set(identity, value);
-  lastRenderedDiagramBytes += value.bytes;
-  while (
-    lastRenderedDiagrams.size > PLANTUML_RAW_CACHE_MAX_ENTRIES
-    || lastRenderedDiagramBytes > PLANTUML_RAW_CACHE_MAX_BYTES
-  ) {
-    const oldestKey = lastRenderedDiagrams.keys().next().value as string | undefined;
-    if (oldestKey === undefined) {
-      break;
-    }
-    lastRenderedDiagramBytes -= lastRenderedDiagrams.get(oldestKey)?.bytes ?? 0;
-    lastRenderedDiagrams.delete(oldestKey);
-  }
-}
+type PreparedBlock = {
+  readonly block: HTMLElement;
+  readonly rendered: HTMLElement | null;
+  readonly sources: readonly string[];
+  readonly splitError: unknown | null;
+};
 
-function deleteLastRenderedDiagram(identity: string): void {
-  const existing = lastRenderedDiagrams.get(identity);
-  if (existing === undefined) {
-    return;
-  }
-  lastRenderedDiagramBytes -= existing.bytes;
-  lastRenderedDiagrams.delete(identity);
-}
+type PreparedDiagram = {
+  readonly block: PreparedBlock;
+  readonly descriptor: PlantUmlDiagramDescriptor;
+  readonly diagramIndex: number;
+  element: HTMLElement | null;
+  plan: PlannedPlantUmlDiagram | null;
+  readonly presentation: ReturnType<typeof presentationFor>;
+  record: PlantUmlDiagramRecord | null;
+  waitPromise: Promise<void> | null;
+};
+
+type PlantUmlSnapshotScope = {
+  readonly key: string;
+  readonly recordsBySurface: Map<PlantUmlPreviewSurface, PlantUmlDiagramRecord[]>;
+};
+
+let activeSnapshotScope: PlantUmlSnapshotScope | null = null;
+let plantUmlTaskSequence = 0;
+let snapshotAccessSequence = 0;
 
 function abortError(): Error {
   return new DOMException("PlantUML render superseded", "AbortError");
 }
 
-function isAborted(signal?: AbortSignal): boolean {
-  return signal?.aborted === true;
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
-function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted === true) {
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
     return Promise.reject(abortError());
   }
   return new Promise((resolve, reject) => {
     const timeoutId = window.setTimeout(resolve, milliseconds);
-    signal?.addEventListener("abort", () => {
+    signal.addEventListener("abort", () => {
       window.clearTimeout(timeoutId);
       reject(abortError());
     }, { once: true });
   });
 }
 
-function blockIdentity(documentKey: string, block: HTMLElement, diagramIndex: number): string {
-  return `${documentKey}:${block.dataset.sourceLineStart ?? "?"}:${diagramIndex}`;
+function waitForTask(task: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (signal === undefined) {
+    return task;
+  }
+  if (signal.aborted) {
+    return Promise.reject(abortError());
+  }
+  return new Promise((resolve, reject) => {
+    const handleAbort = () => {
+      reject(abortError());
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+    task.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", handleAbort);
+    });
+  });
 }
 
 function errorMessage(error: unknown): string {
@@ -128,156 +155,433 @@ function isDarkSurface(surface: PlantUmlPreviewSurface): boolean {
   return resolveKmarkMermaidThemeVariables("standard").darkMode === true;
 }
 
+function snapshotDescriptor(record: PlantUmlDiagramRecord): PlantUmlDiagramSnapshotDescriptor {
+  return {
+    failedSignature: record.failedSignature,
+    finalizeSignature: record.finalizedSignature ?? "",
+    generation: record.generation,
+    hasFinalizedSvg: record.finalizedSvg !== null,
+    hasRawSvg: record.rawSvg !== null,
+    inFlightSignature: record.task?.signature ?? null,
+    instanceId: record.instanceId,
+    order: record.descriptor.order,
+    rawSignature: record.rawSignature ?? "",
+    source: record.descriptor.source,
+  };
+}
+
+function cancelRecordTask(record: PlantUmlDiagramRecord): void {
+  record.task?.cancel();
+  record.task = null;
+}
+
+function activateSnapshotScope(documentKey: string, epoch: number): PlantUmlSnapshotScope {
+  const scopeKey = `${documentKey}\u0000${epoch}`;
+  if (activeSnapshotScope?.key === scopeKey) {
+    return activeSnapshotScope;
+  }
+  if (activeSnapshotScope !== null) {
+    for (const records of activeSnapshotScope.recordsBySurface.values()) {
+      records.forEach(cancelRecordTask);
+    }
+  }
+  getPlantUmlEngine().invalidateCache();
+  activeSnapshotScope = {
+    key: scopeKey,
+    recordsBySurface: new Map(),
+  };
+  return activeSnapshotScope;
+}
+
+function recordPayloadBytes(record: PlantUmlDiagramRecord): number {
+  return ((record.rawSvg?.length ?? 0) + (record.finalizedSvg?.length ?? 0)) * 2;
+}
+
+function enforceSnapshotPayloadLimit(scope: PlantUmlSnapshotScope): void {
+  const records = [...scope.recordsBySurface.values()]
+    .flat()
+    .filter((record) => record.rawSvg !== null || record.finalizedSvg !== null)
+    .sort((left, right) => left.lastUsed - right.lastUsed);
+  let bytes = records.reduce((total, record) => total + recordPayloadBytes(record), 0);
+  let entries = records.length;
+
+  for (const record of records) {
+    if (entries <= PLANTUML_RAW_CACHE_MAX_ENTRIES && bytes <= PLANTUML_RAW_CACHE_MAX_BYTES) {
+      break;
+    }
+    if (record.task !== null) {
+      continue;
+    }
+    bytes -= recordPayloadBytes(record);
+    entries -= 1;
+    record.rawSvg = null;
+    record.rawSignature = null;
+    record.finalizedSvg = null;
+    record.finalizedSignature = null;
+  }
+}
+
+function createRecord(
+  diagramPlan: PlannedPlantUmlDiagram,
+  previousRecord: PlantUmlDiagramRecord | null,
+): PlantUmlDiagramRecord {
+  if (
+    previousRecord !== null
+    && (diagramPlan.action === "reuse-error"
+      || diagramPlan.action === "reuse-finalized"
+      || diagramPlan.action === "reuse-inflight")
+  ) {
+    previousRecord.descriptor = diagramPlan.descriptor;
+    previousRecord.lastUsed = snapshotAccessSequence += 1;
+    return previousRecord;
+  }
+
+  if (previousRecord !== null) {
+    cancelRecordTask(previousRecord);
+  }
+  return {
+    descriptor: diagramPlan.descriptor,
+    error: null,
+    failedSignature: null,
+    finalizedSignature: previousRecord?.finalizedSignature ?? null,
+    finalizedSvg: previousRecord?.finalizedSvg ?? null,
+    generation: diagramPlan.generation,
+    instanceId: diagramPlan.instanceId,
+    lastUsed: snapshotAccessSequence += 1,
+    rawSignature: previousRecord?.rawSignature ?? null,
+    rawSvg: previousRecord?.rawSvg ?? null,
+    task: null,
+  };
+}
+
+function startDiagramTask(
+  record: PlantUmlDiagramRecord,
+  action: "finalize" | "render",
+  dark: boolean,
+  httpsHosts: readonly string[],
+  scope: PlantUmlSnapshotScope,
+  presentation: ReturnType<typeof presentationFor>,
+): PlantUmlDiagramTask {
+  const engine = getPlantUmlEngine();
+  const taskAbortController = new AbortController();
+  const taskRevision = plantUmlTaskSequence += 1;
+  const taskId = `plantuml-${record.instanceId}-g${record.generation}-t${taskRevision}`;
+  let task!: PlantUmlDiagramTask;
+  const promise = (async () => {
+    try {
+      await delay(PLANTUML_DEBOUNCE_MS, taskAbortController.signal);
+      let rawSvg = record.rawSvg;
+      if (action === "render" || rawSvg === null || record.rawSignature !== record.descriptor.rawSignature) {
+        rawSvg = await engine.render(
+          record.descriptor.source,
+          dark,
+          taskId,
+          httpsHosts,
+        );
+        if (taskAbortController.signal.aborted || record.task !== task) {
+          throw abortError();
+        }
+        record.rawSvg = rawSvg;
+        record.rawSignature = record.descriptor.rawSignature;
+      }
+      const finalized = await finalizeGeneratedSvg({
+        revision: taskRevision,
+        renderId: `plantuml-${record.instanceId}-g${record.generation}`,
+        rawSvg,
+        presentation,
+      }, httpsHosts);
+      if (
+        taskAbortController.signal.aborted
+        || record.task !== task
+        || finalized.revision !== taskRevision
+      ) {
+        throw abortError();
+      }
+      record.error = null;
+      record.failedSignature = null;
+      record.finalizedSvg = finalized.svg;
+      record.finalizedSignature = record.descriptor.finalizeSignature;
+      record.lastUsed = snapshotAccessSequence += 1;
+      enforceSnapshotPayloadLimit(scope);
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      if (record.task === task) {
+        record.error = errorMessage(error);
+        record.failedSignature = record.descriptor.finalizeSignature;
+        record.lastUsed = snapshotAccessSequence += 1;
+      }
+    } finally {
+      if (record.task === task) {
+        record.task = null;
+      }
+    }
+  })();
+  task = {
+    cancel: () => {
+      taskAbortController.abort();
+      engine.cancel(taskId);
+    },
+    id: taskId,
+    promise,
+    signature: record.descriptor.finalizeSignature,
+  };
+  void promise.catch(() => {});
+  record.task = task;
+  return task;
+}
+
+function syncDiagramElement(diagram: PreparedDiagram): void {
+  const { element, record } = diagram;
+  if (element === null || record === null) {
+    return;
+  }
+  element.replaceChildren();
+  element.dataset.kmarkPlantumlReuseKey = `${record.instanceId}:${record.generation}`;
+  if (
+    record.finalizedSvg !== null
+    && record.finalizedSignature === record.descriptor.finalizeSignature
+  ) {
+    element.innerHTML = record.finalizedSvg;
+    element.dataset.kmarkPlantumlDiagramState = "rendered";
+    return;
+  }
+  if (record.finalizedSvg !== null) {
+    element.innerHTML = record.finalizedSvg;
+  }
+  if (record.failedSignature === record.descriptor.finalizeSignature && record.error !== null) {
+    element.append(createStatus(element.ownerDocument, "kmark-plantuml-error-message", record.error));
+    element.dataset.kmarkPlantumlDiagramState = "error";
+    return;
+  }
+  if (record.finalizedSvg !== null) {
+    element.dataset.kmarkPlantumlDiagramState = "stale";
+    return;
+  }
+  element.append(createStatus(element.ownerDocument, "kmark-plantuml-loading", "PlantUML生成中"));
+  element.dataset.kmarkPlantumlDiagramState = "loading";
+}
+
+function updateBlockState(block: PreparedBlock): void {
+  if (block.rendered === null || block.splitError !== null) {
+    return;
+  }
+  if (block.rendered.querySelector('[data-kmark-plantuml-diagram-state="error"]') !== null) {
+    block.block.dataset.kmarkPlantumlState = "error";
+    return;
+  }
+  if (block.rendered.querySelector('[data-kmark-plantuml-diagram-state="loading"], [data-kmark-plantuml-diagram-state="stale"]') !== null) {
+    block.block.dataset.kmarkPlantumlState = "rendering";
+    return;
+  }
+  block.block.dataset.kmarkPlantumlState = "rendered";
+}
+
+function serializeTemplates(templates: readonly HTMLTemplateElement[]): string[] {
+  return templates.map((template) => template.innerHTML);
+}
+
+function sourceRange(block: PreparedBlock): readonly [number, number] | null {
+  const start = Number(block.block.dataset.sourceLineStart);
+  const end = Number(block.block.dataset.sourceLineEnd);
+  return Number.isFinite(start) && Number.isFinite(end) ? [start, end] : null;
+}
+
+function descriptorFor(
+  source: string,
+  block: HTMLElement,
+  order: number,
+  dark: boolean,
+  httpsHosts: readonly string[],
+): PlantUmlDiagramDescriptor {
+  const presentation = presentationFor(block);
+  const rawSignature = JSON.stringify({
+    dark,
+    hosts: [...httpsHosts].sort(),
+    source,
+    version: PLANTUML_VERSION,
+  });
+  return {
+    finalizeSignature: JSON.stringify({
+      hosts: [...httpsHosts].sort(),
+      presentation,
+      rawSignature,
+    }),
+    order,
+    rawSignature,
+    source,
+  };
+}
+
+export async function renderPlantUmlPreviewHtmlDocuments(
+  htmlDocuments: readonly string[],
+  options: RenderPlantUmlHtmlDocumentsOptions,
+): Promise<readonly string[]> {
+  if (options.signal?.aborted === true) {
+    throw abortError();
+  }
+  const surface = options.surface ?? "standard";
+  const scope = activateSnapshotScope(options.documentKey, options.plantumlRenderEpoch);
+  const previousRecords = scope.recordsBySurface.get(surface) ?? [];
+  const templates = htmlDocuments.map((html) => {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return template;
+  });
+  const blocks = templates.flatMap((template) => (
+    Array.from(template.content.querySelectorAll<HTMLElement>(PLANTUML_BLOCK_SELECTOR))
+  ));
+  const preparedBlocks = await Promise.all(blocks.map(async (block): Promise<PreparedBlock> => {
+    const source = block.querySelector<HTMLElement>(PLANTUML_SOURCE_SELECTOR)?.textContent ?? "";
+    try {
+      return {
+        block,
+        rendered: block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR),
+        sources: await splitPlantUmlSourceWithWasm(source),
+        splitError: null,
+      };
+    } catch (error) {
+      return {
+        block,
+        rendered: block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR),
+        sources: [],
+        splitError: error,
+      };
+    }
+  }));
+  const dark = isDarkSurface(surface);
+  let diagramOrder = 0;
+  const diagramsByBlock = new Map<PreparedBlock, PreparedDiagram[]>();
+  const preparedDiagrams: PreparedDiagram[] = [];
+  for (const block of preparedBlocks) {
+    const blockDiagrams = block.sources.map((source, diagramIndex): PreparedDiagram => ({
+      block,
+      descriptor: descriptorFor(source, block.block, diagramOrder += 1, dark, options.httpsHosts),
+      diagramIndex,
+      element: null,
+      plan: null,
+      presentation: presentationFor(block.block),
+      record: null,
+      waitPromise: null,
+    }));
+    diagramsByBlock.set(block, blockDiagrams);
+    preparedDiagrams.push(...blockDiagrams);
+  }
+  const renderPlan = planPlantUmlDiagramUpdates(
+    preparedDiagrams.map((diagram) => diagram.descriptor),
+    previousRecords.map(snapshotDescriptor),
+    () => crypto.randomUUID(),
+  );
+  const nextRecords = renderPlan.diagrams.map((diagramPlan, index) => {
+    const previousRecord = diagramPlan.previousIndex === null
+      ? null
+      : previousRecords[diagramPlan.previousIndex] ?? null;
+    const record = createRecord(diagramPlan, previousRecord);
+    preparedDiagrams[index].plan = diagramPlan;
+    preparedDiagrams[index].record = record;
+    return record;
+  });
+  renderPlan.obsoletePreviousIndexes.forEach((index) => {
+    const record = previousRecords[index];
+    if (record !== undefined) {
+      cancelRecordTask(record);
+    }
+  });
+  scope.recordsBySurface.set(surface, nextRecords);
+
+  for (const block of preparedBlocks) {
+    if (block.rendered === null) {
+      continue;
+    }
+    block.rendered.replaceChildren();
+    if (block.splitError !== null) {
+      block.rendered.append(createStatus(
+        block.block.ownerDocument,
+        "kmark-plantuml-error-message",
+        errorMessage(block.splitError),
+      ));
+      block.block.dataset.kmarkPlantumlState = "error";
+      continue;
+    }
+    for (const diagram of diagramsByBlock.get(block) ?? []) {
+      const element = block.block.ownerDocument.createElement("div");
+      element.className = "kmark-plantuml-diagram";
+      element.dataset.kmarkPlantumlDiagramIndex = String(diagram.diagramIndex);
+      diagram.element = element;
+      syncDiagramElement(diagram);
+      block.rendered.append(element);
+    }
+    updateBlockState(block);
+  }
+
+  const renderOrder = prioritizePlantUmlItems(preparedBlocks, options.activeSourceLine, sourceRange);
+  for (const block of renderOrder) {
+    for (const diagram of diagramsByBlock.get(block) ?? []) {
+      const { plan, record } = diagram;
+      if (plan === null || record === null) {
+        continue;
+      }
+      if (plan.action === "render" || plan.action === "finalize") {
+        diagram.waitPromise = startDiagramTask(
+          record,
+          plan.action,
+          dark,
+          options.httpsHosts,
+          scope,
+          diagram.presentation,
+        ).promise;
+      } else if (plan.action === "reuse-inflight") {
+        diagram.waitPromise = record.task?.promise ?? null;
+      }
+    }
+  }
+
+  options.onUpdate?.(serializeTemplates(templates));
+
+  const splitFailure = preparedBlocks.find((block) => block.splitError !== null)?.splitError;
+  if (options.strict === true && splitFailure !== null && splitFailure !== undefined) {
+    throw splitFailure;
+  }
+  const cachedFailure = preparedDiagrams.find((diagram) => (
+    diagram.record?.failedSignature === diagram.descriptor.finalizeSignature
+    && diagram.record.error !== null
+  ));
+  if (options.strict === true && cachedFailure?.record?.error !== undefined && cachedFailure.record.error !== null) {
+    throw new Error(cachedFailure.record.error);
+  }
+
+  for (const block of renderOrder) {
+    for (const diagram of diagramsByBlock.get(block) ?? []) {
+      if (diagram.waitPromise === null) {
+        continue;
+      }
+      await waitForTask(diagram.waitPromise, options.signal);
+      syncDiagramElement(diagram);
+      updateBlockState(block);
+      if (
+        options.strict === true
+        && diagram.record?.failedSignature === diagram.descriptor.finalizeSignature
+        && diagram.record.error !== null
+      ) {
+        throw new Error(diagram.record.error);
+      }
+      options.onUpdate?.(serializeTemplates(templates));
+    }
+  }
+
+  preparedBlocks.forEach(updateBlockState);
+  enforceSnapshotPayloadLimit(scope);
+  return serializeTemplates(templates);
+}
+
 export async function renderPlantUmlPreviewHtml(
   html: string,
   options: RenderPlantUmlHtmlOptions,
 ): Promise<string> {
-  const engine = getPlantUmlEngine();
-  const jobId = `${options.documentKey}:${options.revision}:${crypto.randomUUID()}`;
-  engine.beginRevision(jobId);
-  const cancelJob = () => engine.cancelRevision(jobId);
-  if (options.signal?.aborted === true) {
-    cancelJob();
-  } else {
-    options.signal?.addEventListener("abort", cancelJob, { once: true });
-  }
-  if (!html.includes("kmark-plantuml-block")) {
-    return html;
-  }
-
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  const blocks = Array.from(template.content.querySelectorAll<HTMLElement>(PLANTUML_BLOCK_SELECTOR));
-  const preparedBlocks = await Promise.all(blocks.map(async (block) => {
-    const source = block.querySelector<HTMLElement>(PLANTUML_SOURCE_SELECTOR)?.textContent ?? "";
-    try {
-      return { block, sources: await splitPlantUmlSourceWithWasm(source), splitError: null };
-    } catch (error) {
-      return { block, sources: [] as readonly string[], splitError: error };
-    }
-  }));
-  const renderOrder = prioritizePlantUmlItems(
-    preparedBlocks,
-    options.activeSourceLine,
-    (item) => {
-      const start = Number(item.block.dataset.sourceLineStart);
-      const end = Number(item.block.dataset.sourceLineEnd);
-      return Number.isFinite(start) && Number.isFinite(end) ? [start, end] : null;
-    },
-  );
-
-  for (const { block, sources, splitError } of renderOrder) {
-    const rendered = block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR);
-    if (rendered === null) {
-      continue;
-    }
-    rendered.replaceChildren();
-    if (splitError !== null) {
-      rendered.append(createStatus(block.ownerDocument, "kmark-plantuml-error-message", errorMessage(splitError)));
-      block.dataset.kmarkPlantumlState = "error";
-      continue;
-    }
-    sources.forEach((diagramSource, diagramIndex) => {
-      const item = block.ownerDocument.createElement("div");
-      item.className = "kmark-plantuml-diagram";
-      item.dataset.kmarkPlantumlDiagramIndex = String(diagramIndex);
-      const identity = blockIdentity(options.documentKey, block, diagramIndex);
-      const cacheable = shouldCachePlantUmlSource(diagramSource);
-      const previous = cacheable
-        ? getLastRenderedDiagram(identity)
-        : undefined;
-      if (!cacheable) {
-        deleteLastRenderedDiagram(identity);
-      }
-      if (previous !== undefined) {
-        item.innerHTML = previous.svg;
-        item.dataset.kmarkPlantumlDiagramState = "stale";
-      } else {
-        item.append(createStatus(block.ownerDocument, "kmark-plantuml-loading", "PlantUML生成中"));
-        item.dataset.kmarkPlantumlDiagramState = "loading";
-      }
-      rendered.append(item);
-    });
-    block.dataset.kmarkPlantumlState = "rendering";
-  }
-  options.onUpdate?.(template.innerHTML);
-
-  if (options.strict === true) {
-    const splitFailure = preparedBlocks.find((item) => item.splitError !== null)?.splitError;
-    if (splitFailure !== null && splitFailure !== undefined) {
-      throw splitFailure;
-    }
-  }
-
-  await delay(PLANTUML_DEBOUNCE_MS, options.signal);
-  if (options.signal?.aborted === true) {
-    throw abortError();
-  }
-  const dark = isDarkSurface(options.surface ?? "standard");
-
-  for (const { block, sources, splitError } of renderOrder) {
-    if (splitError !== null) {
-      continue;
-    }
-    const rendered = block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR);
-    if (rendered === null) {
-      continue;
-    }
-    for (let diagramIndex = 0; diagramIndex < sources.length; diagramIndex += 1) {
-      if (isAborted(options.signal)) {
-        throw abortError();
-      }
-      const item = rendered.querySelector<HTMLElement>(
-        `[data-kmark-plantuml-diagram-index="${diagramIndex}"]`,
-      );
-      if (item === null) {
-        continue;
-      }
-      const identity = blockIdentity(options.documentKey, block, diagramIndex);
-      try {
-        const rawSvg = await engine.render(
-          sources[diagramIndex],
-          dark,
-          jobId,
-          options.httpsHosts,
-        );
-        const renderId = `plantuml-r${options.revision}-b${block.dataset.kmarkGeneratedSvgIndex ?? "0"}-d${diagramIndex}`;
-        const finalized = await finalizeGeneratedSvg({
-          revision: options.revision,
-          renderId,
-          rawSvg,
-          presentation: presentationFor(block),
-        }, options.httpsHosts);
-        if (isAborted(options.signal) || finalized.revision !== options.revision) {
-          throw abortError();
-        }
-        item.innerHTML = finalized.svg;
-        item.dataset.kmarkPlantumlDiagramState = "rendered";
-        if (shouldCachePlantUmlSource(sources[diagramIndex])) {
-          setLastRenderedDiagram(identity, finalized.svg);
-        } else {
-          deleteLastRenderedDiagram(identity);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          throw error;
-        }
-        if (options.strict === true) {
-          throw error;
-        }
-        const oldSvg = getLastRenderedDiagram(identity)?.svg;
-        item.replaceChildren();
-        if (oldSvg !== undefined) {
-          item.innerHTML = oldSvg;
-        }
-        item.append(createStatus(block.ownerDocument, "kmark-plantuml-error-message", errorMessage(error)));
-        item.dataset.kmarkPlantumlDiagramState = "error";
-      }
-      options.onUpdate?.(template.innerHTML);
-    }
-    const hasError = rendered.querySelector('[data-kmark-plantuml-diagram-state="error"]') !== null;
-    block.dataset.kmarkPlantumlState = hasError ? "error" : "rendered";
-  }
-
-  return template.innerHTML;
+  const result = await renderPlantUmlPreviewHtmlDocuments([html], {
+    ...options,
+    onUpdate: (documents) => options.onUpdate?.(documents[0] ?? ""),
+  });
+  return result[0] ?? "";
 }
