@@ -18,8 +18,8 @@ import {
 } from "../../domain/preview";
 import { renderMermaidPreviewHtml, resolveMermaidPreviewTheme } from "./browserMermaidRenderer";
 import {
-  renderPlantUmlPreviewHtml,
-  renderPlantUmlPreviewHtmlDocuments,
+  renderGeneratedSvgPreviewHtml,
+  renderGeneratedSvgPreviewHtmlDocuments,
 } from "./browserPlantUmlRenderer";
 import { type PreviewRenderOptions } from "../../application/editorSession/editorSessionPorts";
 
@@ -215,7 +215,7 @@ async function normalizeRenderedMarkdownPreview(
       defaultPageStyle,
       defaultTextStyle,
     };
-    const plantUmlHtml = await renderPlantUmlPreviewHtml(html, {
+    const generatedSvgHtml = await renderGeneratedSvgPreviewHtml(html, {
       revision: options?.revision ?? 0,
       documentKey: options?.documentKey ?? "preview",
       plantumlRenderEpoch: options?.plantumlRenderEpoch ?? 0,
@@ -228,7 +228,7 @@ async function normalizeRenderedMarkdownPreview(
     });
     const hydratedPreview: NormalizedRenderedMarkdownPreviewPayload = {
       ...basePreview,
-      html: await renderMermaidPreviewHtml(plantUmlHtml, {
+      html: await renderMermaidPreviewHtml(generatedSvgHtml, {
         surface: "standard",
         theme: resolveMermaidPreviewTheme("standard"),
         revision: options?.revision ?? 0,
@@ -256,7 +256,7 @@ async function normalizeRenderedMarkdownPreview(
     defaultTextStyle,
   };
   const hydratedPages = [...normalizedPages];
-  const plantUmlPages = await renderPlantUmlPreviewHtmlDocuments(
+  const generatedSvgPages = await renderGeneratedSvgPreviewHtmlDocuments(
     hydratedPages.map((page) => page.html),
     {
       revision: options?.revision ?? 0,
@@ -277,7 +277,7 @@ async function normalizeRenderedMarkdownPreview(
       },
     },
   );
-  plantUmlPages.forEach((html, pageIndex) => {
+  generatedSvgPages.forEach((html, pageIndex) => {
     if (hydratedPages[pageIndex] !== undefined) {
       hydratedPages[pageIndex] = { ...hydratedPages[pageIndex], html };
     }

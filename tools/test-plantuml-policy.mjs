@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { withTransparentDotBackground } from "../src/adapters/browser/browserDotSource.ts";
 import {
-  PLANTUML_DEBOUNCE_MS,
-  PlantUmlRawSvgCache,
-  prioritizePlantUmlItems,
-  shouldCachePlantUmlSource,
+  GENERATED_SVG_DEBOUNCE_MS,
+  GeneratedSvgRawCache,
+  prioritizeGeneratedSvgItems,
+  shouldCacheGeneratedSvgSource,
 } from "../src/adapters/browser/browserPlantUmlPolicy.ts";
-import { planPlantUmlDiagramUpdates } from "../src/application/plantuml/plantUmlRenderPlanner.ts";
+import { planGeneratedSvgDiagramUpdates } from "../src/application/plantuml/plantUmlRenderPlanner.ts";
 import { normalizePlantUmlHttpsHostsText } from "../src/domain/preview.ts";
-import { shouldPreservePlantUmlDiagramDom } from "../src/ui/components/plantUmlPreviewPolicy.ts";
+import { shouldPreserveGeneratedSvgDiagramDom } from "../src/ui/components/plantUmlPreviewPolicy.ts";
 
-function descriptor(source, presentation = "default", rawContext = "light") {
-  const rawSignature = `${rawContext}\u0000${source}`;
+function descriptor(source, presentation = "default", rawContext = "light", engine = "plantuml") {
+  const rawSignature = `${engine}\u0000${rawContext}\u0000${source}`;
   return {
+    engine,
     finalizeSignature: `${rawSignature}\u0000${presentation}`,
     rawSignature,
     source,
@@ -35,30 +37,38 @@ function snapshot(next, instanceId, overrides = {}) {
 }
 
 test("uses the accepted realtime debounce", () => {
-  assert.equal(PLANTUML_DEBOUNCE_MS, 250);
+  assert.equal(GENERATED_SVG_DEBOUNCE_MS, 250);
 });
 
-test("preserves PlantUML DOM only while its render state is unchanged", () => {
+test("injects transparent DOT background at the root body without overriding user statements", () => {
+  assert.equal(
+    withTransparentDotBackground('strict digraph "name{part" /* { */ { bgcolor=pink; A -> B }'),
+    'strict digraph "name{part" /* { */ {\nbgcolor=transparent; bgcolor=pink; A -> B }',
+  );
+  assert.equal(withTransparentDotBackground("digraph G"), "digraph G");
+});
+
+test("preserves generated SVG DOM only while its render state is unchanged", () => {
   for (const state of ["error", "loading", "rendered", "stale"]) {
-    assert.equal(shouldPreservePlantUmlDiagramDom(state, state), true);
+    assert.equal(shouldPreserveGeneratedSvgDiagramDom(state, state), true);
   }
-  assert.equal(shouldPreservePlantUmlDiagramDom("loading", "rendered"), false);
-  assert.equal(shouldPreservePlantUmlDiagramDom("stale", "rendered"), false);
-  assert.equal(shouldPreservePlantUmlDiagramDom("loading", "error"), false);
-  assert.equal(shouldPreservePlantUmlDiagramDom(undefined, undefined), false);
-  assert.equal(shouldPreservePlantUmlDiagramDom("unknown", "unknown"), false);
+  assert.equal(shouldPreserveGeneratedSvgDiagramDom("loading", "rendered"), false);
+  assert.equal(shouldPreserveGeneratedSvgDiagramDom("stale", "rendered"), false);
+  assert.equal(shouldPreserveGeneratedSvgDiagramDom("loading", "error"), false);
+  assert.equal(shouldPreserveGeneratedSvgDiagramDom(undefined, undefined), false);
+  assert.equal(shouldPreserveGeneratedSvgDiagramDom("unknown", "unknown"), false);
 });
 
-test("prioritizes the active PlantUML block and keeps remaining document order", () => {
+test("prioritizes the active generated SVG block and keeps remaining document order", () => {
   const items = [{ id: "a", range: [0, 3] }, { id: "b", range: [6, 10] }, { id: "c", range: [14, 20] }];
   assert.deepEqual(
-    prioritizePlantUmlItems(items, 8, (item) => item.range).map((item) => item.id),
+    prioritizeGeneratedSvgItems(items, 8, (item) => item.range).map((item) => item.id),
     ["b", "a", "c"],
   );
 });
 
 test("LRU cache enforces entry and byte caps and rejects remote-resource caching", () => {
-  const cache = new PlantUmlRawSvgCache(2, 12);
+  const cache = new GeneratedSvgRawCache(2, 12);
   cache.put("a", { bytes: 4, source: "a", svg: "A" });
   cache.put("b", { bytes: 4, source: "b", svg: "B" });
   assert.equal(cache.get("a", "a"), "A");
@@ -69,8 +79,8 @@ test("LRU cache enforces entry and byte caps and rejects remote-resource caching
   cache.clear();
   assert.equal(cache.entryCount, 0);
   assert.equal(cache.byteCount, 0);
-  assert.equal(shouldCachePlantUmlSource("@startuml\n@enduml"), true);
-  assert.equal(shouldCachePlantUmlSource("!includeurl https://example.test/a.puml"), false);
+  assert.equal(shouldCacheGeneratedSvgSource("@startuml\n@enduml"), true);
+  assert.equal(shouldCacheGeneratedSvgSource("!includeurl https://example.test/a.puml"), false);
 });
 
 test("normalizes exact HTTPS hosts and rejects wildcards atomically", () => {
@@ -87,7 +97,7 @@ test("retains the indexed record while PlantUML source changes", () => {
     snapshot(descriptor("B"), "b"),
     snapshot(descriptor("C"), "c"),
   ];
-  const plan = planPlantUmlDiagramUpdates(
+  const plan = planGeneratedSvgDiagramUpdates(
     [descriptor("A"), descriptor("B2"), descriptor("C")],
     previous,
     () => "unused",
@@ -103,7 +113,7 @@ test("retains the indexed record while PlantUML source changes", () => {
 test("does not track reordered diagrams beyond their display index", () => {
   const first = descriptor("A");
   const second = descriptor("B");
-  const plan = planPlantUmlDiagramUpdates(
+  const plan = planGeneratedSvgDiagramUpdates(
     [second, first],
     [snapshot(first, "slot-1"), snapshot(second, "slot-2")],
     () => "unused",
@@ -115,18 +125,32 @@ test("does not track reordered diagrams beyond their display index", () => {
   ]);
 });
 
+test("does not reuse a diagram slot across generated SVG engines", () => {
+  const dot = descriptor("digraph G { A -> B }", "default", "light", "dot");
+  const plantUml = descriptor("digraph G { A -> B }");
+  const plan = planGeneratedSvgDiagramUpdates(
+    [plantUml],
+    [snapshot(dot, "slot-1")],
+    () => "unused",
+  );
+
+  assert.deepEqual(plan.map((item) => [item.instanceId, item.action, item.generation]), [
+    ["slot-1", "render", 2],
+  ]);
+});
+
 test("reuses raw SVG for Kmark-only changes and rerenders raw-context changes", () => {
   const previousDescriptor = descriptor("A", "width=10", "light");
   const previous = [snapshot(previousDescriptor, "a")];
 
-  const presentationPlan = planPlantUmlDiagramUpdates(
+  const presentationPlan = planGeneratedSvgDiagramUpdates(
     [descriptor("A", "width=20", "light")],
     previous,
     () => "unused",
   );
   assert.equal(presentationPlan[0].action, "finalize");
 
-  const darkPlan = planPlantUmlDiagramUpdates(
+  const darkPlan = planGeneratedSvgDiagramUpdates(
     [descriptor("A", "width=10", "dark")],
     previous,
     () => "unused",
@@ -147,7 +171,7 @@ test("retains stable completed, failed, and in-flight states by index", () => {
       inFlightSignature: third.finalizeSignature,
     }),
   ];
-  const plan = planPlantUmlDiagramUpdates([first, second, third], previous, () => "unused");
+  const plan = planGeneratedSvgDiagramUpdates([first, second, third], previous, () => "unused");
 
   assert.deepEqual(plan.map((item) => item.action), ["reuse-finalized", "reuse-error", "reuse-inflight"]);
   assert.deepEqual(plan.map((item) => item.generation), [1, 1, 1]);
@@ -158,12 +182,12 @@ test("creates records only for appended diagrams and drops removed indexes", () 
   const second = descriptor("second");
   const previous = [snapshot(first, "first"), snapshot(second, "second")];
   let nextId = 0;
-  const appendedPlan = planPlantUmlDiagramUpdates(
+  const appendedPlan = planGeneratedSvgDiagramUpdates(
     [first, second, descriptor("third")],
     previous,
     () => `new-${nextId += 1}`,
   );
-  const reducedPlan = planPlantUmlDiagramUpdates([first], previous, () => "unused");
+  const reducedPlan = planGeneratedSvgDiagramUpdates([first], previous, () => "unused");
 
   assert.deepEqual(appendedPlan.map((item) => [item.instanceId, item.action]), [
     ["first", "reuse-finalized"],

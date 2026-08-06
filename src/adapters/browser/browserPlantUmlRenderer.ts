@@ -1,30 +1,31 @@
 import {
-  planPlantUmlDiagramUpdates,
-  type PlantUmlDiagramDescriptor,
-  type PlantUmlDiagramSnapshotDescriptor,
-  type PlannedPlantUmlDiagram,
+  planGeneratedSvgDiagramUpdates,
+  type GeneratedSvgDiagramDescriptor,
+  type GeneratedSvgDiagramSnapshotDescriptor,
+  type PlannedGeneratedSvgDiagram,
 } from "../../application/plantuml/plantUmlRenderPlanner";
 import { normalizePlantUmlSourceWithWasm } from "../../wasm/kmarkWeb";
 import { finalizeGeneratedSvg } from "./browserGeneratedSvgFinalizer";
 import {
-  getPlantUmlEngine,
+  getGeneratedSvgEngine,
+  type GeneratedSvgEngineKind,
   PLANTUML_VERSION,
 } from "./browserPlantUmlEngine";
 import { resolveKmarkMermaidThemeVariables } from "./browserMermaidTheme";
 import {
-  PLANTUML_DEBOUNCE_MS,
-  PLANTUML_RAW_CACHE_MAX_BYTES,
-  PLANTUML_RAW_CACHE_MAX_ENTRIES,
-  prioritizePlantUmlItems,
+  GENERATED_SVG_DEBOUNCE_MS,
+  GENERATED_SVG_RAW_CACHE_MAX_BYTES,
+  GENERATED_SVG_RAW_CACHE_MAX_ENTRIES,
+  prioritizeGeneratedSvgItems,
 } from "./browserPlantUmlPolicy";
 
-const PLANTUML_BLOCK_SELECTOR = ".kmark-plantuml-block";
-const PLANTUML_RENDERED_SELECTOR = ".kmark-plantuml-rendered";
-const PLANTUML_SOURCE_SELECTOR = ".kmark-plantuml-source code";
+const GENERATED_SVG_BLOCK_SELECTOR = ".kmark-persistent-generated-svg-block";
+const GENERATED_SVG_RENDERED_SELECTOR = ".kmark-persistent-generated-svg-rendered";
+const GENERATED_SVG_SOURCE_SELECTOR = ".kmark-generated-svg-source code";
 
-export type PlantUmlPreviewSurface = "standard" | "paper";
+export type GeneratedSvgPreviewSurface = "standard" | "paper";
 
-export type RenderPlantUmlHtmlOptions = {
+export type RenderGeneratedSvgHtmlOptions = {
   readonly revision: number;
   readonly documentKey: string;
   readonly plantumlRenderEpoch: number;
@@ -32,23 +33,23 @@ export type RenderPlantUmlHtmlOptions = {
   readonly activeSourceLine?: number | null;
   readonly strict?: boolean;
   readonly signal?: AbortSignal;
-  readonly surface?: PlantUmlPreviewSurface;
+  readonly surface?: GeneratedSvgPreviewSurface;
   readonly onUpdate?: (html: string) => void;
 };
 
-export type RenderPlantUmlHtmlDocumentsOptions = Omit<RenderPlantUmlHtmlOptions, "onUpdate"> & {
+export type RenderGeneratedSvgHtmlDocumentsOptions = Omit<RenderGeneratedSvgHtmlOptions, "onUpdate"> & {
   readonly onUpdate?: (htmlDocuments: readonly string[]) => void;
 };
 
-type PlantUmlDiagramTask = {
+type GeneratedSvgDiagramTask = {
   readonly cancel: () => void;
   readonly id: string;
   readonly promise: Promise<void>;
   readonly signature: string;
 };
 
-type PlantUmlDiagramRecord = {
-  descriptor: PlantUmlDiagramDescriptor;
+type GeneratedSvgDiagramRecord = {
+  descriptor: GeneratedSvgDiagramDescriptor;
   error: string | null;
   failedSignature: string | null;
   finalizedSignature: string | null;
@@ -58,12 +59,13 @@ type PlantUmlDiagramRecord = {
   lastUsed: number;
   rawSignature: string | null;
   rawSvg: string | null;
-  task: PlantUmlDiagramTask | null;
+  task: GeneratedSvgDiagramTask | null;
 };
 
 type PreparedBlock = {
   readonly block: HTMLElement;
   diagram: PreparedDiagram | null;
+  readonly engine: GeneratedSvgEngineKind | null;
   readonly normalizationError: unknown | null;
   readonly rendered: HTMLElement | null;
   readonly source: string | null;
@@ -71,25 +73,25 @@ type PreparedBlock = {
 
 type PreparedDiagram = {
   readonly block: PreparedBlock;
-  readonly descriptor: PlantUmlDiagramDescriptor;
+  readonly descriptor: GeneratedSvgDiagramDescriptor;
   element: HTMLElement | null;
-  plan: PlannedPlantUmlDiagram | null;
+  plan: PlannedGeneratedSvgDiagram | null;
   readonly presentation: ReturnType<typeof presentationFor>;
-  record: PlantUmlDiagramRecord | null;
+  record: GeneratedSvgDiagramRecord | null;
   waitPromise: Promise<void> | null;
 };
 
-type PlantUmlSnapshotScope = {
+type GeneratedSvgSnapshotScope = {
   readonly key: string;
-  readonly recordsBySurface: Map<PlantUmlPreviewSurface, PlantUmlDiagramRecord[]>;
+  readonly recordsBySurface: Map<GeneratedSvgPreviewSurface, GeneratedSvgDiagramRecord[]>;
 };
 
-let activeSnapshotScope: PlantUmlSnapshotScope | null = null;
-let plantUmlTaskSequence = 0;
+let activeSnapshotScope: GeneratedSvgSnapshotScope | null = null;
+let generatedSvgTaskSequence = 0;
 let snapshotAccessSequence = 0;
 
 function abortError(): Error {
-  return new DOMException("PlantUML render superseded", "AbortError");
+  return new DOMException("Generated SVG render superseded", "AbortError");
 }
 
 function isAbortError(error: unknown): boolean {
@@ -159,14 +161,14 @@ function presentationFor(block: HTMLElement) {
   };
 }
 
-function isDarkSurface(surface: PlantUmlPreviewSurface): boolean {
+function isDarkSurface(surface: GeneratedSvgPreviewSurface): boolean {
   if (surface === "paper") {
     return false;
   }
   return resolveKmarkMermaidThemeVariables("standard").darkMode === true;
 }
 
-function snapshotDescriptor(record: PlantUmlDiagramRecord): PlantUmlDiagramSnapshotDescriptor {
+function snapshotDescriptor(record: GeneratedSvgDiagramRecord): GeneratedSvgDiagramSnapshotDescriptor {
   return {
     failedSignature: record.failedSignature,
     finalizeSignature: record.finalizedSignature ?? "",
@@ -179,12 +181,12 @@ function snapshotDescriptor(record: PlantUmlDiagramRecord): PlantUmlDiagramSnaps
   };
 }
 
-function cancelRecordTask(record: PlantUmlDiagramRecord): void {
+function cancelRecordTask(record: GeneratedSvgDiagramRecord): void {
   record.task?.cancel();
   record.task = null;
 }
 
-function activateSnapshotScope(documentKey: string, epoch: number): PlantUmlSnapshotScope {
+function activateSnapshotScope(documentKey: string, epoch: number): GeneratedSvgSnapshotScope {
   const scopeKey = `${documentKey}\u0000${epoch}`;
   if (activeSnapshotScope?.key === scopeKey) {
     return activeSnapshotScope;
@@ -194,7 +196,7 @@ function activateSnapshotScope(documentKey: string, epoch: number): PlantUmlSnap
       records.forEach(cancelRecordTask);
     }
   }
-  getPlantUmlEngine().invalidateCache();
+  getGeneratedSvgEngine().invalidateCache();
   activeSnapshotScope = {
     key: scopeKey,
     recordsBySurface: new Map(),
@@ -203,7 +205,7 @@ function activateSnapshotScope(documentKey: string, epoch: number): PlantUmlSnap
 }
 
 function assertActiveRenderRequest(
-  scope: PlantUmlSnapshotScope,
+  scope: GeneratedSvgSnapshotScope,
   signal?: AbortSignal,
 ): void {
   if (signal?.aborted === true || activeSnapshotScope !== scope) {
@@ -211,11 +213,11 @@ function assertActiveRenderRequest(
   }
 }
 
-function recordPayloadBytes(record: PlantUmlDiagramRecord): number {
+function recordPayloadBytes(record: GeneratedSvgDiagramRecord): number {
   return ((record.rawSvg?.length ?? 0) + (record.finalizedSvg?.length ?? 0)) * 2;
 }
 
-function enforceSnapshotPayloadLimit(scope: PlantUmlSnapshotScope): void {
+function enforceSnapshotPayloadLimit(scope: GeneratedSvgSnapshotScope): void {
   const records = [...scope.recordsBySurface.values()]
     .flat()
     .filter((record) => record.rawSvg !== null || record.finalizedSvg !== null)
@@ -224,7 +226,7 @@ function enforceSnapshotPayloadLimit(scope: PlantUmlSnapshotScope): void {
   let entries = records.length;
 
   for (const record of records) {
-    if (entries <= PLANTUML_RAW_CACHE_MAX_ENTRIES && bytes <= PLANTUML_RAW_CACHE_MAX_BYTES) {
+    if (entries <= GENERATED_SVG_RAW_CACHE_MAX_ENTRIES && bytes <= GENERATED_SVG_RAW_CACHE_MAX_BYTES) {
       break;
     }
     if (record.task !== null) {
@@ -240,9 +242,9 @@ function enforceSnapshotPayloadLimit(scope: PlantUmlSnapshotScope): void {
 }
 
 function createRecord(
-  diagramPlan: PlannedPlantUmlDiagram,
-  previousRecord: PlantUmlDiagramRecord | null,
-): PlantUmlDiagramRecord {
+  diagramPlan: PlannedGeneratedSvgDiagram,
+  previousRecord: GeneratedSvgDiagramRecord | null,
+): GeneratedSvgDiagramRecord {
   if (
     previousRecord !== null
     && (diagramPlan.action === "reuse-error"
@@ -273,24 +275,25 @@ function createRecord(
 }
 
 function startDiagramTask(
-  record: PlantUmlDiagramRecord,
+  record: GeneratedSvgDiagramRecord,
   action: "finalize" | "render",
   dark: boolean,
   httpsHosts: readonly string[],
-  scope: PlantUmlSnapshotScope,
+  scope: GeneratedSvgSnapshotScope,
   presentation: ReturnType<typeof presentationFor>,
-): PlantUmlDiagramTask {
-  const engine = getPlantUmlEngine();
+): GeneratedSvgDiagramTask {
+  const engine = getGeneratedSvgEngine();
   const taskAbortController = new AbortController();
-  const taskRevision = plantUmlTaskSequence += 1;
-  const taskId = `plantuml-${record.instanceId}-g${record.generation}-t${taskRevision}`;
-  let task!: PlantUmlDiagramTask;
+  const taskRevision = generatedSvgTaskSequence += 1;
+  const taskId = `${record.descriptor.engine}-${record.instanceId}-g${record.generation}-t${taskRevision}`;
+  let task!: GeneratedSvgDiagramTask;
   const promise = (async () => {
     try {
-      await delay(PLANTUML_DEBOUNCE_MS, taskAbortController.signal);
+      await delay(GENERATED_SVG_DEBOUNCE_MS, taskAbortController.signal);
       let rawSvg = record.rawSvg;
       if (action === "render" || rawSvg === null || record.rawSignature !== record.descriptor.rawSignature) {
         rawSvg = await engine.render(
+          record.descriptor.engine,
           record.descriptor.source,
           dark,
           taskId,
@@ -304,7 +307,7 @@ function startDiagramTask(
       }
       const finalized = await finalizeGeneratedSvg({
         revision: taskRevision,
-        renderId: `plantuml-${record.instanceId}-g${record.generation}`,
+        renderId: `${record.descriptor.engine}-${record.instanceId}-g${record.generation}`,
         rawSvg,
         presentation,
         httpsHosts: [...httpsHosts],
@@ -357,42 +360,43 @@ function syncDiagramElement(diagram: PreparedDiagram): void {
     return;
   }
   element.replaceChildren();
-  element.dataset.kmarkPlantumlReuseKey = `${record.instanceId}:${record.generation}`;
+  element.dataset.kmarkGeneratedSvgReuseKey = `${record.instanceId}:${record.generation}`;
   if (
     record.finalizedSvg !== null
     && record.finalizedSignature === record.descriptor.finalizeSignature
   ) {
     element.innerHTML = record.finalizedSvg;
-    element.dataset.kmarkPlantumlDiagramState = "rendered";
+    element.dataset.kmarkGeneratedSvgDiagramState = "rendered";
     return;
   }
   if (record.failedSignature === record.descriptor.finalizeSignature && record.error !== null) {
-    element.append(createStatus(element.ownerDocument, "kmark-plantuml-error-message", record.error));
-    element.dataset.kmarkPlantumlDiagramState = "error";
+    element.append(createStatus(element.ownerDocument, "kmark-generated-svg-error-message", record.error));
+    element.dataset.kmarkGeneratedSvgDiagramState = "error";
     return;
   }
   if (record.finalizedSvg !== null) {
     element.innerHTML = record.finalizedSvg;
-    element.dataset.kmarkPlantumlDiagramState = "stale";
+    element.dataset.kmarkGeneratedSvgDiagramState = "stale";
     return;
   }
-  element.append(createStatus(element.ownerDocument, "kmark-plantuml-loading", "PlantUML生成中"));
-  element.dataset.kmarkPlantumlDiagramState = "loading";
+  const engineName = record.descriptor.engine === "dot" ? "DOT" : "PlantUML";
+  element.append(createStatus(element.ownerDocument, "kmark-generated-svg-loading", `${engineName}生成中`));
+  element.dataset.kmarkGeneratedSvgDiagramState = "loading";
 }
 
 function updateBlockState(block: PreparedBlock): void {
   if (block.rendered === null || block.normalizationError !== null) {
     return;
   }
-  if (block.rendered.querySelector('[data-kmark-plantuml-diagram-state="error"]') !== null) {
-    block.block.dataset.kmarkPlantumlState = "error";
+  if (block.rendered.querySelector('[data-kmark-generated-svg-diagram-state="error"]') !== null) {
+    block.block.dataset.kmarkGeneratedSvgState = "error";
     return;
   }
-  if (block.rendered.querySelector('[data-kmark-plantuml-diagram-state="loading"], [data-kmark-plantuml-diagram-state="stale"]') !== null) {
-    block.block.dataset.kmarkPlantumlState = "rendering";
+  if (block.rendered.querySelector('[data-kmark-generated-svg-diagram-state="loading"], [data-kmark-generated-svg-diagram-state="stale"]') !== null) {
+    block.block.dataset.kmarkGeneratedSvgState = "rendering";
     return;
   }
-  block.block.dataset.kmarkPlantumlState = "rendered";
+  block.block.dataset.kmarkGeneratedSvgState = "rendered";
 }
 
 function serializeTemplates(templates: readonly HTMLTemplateElement[]): string[] {
@@ -406,19 +410,22 @@ function sourceRange(block: PreparedBlock): readonly [number, number] | null {
 }
 
 function descriptorFor(
+  engine: GeneratedSvgEngineKind,
   source: string,
   block: HTMLElement,
   dark: boolean,
   httpsHosts: readonly string[],
-): PlantUmlDiagramDescriptor {
+): GeneratedSvgDiagramDescriptor {
   const presentation = presentationFor(block);
   const rawSignature = JSON.stringify({
-    dark,
-    hosts: [...httpsHosts].sort(),
+    dark: engine === "plantuml" && dark,
+    engine,
+    hosts: engine === "plantuml" ? [...httpsHosts].sort() : [],
     source,
     version: PLANTUML_VERSION,
   });
   return {
+    engine,
     finalizeSignature: JSON.stringify({
       hosts: [...httpsHosts].sort(),
       presentation,
@@ -429,9 +436,9 @@ function descriptorFor(
   };
 }
 
-export async function renderPlantUmlPreviewHtmlDocuments(
+export async function renderGeneratedSvgPreviewHtmlDocuments(
   htmlDocuments: readonly string[],
-  options: RenderPlantUmlHtmlDocumentsOptions,
+  options: RenderGeneratedSvgHtmlDocumentsOptions,
 ): Promise<readonly string[]> {
   if (options.signal?.aborted === true) {
     throw abortError();
@@ -445,24 +452,37 @@ export async function renderPlantUmlPreviewHtmlDocuments(
     return template;
   });
   const blocks = templates.flatMap((template) => (
-    Array.from(template.content.querySelectorAll<HTMLElement>(PLANTUML_BLOCK_SELECTOR))
+    Array.from(template.content.querySelectorAll<HTMLElement>(GENERATED_SVG_BLOCK_SELECTOR))
   ));
   const preparedBlocks = await Promise.all(blocks.map(async (block): Promise<PreparedBlock> => {
-    const source = block.querySelector<HTMLElement>(PLANTUML_SOURCE_SELECTOR)?.textContent ?? "";
+    const engine = block.dataset.kmarkGeneratedSvgEngine === "dot"
+      ? "dot"
+      : block.dataset.kmarkGeneratedSvgEngine === "plantuml"
+        ? "plantuml"
+        : null;
+    const source = block.querySelector<HTMLElement>(GENERATED_SVG_SOURCE_SELECTOR)?.textContent ?? "";
     try {
+      if (engine === null) {
+        throw new Error("generated_svg_engine_invalid:Unknown generated SVG engine");
+      }
+      if (engine === "dot" && source.trim().length === 0) {
+        throw new Error("dot_source_empty:DOT source is empty");
+      }
       return {
         block,
         diagram: null,
+        engine,
         normalizationError: null,
-        rendered: block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR),
-        source: await normalizePlantUmlSourceWithWasm(source),
+        rendered: block.querySelector<HTMLElement>(GENERATED_SVG_RENDERED_SELECTOR),
+        source: engine === "plantuml" ? await normalizePlantUmlSourceWithWasm(source) : source,
       };
     } catch (error) {
       return {
         block,
         diagram: null,
+        engine,
         normalizationError: error,
-        rendered: block.querySelector<HTMLElement>(PLANTUML_RENDERED_SELECTOR),
+        rendered: block.querySelector<HTMLElement>(GENERATED_SVG_RENDERED_SELECTOR),
         source: null,
       };
     }
@@ -471,12 +491,12 @@ export async function renderPlantUmlPreviewHtmlDocuments(
   const dark = isDarkSurface(surface);
   const preparedDiagrams: PreparedDiagram[] = [];
   for (const block of preparedBlocks) {
-    if (block.source === null) {
+    if (block.source === null || block.engine === null) {
       continue;
     }
     const diagram: PreparedDiagram = {
       block,
-      descriptor: descriptorFor(block.source, block.block, dark, options.httpsHosts),
+      descriptor: descriptorFor(block.engine, block.source, block.block, dark, options.httpsHosts),
       element: null,
       plan: null,
       presentation: presentationFor(block.block),
@@ -486,7 +506,7 @@ export async function renderPlantUmlPreviewHtmlDocuments(
     block.diagram = diagram;
     preparedDiagrams.push(diagram);
   }
-  const diagramPlans = planPlantUmlDiagramUpdates(
+  const diagramPlans = planGeneratedSvgDiagramUpdates(
     preparedDiagrams.map((diagram) => diagram.descriptor),
     previousRecords.map(snapshotDescriptor),
     () => crypto.randomUUID(),
@@ -509,15 +529,15 @@ export async function renderPlantUmlPreviewHtmlDocuments(
     if (block.normalizationError !== null) {
       block.rendered.append(createStatus(
         block.block.ownerDocument,
-        "kmark-plantuml-error-message",
+        "kmark-generated-svg-error-message",
         errorMessage(block.normalizationError),
       ));
-      block.block.dataset.kmarkPlantumlState = "error";
+      block.block.dataset.kmarkGeneratedSvgState = "error";
       continue;
     }
     if (block.diagram !== null) {
       const element = block.block.ownerDocument.createElement("div");
-      element.className = "kmark-plantuml-diagram";
+      element.className = "kmark-persistent-generated-svg-diagram";
       block.diagram.element = element;
       syncDiagramElement(block.diagram);
       block.rendered.append(element);
@@ -525,7 +545,7 @@ export async function renderPlantUmlPreviewHtmlDocuments(
     updateBlockState(block);
   }
 
-  const renderOrder = prioritizePlantUmlItems(preparedBlocks, options.activeSourceLine, sourceRange);
+  const renderOrder = prioritizeGeneratedSvgItems(preparedBlocks, options.activeSourceLine, sourceRange);
   for (const block of renderOrder) {
     const diagram = block.diagram;
     if (diagram === null || diagram.plan === null || diagram.record === null) {
@@ -585,11 +605,11 @@ export async function renderPlantUmlPreviewHtmlDocuments(
   return serializeTemplates(templates);
 }
 
-export async function renderPlantUmlPreviewHtml(
+export async function renderGeneratedSvgPreviewHtml(
   html: string,
-  options: RenderPlantUmlHtmlOptions,
+  options: RenderGeneratedSvgHtmlOptions,
 ): Promise<string> {
-  const result = await renderPlantUmlPreviewHtmlDocuments([html], {
+  const result = await renderGeneratedSvgPreviewHtmlDocuments([html], {
     ...options,
     onUpdate: (documents) => options.onUpdate?.(documents[0] ?? ""),
   });

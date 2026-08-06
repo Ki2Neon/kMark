@@ -1,15 +1,18 @@
 import {
-  PlantUmlRawSvgCache,
-  shouldCachePlantUmlSource,
+  GeneratedSvgRawCache,
+  shouldCacheGeneratedSvgSource,
 } from "./browserPlantUmlPolicy";
+import { withTransparentDotBackground } from "./browserDotSource";
 import { resolveBundledStdlibListingSource } from "./browserPlantUmlStdlib";
 import plantUmlStdlibManifest from "./plantumlStdlibManifest.json";
 
 const PLANTUML_VERSION = "1.2026.6";
-const PLANTUML_RENDER_TIMEOUT_MS = 15_000;
+const GENERATED_SVG_RENDER_TIMEOUT_MS = 15_000;
 
-type PlantUmlFrameResult = {
-  readonly type: "kmark-plantuml-result" | "kmark-plantuml-error" | "kmark-plantuml-ready";
+export type GeneratedSvgEngineKind = "dot" | "plantuml";
+
+type GeneratedSvgFrameResult = {
+  readonly type: "kmark-generated-svg-result" | "kmark-generated-svg-error" | "kmark-generated-svg-ready";
   readonly nonce: string;
   readonly requestId?: string;
   readonly svg?: string;
@@ -29,9 +32,9 @@ type FrameInitialization = {
   readonly reject: (error: Error) => void;
 };
 
-class PlantUmlTaskCancelledError extends Error {
+class GeneratedSvgTaskCancelledError extends Error {
   constructor() {
-    super("PlantUML render task cancelled");
+    super("Generated SVG render task cancelled");
     this.name = "AbortError";
   }
 }
@@ -86,20 +89,27 @@ function createFrameDocument(nonce: string, httpsHosts: readonly string[]): stri
   </script><script src="${escapeHtmlAttribute(vizUrl)}"></script><script type="module">
   import { renderToString } from ${serializedPlantUmlUrl};
   const nonce = ${serializedNonce};
-  parent.postMessage({ type: 'kmark-plantuml-ready', nonce }, '*');
-  addEventListener('message', (event) => {
+  const vizPromise = window.Viz.instance();
+  parent.postMessage({ type: 'kmark-generated-svg-ready', nonce }, '*');
+  addEventListener('message', async (event) => {
     const request = event.data;
-    if (event.source !== parent || request?.type !== 'kmark-plantuml-render' || request.nonce !== nonce) return;
+    if (event.source !== parent || request?.type !== 'kmark-generated-svg-render' || request.nonce !== nonce) return;
     const requestId = request.requestId;
     try {
+      if (request.engine === 'dot') {
+        const viz = await vizPromise;
+        const svg = viz.renderString(String(request.source), { engine: 'dot', format: 'svg_inline' });
+        parent.postMessage({ type: 'kmark-generated-svg-result', nonce, requestId, svg }, '*');
+        return;
+      }
       renderToString(
         String(request.source).split(/\\r\\n|\\r|\\n/),
-        (svg) => parent.postMessage({ type: 'kmark-plantuml-result', nonce, requestId, svg }, '*'),
-        (error) => parent.postMessage({ type: 'kmark-plantuml-error', nonce, requestId, error: String(error) }, '*'),
+        (svg) => parent.postMessage({ type: 'kmark-generated-svg-result', nonce, requestId, svg }, '*'),
+        (error) => parent.postMessage({ type: 'kmark-generated-svg-error', nonce, requestId, error: String(error) }, '*'),
         { dark: request.dark === true },
       );
     } catch (error) {
-      parent.postMessage({ type: 'kmark-plantuml-error', nonce, requestId, error: String(error) }, '*');
+      parent.postMessage({ type: 'kmark-generated-svg-error', nonce, requestId, error: String(error) }, '*');
     }
   });
   </script></body></html>`;
@@ -114,8 +124,8 @@ function hashSource(source: string): string {
   return (hash >>> 0).toString(16);
 }
 
-class PlantUmlEngine {
-  #cache = new PlantUmlRawSvgCache();
+class GeneratedSvgEngine {
+  #cache = new GeneratedSvgRawCache();
   #cancelledJobIds = new Set<string>();
   #currentJobId: string | null = null;
   #frame: HTMLIFrameElement | null = null;
@@ -145,26 +155,27 @@ class PlantUmlEngine {
       this.#currentJobId === jobId
       || [...this.#pending.values()].some((pending) => pending.jobId === jobId)
     ) {
-      this.#resetFrame(new PlantUmlTaskCancelledError());
+      this.#resetFrame(new GeneratedSvgTaskCancelledError());
     }
   }
 
   async render(
+    engine: GeneratedSvgEngineKind,
     source: string,
     dark: boolean,
     jobId: string,
     httpsHosts: readonly string[],
   ): Promise<string> {
     if (this.#cancelledJobIds.has(jobId)) {
-      throw new PlantUmlTaskCancelledError();
+      throw new GeneratedSvgTaskCancelledError();
     }
     this.#knownJobIds.add(jobId);
-    const renderSource = resolveBundledStdlibListingSource(
-      source,
-      plantUmlStdlibManifest.assets,
-    );
-    const cacheKey = `${PLANTUML_VERSION}:${dark ? "dark" : "light"}:${renderSource.length}:${hashSource(renderSource)}`;
-    if (shouldCachePlantUmlSource(renderSource)) {
+    const renderSource = engine === "plantuml"
+      ? resolveBundledStdlibListingSource(source, plantUmlStdlibManifest.assets)
+      : withTransparentDotBackground(source);
+    const renderDark = engine === "plantuml" && dark;
+    const cacheKey = `${engine}:${PLANTUML_VERSION}:${renderDark ? "dark" : "light"}:${renderSource.length}:${hashSource(renderSource)}`;
+    if (shouldCacheGeneratedSvgSource(renderSource)) {
       const cached = this.#cache.get(cacheKey, renderSource);
       if (cached !== null) {
         this.#knownJobIds.delete(jobId);
@@ -180,18 +191,18 @@ class PlantUmlEngine {
     });
     const operation = async () => {
       if (this.#cancelledJobIds.has(jobId)) {
-        rejectResult(new PlantUmlTaskCancelledError());
+        rejectResult(new GeneratedSvgTaskCancelledError());
         this.#cancelledJobIds.delete(jobId);
         this.#knownJobIds.delete(jobId);
         return;
       }
       try {
         this.#currentJobId = jobId;
-        const svg = await this.#renderInFrame(renderSource, dark, jobId, httpsHosts);
+        const svg = await this.#renderInFrame(engine, renderSource, renderDark, jobId, httpsHosts);
         if (this.#cancelledJobIds.has(jobId)) {
-          throw new PlantUmlTaskCancelledError();
+          throw new GeneratedSvgTaskCancelledError();
         }
-        if (shouldCachePlantUmlSource(renderSource)) {
+        if (shouldCacheGeneratedSvgSource(renderSource)) {
           this.#cache.put(cacheKey, { bytes: svg.length * 2, source: renderSource, svg });
         }
         resolveResult(svg);
@@ -210,6 +221,7 @@ class PlantUmlEngine {
   }
 
   async #renderInFrame(
+    engine: GeneratedSvgEngineKind,
     source: string,
     dark: boolean,
     jobId: string,
@@ -217,21 +229,22 @@ class PlantUmlEngine {
   ): Promise<string> {
     await this.#ensureFrame(httpsHosts);
     if (this.#cancelledJobIds.has(jobId) || this.#frame?.contentWindow === null) {
-      throw new PlantUmlTaskCancelledError();
+      throw new GeneratedSvgTaskCancelledError();
     }
-    const requestId = `puml-${this.#requestSequence += 1}`;
+    const requestId = `svg-${this.#requestSequence += 1}`;
     return new Promise<string>((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         this.#pending.delete(requestId);
-        const error = new Error("plantuml_timeout:PlantUML render exceeded 15 seconds");
+        const error = new Error(`${engine}_timeout:${engine === "dot" ? "DOT" : "PlantUML"} render exceeded 15 seconds`);
         this.#resetFrame(error);
         reject(error);
-      }, PLANTUML_RENDER_TIMEOUT_MS);
+      }, GENERATED_SVG_RENDER_TIMEOUT_MS);
       this.#pending.set(requestId, { jobId, reject, resolve, timeoutId });
       this.#frame!.contentWindow!.postMessage({
-        type: "kmark-plantuml-render",
+        type: "kmark-generated-svg-render",
         nonce: this.#frameNonce,
         requestId,
+        engine,
         source,
         dark,
       }, "*");
@@ -243,7 +256,7 @@ class PlantUmlEngine {
     if (this.#frame !== null && this.#frameHostsKey === hostsKey && this.#frameReady !== null) {
       return this.#frameReady;
     }
-    this.#resetFrame(new PlantUmlTaskCancelledError());
+    this.#resetFrame(new GeneratedSvgTaskCancelledError());
     this.#frameHostsKey = hostsKey;
     this.#frameNonce = crypto.randomUUID();
     const frameNonce = this.#frameNonce;
@@ -256,7 +269,7 @@ class PlantUmlEngine {
     this.#frame = frame;
     this.#frameReady = new Promise<void>((resolve, reject) => {
       let timeoutId: number | null = null;
-      let readyListener!: (event: MessageEvent<PlantUmlFrameResult>) => void;
+      let readyListener!: (event: MessageEvent<GeneratedSvgFrameResult>) => void;
       const cleanup = () => {
         if (timeoutId !== null) {
           window.clearTimeout(timeoutId);
@@ -265,7 +278,7 @@ class PlantUmlEngine {
         window.removeEventListener("message", readyListener);
       };
       const failInitialization = () => {
-        const error = new Error("plantuml_render_failed:PlantUML renderer failed to initialize");
+        const error = new Error("generated_svg_render_failed:Generated SVG renderer failed to initialize");
         if (this.#frame === frame) {
           this.#resetFrame(error);
           return;
@@ -273,9 +286,9 @@ class PlantUmlEngine {
         cleanup();
         reject(error);
       };
-      readyListener = (event: MessageEvent<PlantUmlFrameResult>) => {
+      readyListener = (event: MessageEvent<GeneratedSvgFrameResult>) => {
         if (event.source !== frame.contentWindow
-          || event.data?.type !== "kmark-plantuml-ready"
+          || event.data?.type !== "kmark-generated-svg-ready"
           || event.data.nonce !== frameNonce) {
           return;
         }
@@ -285,14 +298,14 @@ class PlantUmlEngine {
         }
         resolve();
       };
-      timeoutId = window.setTimeout(failInitialization, PLANTUML_RENDER_TIMEOUT_MS);
+      timeoutId = window.setTimeout(failInitialization, GENERATED_SVG_RENDER_TIMEOUT_MS);
       this.#frameInitialization = { cleanup, frame, reject };
       window.addEventListener("message", readyListener);
     });
     return this.#frameReady;
   }
 
-  #handleMessage = (event: MessageEvent<PlantUmlFrameResult>): void => {
+  #handleMessage = (event: MessageEvent<GeneratedSvgFrameResult>): void => {
     if (event.source !== this.#frame?.contentWindow || event.data?.nonce !== this.#frameNonce) {
       return;
     }
@@ -306,11 +319,11 @@ class PlantUmlEngine {
     }
     this.#pending.delete(requestId);
     window.clearTimeout(pending.timeoutId);
-    if (event.data.type === "kmark-plantuml-result" && typeof event.data.svg === "string") {
+    if (event.data.type === "kmark-generated-svg-result" && typeof event.data.svg === "string") {
       pending.resolve(event.data.svg);
       return;
     }
-    pending.reject(new Error(`plantuml_render_failed:${event.data.error ?? "Unknown PlantUML error"}`));
+    pending.reject(new Error(`generated_svg_render_failed:${event.data.error ?? "Unknown generated SVG error"}`));
   };
 
   #resetFrame(reason: Error): void {
@@ -330,10 +343,10 @@ class PlantUmlEngine {
   }
 }
 
-let engine: PlantUmlEngine | null = null;
+let engine: GeneratedSvgEngine | null = null;
 
-export function getPlantUmlEngine(): PlantUmlEngine {
-  engine ??= new PlantUmlEngine();
+export function getGeneratedSvgEngine(): GeneratedSvgEngine {
+  engine ??= new GeneratedSvgEngine();
   return engine;
 }
 

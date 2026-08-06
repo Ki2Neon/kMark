@@ -1,10 +1,11 @@
-export type PlantUmlDiagramDescriptor = {
+export type GeneratedSvgDiagramDescriptor = {
+  readonly engine: "dot" | "plantuml";
   readonly finalizeSignature: string;
   readonly rawSignature: string;
   readonly source: string;
 };
 
-export type PlantUmlDiagramSnapshotDescriptor = {
+export type GeneratedSvgDiagramSnapshotDescriptor = {
   readonly failedSignature: string | null;
   readonly finalizeSignature: string;
   readonly generation: number;
@@ -15,24 +16,24 @@ export type PlantUmlDiagramSnapshotDescriptor = {
   readonly rawSignature: string;
 };
 
-export type PlantUmlDiagramRenderAction =
+export type GeneratedSvgDiagramRenderAction =
   | "finalize"
   | "render"
   | "reuse-error"
   | "reuse-finalized"
   | "reuse-inflight";
 
-export type PlannedPlantUmlDiagram = {
-  readonly action: PlantUmlDiagramRenderAction;
-  readonly descriptor: PlantUmlDiagramDescriptor;
+export type PlannedGeneratedSvgDiagram = {
+  readonly action: GeneratedSvgDiagramRenderAction;
+  readonly descriptor: GeneratedSvgDiagramDescriptor;
   readonly generation: number;
   readonly instanceId: string;
 };
 
 function resolveAction(
-  next: PlantUmlDiagramDescriptor,
-  previous: PlantUmlDiagramSnapshotDescriptor,
-): PlantUmlDiagramRenderAction {
+  next: GeneratedSvgDiagramDescriptor,
+  previous: GeneratedSvgDiagramSnapshotDescriptor,
+): GeneratedSvgDiagramRenderAction {
   if (previous.failedSignature === next.finalizeSignature) {
     return "reuse-error";
   }
@@ -48,12 +49,12 @@ function resolveAction(
   return "render";
 }
 
-export function planPlantUmlDiagramUpdates(
-  nextDiagrams: readonly PlantUmlDiagramDescriptor[],
-  previousDiagrams: readonly PlantUmlDiagramSnapshotDescriptor[],
+export function planGeneratedSvgDiagramUpdates(
+  nextDiagrams: readonly GeneratedSvgDiagramDescriptor[],
+  previousDiagrams: readonly GeneratedSvgDiagramSnapshotDescriptor[],
   createInstanceId: () => string,
-): readonly PlannedPlantUmlDiagram[] {
-  return nextDiagrams.map<PlannedPlantUmlDiagram>((descriptor, index) => {
+): readonly PlannedGeneratedSvgDiagram[] {
+  return nextDiagrams.map<PlannedGeneratedSvgDiagram>((descriptor, index) => {
     const previous = previousDiagrams[index];
     if (previous === undefined) {
       return {

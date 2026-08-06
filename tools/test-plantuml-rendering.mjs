@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { withTransparentDotBackground } from "../src/adapters/browser/browserDotSource.ts";
+
 function escapeXmlText(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -185,6 +187,39 @@ globalThis.XMLSerializer = class TestXmlSerializer {
 console.log = () => {};
 await import("../node_modules/@plantuml/core/viz-global.js");
 const { renderToString } = await import("../node_modules/@plantuml/core/plantuml.js");
+const viz = await globalThis.Viz.instance();
+
+export function renderDotTestSource(source) {
+  return viz.renderString(withTransparentDotBackground(source), {
+    engine: "dot",
+    format: "svg_inline",
+  });
+}
+
+for (const [name, source, expectedText] of [
+  ["digraph", "digraph G { A -> B }", "A"],
+  ["graph", "graph G { A -- B }", "B"],
+  ["strict-digraph", "strict digraph G { A -> B; A -> B }", "A"],
+]) {
+  const svg = renderDotTestSource(source);
+  assert.ok(svg.includes("<svg"), `${name} must return SVG`);
+  assert.ok(svg.includes(expectedText), `${name} text is missing`);
+}
+assert.throws(
+  () => renderDotTestSource("digraph G { A ->"),
+  /syntax error/iu,
+  "invalid DOT must fail",
+);
+const defaultBackgroundSvg = renderDotTestSource("digraph G { A -> B }");
+assert.ok(
+  !defaultBackgroundSvg.includes('<polygon fill="white" stroke="none"'),
+  "DOT without bgcolor must have a transparent background",
+);
+const explicitBackgroundSvg = renderDotTestSource("digraph G { bgcolor=pink; A -> B }");
+assert.ok(
+  explicitBackgroundSvg.includes('<polygon fill="pink" stroke="none"'),
+  "explicit DOT bgcolor must override the transparent default",
+);
 
 export async function renderPlantUmlTestSource(source, dark) {
   return new Promise((resolve, reject) => {
@@ -305,3 +340,4 @@ for (const sample of samples) {
 
 console.log = originalConsoleLog;
 console.log(`PlantUML rendering samples: OK (${samples.length})`);
+console.log("DOT rendering samples: OK (3 valid, 1 invalid)");

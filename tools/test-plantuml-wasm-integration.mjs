@@ -8,6 +8,7 @@ import initKmarkWeb, {
 } from "../src/wasm/pkg/kmark_web.js";
 import {
   renderedPlantUmlSamples,
+  renderDotTestSource,
   renderPlantUmlTestSource,
 } from "./test-plantuml-rendering.mjs";
 
@@ -26,7 +27,7 @@ function decodeHtmlText(value) {
 function extractPlantUmlSource(markdown) {
   const preview = JSON.parse(renderMarkdownPreviewJson(markdown, null, "a4"));
   const html = preview.pages.map((page) => page.html).join("");
-  const match = html.match(/kmark-plantuml-source[\s\S]*?<pre><code>([\s\S]*?)<\/code>/u);
+  const match = html.match(/data-kmark-generated-svg-engine="plantuml"[\s\S]*?kmark-generated-svg-source[\s\S]*?<pre><code>([\s\S]*?)<\/code>/u);
   assert.ok(match, "PlantUML hidden source is missing");
   return decodeHtmlText(match[1]);
 }
@@ -129,4 +130,21 @@ const heightFitResult = JSON.parse(finalizeGeneratedSvgJson(JSON.stringify({
 assert.match(heightFitResult.svg, /height:var\(--kmark-page-fit-contain-height,auto\)/u);
 assert.match(heightFitResult.svg, /width:auto/u);
 
+const dotPreview = JSON.parse(renderMarkdownPreviewJson(
+  "```dot\ndigraph G { A -> B }\n```",
+  null,
+  "standard",
+));
+assert.match(dotPreview.html, /data-kmark-generated-svg-engine="dot"/u);
+const dotResult = JSON.parse(finalizeGeneratedSvgJson(JSON.stringify({
+  httpsHosts: [],
+  presentation: { position: null, rootStyle: null },
+  rawSvg: renderDotTestSource("digraph G { A -> B }"),
+  renderId: "integration-dot",
+  revision: 101,
+})));
+assert.match(dotResult.svg, /^\s*<svg\b/u);
+assert.ok(dotResult.svg.includes("A"));
+
 console.log(`PlantUML -> WASM finalizer integration: OK (${renderedPlantUmlSamples.length})`);
+console.log("DOT -> WASM finalizer integration: OK");

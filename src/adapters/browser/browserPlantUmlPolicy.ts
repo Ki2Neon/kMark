@@ -1,22 +1,22 @@
-export const PLANTUML_DEBOUNCE_MS = 250;
-export const PLANTUML_RAW_CACHE_MAX_ENTRIES = 64;
-export const PLANTUML_RAW_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+export const GENERATED_SVG_DEBOUNCE_MS = 250;
+export const GENERATED_SVG_RAW_CACHE_MAX_ENTRIES = 64;
+export const GENERATED_SVG_RAW_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
-export type PlantUmlRawCacheEntry = {
+export type GeneratedSvgRawCacheEntry = {
   readonly bytes: number;
   readonly source: string;
   readonly svg: string;
 };
 
-export class PlantUmlRawSvgCache {
-  readonly #entries = new Map<string, PlantUmlRawCacheEntry>();
+export class GeneratedSvgRawCache {
+  readonly #entries = new Map<string, GeneratedSvgRawCacheEntry>();
   #bytes = 0;
   readonly maxEntries: number;
   readonly maxBytes: number;
 
   constructor(
-    maxEntries = PLANTUML_RAW_CACHE_MAX_ENTRIES,
-    maxBytes = PLANTUML_RAW_CACHE_MAX_BYTES,
+    maxEntries = GENERATED_SVG_RAW_CACHE_MAX_ENTRIES,
+    maxBytes = GENERATED_SVG_RAW_CACHE_MAX_BYTES,
   ) {
     this.maxEntries = maxEntries;
     this.maxBytes = maxBytes;
@@ -32,7 +32,7 @@ export class PlantUmlRawSvgCache {
     return entry.svg;
   }
 
-  put(key: string, entry: PlantUmlRawCacheEntry): void {
+  put(key: string, entry: GeneratedSvgRawCacheEntry): void {
     const existing = this.#entries.get(key);
     if (existing !== undefined) {
       this.#bytes -= existing.bytes;
@@ -65,12 +65,12 @@ export class PlantUmlRawSvgCache {
   }
 }
 
-export function shouldCachePlantUmlSource(source: string): boolean {
+export function shouldCacheGeneratedSvgSource(source: string): boolean {
   const lower = source.toLowerCase();
   return !lower.includes("https://") && !lower.includes("http://") && !lower.includes("!includeurl");
 }
 
-export function prioritizePlantUmlItems<T>(
+export function prioritizeGeneratedSvgItems<T>(
   items: readonly T[],
   activeSourceLine: number | null | undefined,
   sourceRange: (item: T) => readonly [number, number] | null,

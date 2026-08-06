@@ -390,27 +390,27 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     margin-bottom: 0;
   }
 
-  .markdown-body .kmark-plantuml-block {
+  .markdown-body .kmark-persistent-generated-svg-block {
     max-width: 100%;
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
-  .markdown-body .kmark-plantuml-rendered {
+  .markdown-body .kmark-persistent-generated-svg-rendered {
     display: grid;
     gap: 0.75em;
     justify-items: center;
     max-width: 100%;
   }
 
-  .markdown-body .kmark-plantuml-diagram,
-  .markdown-body .kmark-plantuml-diagram > svg {
+  .markdown-body .kmark-persistent-generated-svg-diagram,
+  .markdown-body .kmark-persistent-generated-svg-diagram > svg {
     display: block;
     max-width: 100%;
     height: auto;
   }
 
-  .markdown-body .kmark-plantuml-error-message {
+  .markdown-body .kmark-generated-svg-error-message {
     color: #991b1b;
     white-space: pre-wrap;
   }

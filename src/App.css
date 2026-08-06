@@ -2062,7 +2062,7 @@ input:focus-visible,
   margin-bottom: 0;
 }
 
-.markdown-body .kmark-plantuml-block {
+.markdown-body .kmark-persistent-generated-svg-block {
   max-width: 100%;
   overflow-x: auto;
   padding: 0.75em;
@@ -2074,7 +2074,7 @@ input:focus-visible,
   page-break-inside: avoid;
 }
 
-.markdown-body .kmark-plantuml-block--image-params {
+.markdown-body .kmark-persistent-generated-svg-block--image-params {
   overflow: visible;
   padding: 0;
   border-width: 0;
@@ -2082,29 +2082,29 @@ input:focus-visible,
   background: transparent;
 }
 
-.markdown-body .kmark-plantuml-rendered {
+.markdown-body .kmark-persistent-generated-svg-rendered {
   display: grid;
   gap: 0.75em;
   justify-items: center;
   max-width: 100%;
 }
 
-.markdown-body .kmark-plantuml-diagram {
+.markdown-body .kmark-persistent-generated-svg-diagram {
   max-width: 100%;
   min-width: 0;
 }
 
-.markdown-body .kmark-plantuml-diagram > svg {
+.markdown-body .kmark-persistent-generated-svg-diagram > svg {
   display: block;
   max-width: 100%;
   height: auto;
 }
 
-.markdown-body .kmark-plantuml-loading {
+.markdown-body .kmark-generated-svg-loading {
   color: var(--preview-text-soft);
 }
 
-.markdown-body .kmark-plantuml-error-message {
+.markdown-body .kmark-generated-svg-error-message {
   margin-top: 0.5em;
   color: color-mix(in srgb, #b91c1c 82%, var(--preview-text));
   white-space: pre-wrap;
