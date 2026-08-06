@@ -88,6 +88,8 @@ pub struct FinalizeGeneratedSvgRequestPayload {
     pub render_id: String,
     pub raw_svg: String,
     pub presentation: GeneratedSvgPresentationPayload,
+    #[serde(default)]
+    pub https_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

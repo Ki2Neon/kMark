@@ -10,10 +10,9 @@ const FINALIZE_GENERATED_SVG_COMMAND = "finalize_generated_svg";
 
 export async function finalizeGeneratedSvg(
   request: FinalizeGeneratedSvgRequestPayload,
-  httpsHosts: readonly string[],
 ): Promise<FinalizeGeneratedSvgResultPayload> {
   if (!isTauri()) {
-    return finalizeGeneratedSvgWithWasm(request, httpsHosts);
+    return finalizeGeneratedSvgWithWasm(request);
   }
   return invokeTauriCommand<FinalizeGeneratedSvgResultPayload>(
     FINALIZE_GENERATED_SVG_COMMAND,

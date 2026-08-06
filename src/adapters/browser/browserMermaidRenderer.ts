@@ -1346,7 +1346,8 @@ async function renderMermaidBlock(
         rootStyle: block.dataset.kmarkGeneratedSvgStyle ?? block.dataset.kmarkMermaidSvgStyle ?? null,
         position: block.dataset.kmarkGeneratedSvgPosition ?? block.dataset.kmarkMermaidPosition ?? null,
       },
-    }, httpsHosts);
+      httpsHosts: [...httpsHosts],
+    });
     if (isAbortRequested(signal) || finalized.revision !== revision) {
       throw new DOMException("Mermaid render superseded", "AbortError");
     }

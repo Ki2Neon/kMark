@@ -19,7 +19,12 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
 
   const controller = controllerRef.current;
   const [previewPreferences, setPreviewPreferences] = useState<PreviewPreferences>(() => controller.createInitialState());
+  const [confirmedPlantUmlHttpsHosts, setConfirmedPlantUmlHttpsHosts] = useState<readonly string[]>(
+    () => controller.createInitialState().plantumlHttpsHosts,
+  );
   const isLoadedRef = useRef(false);
+  const plantUmlHostPersistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const plantUmlHostPersistSequenceRef = useRef(0);
 
   useEffect(() => {
     let isDisposed = false;
@@ -32,6 +37,7 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
 
       isLoadedRef.current = true;
       setPreviewPreferences(nextPreviewPreferences);
+      setConfirmedPlantUmlHttpsHosts(nextPreviewPreferences.plantumlHttpsHosts);
     }).catch(() => {});
 
     void controller.subscribeToPreferences((nextPreviewPreferences) => {
@@ -41,6 +47,7 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
 
       isLoadedRef.current = true;
       setPreviewPreferences(nextPreviewPreferences);
+      setConfirmedPlantUmlHttpsHosts(nextPreviewPreferences.plantumlHttpsHosts);
     }).then((nextUnlisten) => {
       if (isDisposed) {
         nextUnlisten();
@@ -91,24 +98,48 @@ export function usePreviewPreferences(options: UsePreviewPreferencesOptions = {}
   }, [controller]);
 
   const handlePlantUmlHttpsHostsChange = useCallback((plantumlHttpsHosts: readonly string[]) => {
-    setPreviewPreferences((currentPreviewPreferences) => {
-      const nextPreviewPreferences = controller.changePlantUmlHttpsHosts(
-        currentPreviewPreferences,
-        plantumlHttpsHosts,
-      );
-      if (nextPreviewPreferences !== currentPreviewPreferences && isLoadedRef.current) {
-        void controller.persist(nextPreviewPreferences).catch(() => {
-          void controller.loadPreferences().then(setPreviewPreferences).catch(() => {});
-        });
+    const nextPreviewPreferences = controller.changePlantUmlHttpsHosts(
+      previewPreferences,
+      plantumlHttpsHosts,
+    );
+    if (nextPreviewPreferences === previewPreferences) {
+      return;
+    }
+    setPreviewPreferences(nextPreviewPreferences);
+    if (!isLoadedRef.current) {
+      return;
+    }
+
+    const persistSequence = plantUmlHostPersistSequenceRef.current + 1;
+    plantUmlHostPersistSequenceRef.current = persistSequence;
+    const persistOperation = plantUmlHostPersistQueueRef.current.then(() => (
+      controller.persist(nextPreviewPreferences)
+    ));
+    plantUmlHostPersistQueueRef.current = persistOperation.then(() => {}, () => {});
+    void persistOperation.then((persistedPreviewPreferences) => {
+      if (plantUmlHostPersistSequenceRef.current === persistSequence) {
+        setPreviewPreferences((currentPreviewPreferences) => (
+          controller.changePlantUmlHttpsHosts(
+            currentPreviewPreferences,
+            persistedPreviewPreferences.plantumlHttpsHosts,
+          )
+        ));
+        setConfirmedPlantUmlHttpsHosts(persistedPreviewPreferences.plantumlHttpsHosts);
       }
-      return nextPreviewPreferences;
+    }).catch(() => {
+      if (plantUmlHostPersistSequenceRef.current === persistSequence) {
+        void controller.loadPreferences().then((loadedPreviewPreferences) => {
+          setPreviewPreferences(loadedPreviewPreferences);
+          setConfirmedPlantUmlHttpsHosts(loadedPreviewPreferences.plantumlHttpsHosts);
+        }).catch(() => {});
+      }
     });
-  }, [controller]);
+  }, [controller, previewPreferences]);
 
   return {
     isPreviewVisible: previewPreferences.isPreviewVisible,
     previewDisplayMode: previewPreferences.previewDisplayMode,
-    plantumlHttpsHosts: previewPreferences.plantumlHttpsHosts,
+    plantumlHttpsHosts: confirmedPlantUmlHttpsHosts,
     onPreviewDisplayModeChange: handlePreviewDisplayModeChange,
     onPreviewVisibilityChange: handlePreviewVisibilityChange,
     onPlantUmlHttpsHostsChange: handlePlantUmlHttpsHostsChange,

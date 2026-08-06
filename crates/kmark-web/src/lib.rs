@@ -115,15 +115,10 @@ pub fn split_plantuml_source_json(source: String) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn finalize_generated_svg_json(
-    request_input: String,
-    https_hosts_input: String,
-) -> Result<String, JsValue> {
+pub fn finalize_generated_svg_json(request_input: String) -> Result<String, JsValue> {
     let request = serde_json::from_str::<FinalizeGeneratedSvgRequestPayload>(&request_input)
         .map_err(|error| JsValue::from_str(&format!("generated_svg_invalid_request:{error}")))?;
-    let https_hosts = serde_json::from_str::<Vec<String>>(&https_hosts_input)
-        .map_err(|error| JsValue::from_str(&format!("generated_svg_invalid_hosts:{error}")))?;
-    let https_hosts = normalize_plantuml_https_hosts(&https_hosts)
+    let https_hosts = normalize_plantuml_https_hosts(&request.https_hosts)
         .map_err(|error| JsValue::from_str(&format!("generated_svg_invalid_hosts:{error}")))?;
     let presentation = GeneratedSvgPresentation {
         root_style: request.presentation.root_style,
@@ -482,8 +477,7 @@ mod tests {
 
         let finalized = serde_json::from_str::<FinalizeGeneratedSvgResultPayload>(
             &finalize_generated_svg_json(
-                r#"{"revision":7,"renderId":"wasm-7","rawSvg":"<svg><text>ok</text></svg>","presentation":{"rootStyle":"width:100px;","position":"center"}}"#.to_owned(),
-                "[]".to_owned(),
+                r#"{"revision":7,"renderId":"wasm-7","rawSvg":"<svg><text>ok</text></svg>","presentation":{"rootStyle":"width:100px;","position":"center"},"httpsHosts":[]}"#.to_owned(),
             )
             .expect("SVG finalization failed"),
         )

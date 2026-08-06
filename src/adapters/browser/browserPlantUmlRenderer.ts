@@ -101,11 +101,15 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
     return Promise.reject(abortError());
   }
   return new Promise((resolve, reject) => {
-    const timeoutId = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
+    const handleAbort = () => {
       window.clearTimeout(timeoutId);
       reject(abortError());
-    }, { once: true });
+    };
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", handleAbort, { once: true });
   });
 }
 
@@ -121,9 +125,16 @@ function waitForTask(task: Promise<void>, signal?: AbortSignal): Promise<void> {
       reject(abortError());
     };
     signal.addEventListener("abort", handleAbort, { once: true });
-    task.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", handleAbort);
-    });
+    task.then(
+      () => {
+        signal.removeEventListener("abort", handleAbort);
+        resolve();
+      },
+      (error) => {
+        signal.removeEventListener("abort", handleAbort);
+        reject(error);
+      },
+    );
   });
 }
 
@@ -191,6 +202,15 @@ function activateSnapshotScope(documentKey: string, epoch: number): PlantUmlSnap
     recordsBySurface: new Map(),
   };
   return activeSnapshotScope;
+}
+
+function assertActiveRenderRequest(
+  scope: PlantUmlSnapshotScope,
+  signal?: AbortSignal,
+): void {
+  if (signal?.aborted === true || activeSnapshotScope !== scope) {
+    throw abortError();
+  }
 }
 
 function recordPayloadBytes(record: PlantUmlDiagramRecord): number {
@@ -289,7 +309,8 @@ function startDiagramTask(
         renderId: `plantuml-${record.instanceId}-g${record.generation}`,
         rawSvg,
         presentation,
-      }, httpsHosts);
+        httpsHosts: [...httpsHosts],
+      });
       if (
         taskAbortController.signal.aborted
         || record.task !== task
@@ -450,6 +471,7 @@ export async function renderPlantUmlPreviewHtmlDocuments(
       };
     }
   }));
+  assertActiveRenderRequest(scope, options.signal);
   const dark = isDarkSurface(surface);
   let diagramOrder = 0;
   const diagramsByBlock = new Map<PreparedBlock, PreparedDiagram[]>();
@@ -572,6 +594,7 @@ export async function renderPlantUmlPreviewHtmlDocuments(
 
   preparedBlocks.forEach(updateBlockState);
   enforceSnapshotPayloadLimit(scope);
+  assertActiveRenderRequest(scope, options.signal);
   return serializeTemplates(templates);
 }
 

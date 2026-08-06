@@ -21,6 +21,12 @@ type PendingRender = {
   readonly timeoutId: number;
 };
 
+type FrameInitialization = {
+  readonly cleanup: () => void;
+  readonly frame: HTMLIFrameElement;
+  readonly reject: (error: Error) => void;
+};
+
 class PlantUmlTaskCancelledError extends Error {
   constructor() {
     super("PlantUML render task cancelled");
@@ -109,8 +115,10 @@ function hashSource(source: string): string {
 class PlantUmlEngine {
   #cache = new PlantUmlRawSvgCache();
   #cancelledJobIds = new Set<string>();
+  #currentJobId: string | null = null;
   #frame: HTMLIFrameElement | null = null;
   #frameHostsKey = "";
+  #frameInitialization: FrameInitialization | null = null;
   #frameNonce = "";
   #frameReady: Promise<void> | null = null;
   #knownJobIds = new Set<string>();
@@ -131,7 +139,10 @@ class PlantUmlEngine {
       return;
     }
     this.#cancelledJobIds.add(jobId);
-    if ([...this.#pending.values()].some((pending) => pending.jobId === jobId)) {
+    if (
+      this.#currentJobId === jobId
+      || [...this.#pending.values()].some((pending) => pending.jobId === jobId)
+    ) {
       this.#resetFrame(new PlantUmlTaskCancelledError());
     }
   }
@@ -169,6 +180,7 @@ class PlantUmlEngine {
         return;
       }
       try {
+        this.#currentJobId = jobId;
         const svg = await this.#renderInFrame(source, dark, jobId, httpsHosts);
         if (this.#cancelledJobIds.has(jobId)) {
           throw new PlantUmlTaskCancelledError();
@@ -180,6 +192,9 @@ class PlantUmlEngine {
       } catch (error) {
         rejectResult(error);
       } finally {
+        if (this.#currentJobId === jobId) {
+          this.#currentJobId = null;
+        }
         this.#cancelledJobIds.delete(jobId);
         this.#knownJobIds.delete(jobId);
       }
@@ -225,6 +240,7 @@ class PlantUmlEngine {
     this.#resetFrame(new PlantUmlTaskCancelledError());
     this.#frameHostsKey = hostsKey;
     this.#frameNonce = crypto.randomUUID();
+    const frameNonce = this.#frameNonce;
     const frame = document.createElement("iframe");
     frame.hidden = true;
     frame.setAttribute("aria-hidden", "true");
@@ -233,27 +249,38 @@ class PlantUmlEngine {
     document.body.append(frame);
     this.#frame = frame;
     this.#frameReady = new Promise<void>((resolve, reject) => {
-      const failInitialization = () => {
+      let timeoutId: number | null = null;
+      let readyListener!: (event: MessageEvent<PlantUmlFrameResult>) => void;
+      const cleanup = () => {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+          timeoutId = null;
+        }
         window.removeEventListener("message", readyListener);
+      };
+      const failInitialization = () => {
         const error = new Error("plantuml_render_failed:PlantUML renderer failed to initialize");
         if (this.#frame === frame) {
           this.#resetFrame(error);
-        }
-        reject(error);
-      };
-      const timeoutId = window.setTimeout(() => {
-        failInitialization();
-      }, PLANTUML_RENDER_TIMEOUT_MS);
-      const readyListener = (event: MessageEvent<PlantUmlFrameResult>) => {
-        if (event.source !== frame.contentWindow
-          || event.data?.type !== "kmark-plantuml-ready"
-          || event.data.nonce !== this.#frameNonce) {
           return;
         }
-        window.clearTimeout(timeoutId);
-        window.removeEventListener("message", readyListener);
+        cleanup();
+        reject(error);
+      };
+      readyListener = (event: MessageEvent<PlantUmlFrameResult>) => {
+        if (event.source !== frame.contentWindow
+          || event.data?.type !== "kmark-plantuml-ready"
+          || event.data.nonce !== frameNonce) {
+          return;
+        }
+        cleanup();
+        if (this.#frameInitialization?.frame === frame) {
+          this.#frameInitialization = null;
+        }
         resolve();
       };
+      timeoutId = window.setTimeout(failInitialization, PLANTUML_RENDER_TIMEOUT_MS);
+      this.#frameInitialization = { cleanup, frame, reject };
       window.addEventListener("message", readyListener);
     });
     return this.#frameReady;
@@ -281,6 +308,10 @@ class PlantUmlEngine {
   };
 
   #resetFrame(reason: Error): void {
+    const initialization = this.#frameInitialization;
+    this.#frameInitialization = null;
+    initialization?.cleanup();
+    initialization?.reject(reason);
     for (const pending of this.#pending.values()) {
       window.clearTimeout(pending.timeoutId);
       pending.reject(reason);

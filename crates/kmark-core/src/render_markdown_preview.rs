@@ -4930,7 +4930,19 @@ impl KmarkParams {
         if prefer_engine_background {
             image.background = None;
         }
-        image.to_style(&self.layout)
+        let mut style = image.to_style(&self.layout).unwrap_or_default();
+
+        // Generated SVG engines emit intrinsic width/height attributes. When Kmark
+        // overrides only one axis, the untouched attribute would keep the other
+        // viewport axis fixed and preserveAspectRatio would add whitespace instead
+        // of scaling the diagram. Explicit auto overrides that intrinsic attribute.
+        match (&image.width, &image.height) {
+            (None, Some(_)) => style.push_str("width:auto;"),
+            (Some(_), None) => style.push_str("height:auto;"),
+            _ => {}
+        }
+
+        (!style.is_empty()).then_some(style)
     }
 
     fn to_table_root_style(&self) -> Option<String> {
@@ -10744,7 +10756,7 @@ mod tests {
         assert!(rendered_preview.html.contains("class=\"kmark-generated-svg-block kmark-plantuml-block kmark-plantuml-block--image-params\""));
         assert!(rendered_preview
             .html
-            .contains("data-kmark-generated-svg-style=\"width:200px;\""));
+            .contains("data-kmark-generated-svg-style=\"width:200px;height:auto;\""));
         assert!(rendered_preview
             .html
             .contains("data-kmark-generated-svg-position=\"top right\""));
@@ -10788,8 +10800,36 @@ mod tests {
             .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview
             .html
-            .contains("data-kmark-mermaid-svg-style=\"height:100px;\""));
+            .contains("data-kmark-mermaid-svg-style=\"height:100px;width:auto;\""));
         assert!(!rendered_preview.html.contains(" style=\"height:100px"));
+    }
+
+    #[test]
+    fn keeps_plantuml_aspect_ratio_for_one_axis_size_and_page_fit_contain() {
+        let fixed_height_preview = render_markdown_preview(
+            "<!-- kmark h:300 -->\n\
+             ```plantuml\n\
+             @startuml\n\
+             Alice -> Bob\n\
+             @enduml\n\
+             ```",
+        );
+        assert!(fixed_height_preview
+            .html
+            .contains("data-kmark-generated-svg-style=\"height:300px;width:auto;\""));
+
+        let page_fit_preview = render_markdown_preview(
+            "<!-- kmark h:page_fit_contain -->\n\
+             ```plantuml\n\
+             @startuml\n\
+             Alice -> Bob\n\
+             @enduml\n\
+             ```",
+        );
+
+        assert!(page_fit_preview.html.contains(
+            "data-kmark-generated-svg-style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;width:auto;\""
+        ));
     }
 
     #[test]
@@ -10804,7 +10844,7 @@ mod tests {
             .html
             .contains("class=\"kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block\""));
         assert!(rendered_preview.html.contains(
-            "data-kmark-mermaid-svg-style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;\""
+            "data-kmark-mermaid-svg-style=\"width:180px;border-width:2px;border-style:solid;background:#fff0f0;height:auto;\""
         ));
     }
 

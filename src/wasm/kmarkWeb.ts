@@ -88,13 +88,11 @@ export async function splitPlantUmlSourceWithWasm(source: string): Promise<reado
 
 export async function finalizeGeneratedSvgWithWasm(
   request: FinalizeGeneratedSvgRequestPayload,
-  httpsHosts: readonly string[],
 ): Promise<FinalizeGeneratedSvgResultPayload> {
   await initializeKmarkWeb();
   return parseJsonPayload<FinalizeGeneratedSvgResultPayload>(
     loadKmarkWebModuleSync().finalize_generated_svg_json(
       JSON.stringify(request),
-      JSON.stringify(httpsHosts),
     ),
   );
 }

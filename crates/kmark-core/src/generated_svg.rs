@@ -81,6 +81,8 @@ fn inspect_svg(raw_svg: &str, render_id: &str) -> Result<SvgIdPlan, GeneratedSvg
     reader.config_mut().trim_text(false);
     let mut depth = 0usize;
     let mut root_count = 0usize;
+    let mut suppressed_depth = 0usize;
+    let mut foreign_depth = 0usize;
     let mut id_plan = SvgIdPlan::default();
     let mut id_occurrences = HashMap::new();
     let mut retained_expanded = HashMap::new();
@@ -92,6 +94,20 @@ fn inspect_svg(raw_svg: &str, render_id: &str) -> Result<SvgIdPlan, GeneratedSvg
                 if depth == 0 {
                     validate_root(&element)?;
                     root_count += 1;
+                }
+                let qualified_name = element.name();
+                let name = local_name(qualified_name.as_ref()).to_ascii_lowercase();
+                if suppressed_depth > 0 {
+                    suppressed_depth += 1;
+                    depth += 1;
+                    continue;
+                }
+                if is_unsafe_element(&name)
+                    || (foreign_depth > 0 && !is_safe_foreign_element(&name))
+                {
+                    suppressed_depth = 1;
+                    depth += 1;
+                    continue;
                 }
                 collect_element_id(
                     &reader,
@@ -105,11 +121,24 @@ fn inspect_svg(raw_svg: &str, render_id: &str) -> Result<SvgIdPlan, GeneratedSvg
                     &mut retained_expanded,
                 )?;
                 depth += 1;
+                if name == b"foreignobject" {
+                    foreign_depth += 1;
+                }
             }
             Ok(Event::Empty(element)) => {
                 if depth == 0 {
                     validate_root(&element)?;
                     root_count += 1;
+                }
+                if suppressed_depth > 0 {
+                    continue;
+                }
+                let qualified_name = element.name();
+                let name = local_name(qualified_name.as_ref()).to_ascii_lowercase();
+                if is_unsafe_element(&name)
+                    || (foreign_depth > 0 && !is_safe_foreign_element(&name))
+                {
+                    continue;
                 }
                 collect_element_id(
                     &reader,
@@ -123,11 +152,21 @@ fn inspect_svg(raw_svg: &str, render_id: &str) -> Result<SvgIdPlan, GeneratedSvg
                     &mut retained_expanded,
                 )?;
             }
-            Ok(Event::End(_)) => {
+            Ok(Event::End(element)) => {
                 if depth == 0 {
                     return Err(GeneratedSvgError::InvalidXml(
                         "generated SVG contains an unmatched closing element".to_owned(),
                     ));
+                }
+                if suppressed_depth > 0 {
+                    suppressed_depth -= 1;
+                    depth -= 1;
+                    continue;
+                }
+                let qualified_name = element.name();
+                let name = local_name(qualified_name.as_ref()).to_ascii_lowercase();
+                if name == b"foreignobject" {
+                    foreign_depth = foreign_depth.saturating_sub(1);
                 }
                 depth -= 1;
             }
@@ -600,12 +639,18 @@ fn sanitize_href(
 ) -> Result<String, GeneratedSvgError> {
     let trimmed = value.trim();
     if let Some(fragment) = trimmed.strip_prefix('#') {
-        return id_map
-            .get(fragment)
-            .map(|id| format!("#{id}"))
-            .ok_or_else(|| {
-                GeneratedSvgError::Unsafe("generated SVG references an unknown id".to_owned())
-            });
+        if let Some(id) = id_map.get(fragment) {
+            return Ok(format!("#{id}"));
+        }
+        if element_name.eq_ignore_ascii_case("a")
+            && !fragment.is_empty()
+            && !fragment.chars().any(char::is_control)
+        {
+            return Ok(trimmed.to_owned());
+        }
+        return Err(GeneratedSvgError::Unsafe(
+            "generated SVG references an unknown id".to_owned(),
+        ));
     }
     match element_name.to_ascii_lowercase().as_str() {
         "a" if is_safe_navigation_url(trimmed) => Ok(trimmed.to_owned()),
@@ -900,6 +945,7 @@ fn is_forbidden_attribute(name: &str) -> bool {
             | "nonce"
             | "integrity"
             | "crossorigin"
+            | "target"
             | "formaction"
             | "autofocus"
             | "ping"
@@ -1227,6 +1273,22 @@ mod tests {
     }
 
     #[test]
+    fn builds_fragment_id_plan_only_from_retained_elements() {
+        let finalized = finalize_generated_svg(
+            r##"<svg><script id="target"><g id="nested"/></script><g id="target"><rect/></g><use href="#target"/></svg>"##,
+            "safe-ids",
+            &GeneratedSvgPresentation::default(),
+            &[],
+        )
+        .expect("finalization failed");
+
+        assert!(!finalized.contains("script"));
+        assert!(!finalized.contains("nested"));
+        assert_eq!(finalized.matches("id=\"kmark-safe-ids-id-1\"").count(), 1);
+        assert!(finalized.contains("<use href=\"#kmark-safe-ids-id-1\"/>"));
+    }
+
+    #[test]
     fn enforces_resource_host_allowlist_and_rejects_data_svg() {
         let allowed = finalize_generated_svg(
             r#"<svg><image href="https://cdn.example.test:443/a.png"/></svg>"#,
@@ -1266,6 +1328,29 @@ mod tests {
             finalize_generated_svg(
                 r#"<svg><rect style="background-image:image-set('https://evil.test/x.png' 1x)"/></svg>"#,
                 "image-set",
+                &GeneratedSvgPresentation::default(),
+                &[],
+            ),
+            Err(GeneratedSvgError::Unsafe(_))
+        ));
+    }
+
+    #[test]
+    fn preserves_safe_document_fragment_links_but_not_unknown_resource_fragments() {
+        let finalized = finalize_generated_svg(
+            r##"<svg><a href="#document-section" target="_blank"><text>jump</text></a></svg>"##,
+            "fragment",
+            &GeneratedSvgPresentation::default(),
+            &[],
+        )
+        .expect("finalization failed");
+        assert!(finalized.contains("href=\"#document-section\""));
+        assert!(!finalized.contains("target="));
+
+        assert!(matches!(
+            finalize_generated_svg(
+                r##"<svg><use href="#missing"/></svg>"##,
+                "missing-resource",
                 &GeneratedSvgPresentation::default(),
                 &[],
             ),

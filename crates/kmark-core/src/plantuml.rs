@@ -18,6 +18,10 @@ pub enum PlantUmlSourceError {
         expected: String,
         actual: String,
     },
+    UnsupportedDirective {
+        line: usize,
+        directive: String,
+    },
     SourceTooLarge {
         bytes: usize,
     },
@@ -45,6 +49,10 @@ impl fmt::Display for PlantUmlSourceError {
             Self::MismatchedEnd { line, expected, actual } => {
                 write!(formatter, "expected {expected} but found {actual} at line {line}")
             }
+            Self::UnsupportedDirective { line, directive } => write!(
+                formatter,
+                "{directive} at line {line} is unsupported by the bundled PlantUML renderer; use separate explicit diagrams"
+            ),
             Self::SourceTooLarge { bytes } => write!(
                 formatter,
                 "expanded PlantUML source is {bytes} bytes; maximum is {MAX_PLANTUML_SOURCE_BYTES} bytes"
@@ -81,6 +89,12 @@ pub fn split_plantuml_source(source: &str) -> Result<Vec<String>, PlantUmlSource
 
         if let Some(diagram) = open_diagram.as_mut() {
             diagram.source.push_str(line_with_ending);
+            if definition_depth == 0 && is_newpage_directive(trimmed) {
+                return Err(PlantUmlSourceError::UnsupportedDirective {
+                    line: line_number,
+                    directive: "newpage".to_owned(),
+                });
+            }
             if let Some((kind, name)) = directive {
                 if name.eq_ignore_ascii_case("def") {
                     match kind {
@@ -201,6 +215,12 @@ fn parse_directive(line: &str) -> Option<(DirectiveKind, &str)> {
     .then_some((kind, name))
 }
 
+fn is_newpage_directive(line: &str) -> bool {
+    line.split_ascii_whitespace()
+        .next()
+        .is_some_and(|token| token.eq_ignore_ascii_case("newpage"))
+}
+
 fn lines_with_endings(source: &str) -> Vec<&str> {
     if source.is_empty() {
         return Vec::new();
@@ -208,10 +228,21 @@ fn lines_with_endings(source: &str) -> Vec<&str> {
 
     let mut lines = Vec::new();
     let mut start = 0usize;
-    for (index, character) in source.char_indices() {
-        if character == '\n' {
-            lines.push(&source[start..index + 1]);
-            start = index + 1;
+    let bytes = source.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                lines.push(&source[start..index + 2]);
+                index += 2;
+                start = index;
+            }
+            b'\r' | b'\n' => {
+                lines.push(&source[start..index + 1]);
+                index += 1;
+                start = index;
+            }
+            _ => index += 1,
         }
     }
     if start < source.len() {
@@ -236,12 +267,21 @@ mod tests {
     }
 
     #[test]
-    fn keeps_newpage_in_one_job() {
-        let diagrams =
-            split_plantuml_source("@startuml\nAlice -> Bob\nnewpage\nBob -> Alice\n@enduml")
-                .expect("split failed");
-        assert_eq!(diagrams.len(), 1);
-        assert!(diagrams[0].contains("newpage"));
+    fn rejects_newpage_instead_of_silently_dropping_later_pages() {
+        assert!(matches!(
+            split_plantuml_source(
+                "@startuml\nAlice -> Bob\nnewpage Second page\nBob -> Alice\n@enduml"
+            ),
+            Err(PlantUmlSourceError::UnsupportedDirective { line: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn accepts_all_supported_line_endings_without_changing_them() {
+        for newline in ["\n", "\r\n", "\r"] {
+            let source = format!("@startuml{newline}Alice -> Bob{newline}@enduml");
+            assert_eq!(split_plantuml_source(&source), Ok(vec![source]));
+        }
     }
 
     #[test]
