@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/kmark-api-contract",
+  "crates/kmark-application",
+  "crates/kmark-contract",
+  "crates/kmark-core",
+  "crates/kmark-mcp",
+  "crates/kmark-rest",
+  "crates/kmark-web",
+  "src-tauri",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+base64 = "0.22"
+fs2 = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }

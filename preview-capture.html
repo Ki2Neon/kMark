@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: tauri: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 ws://localhost:1421; worker-src 'self' blob:; frame-src 'self' blob:"
+    />
+    <title>Kmark Preview Capture</title>
+    <script type="module" src="/src/previewCapture.ts"></script>
+  </head>
+  <body>
+    <main class="kmark-preview markdown-body"></main>
+  </body>
+</html>

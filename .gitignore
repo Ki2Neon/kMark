@@ -26,3 +26,4 @@ dist-ssr
 
 target
 .tmp
+src-tauri/binaries/kmark-mcp-*

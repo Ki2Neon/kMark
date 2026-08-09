@@ -6,12 +6,16 @@ import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/bro
 import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
 import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
 import { createBrowserRecentFileStore } from "../../adapters/browser/browserRecentFileStore";
+import { createTauriExternalDocumentSessionGateway } from "../../adapters/tauri/tauriExternalDocumentSessionGateway";
 import {
   EditorSessionController,
   toEditorSessionErrorMessage,
   type EditorSessionStore,
 } from "../../application/editorSession/editorSessionController";
-import { type MarkdownAssetDataFile } from "../../application/editorSession/editorSessionPorts";
+import {
+  type ExternalDocumentSession,
+  type MarkdownAssetDataFile,
+} from "../../application/editorSession/editorSessionPorts";
 import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
@@ -28,6 +32,7 @@ export type InitialEditorDocumentMode = "stored" | "new-untitled";
 const EMPTY_PLANTUML_HTTPS_HOSTS: readonly string[] = [];
 
 type UseMarkdownEditorOptions = {
+  readonly initialExternalSessionId?: string | null;
   readonly initialDocumentMode?: InitialEditorDocumentMode;
   readonly previewColorKey?: string;
   readonly previewDisplayMode?: PreviewDisplayMode;
@@ -41,6 +46,7 @@ export function useMarkdownEditor(
 ) {
   const {
     initialDocumentMode = "stored",
+    initialExternalSessionId = null,
     previewColorKey = "",
     previewDisplayMode = "standard",
     plantumlHttpsHosts = EMPTY_PLANTUML_HTTPS_HOSTS,
@@ -52,6 +58,11 @@ export function useMarkdownEditor(
   const shouldSkipInitialEditPersistRef = useRef(false);
   const rulesRef = useRef<ReturnType<typeof createBrowserEditorStateRules> | null>(null);
   const controllerRef = useRef<EditorSessionController | null>(null);
+  const externalSessionGatewayRef = useRef(createTauriExternalDocumentSessionGateway());
+  const externalSessionRef = useRef<ExternalDocumentSession | null>(null);
+  const externalSessionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastExternalSessionSignatureRef = useRef<string | null>(null);
+  const externalSessionHydrationSignatureRef = useRef<string | null>(null);
 
   if (plantUmlDocumentKeyRef.current === null) {
     plantUmlDocumentKeyRef.current = crypto.randomUUID();
@@ -87,6 +98,7 @@ export function useMarkdownEditor(
     startupEditMode,
     (initialStartupEditMode) => controller.createInitialState(initialStartupEditMode).initialState,
   );
+  const [externalSession, setExternalSession] = useState<ExternalDocumentSession | null>(null);
   const stateRef = useRef(state);
   const store = useMemo<EditorSessionStore>(() => ({
     dispatch,
@@ -103,6 +115,141 @@ export function useMarkdownEditor(
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  const applyExternalSession = useCallback((session: ExternalDocumentSession) => {
+    const signature = sessionSignature(session);
+    externalSessionRef.current = session;
+    lastExternalSessionSignatureRef.current = signature;
+    setExternalSession(session);
+    const current = stateRef.current;
+    if (
+      current.content !== session.content
+      || current.fileName !== session.fileName
+      || current.filePath !== session.filePath
+      || current.isDirty !== session.isDirty
+    ) {
+      externalSessionHydrationSignatureRef.current = signature;
+      controller.loadApplicationSession(store, session);
+      reloadPlantUml();
+    } else {
+      externalSessionHydrationSignatureRef.current = null;
+    }
+  }, [controller, store]);
+
+  useEffect(() => {
+    const gateway = externalSessionGatewayRef.current;
+    if (!isReady || !gateway.isSupported()) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const enqueue = (operation: () => Promise<void>) => {
+      externalSessionQueueRef.current = externalSessionQueueRef.current
+        .then(operation)
+        .catch((error) => {
+          if (!disposed) {
+            controller.raiseError(store, toEditorSessionErrorMessage(error));
+          }
+        });
+    };
+
+    enqueue(async () => {
+      const session = initialExternalSessionId === null
+        ? await gateway.register({
+          fileName: stateRef.current.fileName,
+          filePath: stateRef.current.filePath,
+          content: stateRef.current.content,
+          isDirty: stateRef.current.isDirty,
+        })
+        : await gateway.attach(initialExternalSessionId);
+      if (!disposed) {
+        applyExternalSession(session);
+      }
+    });
+
+    void gateway.listen((event) => {
+      const current = externalSessionRef.current;
+      if (current === null || current.sessionId !== event.sessionId || current.revision >= event.revision) {
+        return;
+      }
+      enqueue(async () => {
+        const synchronizedSignature = lastExternalSessionSignatureRef.current;
+        if (editorStateSignature(stateRef.current) !== synchronizedSignature) {
+          return;
+        }
+        const session = await gateway.get(event.sessionId);
+        if (
+          !disposed
+          && editorStateSignature(stateRef.current) === synchronizedSignature
+        ) {
+          applyExternalSession(session);
+        }
+      });
+    }).then((dispose) => {
+      if (disposed) {
+        dispose();
+      } else {
+        unlisten = dispose;
+      }
+    }).catch((error) => {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [applyExternalSession, controller, initialExternalSessionId, isReady, store]);
+
+  useEffect(() => {
+    const gateway = externalSessionGatewayRef.current;
+    if (!isReady || !gateway.isSupported()) {
+      return;
+    }
+    const session = externalSessionRef.current;
+    const signature = editorStateSignature(state);
+    const hydrationSignature = externalSessionHydrationSignatureRef.current;
+    if (hydrationSignature !== null) {
+      if (signature === hydrationSignature) {
+        externalSessionHydrationSignatureRef.current = null;
+      }
+      return;
+    }
+    if (session === null || signature === lastExternalSessionSignatureRef.current) {
+      return;
+    }
+    externalSessionQueueRef.current = externalSessionQueueRef.current
+      .then(async () => {
+        const current = externalSessionRef.current;
+        if (current === null) {
+          return;
+        }
+        const snapshot = await gateway.sync({
+          sessionId: current.sessionId,
+          expectedRevision: current.revision,
+          fileName: state.fileName,
+          filePath: state.filePath,
+          content: state.content,
+          isDirty: state.isDirty,
+        });
+        externalSessionRef.current = snapshot;
+        lastExternalSessionSignatureRef.current = sessionSignature(snapshot);
+        setExternalSession(snapshot);
+      })
+      .catch(async (error) => {
+        const current = externalSessionRef.current;
+        if (current !== null && commandErrorCode(error) === "revision_conflict") {
+          try {
+            applyExternalSession(await gateway.get(current.sessionId));
+            return;
+          } catch (refreshError) {
+            controller.raiseError(store, toEditorSessionErrorMessage(refreshError));
+            return;
+          }
+        }
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      });
+  }, [applyExternalSession, controller, isReady, state, store]);
 
   const applyRecentFilesRequest = useCallback(async (
     operation: () => Promise<readonly RecentFile[] | null>,
@@ -385,6 +532,30 @@ export function useMarkdownEditor(
     reloadPlantUml();
   }, []);
 
+  const handleCommitStagedFileOperation = useCallback(async () => {
+    const session = externalSessionRef.current;
+    if (session === null) {
+      return;
+    }
+    try {
+      applyExternalSession(await externalSessionGatewayRef.current.commitStagedOperation(session.sessionId));
+    } catch (error) {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    }
+  }, [applyExternalSession, controller, store]);
+
+  const handleCancelStagedFileOperation = useCallback(async () => {
+    const session = externalSessionRef.current;
+    if (session === null) {
+      return;
+    }
+    try {
+      applyExternalSession(await externalSessionGatewayRef.current.cancelStagedOperation(session.sessionId));
+    } catch (error) {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    }
+  }, [applyExternalSession, controller, store]);
+
   const handleErrorRaise = useCallback((message: string) => {
     controller.raiseError(store, message);
   }, [controller, store]);
@@ -406,6 +577,7 @@ export function useMarkdownEditor(
     content: state.content,
     currentDocumentFilePath,
     errorMessage: state.errorMessage,
+    externalSession,
     fileName: state.fileName,
     isDirty: state.isDirty,
     isReady,
@@ -418,6 +590,8 @@ export function useMarkdownEditor(
     confirmDiscard,
     handleClearPendingExternalDocuments,
     handleContentChange,
+    handleCancelStagedFileOperation,
+    handleCommitStagedFileOperation,
     handleErrorClear,
     handleErrorRaise,
     handleImportDroppedAssets,
@@ -435,4 +609,24 @@ export function useMarkdownEditor(
     handleTakePendingExternalDocuments,
     subscribeToExternalDocumentRequests,
   };
+}
+
+function editorStateSignature(state: {
+  readonly content: string;
+  readonly fileName: string;
+  readonly filePath: string | null;
+  readonly isDirty: boolean;
+}): string {
+  return JSON.stringify([state.content, state.fileName, state.filePath, state.isDirty]);
+}
+
+function sessionSignature(session: ExternalDocumentSession): string {
+  return editorStateSignature(session);
+}
+
+function commandErrorCode(error: unknown): string | null {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return null;
 }

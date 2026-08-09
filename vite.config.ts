@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import { plantUmlAssetsPlugin, plantUmlBuildAssetsPlugin } from "./tools/vite-plantuml-assets.mjs";
 
 // @ts-expect-error process is a nodejs global
@@ -13,6 +14,10 @@ export default defineConfig(async () => ({
   plugins: [react(), plantUmlAssetsPlugin(), plantUmlBuildAssetsPlugin()],
   build: {
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        previewCapture: resolve(__dirname, "preview-capture.html"),
+      },
       output: {
         manualChunks(id) {
           if (id.includes("@uiw/react-codemirror")) {

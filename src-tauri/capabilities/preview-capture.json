@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "preview-capture",
+  "description": "Minimal event permission for hidden preview rendering WebViews",
+  "webviews": ["preview-capture-*"],
+  "permissions": ["core:event:allow-emit"]
+}

@@ -17,6 +17,52 @@ export type SavedMarkdownDocument = {
   readonly filePath: string | null;
 };
 
+export type ExternalDocumentSession = {
+  readonly instanceId: string;
+  readonly sessionId: string;
+  readonly fileName: string;
+  readonly filePath: string | null;
+  readonly content: string;
+  readonly revision: number;
+  readonly isDirty: boolean;
+  readonly pendingProposalId: string | null;
+  readonly stagedFileOperation: {
+    readonly kind: string;
+    readonly sourceRelativePath: string;
+    readonly targetRelativePath: string | null;
+  } | null;
+};
+
+export type ExternalDocumentSessionChanged = {
+  readonly sessionId: string;
+  readonly revision: number;
+};
+
+export type ExternalDocumentSessionGateway = {
+  isSupported(): boolean;
+  register(input: {
+    readonly fileName: string;
+    readonly filePath: string | null;
+    readonly content: string;
+    readonly isDirty: boolean;
+  }): Promise<ExternalDocumentSession>;
+  attach(sessionId: string): Promise<ExternalDocumentSession>;
+  sync(input: {
+    readonly sessionId: string;
+    readonly expectedRevision: number;
+    readonly fileName: string;
+    readonly filePath: string | null;
+    readonly content: string;
+    readonly isDirty: boolean;
+  }): Promise<ExternalDocumentSession>;
+  get(sessionId: string): Promise<ExternalDocumentSession>;
+  listen(
+    callback: (event: ExternalDocumentSessionChanged) => void,
+  ): Promise<() => void>;
+  commitStagedOperation(sessionId: string): Promise<ExternalDocumentSession>;
+  cancelStagedOperation(sessionId: string): Promise<ExternalDocumentSession>;
+};
+
 export type ImportedMarkdownAsset = {
   readonly originalPath: string;
   readonly copiedPath: string;

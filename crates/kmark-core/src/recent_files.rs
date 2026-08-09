@@ -133,7 +133,8 @@ mod tests {
     fn records_most_recent_first_and_deduplicates_path() {
         let first = RecentFile::new("first.md", r"C:\docs\first.md").expect("first");
         let second = RecentFile::new("second.md", r"C:\docs\second.md").expect("second");
-        let renamed_first = RecentFile::new("first-renamed.md", r"C:\docs\first.md").expect("renamed first");
+        let renamed_first =
+            RecentFile::new("first-renamed.md", r"C:\docs\first.md").expect("renamed first");
         let recent_files = RecentFiles::default()
             .record(first)
             .record(second.clone())
@@ -145,7 +146,9 @@ mod tests {
     #[test]
     fn caps_recent_files() {
         let files = (0..(MAX_RECENT_FILES + 2))
-            .filter_map(|index| RecentFile::new(format!("{index}.md"), format!("C:\\docs\\{index}.md")))
+            .filter_map(|index| {
+                RecentFile::new(format!("{index}.md"), format!("C:\\docs\\{index}.md"))
+            })
             .collect::<Vec<_>>();
         let recent_files = RecentFiles::new(files);
 

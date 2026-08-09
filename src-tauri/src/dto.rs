@@ -1,8 +1,10 @@
 pub use kmark_contract::{
     recent_file_from_payload, recent_file_payloads_from_recent_files, recent_files_from_payloads,
-    DesktopLayoutPreferencesPayload, EditorDraftPayload, EditorPreferencesPayload,
-    FinalizeGeneratedSvgRequestPayload, FinalizeGeneratedSvgResultPayload,
-    PreviewPreferencesPayload, RecentFilePayload, RegisterSubWindowSourceResponsePayload,
+    DesktopLayoutPreferencesPayload, DocumentSessionPayload, EditorDraftPayload,
+    EditorPreferencesPayload, ExternalApiPreferencesPayload, ExternalApiRootPayload,
+    ExternalApiStatusPayload, ExternalProposalReviewPayload, FinalizeGeneratedSvgRequestPayload,
+    FinalizeGeneratedSvgResultPayload, PendingExternalProposalsPayload, PreviewPreferencesPayload,
+    RecentFilePayload, RegisterSubWindowSourceResponsePayload, StagedFileOperationPayload,
     SubWindowResolvedSourceStatePayload, SubWindowSelectionPayload,
     SubWindowSourceLineSelectionRequestPayload, SubWindowSourceStateChangedPayload,
     SubWindowSourceSummaryPayload, SubWindowSourcesSnapshotPayload, SubWindowStatePayload,

@@ -1,0 +1,20 @@
+[package]
+name = "kmark-mcp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kmark-mcp"
+path = "src/main.rs"
+
+[dependencies]
+base64.workspace = true
+fs2.workspace = true
+kmark-api-contract = { path = "../kmark-api-contract" }
+rmcp = { version = "3.1.2", features = ["server", "transport-io"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "query"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-std"] }

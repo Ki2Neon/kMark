@@ -31,8 +31,17 @@ import {
   MIN_SUB_WINDOW_PAGE_TRANSITION_FADE_MS,
 } from "../../application/subWindow/subWindowPorts";
 import { MenuIcon } from "./MenuIcon";
+import {
+  type ExternalApiPreferences,
+  type ExternalApiStatus,
+} from "../../application/externalApi/externalApiPorts";
 
 type MenuSectionProps = {
+  readonly externalApiAvailable: boolean;
+  readonly externalApiError: string | null;
+  readonly externalApiIsSaving: boolean;
+  readonly externalApiPreferences: ExternalApiPreferences | null;
+  readonly externalApiStatus: ExternalApiStatus | null;
   readonly appFontId: AppFontId;
   readonly appThemeId: AppThemeId;
   readonly canControlWindowsStartupTrayResident: boolean;
@@ -55,6 +64,9 @@ type MenuSectionProps = {
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
+  readonly onExternalApiAddRoot: () => void;
+  readonly onExternalApiEnabledChange: (enabled: boolean) => void;
+  readonly onExternalApiRemoveRoot: (rootId: string) => void;
   readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
   readonly onSystemFontSizeChange: (systemFontSizePx: SystemFontSizePx) => void;
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
@@ -113,6 +125,11 @@ function MenuSectionComponent({
   appThemeId,
   canControlWindowsStartupTrayResident,
   editFontId,
+  externalApiAvailable,
+  externalApiError,
+  externalApiIsSaving,
+  externalApiPreferences,
+  externalApiStatus,
   editFontSizePx,
   systemFontSizePx,
   previewDisplayMode,
@@ -131,6 +148,9 @@ function MenuSectionComponent({
   onAppFontChange,
   onAppThemeChange,
   onEditFontChange,
+  onExternalApiAddRoot,
+  onExternalApiEnabledChange,
+  onExternalApiRemoveRoot,
   onEditFontSizeChange,
   onSystemFontSizeChange,
   onLayoutModeChange,
@@ -253,6 +273,13 @@ function MenuSectionComponent({
   const appThemeGroupVisible = matchesMenuSearch("アプリテーマ", "配色テーマ", "theme");
   const layoutModeGroupVisible = matchesMenuSearch("表示モード", "レイアウト", "PC", "Mobile", "layout");
   const multiCursorGroupVisible = matchesMenuSearch("マルチカーソル", "追加カーソル", "modifier");
+  const externalApiGroupVisible = externalApiAvailable && matchesMenuSearch(
+    "外部API",
+    "AI",
+    "MCP",
+    "REST",
+    "Root",
+  );
   const hasVisibleMenuItems =
     fileGroupVisible ||
     previewGroupVisible ||
@@ -261,6 +288,8 @@ function MenuSectionComponent({
     appThemeGroupVisible ||
     layoutModeGroupVisible ||
     multiCursorGroupVisible;
+    // Keep the empty state aware of the external API group.
+  const hasAnyVisibleMenuItems = hasVisibleMenuItems || externalApiGroupVisible;
 
   useEffect(() => {
     if (focusedFontField !== "app") {
@@ -1218,7 +1247,60 @@ function MenuSectionComponent({
         </div>
       ) : null}
 
-      {!hasVisibleMenuItems ? <p className="menu-section__empty">一致する設定なし</p> : null}
+      {externalApiGroupVisible ? (
+        <div className="menu-section__group">
+          <div className="menu-section__group-header">
+            <h2 className="menu-section__group-title">外部API</h2>
+            <p className="menu-section__group-description">localhost REST / MCP Adapter</p>
+          </div>
+          <label className="menu-section__mode-switch">
+            <span className="menu-section__mode-switch-meta">
+              <span className="menu-section__field-label">Server</span>
+            </span>
+            <span className="menu-section__mode-switch-values">
+              <span className={!externalApiPreferences?.enabled ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>停止</span>
+              <input
+                type="checkbox"
+                className="menu-section__switch-input"
+                checked={externalApiPreferences?.enabled === true}
+                disabled={externalApiPreferences === null || externalApiIsSaving}
+                onChange={(event) => onExternalApiEnabledChange(event.currentTarget.checked)}
+                aria-label="外部API Serverを切り替え"
+              />
+              <span className="menu-section__switch" aria-hidden="true" />
+              <span className={externalApiPreferences?.enabled ? "menu-section__mode-label is-active" : "menu-section__mode-label"}>起動</span>
+            </span>
+          </label>
+          {externalApiStatus?.endpoint !== null && externalApiStatus?.endpoint !== undefined ? (
+            <p className="menu-section__endpoint" title={externalApiStatus.endpoint}>{externalApiStatus.endpoint}</p>
+          ) : null}
+          <div className="menu-section__root-list">
+            {externalApiPreferences?.roots.map((root) => (
+              <div className="menu-section__root" key={root.id}>
+                <span title={root.path}>{root.label}<small>{root.path}</small></span>
+                <button
+                  type="button"
+                  disabled={externalApiIsSaving}
+                  onClick={() => onExternalApiRemoveRoot(root.id)}
+                  aria-label={`${root.label}を公開Rootから削除`}
+                  title="Rootを削除"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="menu-section__actions">
+            <button type="button" disabled={externalApiIsSaving} onClick={onExternalApiAddRoot}>
+              <MenuIcon name="folder" />
+              <span>公開Rootを追加</span>
+            </button>
+          </div>
+          {externalApiError !== null ? <p className="menu-section__field-error" role="alert">{externalApiError}</p> : null}
+        </div>
+      ) : null}
+
+      {!hasAnyVisibleMenuItems ? <p className="menu-section__empty">一致する設定なし</p> : null}
     </section>
   );
 }

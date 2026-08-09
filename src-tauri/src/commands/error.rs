@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::infra::{JsonStateStoreError, SubWindowRegistryError};
+use kmark_application::ApplicationError;
 use kmark_contract::CommandErrorPayload as ContractCommandErrorPayload;
 use kmark_core::MarkdownDocumentError;
 
@@ -35,6 +36,19 @@ impl CommandErrorPayload {
 impl From<MarkdownDocumentError> for CommandErrorPayload {
     fn from(error: MarkdownDocumentError) -> Self {
         Self(error.into())
+    }
+}
+
+impl From<ApplicationError> for CommandErrorPayload {
+    fn from(error: ApplicationError) -> Self {
+        match error.current_revision() {
+            Some(current_revision) => Self::with_detail(
+                error.code().as_str(),
+                error.message(),
+                format!("currentRevision={current_revision}"),
+            ),
+            None => Self::new(error.code().as_str(), error.message()),
+        }
     }
 }
 

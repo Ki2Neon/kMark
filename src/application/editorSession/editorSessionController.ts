@@ -28,6 +28,13 @@ export type EditorSessionBootstrap = {
   readonly shouldSkipInitialPersist: boolean;
 };
 
+export type ApplicationDocumentSession = {
+  readonly content: string;
+  readonly fileName: string;
+  readonly filePath: string | null;
+  readonly isDirty: boolean;
+};
+
 type EditorSessionControllerDependencies = {
   readonly assetImporter: MarkdownAssetImporter;
   readonly clock: Clock;
@@ -146,6 +153,24 @@ export class EditorSessionController {
 
   changeContent(store: EditorSessionStore, content: string): void {
     store.dispatch({ type: "editor/contentChanged", content });
+  }
+
+  loadApplicationSession(
+    store: EditorSessionStore,
+    session: ApplicationDocumentSession,
+  ): void {
+    this.#documentGateway.restoreDocumentReference(session.filePath);
+    store.dispatch({
+      type: "editor/bootstrapLoaded",
+      state: {
+        content: session.content,
+        fileName: session.fileName,
+        filePath: session.filePath,
+        isDirty: session.isDirty,
+        lastSavedAt: null,
+        errorMessage: null,
+      },
+    });
   }
 
   async openDocumentFromPicker(store: EditorSessionStore): Promise<LoadedMarkdownDocument | null> {

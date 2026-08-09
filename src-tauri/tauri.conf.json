@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm run build",
+    "beforeBuildCommand": "pnpm run build:desktop",
     "frontendDist": "../dist"
   },
   "app": {
@@ -25,6 +25,9 @@
     "active": true,
     "publisher": "JJ5RZN",
     "targets": "all",
+    "externalBin": [
+      "binaries/kmark-mcp"
+    ],
     "fileAssociations": [
       {
         "ext": [

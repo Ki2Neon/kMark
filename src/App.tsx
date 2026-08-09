@@ -19,6 +19,13 @@ function detectInitialEditorDocumentMode(): InitialEditorDocumentMode {
     : "stored";
 }
 
+function detectInitialExternalSessionId(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return new URLSearchParams(window.location.search).get("kmarkSessionId");
+}
+
 function detectSubWindowTarget(): { readonly stateKey: string | null } | null {
   return resolveBrowserSubWindowTarget();
 }
@@ -92,6 +99,7 @@ function App() {
       editFontId={editFontId}
       editFontSizePx={editFontSizePx}
       initialDocumentMode={detectInitialEditorDocumentMode()}
+      initialExternalSessionId={detectInitialExternalSessionId()}
       lineWrappingEnabled={lineWrappingEnabled}
       multiCursorModifier={multiCursorModifier}
       showLineNumbers={showLineNumbers}

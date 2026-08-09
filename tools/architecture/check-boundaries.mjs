@@ -66,11 +66,23 @@ for (const [sourceFilePath, targetFilePaths] of graph.entries()) {
 
   if (
     sourceRelativePath === "src/ui/hooks/useMarkdownEditor.ts"
+    || sourceRelativePath === "src/ui/hooks/useExternalApiPreferences.ts"
     || sourceRelativePath === "src/ui/hooks/useAppTheme.ts"
     || sourceRelativePath === "src/ui/hooks/useEditorPreferences.ts"
     || sourceRelativePath === "src/ui/hooks/usePreviewPreferences.ts"
     || sourceRelativePath === "src/ui/hooks/useDesktopWorkspaceSplit.ts"
     || sourceRelativePath === "src/ui/hooks/useAppShell.ts"
+  ) {
+    for (const targetFilePath of targetFilePaths) {
+      verifyLayerBoundary(sourceFilePath, targetFilePath, new Set(["ui", "application", "adapters", "domain"]));
+    }
+
+    continue;
+  }
+
+  if (
+    sourceRelativePath === "src/ui/components/ExternalProposalReviewDialog.tsx"
+    || sourceRelativePath === "src/ui/components/MenuSection.tsx"
   ) {
     for (const targetFilePath of targetFilePaths) {
       verifyLayerBoundary(sourceFilePath, targetFilePath, new Set(["ui", "application", "adapters", "domain"]));

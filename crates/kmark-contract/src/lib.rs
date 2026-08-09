@@ -575,6 +575,85 @@ pub struct EditorStatePayload {
     pub error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct ExternalApiRootPayload {
+    pub id: String,
+    pub label: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct ExternalApiPreferencesPayload {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub roots: Vec<ExternalApiRootPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct ExternalApiStatusPayload {
+    pub enabled: bool,
+    pub instance_id: String,
+    pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct DocumentSessionPayload {
+    pub instance_id: String,
+    pub session_id: String,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub revision: u64,
+    pub file_name: String,
+    pub file_path: Option<String>,
+    pub content: String,
+    pub is_dirty: bool,
+    pub pending_proposal_id: Option<String>,
+    pub staged_file_operation: Option<StagedFileOperationPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct StagedFileOperationPayload {
+    pub kind: String,
+    pub source_relative_path: String,
+    pub target_relative_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct ExternalProposalReviewPayload {
+    pub proposal_id: String,
+    pub session_id: Option<String>,
+    pub kind: String,
+    pub status: String,
+    pub file_name: String,
+    pub unified_diff: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct PendingExternalProposalsPayload {
+    pub proposals: Vec<ExternalProposalReviewPayload>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "bindings", derive(ts_rs::TS))]

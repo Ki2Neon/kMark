@@ -1,4 +1,5 @@
 mod desktop_layout;
+mod diagram;
 mod editor_draft;
 mod editor_preferences;
 mod editor_state;
@@ -17,6 +18,9 @@ mod theme;
 pub use desktop_layout::{
     DesktopLayoutPreferences, DEFAULT_DESKTOP_SPLIT_RATIO, MAX_DESKTOP_SPLIT_RATIO,
     MIN_DESKTOP_SPLIT_RATIO,
+};
+pub use diagram::{
+    extract_diagrams, validate_diagram, DiagramBlock, DiagramDiagnostic, DiagramLanguage,
 };
 pub use editor_draft::StoredEdit;
 pub use editor_draft::{ensure_markdown_file_name, DEFAULT_FILE_NAME};

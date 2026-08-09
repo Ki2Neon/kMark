@@ -8,6 +8,8 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "build:wasm": "node tools/build-wasm.mjs",
+    "build:mcp-sidecar": "node tools/build-mcp-sidecar.mjs",
+    "build:desktop": "pnpm run build:mcp-sidecar && pnpm run build",
     "generate:contracts": "node tools/generate-contracts.mjs",
     "check:contracts": "node tools/generate-contracts.mjs --check",
     "dev:vite": "vite",

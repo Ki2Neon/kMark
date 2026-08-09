@@ -21,14 +21,18 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tokio::sync::Mutex as AsyncMutex;
 
 use infra::{
     load_desktop_layout_preferences, load_editor_draft, load_editor_preferences,
     load_preview_preferences, load_recent_files, load_theme_preferences, persist_window_state,
-    restore_window_state, FileSystemAssetRepository, FileSystemMarkdownDocumentRepository,
-    InMemoryOpenRequestQueue, JsonStateStoreError, TrayCommandKind, TrayCoordinator,
-    TrayCoordinatorError, SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL, TRAY_COORDINATOR_POLL_INTERVAL,
+    restore_window_state, DeferredApplicationEventSink, ExternalApiFileRepository,
+    ExternalApiRuntime, FileSystemAssetRepository, FileSystemMarkdownDocumentRepository,
+    InMemoryOpenRequestQueue, JsonStateStoreError, TauriPreviewJobService, TrayCommandKind,
+    TrayCoordinator, TrayCoordinatorError, SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL,
+    TRAY_COORDINATOR_POLL_INTERVAL,
 };
+use kmark_application::{ApplicationEvent, ApplicationService, RegisteredRoot};
 use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RecentFiles, StoredEdit,
     ThemePreferences,
@@ -78,8 +82,12 @@ enum TrayRuntimeError {
     Tauri(#[from] tauri::Error),
 }
 
-#[derive(Default)]
 pub(crate) struct AppState {
+    pub(crate) application: Arc<ApplicationService>,
+    pub(crate) application_event_sink: Arc<DeferredApplicationEventSink>,
+    pub(crate) external_api_preferences: Mutex<dto::ExternalApiPreferencesPayload>,
+    pub(crate) external_api_runtime: AsyncMutex<ExternalApiRuntime>,
+    pub(crate) preview_jobs: Arc<TauriPreviewJobService>,
     pub(crate) asset_repository: FileSystemAssetRepository,
     pub(crate) markdown_document_repository: FileSystemMarkdownDocumentRepository,
     pub(crate) open_request_queue: InMemoryOpenRequestQueue,
@@ -96,6 +104,38 @@ pub(crate) struct AppState {
     pub(crate) next_untitled_window_sequence: AtomicU64,
     pub(crate) next_sub_window_sequence: AtomicU64,
     pub(crate) next_sandbox_browser_sequence: AtomicU64,
+}
+
+impl AppState {
+    fn new(
+        application: Arc<ApplicationService>,
+        application_event_sink: Arc<DeferredApplicationEventSink>,
+        instance_id: String,
+    ) -> Self {
+        Self {
+            application,
+            application_event_sink,
+            external_api_preferences: Mutex::new(dto::ExternalApiPreferencesPayload::default()),
+            external_api_runtime: AsyncMutex::new(ExternalApiRuntime::new(instance_id)),
+            preview_jobs: Arc::new(TauriPreviewJobService::default()),
+            asset_repository: FileSystemAssetRepository,
+            markdown_document_repository: FileSystemMarkdownDocumentRepository,
+            open_request_queue: InMemoryOpenRequestQueue::default(),
+            theme_preferences: Mutex::new(ThemePreferences::default()),
+            desktop_layout_preferences: Mutex::new(DesktopLayoutPreferences::default()),
+            editor_preferences: Mutex::new(EditorPreferences::default()),
+            editor_draft: Mutex::new(None),
+            preview_preferences: Mutex::new(PreviewPreferences::default()),
+            recent_files: Mutex::new(RecentFiles::default()),
+            sub_window_sources: Mutex::new(HashMap::new()),
+            sub_window_browser_tokens: Mutex::new(HashMap::new()),
+            app_exit_coordinator: Mutex::new(AppExitCoordinator::default()),
+            should_exit: AtomicBool::new(false),
+            next_untitled_window_sequence: AtomicU64::new(0),
+            next_sub_window_sequence: AtomicU64::new(0),
+            next_sandbox_browser_sequence: AtomicU64::new(0),
+        }
+    }
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -143,6 +183,22 @@ fn create_new_untitled_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> t
 
     let _ = window.set_focus();
 
+    Ok(())
+}
+
+pub(crate) fn open_external_session_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    session_id: &str,
+) -> tauri::Result<()> {
+    let label = next_untitled_window_label(app);
+    let url = format!("index.html?kmarkSessionId={session_id}");
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
+        .title("External proposal - kMark")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(50.0, 50.0)
+        .visible(true)
+        .focused(true)
+        .build()?;
     Ok(())
 }
 
@@ -337,7 +393,18 @@ fn start_sub_window_registry_worker<R: tauri::Runtime + 'static>(app: &tauri::Ap
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().manage(AppState::default());
+    let instance_id = infra::generate_instance_id();
+    let application_event_sink = Arc::new(DeferredApplicationEventSink::default());
+    let application = Arc::new(ApplicationService::new(
+        instance_id.clone(),
+        Arc::new(ExternalApiFileRepository),
+        application_event_sink.clone(),
+    ));
+    let builder = tauri::Builder::default().manage(AppState::new(
+        application,
+        application_event_sink,
+        instance_id,
+    ));
 
     #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(
@@ -373,6 +440,11 @@ pub fn run() {
                 {
                     eprintln!("failed to activate subwindow source: {}", error.message());
                 }
+                window
+                    .app_handle()
+                    .state::<AppState>()
+                    .application
+                    .activate_window(window.label());
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 if window
@@ -418,6 +490,11 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Destroyed => {
+                window
+                    .app_handle()
+                    .state::<AppState>()
+                    .application
+                    .detach_window(window.label());
                 if window
                     .label()
                     .starts_with(commands::external_link::SANDBOX_BROWSER_LABEL_PREFIX)
@@ -447,6 +524,47 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             let start_hidden = should_start_hidden();
+            app_handle
+                .state::<AppState>()
+                .preview_jobs
+                .set_app(&app_handle);
+
+            let event_app = app_handle.clone();
+            app_handle
+                .state::<AppState>()
+                .application_event_sink
+                .set_callback(Arc::new(move |event| match event {
+                    ApplicationEvent::InstanceProposalCreated { proposal_id } => {
+                        let _ = event_app.emit(
+                            "external-proposal-created",
+                            serde_json::json!({ "proposalId": proposal_id }),
+                        );
+                    }
+                    ApplicationEvent::SessionProposalCreated {
+                        session_id,
+                        proposal_id,
+                    } => {
+                        let _ = event_app.emit(
+                            "external-proposal-created",
+                            serde_json::json!({
+                                "proposalId": proposal_id,
+                                "sessionId": session_id,
+                            }),
+                        );
+                    }
+                    ApplicationEvent::SessionChanged {
+                        session_id,
+                        revision,
+                    } => {
+                        let _ = event_app.emit(
+                            "external-document-session-changed",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "revision": revision,
+                            }),
+                        );
+                    }
+                }));
 
             if !start_hidden {
                 create_main_window(&app_handle)?;
@@ -569,6 +687,46 @@ pub fn run() {
                 }
             }
 
+            match infra::load_external_api_preferences(&app_handle) {
+                Ok(Some(preferences)) => {
+                    let roots = preferences
+                        .roots
+                        .iter()
+                        .map(|root| RegisteredRoot {
+                            id: root.id.clone(),
+                            label: root.label.clone(),
+                            path: PathBuf::from(&root.path),
+                        })
+                        .collect();
+                    let state = app_handle.state::<AppState>();
+                    state.application.replace_roots(roots);
+                    if let Ok(mut current_preferences) = state.external_api_preferences.lock() {
+                        *current_preferences = preferences.clone();
+                    }
+                    if preferences.enabled {
+                        let application = state.application.clone();
+                        let preview_jobs = state.preview_jobs.clone();
+                        let runtime = &state.external_api_runtime;
+                        if let Err(error) = tauri::async_runtime::block_on(async {
+                            runtime
+                                .lock()
+                                .await
+                                .start(&app_handle, application, preview_jobs)
+                                .await
+                        }) {
+                            eprintln!("failed to start external API: {error}");
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    if halt_for_unsupported_state_schema(app, &error) {
+                        return Ok(());
+                    }
+                    eprintln!("failed to load external API preferences: {error}");
+                }
+            }
+
             #[cfg(desktop)]
             start_tray_coordinator(&app_handle)?;
 
@@ -596,6 +754,19 @@ pub fn run() {
             commands::editor_draft::set_editor_draft,
             commands::editor_preferences::get_editor_preferences,
             commands::editor_preferences::set_editor_preferences,
+            commands::external_api::accept_external_proposal,
+            commands::external_api::attach_document_session,
+            commands::external_api::cancel_staged_file_operation,
+            commands::external_api::commit_staged_file_operation,
+            commands::external_api::get_document_session,
+            commands::external_api::get_external_api_preferences,
+            commands::external_api::get_external_api_status,
+            commands::external_api::get_pending_external_proposals,
+            commands::external_api::pick_external_api_root,
+            commands::external_api::register_document_session,
+            commands::external_api::reject_external_proposal,
+            commands::external_api::set_external_api_preferences,
+            commands::external_api::sync_document_session,
             commands::external_link::open_external_link,
             commands::external_link::open_sub_window_external_browser,
             commands::external_link::resize_sub_window_external_browser,
@@ -644,6 +815,13 @@ pub fn run() {
 
             if code.is_none() && app_handle.webview_windows().is_empty() && !should_exit {
                 api.prevent_exit();
+            }
+
+            if should_exit {
+                let state = app_handle.state::<AppState>();
+                tauri::async_runtime::block_on(async {
+                    state.external_api_runtime.lock().await.stop().await;
+                });
             }
         }
     });

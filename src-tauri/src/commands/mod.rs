@@ -4,6 +4,7 @@ pub mod desktop_layout_preferences;
 pub mod editor_draft;
 pub mod editor_preferences;
 mod error;
+pub mod external_api;
 pub mod external_link;
 pub mod file_open;
 pub mod generated_svg;

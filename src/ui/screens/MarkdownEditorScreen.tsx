@@ -22,6 +22,7 @@ import { MarkdownInput } from "../components/MarkdownInput";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { UnsavedExitDialog } from "../components/UnsavedExitDialog";
+import { ExternalProposalReviewDialog } from "../components/ExternalProposalReviewDialog";
 import { useConfirmSaveOnExit } from "../hooks/useConfirmSaveOnExit";
 import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
 import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
@@ -32,6 +33,7 @@ import { type MobileSectionId, useMobileSectionNavigation } from "../hooks/useMo
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
 import { usePreviewPreferences } from "../hooks/usePreviewPreferences";
 import { useWindowTitle } from "../hooks/useWindowTitle";
+import { useExternalApiPreferences } from "../hooks/useExternalApiPreferences";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 import { getKmarkModelViewerViewpoint } from "../../adapters/browser/browserModelRenderer";
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
@@ -64,6 +66,7 @@ type MarkdownEditorScreenProps = {
   readonly editFontId: EditFontId;
   readonly editFontSizePx: EditFontSizePx;
   readonly initialDocumentMode: InitialEditorDocumentMode;
+  readonly initialExternalSessionId: string | null;
   readonly lineWrappingEnabled: boolean;
   readonly systemFontSizePx: SystemFontSizePx;
   readonly multiCursorModifier: MultiCursorModifier;
@@ -113,6 +116,7 @@ export function MarkdownEditorScreen({
   editFontId,
   editFontSizePx,
   initialDocumentMode,
+  initialExternalSessionId,
   lineWrappingEnabled,
   systemFontSizePx,
   multiCursorModifier,
@@ -133,6 +137,7 @@ export function MarkdownEditorScreen({
   previewUsesAppThemeColors,
 }: MarkdownEditorScreenProps) {
   const [activeEditCursorLine, setActiveEditCursorLine] = useState<number | null>(1);
+  const externalApi = useExternalApiPreferences();
   const {
     isPreviewVisible,
     previewDisplayMode,
@@ -146,6 +151,7 @@ export function MarkdownEditorScreen({
     content,
     currentDocumentFilePath,
     errorMessage,
+    externalSession,
     fileName,
     isDirty,
     isReady: isEditorReady,
@@ -158,6 +164,8 @@ export function MarkdownEditorScreen({
     defaultPreviewTextStyle,
     confirmDiscard,
     handleContentChange,
+    handleCancelStagedFileOperation,
+    handleCommitStagedFileOperation,
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
@@ -176,6 +184,7 @@ export function MarkdownEditorScreen({
     handleImportPastedAssets,
   } = useMarkdownEditor(startupEditMode, {
     initialDocumentMode,
+    initialExternalSessionId,
     previewColorKey: previewUsesAppThemeColors ? `app:${appThemeId}` : "fixed",
     previewDisplayMode,
     plantumlHttpsHosts,
@@ -756,6 +765,11 @@ export function MarkdownEditorScreen({
     canControlWindowsStartupTrayResident,
     editFontId,
     editFontSizePx,
+    externalApiAvailable: externalApi.available,
+    externalApiError: externalApi.error,
+    externalApiIsSaving: externalApi.isSaving,
+    externalApiPreferences: externalApi.preferences,
+    externalApiStatus: externalApi.status,
     systemFontSizePx,
     isPreviewVisible,
     layoutMode,
@@ -765,6 +779,9 @@ export function MarkdownEditorScreen({
     onAppThemeChange,
     onEditFontChange,
     onEditFontSizeChange,
+    onExternalApiAddRoot: () => void externalApi.addRoot(),
+    onExternalApiEnabledChange: externalApi.setEnabled,
+    onExternalApiRemoveRoot: externalApi.removeRoot,
     onLineWrappingEnabledChange,
     onSystemFontSizeChange,
     onLayoutModeChange: handleLayoutModeChange,
@@ -1002,6 +1019,27 @@ export function MarkdownEditorScreen({
           onDiscard={confirmSaveOnExit.onDiscard}
           onSave={confirmSaveOnExit.onSave}
         />
+      ) : null}
+
+      <ExternalProposalReviewDialog />
+
+      {externalSession?.stagedFileOperation != null ? (
+        <div className="external-operation__overlay">
+          <section className="external-operation" role="alertdialog" aria-modal="true" aria-label="File操作の確定">
+            <div>
+              <h2>File操作を確定</h2>
+              <p>
+                {externalSession?.stagedFileOperation.kind === "delete"
+                  ? `${externalSession.stagedFileOperation.sourceRelativePath} をRecycle Binへ移動`
+                  : `${externalSession?.stagedFileOperation.sourceRelativePath} を ${externalSession?.stagedFileOperation.targetRelativePath ?? ""} へ変更`}
+              </p>
+            </div>
+            <div className="external-operation__actions">
+              <button type="button" onClick={() => void handleCancelStagedFileOperation()}>取消</button>
+              <button type="button" onClick={() => void handleCommitStagedFileOperation()}>確定</button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </main>
   );
