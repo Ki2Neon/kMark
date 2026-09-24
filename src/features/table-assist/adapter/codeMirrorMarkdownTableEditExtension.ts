@@ -1167,14 +1167,20 @@ function insertMarkdownTable(view: EditorView, rowCount: number, columnCount: nu
     ? table
     : `\n\n${table}${line.to < view.state.doc.length ? "\n" : ""}`;
   const tableStartLineNumber = insertsInsideBlankLine ? line.number : line.number + 2;
+  const tableEndLineNumber = tableStartLineNumber + table.split("\n").length - 1;
+  const source = view.state.doc.toString();
+  const insertedSource = `${source.slice(0, from)}${insert}${source.slice(to)}`;
+  const result = formatMarkdownTablesInLineRanges(insertedSource, [{
+    endLine: tableEndLineNumber,
+    startLine: tableStartLineNumber,
+  }]);
+  const changes = resolveMarkdownTableFormatTextChanges(source, result.text);
 
-  view.dispatch({
-    changes: {
-      from,
-      insert,
-      to,
-    },
-  });
+  if (changes.length > 0) {
+    view.dispatch({
+      changes: [...changes],
+    });
+  }
   selectTableCell(view, tableStartLineNumber + (rowCount > 1 ? 2 : 0), 0);
 
   return true;
