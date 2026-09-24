@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildInsertedMarkdownTable } from "../src/features/table-assist/core/markdownTableInsert.ts";
+import { resolveAnchoredDialogGroupPosition } from "../src/features/table-assist/adapter/tableInsertDialogGeometry.ts";
 
 test("builds the previous two-by-two default table", () => {
   assert.equal(
@@ -40,4 +41,42 @@ test("rejects dimensions outside the supported integer range", () => {
   ]) {
     assert.throws(() => buildInsertedMarkdownTable(rowCount, columnCount), RangeError);
   }
+});
+
+test("anchors the first table cell center to the menu activation point", () => {
+  assert.deepEqual(
+    resolveAnchoredDialogGroupPosition({
+      anchorOffsetX: 11.5,
+      anchorOffsetY: 67.5,
+      anchorX: 600,
+      anchorY: 400,
+      groupHeight: 476,
+      groupWidth: 422,
+      margin: 12,
+      viewportHeight: 900,
+      viewportWidth: 1200,
+    }),
+    { left: 588.5, top: 332.5 },
+  );
+});
+
+test("moves the complete table dialog group inside viewport edges", () => {
+  const input = {
+    anchorOffsetX: 11.5,
+    anchorOffsetY: 67.5,
+    groupHeight: 476,
+    groupWidth: 422,
+    margin: 12,
+    viewportHeight: 900,
+    viewportWidth: 1200,
+  };
+
+  assert.deepEqual(
+    resolveAnchoredDialogGroupPosition({ ...input, anchorX: 0, anchorY: 0 }),
+    { left: 12, top: 12 },
+  );
+  assert.deepEqual(
+    resolveAnchoredDialogGroupPosition({ ...input, anchorX: 1200, anchorY: 900 }),
+    { left: 766, top: 412 },
+  );
 });
