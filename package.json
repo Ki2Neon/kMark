@@ -29,6 +29,7 @@
     "test:plantuml-wasm": "node --experimental-strip-types tools/test-plantuml-wasm-integration.mjs",
     "test:plantuml-policy": "node --experimental-strip-types --test tools/test-plantuml-policy.mjs",
     "test:editor-scroll": "node --experimental-strip-types --test tools/test-editor-shift-wheel.mjs",
+    "test:table-insert": "node --experimental-strip-types --test tools/test-table-insert.mjs",
     "test:kmark-completion": "node tools/test-kmark-completion-context.mjs",
     "test:kmark-scope-display": "node tools/test-kmark-scope-display.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
