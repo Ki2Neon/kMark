@@ -70,6 +70,17 @@ pub fn ensure_markdown_file_name(value: &str) -> String {
     }
 }
 
+pub fn resolve_document_file_stem(file_name: &str) -> String {
+    let normalized_file_name = ensure_markdown_file_name(file_name);
+
+    normalized_file_name
+        .rsplit_once('.')
+        .map(|(file_stem, _)| file_stem)
+        .filter(|file_stem| !file_stem.is_empty())
+        .unwrap_or(&normalized_file_name)
+        .to_owned()
+}
+
 fn resolve_stored_file_name(file_name: &str, file_path: Option<&str>) -> String {
     let normalized_file_name = ensure_markdown_file_name(file_name);
 
@@ -112,7 +123,7 @@ fn has_markdown_extension(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_markdown_file_name, StoredEdit};
+    use super::{ensure_markdown_file_name, resolve_document_file_stem, StoredEdit};
 
     #[test]
     fn normalizes_markdown_file_name() {
@@ -120,6 +131,18 @@ mod tests {
         assert_eq!(ensure_markdown_file_name(" notes "), "notes.md");
         assert_eq!(ensure_markdown_file_name("report.txt"), "report.txt");
         assert_eq!(ensure_markdown_file_name("bad:name"), "bad-name.md");
+    }
+
+    #[test]
+    fn resolves_document_file_stem_without_source_extension() {
+        assert_eq!(resolve_document_file_stem("report.md"), "report");
+        assert_eq!(
+            resolve_document_file_stem("report.v2.markdown"),
+            "report.v2"
+        );
+        assert_eq!(resolve_document_file_stem("notes.txt"), "notes");
+        assert_eq!(resolve_document_file_stem(" notes "), "notes");
+        assert_eq!(resolve_document_file_stem(""), "untitled");
     }
 
     #[test]

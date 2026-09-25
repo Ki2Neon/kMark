@@ -181,6 +181,10 @@ export function normalizeMarkdownFileNameWithWasmSync(fileName: string): string 
   return loadKmarkWebModuleSync().normalize_markdown_file_name_json(fileName);
 }
 
+export function resolveDocumentFileStemWithWasmSync(fileName: string): string {
+  return loadKmarkWebModuleSync().resolve_document_file_stem_json(fileName);
+}
+
 export function resolveAppFontFamilyWithWasmSync(appFontId: string): string {
   return loadKmarkWebModuleSync().resolve_app_font_family_json(appFontId);
 }

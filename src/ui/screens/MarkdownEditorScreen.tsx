@@ -36,6 +36,7 @@ import { useWindowTitle } from "../hooks/useWindowTitle";
 import { useExternalApiPreferences } from "../hooks/useExternalApiPreferences";
 import { openExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
 import { getKmarkModelViewerViewpoint } from "../../adapters/browser/browserModelRenderer";
+import { resolveDocumentFileStem } from "../../adapters/browser/browserRustCore";
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
 import { SubWindowController } from "../../application/subWindow/subWindowController";
 import {
@@ -334,6 +335,7 @@ export function MarkdownEditorScreen({
   }, [errorMessage, handleErrorClear]);
 
   const normalizedFileName = fileName.trim().length > 0 ? fileName.trim() : "untitled.md";
+  const documentFileStem = resolveDocumentFileStem(normalizedFileName);
   const subWindowStateRequest = useMemo(() => ({
     activeSourceLine: previewHighlightSourceLine,
     browserFadeMs: subWindowBrowserFadeMs,
@@ -369,7 +371,7 @@ export function MarkdownEditorScreen({
     subWindowStateRequestRef.current = subWindowStateRequest;
   }, [subWindowStateRequest]);
 
-  useWindowTitle(`${isDirty ? "* " : ""}${normalizedFileName} - kMark`);
+  useWindowTitle(documentFileStem);
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
     isDirty,

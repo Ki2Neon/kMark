@@ -1,6 +1,7 @@
 import { type MarkdownDocumentPrinter } from "../../application/editorSession/editorSessionPorts";
 import { createKmarkModelViewerScope, renderKmarkModelViewerNow } from "./browserModelRenderer";
 import { printMarkdownDocument } from "../../infra/printDocument";
+import { resolveDocumentFileStem } from "./browserRustCore";
 
 const PRINT_MODEL_RENDER_TIMEOUT_MS = 10000;
 const PRINT_MODEL_CAPTURE_TIMEOUT_MS = 5000;
@@ -14,9 +15,25 @@ const PRINT_MODEL_CANVAS_SELECTOR = ".kmark-model-canvas > canvas";
 export function createBrowserMarkdownDocumentPrinter(): MarkdownDocumentPrinter {
   return {
     async print(request) {
-      await printMarkdownDocument(request, {
+      const title = resolveDocumentFileStem(request.sourceFileName);
+      const runtimeOptions = {
         preparePrintWindow: preparePrintWindowModelViewers,
-      });
+      };
+
+      if (request.displayMode === "a4") {
+        await printMarkdownDocument({
+          displayMode: "a4",
+          title,
+          pages: request.pages,
+        }, runtimeOptions);
+        return;
+      }
+
+      await printMarkdownDocument({
+        displayMode: "standard",
+        title,
+        html: request.html,
+      }, runtimeOptions);
     },
   };
 }

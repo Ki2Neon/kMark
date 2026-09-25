@@ -163,7 +163,7 @@ fn create_main_window<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> tauri::Result<tauri::WebviewWindow<R>> {
     WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
-        .title("kMark")
+        .title("untitled")
         .inner_size(1280.0, 860.0)
         .min_inner_size(50.0, 50.0)
         .visible(false)
@@ -174,7 +174,7 @@ fn create_new_untitled_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> t
     let label = next_untitled_window_label(app);
     let window =
         WebviewWindowBuilder::new(app, label, WebviewUrl::App(TRAY_UNTITLED_WINDOW_URL.into()))
-            .title("untitled.md - kMark")
+            .title("untitled")
             .inner_size(1280.0, 860.0)
             .min_inner_size(50.0, 50.0)
             .visible(true)
@@ -193,7 +193,7 @@ pub(crate) fn open_external_session_window<R: tauri::Runtime>(
     let label = next_untitled_window_label(app);
     let url = format!("index.html?kmarkSessionId={session_id}");
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
-        .title("External proposal - kMark")
+        .title("untitled")
         .inner_size(1280.0, 860.0)
         .min_inner_size(50.0, 50.0)
         .visible(true)

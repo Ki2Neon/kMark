@@ -37,7 +37,7 @@ pub async fn open_sub_window(app: AppHandle) -> Result<(), CommandErrorPayload> 
     let window =
         WebviewWindowBuilder::new(&app, label.clone(), WebviewUrl::App(SUB_WINDOW_URL.into()))
             .initialization_script(SUB_WINDOW_INIT_SCRIPT)
-            .title("Subwindow - kMark")
+            .title("untitled")
             .inner_size(1280.0, 860.0)
             .min_inner_size(50.0, 50.0)
             .visible(true)

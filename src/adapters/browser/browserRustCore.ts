@@ -20,6 +20,7 @@ import {
   reduceEditorStateJsonWithWasmSync,
   resolveAppFontFamilyWithWasmSync,
   resolveEditFontFamilyWithWasmSync,
+  resolveDocumentFileStemWithWasmSync,
   type FormatMarkdownTablesPayload,
   type TableFormatLineRangePayload,
   type TableFormatOptionsPayload,
@@ -77,6 +78,10 @@ export function reduceEditorState(state: EditorState, action: EditorSessionActio
 
 export function normalizeMarkdownFileName(fileName: string): string {
   return normalizeMarkdownFileNameWithWasmSync(fileName);
+}
+
+export function resolveDocumentFileStem(fileName: string): string {
+  return resolveDocumentFileStemWithWasmSync(fileName);
 }
 
 export function deriveEditorStats(content: string): EditorStats {
