@@ -23,7 +23,7 @@ pub use diagram::{
     extract_diagrams, validate_diagram, DiagramBlock, DiagramDiagnostic, DiagramLanguage,
 };
 pub use editor_draft::StoredEdit;
-pub use editor_draft::{ensure_markdown_file_name, DEFAULT_FILE_NAME};
+pub use editor_draft::{ensure_markdown_file_name, resolve_document_file_stem, DEFAULT_FILE_NAME};
 pub use editor_preferences::{
     resolve_app_font_family, resolve_edit_font_family, sanitize_font_preference, AppFontId,
     EditFontId, EditorPreferences, MultiCursorModifier, StartupEditMode, DEFAULT_EDIT_FONT_SIZE_PX,

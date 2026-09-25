@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createBrowserSubWindowGateway } from "../../adapters/browser/browserSubWindowGateway";
 import { isSupportedExternalLink } from "../../adapters/browser/browserExternalLinkOpener";
+import { resolveDocumentFileStem } from "../../adapters/browser/browserRustCore";
 import {
   beginSubWindowExternalBrowserClose,
   closeSubWindowExternalBrowser,
@@ -526,7 +527,7 @@ export function SubWindowScreen({ stateKey: _stateKey }: SubWindowScreenProps) {
     initialFitMode: "page",
     isAvailable: true,
   });
-  const title = state === null ? "Subwindow - kMark" : `${state.title} - サブウィンドウ - kMark`;
+  const title = resolveDocumentFileStem(state === null ? "untitled.md" : state.title);
   const isFullscreenCursorHidden = isFullscreen
     && !isFullscreenCursorVisible
     && previewContextMenuState === null

@@ -90,12 +90,12 @@ export type ImportMarkdownAssetDataRequest = {
 export type PrintMarkdownDocumentRequest =
   | {
     readonly displayMode: "standard";
-    readonly title: string;
+    readonly sourceFileName: string;
     readonly html: string;
   }
   | {
     readonly displayMode: "a4";
-    readonly title: string;
+    readonly sourceFileName: string;
     readonly pages: readonly { readonly html: string }[];
   };
 

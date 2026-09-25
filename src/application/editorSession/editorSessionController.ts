@@ -373,7 +373,7 @@ export class EditorSessionController {
       }
       await this.#printer.print({
         displayMode: "a4",
-        title: state.fileName,
+        sourceFileName: state.fileName,
         pages: renderedPreview.pages,
       });
       return;
@@ -385,7 +385,7 @@ export class EditorSessionController {
 
     await this.#printer.print({
       displayMode: "standard",
-      title: state.fileName,
+      sourceFileName: state.fileName,
       html: renderedPreview.html,
     });
   }

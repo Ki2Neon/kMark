@@ -9,10 +9,10 @@ use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
     finalize_generated_svg, format_markdown_tables, format_markdown_tables_in_line_ranges,
     normalize_plantuml_https_hosts, reduce_editor_state, render_markdown_preview_with_file_path,
-    resolve_app_font_family, resolve_edit_font_family, DesktopLayoutPreferences, EditorPreferences,
-    EditorState, EditorStateAction, GeneratedSvgPresentation, PreviewDisplayMode,
-    PreviewPreferences, RecentFile, RecentFiles, StoredEdit, TableFormatLineRange,
-    TableFormatOptions, ThemePreferences,
+    resolve_app_font_family, resolve_document_file_stem, resolve_edit_font_family,
+    DesktopLayoutPreferences, EditorPreferences, EditorState, EditorStateAction,
+    GeneratedSvgPresentation, PreviewDisplayMode, PreviewPreferences, RecentFile, RecentFiles,
+    StoredEdit, TableFormatLineRange, TableFormatOptions, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -230,6 +230,11 @@ pub fn reduce_editor_state_json(current_state_input: String, action_input: Strin
 #[wasm_bindgen]
 pub fn normalize_markdown_file_name_json(file_name: String) -> String {
     ensure_markdown_file_name(&file_name)
+}
+
+#[wasm_bindgen]
+pub fn resolve_document_file_stem_json(file_name: String) -> String {
+    resolve_document_file_stem(&file_name)
 }
 
 #[wasm_bindgen]
