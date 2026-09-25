@@ -14,22 +14,40 @@ if (!host) {
   throw new Error("Failed to determine the Rust host target");
 }
 
-execFileSync("cargo", ["build", "--release", "-p", "kmark-mcp"], {
+const target = process.env.KMARK_MCP_TARGET?.trim() || host;
+
+if (!/^[a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)+$/u.test(target)) {
+  throw new Error(`Invalid MCP target triple: ${target}`);
+}
+
+execFileSync("cargo", [
+  "build",
+  "--release",
+  "-p",
+  "kmark-mcp",
+  "--target",
+  target,
+], {
   cwd: workspaceRoot,
   stdio: "inherit",
 });
 
-const extension = process.platform === "win32" ? ".exe" : "";
+const extension = target.includes("-windows-") ? ".exe" : "";
 const configuredTargetDir = process.env.CARGO_TARGET_DIR;
 const targetDir = configuredTargetDir
   ? resolve(workspaceRoot, configuredTargetDir)
   : resolve(workspaceRoot, "target");
-const source = resolve(targetDir, "release", `kmark-mcp${extension}`);
+const source = resolve(
+  targetDir,
+  target,
+  "release",
+  `kmark-mcp${extension}`,
+);
 const destination = resolve(
   workspaceRoot,
   "src-tauri",
   "binaries",
-  `kmark-mcp-${host}${extension}`,
+  `kmark-mcp-${target}${extension}`,
 );
 
 mkdirSync(dirname(destination), { recursive: true });

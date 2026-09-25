@@ -29,19 +29,19 @@ jobs:
         include:
           - label: Windows x64
             platform: windows-latest
-            args: ""
+            target: x86_64-pc-windows-msvc
 
           - label: macOS Apple Silicon
             platform: macos-latest
-            args: "--target aarch64-apple-darwin"
+            target: aarch64-apple-darwin
 
           - label: macOS Intel
             platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+            target: x86_64-apple-darwin
 
           - label: Linux x64
             platform: ubuntu-22.04
-            args: ""
+            target: x86_64-unknown-linux-gnu
 
     steps:
       - name: Checkout release tag
@@ -81,12 +81,12 @@ jobs:
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin' || 'wasm32-unknown-unknown' }}
+          targets: wasm32-unknown-unknown,${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: ". -> target"
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.14.0 --locked
@@ -143,6 +143,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KMARK_MCP_TARGET: ${{ matrix.target }}
         with:
           tagName: ${{ steps.version.outputs.tag }}
           releaseName: "kmark ${{ steps.version.outputs.tag }}"
@@ -150,16 +151,16 @@ jobs:
           releaseDraft: false
           prerelease: false
           tauriScript: pnpm tauri
-          args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.ci.conf.json
 
       - name: List Tauri bundles
         if: success()
         shell: pwsh
         run: |
           $extensions = @(".msi", ".exe", ".dmg", ".AppImage", ".deb", ".rpm")
-          $files = Get-ChildItem -Path "src-tauri/target" -Recurse -File -ErrorAction SilentlyContinue |
+          $files = Get-ChildItem -Path "target" -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object { $extensions -contains $_.Extension }
           if (-not $files) {
-            Write-Error "No Tauri installer or bundle files found under src-tauri/target."
+            Write-Error "No Tauri installer or bundle files found under target."
           }
           $files | ForEach-Object { $_.FullName }
