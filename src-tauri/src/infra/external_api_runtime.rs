@@ -13,6 +13,8 @@ use rand::RngCore;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
+use super::TauriSavePathPicker;
+
 const DISCOVERY_SCHEMA_VERSION: u32 = 1;
 const EXTERNAL_API_DIRECTORY_NAME: &str = "external-api";
 const INSTANCE_DIRECTORY_NAME: &str = "instances";
@@ -99,9 +101,14 @@ impl ExternalApiRuntime {
             return Ok(());
         }
         let token = generate_token();
-        let server = start_rest_server(application, preview_jobs, token.clone())
-            .await
-            .map_err(ExternalApiRuntimeError::StartServer)?;
+        let server = start_rest_server(
+            application,
+            preview_jobs,
+            Arc::new(TauriSavePathPicker::new(app.clone())),
+            token.clone(),
+        )
+        .await
+        .map_err(ExternalApiRuntimeError::StartServer)?;
         let directory = discovery_directory(app)?;
         prepare_private_directory(&directory)?;
         let lease_path = directory.join(format!("{}.lock", self.instance_id));

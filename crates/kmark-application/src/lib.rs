@@ -5,13 +5,9 @@ mod preview_port;
 mod service;
 
 pub use error::{ApplicationError, ApplicationErrorCode};
-pub use file_port::{
-    DocumentFileRepository, FileEntry, FileFingerprint, ReadFileResult, RegisteredRoot, SearchMatch,
-};
+pub use file_port::{DocumentFileRepository, FileFingerprint, ReadFileResult};
 pub use model::{
-    ApplicationEvent, CreateDocumentProposal, CreateDocumentProposalInput, DocumentSession,
-    DocumentSnapshot, InstanceProposalStatus, ProposalStatus, SessionProposal,
-    SessionProposalInput, SessionProposalKind, StagedFileOperation, StagedFileOperationKind,
+    ApplicationEvent, DocumentSnapshot, ProposalStatus, SessionProposal, SessionProposalInput,
     TextEdit,
 };
 pub use preview_port::{

@@ -32,7 +32,7 @@ use infra::{
     TrayCoordinator, TrayCoordinatorError, SUB_WINDOW_REGISTRY_HEARTBEAT_INTERVAL,
     TRAY_COORDINATOR_POLL_INTERVAL,
 };
-use kmark_application::{ApplicationEvent, ApplicationService, RegisteredRoot};
+use kmark_application::{ApplicationEvent, ApplicationService};
 use kmark_core::{
     DesktopLayoutPreferences, EditorPreferences, PreviewPreferences, RecentFiles, StoredEdit,
     ThemePreferences,
@@ -78,6 +78,14 @@ fn halt_for_unsupported_state_schema(app: &tauri::App, error: &JsonStateStoreErr
 enum TrayRuntimeError {
     #[error(transparent)]
     Coordinator(#[from] TrayCoordinatorError),
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ExternalSessionWindowError {
+    #[error(transparent)]
+    Application(#[from] kmark_application::ApplicationError),
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
 }
@@ -189,17 +197,24 @@ fn create_new_untitled_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> t
 pub(crate) fn open_external_session_window<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     session_id: &str,
-) -> tauri::Result<()> {
+) -> Result<(), ExternalSessionWindowError> {
     let label = next_untitled_window_label(app);
+    let application = app.state::<AppState>().application.clone();
+    if !application.reserve_session_window(session_id, label.clone())? {
+        return Ok(());
+    }
     let url = format!("index.html?kmarkSessionId={session_id}");
-    WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
-        .title("External proposal - kMark")
+    let result = WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::App(url.into()))
+        .title("kMark")
         .inner_size(1280.0, 860.0)
         .min_inner_size(50.0, 50.0)
         .visible(true)
         .focused(true)
-        .build()?;
-    Ok(())
+        .build();
+    if result.is_err() {
+        application.detach_window(&label);
+    }
+    result.map(|_| ()).map_err(Into::into)
 }
 
 fn next_untitled_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
@@ -534,12 +549,6 @@ pub fn run() {
                 .state::<AppState>()
                 .application_event_sink
                 .set_callback(Arc::new(move |event| match event {
-                    ApplicationEvent::InstanceProposalCreated { proposal_id } => {
-                        let _ = event_app.emit(
-                            "external-proposal-created",
-                            serde_json::json!({ "proposalId": proposal_id }),
-                        );
-                    }
                     ApplicationEvent::SessionProposalCreated {
                         session_id,
                         proposal_id,
@@ -563,6 +572,32 @@ pub fn run() {
                                 "revision": revision,
                             }),
                         );
+                    }
+                    ApplicationEvent::SessionPresentationRequested { session_id } => {
+                        let attached_label = event_app
+                            .state::<AppState>()
+                            .application
+                            .session_window_label(session_id)
+                            .ok()
+                            .flatten();
+                        match attached_label {
+                            Some(label) => {
+                                if let Some(window) = event_app.get_webview_window(&label) {
+                                    let _ = window.show();
+                                    let _ = window.unminimize();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            None => {
+                                if let Err(error) =
+                                    open_external_session_window(&event_app, session_id)
+                                {
+                                    eprintln!(
+                                        "failed to present external document session: {error}"
+                                    );
+                                }
+                            }
+                        }
                     }
                 }));
 
@@ -689,17 +724,7 @@ pub fn run() {
 
             match infra::load_external_api_preferences(&app_handle) {
                 Ok(Some(preferences)) => {
-                    let roots = preferences
-                        .roots
-                        .iter()
-                        .map(|root| RegisteredRoot {
-                            id: root.id.clone(),
-                            label: root.label.clone(),
-                            path: PathBuf::from(&root.path),
-                        })
-                        .collect();
                     let state = app_handle.state::<AppState>();
-                    state.application.replace_roots(roots);
                     if let Ok(mut current_preferences) = state.external_api_preferences.lock() {
                         *current_preferences = preferences.clone();
                     }
@@ -756,13 +781,10 @@ pub fn run() {
             commands::editor_preferences::set_editor_preferences,
             commands::external_api::accept_external_proposal,
             commands::external_api::attach_document_session,
-            commands::external_api::cancel_staged_file_operation,
-            commands::external_api::commit_staged_file_operation,
             commands::external_api::get_document_session,
             commands::external_api::get_external_api_preferences,
             commands::external_api::get_external_api_status,
             commands::external_api::get_pending_external_proposals,
-            commands::external_api::pick_external_api_root,
             commands::external_api::register_document_session,
             commands::external_api::reject_external_proposal,
             commands::external_api::set_external_api_preferences,

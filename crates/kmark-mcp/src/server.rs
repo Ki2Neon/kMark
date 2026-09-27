@@ -1,8 +1,8 @@
 use kmark_api_contract::{
-    DiagnosticsPayload, DiagramValidationPayload, DiagramsPayload, DocumentPayload,
-    DocumentSessionSummaryPayload, FileEntriesPayload, FileSearchPayload, FileSearchRequest,
-    InstanceProposalRequest, OpenDocumentRequest, PreviewJobPayload, PreviewJobRequestPayload,
-    ProposalPayload, ReadFilePayload, RootPayload, SessionProposalRequest,
+    CreateDocumentRequest, DiagnosticsPayload, DiagramValidationPayload, DiagramsPayload,
+    DocumentPayload, DocumentSessionSummaryPayload, OpenDocumentRequest, PreviewJobPayload,
+    PreviewJobRequestPayload, ProposalPayload, SaveDocumentRequest, SaveDocumentResponse,
+    SessionProposalRequest,
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -61,36 +61,23 @@ struct SessionInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct ListFilesInput {
+struct OpenDocumentInput {
     instance_id: String,
-    root_id: String,
-    #[serde(default)]
-    relative_path: String,
-    #[serde(default = "default_list_limit")]
-    limit: usize,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct FileInput {
-    instance_id: String,
-    root_id: String,
-    relative_path: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct SearchInput {
-    instance_id: String,
-    root_id: String,
-    query: String,
-    #[serde(default = "default_search_limit")]
-    limit: usize,
+    #[schemars(description = "Absolute path to an existing Markdown file")]
+    path: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct CreateDocumentInput {
     instance_id: String,
     suggested_file_name: String,
-    content: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SaveDocumentInput {
+    instance_id: String,
+    session_id: String,
+    expected_revision: u64,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -135,21 +122,6 @@ struct InsertTextInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct RenameInput {
-    instance_id: String,
-    session_id: String,
-    expected_revision: u64,
-    target_relative_path: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct DeleteInput {
-    instance_id: String,
-    session_id: String,
-    expected_revision: u64,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct DiagramInput {
     instance_id: String,
     session_id: String,
@@ -162,14 +134,6 @@ struct InstancesOutput {
     instances: Vec<crate::discovery::InstanceSummary>,
 }
 
-fn default_list_limit() -> usize {
-    200
-}
-
-fn default_search_limit() -> usize {
-    100
-}
-
 #[tool_router]
 impl KmarkMcpServer {
     #[tool(description = "List running Kmark instances with external API enabled")]
@@ -179,23 +143,7 @@ impl KmarkMcpServer {
         })
     }
 
-    #[tool(description = "List file roots explicitly registered by the user in a Kmark instance")]
-    async fn list_roots(
-        &self,
-        Parameters(input): Parameters<InstanceInput>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = self.client(&input.instance_id)?;
-        let result: Vec<RootPayload> = client
-            .get(
-                &format!("/api/v1/instances/{}/roots", client.instance_id()),
-                &[],
-            )
-            .await
-            .map_err(internal_error)?;
-        json_result(result)
-    }
-
-    #[tool(description = "List externally visible DocumentSessions in an explicit Kmark instance")]
+    #[tool(description = "List all open DocumentSessions in an explicit Kmark instance")]
     async fn list_documents(
         &self,
         Parameters(input): Parameters<InstanceInput>,
@@ -219,110 +167,33 @@ impl KmarkMcpServer {
         json_result(self.document(&input).await?)
     }
 
-    #[tool(
-        description = "Read a UTF-8 file below a registered root without creating a DocumentSession"
-    )]
-    async fn read_file(
-        &self,
-        Parameters(input): Parameters<FileInput>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = self.client(&input.instance_id)?;
-        let result: ReadFilePayload = client
-            .get(
-                &format!(
-                    "/api/v1/instances/{}/roots/{}/file",
-                    client.instance_id(),
-                    checked_id(&input.root_id)?
-                ),
-                &[("relativePath", input.relative_path.as_str())],
-            )
-            .await
-            .map_err(internal_error)?;
-        json_result(result)
-    }
-
-    #[tool(
-        description = "Open a UTF-8 file below a registered root as a new explicit DocumentSession"
-    )]
+    #[tool(description = "Open an absolute Markdown path in Kmark and show its editor window")]
     async fn open_document(
         &self,
-        Parameters(input): Parameters<FileInput>,
+        Parameters(input): Parameters<OpenDocumentInput>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client(&input.instance_id)?;
         let result: DocumentPayload = client
             .post(
                 &format!("/api/v1/instances/{}/sessions/open", client.instance_id()),
-                &OpenDocumentRequest {
-                    root_id: input.root_id,
-                    relative_path: input.relative_path,
-                },
+                &OpenDocumentRequest { path: input.path },
             )
             .await
             .map_err(internal_error)?;
         json_result(result)
     }
 
-    #[tool(description = "List files and directories immediately below a registered root path")]
-    async fn list_files(
-        &self,
-        Parameters(input): Parameters<ListFilesInput>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = self.client(&input.instance_id)?;
-        let limit = input.limit.min(1000).to_string();
-        let result: FileEntriesPayload = client
-            .get(
-                &format!(
-                    "/api/v1/instances/{}/roots/{}/entries",
-                    client.instance_id(),
-                    checked_id(&input.root_id)?
-                ),
-                &[
-                    ("relativePath", input.relative_path.as_str()),
-                    ("limit", limit.as_str()),
-                ],
-            )
-            .await
-            .map_err(internal_error)?;
-        json_result(result)
-    }
-
-    #[tool(description = "Search UTF-8 text below a registered root without opening files")]
-    async fn search_files(
-        &self,
-        Parameters(input): Parameters<SearchInput>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = self.client(&input.instance_id)?;
-        let result: FileSearchPayload = client
-            .post(
-                &format!(
-                    "/api/v1/instances/{}/roots/{}/search",
-                    client.instance_id(),
-                    checked_id(&input.root_id)?
-                ),
-                &FileSearchRequest {
-                    query: input.query,
-                    limit: input.limit.min(500),
-                },
-            )
-            .await
-            .map_err(internal_error)?;
-        json_result(result)
-    }
-
-    #[tool(
-        description = "Propose a new untitled document; Kmark UI approval creates the DocumentSession and does not write disk"
-    )]
-    async fn propose_create_document(
+    #[tool(description = "Create a blank untitled Kmark document and show its editor window")]
+    async fn create_document(
         &self,
         Parameters(input): Parameters<CreateDocumentInput>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client(&input.instance_id)?;
-        let result: ProposalPayload = client
+        let result: DocumentPayload = client
             .post(
-                &format!("/api/v1/instances/{}/proposals", client.instance_id()),
-                &InstanceProposalRequest::CreateDocument {
+                &format!("/api/v1/instances/{}/sessions", client.instance_id()),
+                &CreateDocumentRequest {
                     suggested_file_name: input.suggested_file_name,
-                    content: input.content,
                 },
             )
             .await
@@ -430,39 +301,20 @@ impl KmarkMcpServer {
         .await
     }
 
-    #[tool(
-        description = "Propose renaming a saved document below its registered root; disk commit requires Kmark UI confirmation"
-    )]
-    async fn propose_rename_document(
+    #[tool(description = "Save an explicit DocumentSession using Kmark save behavior")]
+    async fn save_document(
         &self,
-        Parameters(input): Parameters<RenameInput>,
+        Parameters(input): Parameters<SaveDocumentInput>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client(&input.instance_id)?;
-        let result: ProposalPayload = client
+        let result: SaveDocumentResponse = client
             .post(
-                &proposal_path(&client, &input.session_id)?,
-                &SessionProposalRequest::RenameDocument {
-                    expected_revision: input.expected_revision,
-                    target_relative_path: input.target_relative_path,
-                },
-            )
-            .await
-            .map_err(internal_error)?;
-        json_result(result)
-    }
-
-    #[tool(
-        description = "Propose moving a saved document to the recycle bin; disk commit requires Kmark UI confirmation"
-    )]
-    async fn propose_delete_document(
-        &self,
-        Parameters(input): Parameters<DeleteInput>,
-    ) -> Result<CallToolResult, McpError> {
-        let client = self.client(&input.instance_id)?;
-        let result: ProposalPayload = client
-            .post(
-                &proposal_path(&client, &input.session_id)?,
-                &SessionProposalRequest::DeleteDocument {
+                &format!(
+                    "/api/v1/instances/{}/sessions/{}/save",
+                    client.instance_id(),
+                    checked_id(&input.session_id)?
+                ),
+                &SaveDocumentRequest {
                     expected_revision: input.expected_revision,
                 },
             )
@@ -581,7 +433,7 @@ impl KmarkMcpServer {
         let result: ProposalPayload = client
             .post(
                 &proposal_path(&client, session_id)?,
-                &SessionProposalRequest::TextEdit {
+                &SessionProposalRequest {
                     expected_revision,
                     operations: vec![edit],
                 },
@@ -606,7 +458,7 @@ impl ServerHandler for KmarkMcpServer {
                 .with_title("Kmark MCP Adapter"),
         )
         .with_instructions(
-            "Use explicit instance_id and session_id. All mutations create Kmark UI proposals. Tool schemas never expose UTF-8 byte offsets.",
+            "Use explicit instance_id and session_id. Text mutations create Kmark UI proposals. Create, open, and save use Kmark document workflows. Tool schemas never expose UTF-8 byte offsets.",
         )
     }
 
@@ -615,24 +467,9 @@ impl ServerHandler for KmarkMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, McpError> {
-        Ok(ListResourceTemplatesResult::with_all_items(vec![
-            ResourceTemplate::new(
-                "kmark-preview://{instance_id}/{session_id}/{revision}/html/{width}/{height}",
-                "kmark_preview_html",
-            )
-            .with_title("Kmark HTML Preview")
-            .with_description("Rendered preview for one explicit immutable document revision")
-            .with_mime_type("text/html"),
-            ResourceTemplate::new(
-                "kmark-preview://{instance_id}/{session_id}/{revision}/png/{width}/{height}",
-                "kmark_preview_png",
-            )
-            .with_title("Kmark PNG Preview")
-            .with_description(
-                "Windows WebView2 capture for one explicit immutable document revision",
-            )
-            .with_mime_type("image/png"),
-        ]))
+        Ok(ListResourceTemplatesResult::with_all_items(
+            preview_resource_templates(),
+        ))
     }
 
     async fn read_resource(
@@ -693,6 +530,25 @@ impl ServerHandler for KmarkMcpServer {
         };
         Ok(ReadResourceResult::new(vec![content]).into())
     }
+}
+
+fn preview_resource_templates() -> Vec<ResourceTemplate> {
+    vec![
+        ResourceTemplate::new(
+            "kmark-preview://{instance_id}/{session_id}/{revision}/html/{width}/{height}",
+            "kmark_preview_html",
+        )
+        .with_title("Kmark HTML Preview")
+        .with_description("Rendered preview for one explicit immutable document revision")
+        .with_mime_type("text/html"),
+        ResourceTemplate::new(
+            "kmark-preview://{instance_id}/{session_id}/{revision}/png/{width}/{height}",
+            "kmark_preview_png",
+        )
+        .with_title("Kmark PNG Preview")
+        .with_description("Windows WebView2 capture for one explicit immutable document revision")
+        .with_mime_type("image/png"),
+    ]
 }
 
 struct PreviewResourceLocator {
@@ -791,7 +647,7 @@ fn invalid_params(error: impl std::fmt::Display) -> McpError {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::KmarkMcpServer;
+    use super::{preview_resource_templates, KmarkMcpServer};
 
     #[test]
     fn publishes_semantic_tools_without_byte_locator_fields() {
@@ -803,21 +659,16 @@ mod tests {
         assert_eq!(
             names,
             BTreeSet::from([
+                "create_document",
                 "get_document",
                 "insert_text",
                 "list_diagrams",
                 "list_documents",
-                "list_files",
                 "list_instances",
-                "list_roots",
                 "open_document",
-                "propose_create_document",
-                "propose_delete_document",
-                "propose_rename_document",
-                "read_file",
                 "replace_lines",
                 "replace_text",
-                "search_files",
+                "save_document",
                 "validate_diagram",
                 "validate_document",
             ])
@@ -837,5 +688,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn publishes_only_html_and_png_preview_resources() {
+        let templates = preview_resource_templates();
+        assert_eq!(templates.len(), 2);
+        assert_eq!(templates[0].name, "kmark_preview_html");
+        assert_eq!(templates[1].name, "kmark_preview_png");
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     net::{Ipv4Addr, SocketAddr},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -8,7 +9,7 @@ use std::{
 
 use axum::{
     body::Body,
-    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    extract::{DefaultBodyLimit, Path, Request, State},
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -16,18 +17,16 @@ use axum::{
     Json, Router,
 };
 use kmark_api_contract::{
-    ApiErrorDetails, ApiErrorResponse, DiagnosticPayload, DiagnosticsPayload, DiagramPayload,
-    DiagramValidationPayload, DiagramsPayload, DocumentPayload, DocumentSessionSummaryPayload,
-    FileEntriesPayload, FileEntryPayload, FileSearchMatchPayload, FileSearchPayload,
-    FileSearchRequest, InstancePayload, InstanceProposalRequest, OpenDocumentRequest,
-    PreviewJobPayload, PreviewJobRequestPayload, ProposalPayload, ReadFilePayload, RootPayload,
+    ApiErrorDetails, ApiErrorResponse, CreateDocumentRequest, DiagnosticPayload,
+    DiagnosticsPayload, DiagramPayload, DiagramValidationPayload, DiagramsPayload, DocumentPayload,
+    DocumentSessionSummaryPayload, InstancePayload, OpenDocumentRequest, PreviewJobPayload,
+    PreviewJobRequestPayload, ProposalPayload, SaveDocumentRequest, SaveDocumentResponse,
     SessionProposalRequest,
 };
 use kmark_application::{
-    ApplicationError, ApplicationErrorCode, ApplicationService, CreateDocumentProposalInput,
-    PreviewFormat, PreviewJob, PreviewJobPort, PreviewRequest, SessionProposalInput, TextEdit,
+    ApplicationError, ApplicationErrorCode, ApplicationService, PreviewFormat, PreviewJob,
+    PreviewJobPort, PreviewRequest, SessionProposalInput, TextEdit,
 };
-use serde::Deserialize;
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use utoipa::{
     openapi::security::{Http, HttpAuthScheme, SecurityRequirement, SecurityScheme},
@@ -39,10 +38,31 @@ use crate::mapping;
 const API_VERSION: &str = "v1";
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 
+/// UI boundary used only when an untitled session is saved through REST.
+pub trait SavePathPicker: Send + Sync {
+    fn pick_save_path(
+        &self,
+        suggested_file_name: &str,
+    ) -> Result<Option<PathBuf>, ApplicationError>;
+}
+
+#[derive(Default)]
+pub struct CancelSavePathPicker;
+
+impl SavePathPicker for CancelSavePathPicker {
+    fn pick_save_path(
+        &self,
+        _suggested_file_name: &str,
+    ) -> Result<Option<PathBuf>, ApplicationError> {
+        Ok(None)
+    }
+}
+
 #[derive(Clone)]
 struct RestState {
     application: Arc<ApplicationService>,
     preview_jobs: Arc<dyn PreviewJobPort>,
+    save_path_picker: Arc<dyn SavePathPicker>,
     token: Arc<str>,
     expected_host: Arc<str>,
     next_request_id: Arc<AtomicU64>,
@@ -83,16 +103,11 @@ impl RestServerHandle {
         openapi_document,
         get_instance,
         list_sessions,
-        get_current_session,
+        create_document,
         open_document,
         get_document,
+        save_document,
         get_diagnostics,
-        list_roots,
-        list_entries,
-        search_files,
-        read_file,
-        create_instance_proposal,
-        get_instance_proposal,
         create_session_proposal,
         get_session_proposal,
         list_diagrams,
@@ -104,6 +119,7 @@ impl RestServerHandle {
     components(schemas(
         ApiErrorDetails,
         ApiErrorResponse,
+        CreateDocumentRequest,
         DiagramPayload,
         DiagramValidationPayload,
         DiagramsPayload,
@@ -111,19 +127,13 @@ impl RestServerHandle {
         DiagnosticsPayload,
         DocumentPayload,
         DocumentSessionSummaryPayload,
-        FileEntriesPayload,
-        FileEntryPayload,
-        FileSearchMatchPayload,
-        FileSearchPayload,
-        FileSearchRequest,
         InstancePayload,
-        InstanceProposalRequest,
         OpenDocumentRequest,
         PreviewJobPayload,
         PreviewJobRequestPayload,
         ProposalPayload,
-        ReadFilePayload,
-        RootPayload,
+        SaveDocumentRequest,
+        SaveDocumentResponse,
         SessionProposalRequest
     )),
     tags((name = "Kmark External API", description = "Authenticated loopback API")),
@@ -151,13 +161,15 @@ impl Modify for SecurityAddon {
 pub async fn start_rest_server(
     application: Arc<ApplicationService>,
     preview_jobs: Arc<dyn PreviewJobPort>,
+    save_path_picker: Arc<dyn SavePathPicker>,
     token: String,
 ) -> std::io::Result<RestServerHandle> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let address = listener.local_addr()?;
-    let router = build_router(
+    let router = build_router_with_save_path(
         application.clone(),
         preview_jobs,
+        save_path_picker,
         token,
         format!("{}:{}", address.ip(), address.port()),
     );
@@ -185,9 +197,26 @@ pub fn build_router(
     token: String,
     expected_host: String,
 ) -> Router {
+    build_router_with_save_path(
+        application,
+        preview_jobs,
+        Arc::new(CancelSavePathPicker),
+        token,
+        expected_host,
+    )
+}
+
+pub fn build_router_with_save_path(
+    application: Arc<ApplicationService>,
+    preview_jobs: Arc<dyn PreviewJobPort>,
+    save_path_picker: Arc<dyn SavePathPicker>,
+    token: String,
+    expected_host: String,
+) -> Router {
     let state = RestState {
         application,
         preview_jobs,
+        save_path_picker,
         token: Arc::from(token),
         expected_host: Arc::from(expected_host),
         next_request_id: Arc::new(AtomicU64::new(0)),
@@ -197,11 +226,7 @@ pub fn build_router(
         .route("/api/v1/instances/{instance_id}", get(get_instance))
         .route(
             "/api/v1/instances/{instance_id}/sessions",
-            get(list_sessions),
-        )
-        .route(
-            "/api/v1/instances/{instance_id}/sessions/current",
-            get(get_current_session),
+            get(list_sessions).post(create_document),
         )
         .route(
             "/api/v1/instances/{instance_id}/sessions/open",
@@ -212,29 +237,12 @@ pub fn build_router(
             get(get_document),
         )
         .route(
+            "/api/v1/instances/{instance_id}/sessions/{session_id}/save",
+            post(save_document),
+        )
+        .route(
             "/api/v1/instances/{instance_id}/sessions/{session_id}/diagnostics",
             get(get_diagnostics),
-        )
-        .route("/api/v1/instances/{instance_id}/roots", get(list_roots))
-        .route(
-            "/api/v1/instances/{instance_id}/roots/{root_id}/entries",
-            get(list_entries),
-        )
-        .route(
-            "/api/v1/instances/{instance_id}/roots/{root_id}/search",
-            post(search_files),
-        )
-        .route(
-            "/api/v1/instances/{instance_id}/roots/{root_id}/file",
-            get(read_file),
-        )
-        .route(
-            "/api/v1/instances/{instance_id}/proposals",
-            post(create_instance_proposal),
-        )
-        .route(
-            "/api/v1/instances/{instance_id}/proposals/{proposal_id}",
-            get(get_instance_proposal),
         )
         .route(
             "/api/v1/instances/{instance_id}/sessions/{session_id}/proposals",
@@ -359,16 +367,17 @@ async fn list_sessions(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/sessions/current", params(("instance_id" = String, Path)), responses((status = 200, body = DocumentSessionSummaryPayload), (status = 204)))]
-async fn get_current_session(
+#[utoipa::path(post, path = "/api/v1/instances/{instance_id}/sessions", params(("instance_id" = String, Path)), request_body = CreateDocumentRequest, responses((status = 201, body = DocumentPayload)))]
+async fn create_document(
     State(state): State<RestState>,
     Path(instance_id): Path<String>,
-) -> Result<Response, ApiFailure> {
+    Json(request): Json<CreateDocumentRequest>,
+) -> Result<(StatusCode, Json<DocumentPayload>), ApiFailure> {
     require_instance(&state, &instance_id)?;
-    Ok(match state.application.current_session() {
-        Some(snapshot) => Json(mapping::session_summary(&snapshot)).into_response(),
-        None => StatusCode::NO_CONTENT.into_response(),
-    })
+    let snapshot = state
+        .application
+        .create_session(request.suggested_file_name);
+    Ok((StatusCode::CREATED, Json(mapping::document(snapshot))))
 }
 
 #[utoipa::path(post, path = "/api/v1/instances/{instance_id}/sessions/open", params(("instance_id" = String, Path)), request_body = OpenDocumentRequest, responses((status = 200, body = DocumentPayload)))]
@@ -379,10 +388,8 @@ async fn open_document(
 ) -> ApiResult<DocumentPayload> {
     require_instance(&state, &instance_id)?;
     let application = state.application.clone();
-    let snapshot = run_blocking(&state, move || {
-        application.open_session(&request.root_id, &request.relative_path)
-    })
-    .await?;
+    let path = PathBuf::from(request.path);
+    let snapshot = run_blocking(&state, move || application.open_session(&path)).await?;
     Ok(Json(mapping::document(snapshot)))
 }
 
@@ -398,6 +405,64 @@ async fn get_document(
             .session(&session_id)
             .map_err(|error| application_failure(&state, error))?,
     )))
+}
+
+#[utoipa::path(post, path = "/api/v1/instances/{instance_id}/sessions/{session_id}/save", params(("instance_id" = String, Path), ("session_id" = String, Path)), request_body = SaveDocumentRequest, responses((status = 200, body = SaveDocumentResponse), (status = 409, body = ApiErrorResponse)))]
+async fn save_document(
+    State(state): State<RestState>,
+    Path((instance_id, session_id)): Path<(String, String)>,
+    Json(request): Json<SaveDocumentRequest>,
+) -> ApiResult<SaveDocumentResponse> {
+    require_instance(&state, &instance_id)?;
+    let current = state
+        .application
+        .session(&session_id)
+        .map_err(|error| application_failure(&state, error))?;
+    if current.revision != request.expected_revision {
+        return Err(application_failure(
+            &state,
+            ApplicationError::revision_conflict(current.revision),
+        ));
+    }
+    if current.pending_proposal_id.is_some() {
+        return Err(application_failure(
+            &state,
+            ApplicationError::new(
+                ApplicationErrorCode::ProposalPending,
+                "document session has a pending proposal",
+            ),
+        ));
+    }
+
+    let destination = if current.file_path.is_none() {
+        let picker = state.save_path_picker.clone();
+        let suggested = current.file_name.clone();
+        let selected = run_blocking(&state, move || picker.pick_save_path(&suggested)).await?;
+        match selected {
+            Some(path) => Some(path),
+            None => {
+                return Ok(Json(SaveDocumentResponse {
+                    outcome: "cancelled".to_owned(),
+                    document: mapping::document(current),
+                }));
+            }
+        }
+    } else {
+        None
+    };
+    let application = state.application.clone();
+    let snapshot = run_blocking(&state, move || {
+        application.save_session(
+            &session_id,
+            request.expected_revision,
+            destination.as_deref(),
+        )
+    })
+    .await?;
+    Ok(Json(SaveDocumentResponse {
+        outcome: "saved".to_owned(),
+        document: mapping::document(snapshot),
+    }))
 }
 
 #[utoipa::path(get, path = "/api/v1/instances/{instance_id}/sessions/{session_id}/diagnostics", params(("instance_id" = String, Path), ("session_id" = String, Path)), responses((status = 200, body = DiagnosticsPayload)))]
@@ -421,151 +486,6 @@ async fn get_diagnostics(
     }))
 }
 
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/roots", params(("instance_id" = String, Path)), responses((status = 200, body = [RootPayload])))]
-async fn list_roots(
-    State(state): State<RestState>,
-    Path(instance_id): Path<String>,
-) -> ApiResult<Vec<RootPayload>> {
-    require_instance(&state, &instance_id)?;
-    Ok(Json(
-        state
-            .application
-            .roots()
-            .into_iter()
-            .map(|root| RootPayload {
-                id: root.id,
-                label: root.label,
-            })
-            .collect(),
-    ))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EntriesQuery {
-    #[serde(default)]
-    relative_path: String,
-    #[serde(default = "default_entries_limit")]
-    limit: usize,
-}
-
-fn default_entries_limit() -> usize {
-    200
-}
-
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/roots/{root_id}/entries", params(("instance_id" = String, Path), ("root_id" = String, Path), ("relativePath" = Option<String>, Query), ("limit" = Option<usize>, Query)), responses((status = 200, body = FileEntriesPayload)))]
-async fn list_entries(
-    State(state): State<RestState>,
-    Path((instance_id, root_id)): Path<(String, String)>,
-    Query(query): Query<EntriesQuery>,
-) -> ApiResult<FileEntriesPayload> {
-    require_instance(&state, &instance_id)?;
-    let application = state.application.clone();
-    let entries = run_blocking(&state, move || {
-        application.list_entries(&root_id, &query.relative_path, query.limit)
-    })
-    .await?;
-    Ok(Json(FileEntriesPayload {
-        entries: entries
-            .into_iter()
-            .map(|entry| FileEntryPayload {
-                relative_path: entry.relative_path,
-                is_directory: entry.is_directory,
-                byte_length: entry.byte_length,
-            })
-            .collect(),
-    }))
-}
-
-#[utoipa::path(post, path = "/api/v1/instances/{instance_id}/roots/{root_id}/search", params(("instance_id" = String, Path), ("root_id" = String, Path)), request_body = FileSearchRequest, responses((status = 200, body = FileSearchPayload)))]
-async fn search_files(
-    State(state): State<RestState>,
-    Path((instance_id, root_id)): Path<(String, String)>,
-    Json(request): Json<FileSearchRequest>,
-) -> ApiResult<FileSearchPayload> {
-    require_instance(&state, &instance_id)?;
-    let application = state.application.clone();
-    let matches = run_blocking(&state, move || {
-        application.search_files(&root_id, &request.query, request.limit)
-    })
-    .await?;
-    Ok(Json(FileSearchPayload {
-        matches: matches
-            .into_iter()
-            .map(|item| FileSearchMatchPayload {
-                relative_path: item.relative_path,
-                line: item.line,
-                text: item.text,
-            })
-            .collect(),
-    }))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReadFileQuery {
-    relative_path: String,
-}
-
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/roots/{root_id}/file", params(("instance_id" = String, Path), ("root_id" = String, Path), ("relativePath" = String, Query)), responses((status = 200, body = ReadFilePayload)))]
-async fn read_file(
-    State(state): State<RestState>,
-    Path((instance_id, root_id)): Path<(String, String)>,
-    Query(query): Query<ReadFileQuery>,
-) -> ApiResult<ReadFilePayload> {
-    require_instance(&state, &instance_id)?;
-    let response_root_id = root_id.clone();
-    let application = state.application.clone();
-    let file = run_blocking(&state, move || {
-        application.read_file(&root_id, &query.relative_path)
-    })
-    .await?;
-    Ok(Json(ReadFilePayload {
-        root_id: response_root_id,
-        relative_path: file.relative_path,
-        content: file.content,
-        content_hash: file.fingerprint.sha256,
-        byte_length: file.fingerprint.byte_length,
-        modified_at_epoch_ms: file.modified_at_epoch_ms,
-    }))
-}
-
-#[utoipa::path(post, path = "/api/v1/instances/{instance_id}/proposals", params(("instance_id" = String, Path)), request_body = InstanceProposalRequest, responses((status = 201, body = ProposalPayload)))]
-async fn create_instance_proposal(
-    State(state): State<RestState>,
-    Path(instance_id): Path<String>,
-    Json(request): Json<InstanceProposalRequest>,
-) -> Result<(StatusCode, Json<ProposalPayload>), ApiFailure> {
-    require_instance(&state, &instance_id)?;
-    let InstanceProposalRequest::CreateDocument {
-        suggested_file_name,
-        content,
-    } = request;
-    let proposal = state
-        .application
-        .create_document_proposal(CreateDocumentProposalInput {
-            suggested_file_name,
-            content,
-        });
-    Ok((
-        StatusCode::CREATED,
-        Json(mapping::create_proposal(&proposal)),
-    ))
-}
-
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/proposals/{proposal_id}", params(("instance_id" = String, Path), ("proposal_id" = String, Path)), responses((status = 200, body = ProposalPayload)))]
-async fn get_instance_proposal(
-    State(state): State<RestState>,
-    Path((instance_id, proposal_id)): Path<(String, String)>,
-) -> ApiResult<ProposalPayload> {
-    require_instance(&state, &instance_id)?;
-    let proposal = state
-        .application
-        .create_document_proposal_by_id(&proposal_id)
-        .map_err(|error| application_failure(&state, error))?;
-    Ok(Json(mapping::create_proposal(&proposal)))
-}
-
 #[utoipa::path(post, path = "/api/v1/instances/{instance_id}/sessions/{session_id}/proposals", params(("instance_id" = String, Path), ("session_id" = String, Path)), request_body = SessionProposalRequest, responses((status = 201, body = ProposalPayload), (status = 409, body = ApiErrorResponse)))]
 async fn create_session_proposal(
     State(state): State<RestState>,
@@ -573,35 +493,23 @@ async fn create_session_proposal(
     Json(request): Json<SessionProposalRequest>,
 ) -> Result<(StatusCode, Json<ProposalPayload>), ApiFailure> {
     require_instance(&state, &instance_id)?;
-    let input = match request {
-        SessionProposalRequest::TextEdit {
-            expected_revision,
-            operations,
-        } => SessionProposalInput::TextEdit {
-            expected_revision,
-            operations: operations
-                .into_iter()
-                .map(|operation| TextEdit {
-                    start: operation.start,
-                    end: operation.end,
-                    text: operation.text,
-                })
-                .collect(),
-        },
-        SessionProposalRequest::RenameDocument {
-            expected_revision,
-            target_relative_path,
-        } => SessionProposalInput::RenameDocument {
-            expected_revision,
-            target_relative_path,
-        },
-        SessionProposalRequest::DeleteDocument { expected_revision } => {
-            SessionProposalInput::DeleteDocument { expected_revision }
-        }
-    };
     let proposal = state
         .application
-        .create_session_proposal(&session_id, input)
+        .create_session_proposal(
+            &session_id,
+            SessionProposalInput {
+                expected_revision: request.expected_revision,
+                operations: request
+                    .operations
+                    .into_iter()
+                    .map(|operation| TextEdit {
+                        start: operation.start,
+                        end: operation.end,
+                        text: operation.text,
+                    })
+                    .collect(),
+            },
+        )
         .map_err(|error| application_failure(&state, error))?;
     Ok((
         StatusCode::CREATED,
@@ -829,16 +737,15 @@ fn application_failure(state: &RestState, error: ApplicationError) -> ApiFailure
         ApplicationErrorCode::RevisionConflict
         | ApplicationErrorCode::ProposalPending
         | ApplicationErrorCode::StaleProposal
-        | ApplicationErrorCode::DiskFileChanged
-        | ApplicationErrorCode::FileAlreadyExists
-        | ApplicationErrorCode::DeleteStaged => StatusCode::CONFLICT,
+        | ApplicationErrorCode::DiskFileChanged => StatusCode::CONFLICT,
         ApplicationErrorCode::SessionNotFound
-        | ApplicationErrorCode::RootNotFound
         | ApplicationErrorCode::ProposalNotFound
-        | ApplicationErrorCode::StagedOperationNotFound
         | ApplicationErrorCode::FileNotFound => StatusCode::NOT_FOUND,
-        ApplicationErrorCode::UnsupportedEncoding => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ApplicationErrorCode::UnsupportedEncoding | ApplicationErrorCode::UnsupportedFileType => {
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        }
         ApplicationErrorCode::IoFailed => StatusCode::INTERNAL_SERVER_ERROR,
+        ApplicationErrorCode::InvalidAbsolutePath => StatusCode::BAD_REQUEST,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     ApiFailure(
@@ -936,9 +843,8 @@ mod tests {
 
     use axum::{body::Body, http::Request};
     use kmark_application::{
-        ApplicationError, ApplicationErrorCode, DocumentFileRepository, FileEntry, FileFingerprint,
+        ApplicationError, ApplicationErrorCode, DocumentFileRepository, FileFingerprint,
         PreviewArtifact, PreviewFuture, PreviewJob, PreviewJobPort, PreviewRequest, ReadFileResult,
-        RegisteredRoot, SearchMatch,
     };
     use tower::ServiceExt;
     use utoipa::OpenApi;
@@ -982,63 +888,26 @@ mod tests {
     }
 
     impl DocumentFileRepository for EmptyRepository {
-        fn read_utf8(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_path: &str,
-        ) -> Result<ReadFileResult, ApplicationError> {
+        fn read_utf8(&self, _path: &Path) -> Result<ReadFileResult, ApplicationError> {
             Err(ApplicationError::new(
                 ApplicationErrorCode::FileNotFound,
                 "not found",
             ))
         }
-        fn list_entries(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_directory: &str,
-            _limit: usize,
-        ) -> Result<Vec<FileEntry>, ApplicationError> {
-            Ok(Vec::new())
-        }
-        fn search_utf8(
-            &self,
-            _root: &RegisteredRoot,
-            _query: &str,
-            _limit: usize,
-        ) -> Result<Vec<SearchMatch>, ApplicationError> {
-            Ok(Vec::new())
-        }
-        fn fingerprint(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_path: &str,
-        ) -> Result<FileFingerprint, ApplicationError> {
+
+        fn fingerprint(&self, _path: &Path) -> Result<FileFingerprint, ApplicationError> {
             Err(ApplicationError::new(
                 ApplicationErrorCode::FileNotFound,
                 "not found",
             ))
         }
-        fn rename(
+
+        fn write_utf8(
             &self,
-            _root: &RegisteredRoot,
-            _source_relative_path: &str,
-            _target_relative_path: &str,
+            _path: &Path,
+            _content: &str,
         ) -> Result<ReadFileResult, ApplicationError> {
             unreachable!()
-        }
-        fn move_to_trash(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_path: &str,
-        ) -> Result<(), ApplicationError> {
-            unreachable!()
-        }
-        fn resolve_registered_path(
-            &self,
-            _roots: &[RegisteredRoot],
-            _absolute_path: &Path,
-        ) -> Option<(String, String)> {
-            None
         }
     }
 
@@ -1056,22 +925,33 @@ mod tests {
         )
     }
 
-    #[test]
-    fn openapi_declares_global_bearer_authentication() {
-        let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI");
+    fn authorized(path: &str) -> Request<Body> {
+        Request::builder()
+            .uri(path)
+            .header("host", "127.0.0.1:43121")
+            .header("authorization", "Bearer secret")
+            .body(Body::empty())
+            .unwrap()
+    }
 
+    #[test]
+    fn openapi_declares_contract_and_omits_removed_routes() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI");
         assert_eq!(
             document.pointer("/components/securitySchemes/bearerAuth/type"),
             Some(&serde_json::json!("http"))
         );
-        assert_eq!(
-            document.pointer("/components/securitySchemes/bearerAuth/scheme"),
-            Some(&serde_json::json!("bearer"))
-        );
-        assert_eq!(
-            document.pointer("/security/0/bearerAuth"),
-            Some(&serde_json::json!([]))
-        );
+        let text = serde_json::to_string(&document).unwrap();
+        for removed in [
+            "/roots",
+            "/sessions/current",
+            "rename_document",
+            "delete_document",
+            "ReadFilePayload",
+        ] {
+            assert!(!text.contains(removed), "OpenAPI still contains {removed}");
+        }
+        assert!(text.contains("/sessions/{session_id}/save"));
     }
 
     #[tokio::test]
@@ -1104,18 +984,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exposes_instance_only_with_explicit_id() {
-        let response = router()
+    async fn removed_routes_return_not_found() {
+        for path in [
+            "/api/v1/instances/instance/roots",
+            "/api/v1/instances/instance/sessions/current",
+            "/api/v1/instances/instance/proposals",
+        ] {
+            assert_eq!(
+                router().oneshot(authorized(path)).await.unwrap().status(),
+                404
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_untitled_save_keeps_revision_unchanged() {
+        let service = Arc::new(ApplicationService::new(
+            "instance",
+            Arc::new(EmptyRepository),
+            Arc::new(kmark_application::NoopApplicationEventSink),
+        ));
+        let session = service.create_session("untitled.md".to_owned());
+        let router = build_router(
+            service.clone(),
+            Arc::new(EmptyPreviewJobs),
+            "secret".to_owned(),
+            "127.0.0.1:43121".to_owned(),
+        );
+        let response = router
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/instances/instance")
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/instances/instance/sessions/{}/save",
+                        session.session_id
+                    ))
                     .header("host", "127.0.0.1:43121")
                     .header("authorization", "Bearer secret")
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"expectedRevision":1}"#))
                     .unwrap(),
             )
             .await
             .unwrap();
+
         assert_eq!(response.status(), 200);
+        assert_eq!(service.session(&session.session_id).unwrap().revision, 1);
     }
 }

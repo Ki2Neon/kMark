@@ -3,8 +3,6 @@ import {
 } from "../../application/editorSession/editorSessionPorts";
 import {
   attachDocumentSession,
-  cancelStagedFileOperation,
-  commitStagedFileOperation,
   getDocumentSession,
   listenForDocumentSessionChanged,
   registerDocumentSession,
@@ -20,7 +18,5 @@ export function createTauriExternalDocumentSessionGateway(): ExternalDocumentSes
     sync: syncDocumentSession,
     get: getDocumentSession,
     listen: listenForDocumentSessionChanged,
-    commitStagedOperation: commitStagedFileOperation,
-    cancelStagedOperation: cancelStagedFileOperation,
   };
 }

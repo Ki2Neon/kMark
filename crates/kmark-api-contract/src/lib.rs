@@ -30,25 +30,14 @@ pub struct InstancePayload {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct RootPayload {
-    pub id: String,
-    pub label: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DocumentSessionSummaryPayload {
     pub instance_id: String,
     pub session_id: String,
     pub revision: u64,
     pub file_name: String,
     pub file_path: Option<String>,
-    pub root_id: Option<String>,
-    pub relative_path: Option<String>,
     pub is_dirty: bool,
     pub pending_proposal_id: Option<String>,
-    pub staged_file_operation: Option<StagedFileOperationPayload>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,66 +52,30 @@ pub struct DocumentPayload {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateDocumentRequest {
+    pub suggested_file_name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OpenDocumentRequest {
-    pub root_id: String,
-    pub relative_path: String,
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FileEntryPayload {
-    pub relative_path: String,
-    pub is_directory: bool,
-    pub byte_length: Option<u64>,
+pub struct SaveDocumentRequest {
+    pub expected_revision: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FileEntriesPayload {
-    pub entries: Vec<FileEntryPayload>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FileSearchRequest {
-    pub query: String,
-    #[serde(default = "default_search_limit")]
-    pub limit: usize,
-}
-
-fn default_search_limit() -> usize {
-    100
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FileSearchMatchPayload {
-    pub relative_path: String,
-    pub line: u32,
-    pub text: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct FileSearchPayload {
-    pub matches: Vec<FileSearchMatchPayload>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ReadFilePayload {
-    pub root_id: String,
-    pub relative_path: String,
-    pub content: String,
-    pub content_hash: String,
-    pub byte_length: u64,
-    pub modified_at_epoch_ms: Option<u64>,
+pub struct SaveDocumentResponse {
+    pub outcome: String,
+    pub document: DocumentPayload,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -135,38 +88,11 @@ pub struct TextEditOperationPayload {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum SessionProposalRequest {
-    TextEdit {
-        expected_revision: u64,
-        operations: Vec<TextEditOperationPayload>,
-    },
-    RenameDocument {
-        expected_revision: u64,
-        target_relative_path: String,
-    },
-    DeleteDocument {
-        expected_revision: u64,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum InstanceProposalRequest {
-    CreateDocument {
-        suggested_file_name: String,
-        content: String,
-    },
+pub struct SessionProposalRequest {
+    pub expected_revision: u64,
+    pub operations: Vec<TextEditOperationPayload>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -174,23 +100,11 @@ pub enum InstanceProposalRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProposalPayload {
     pub proposal_id: String,
-    pub session_id: Option<String>,
-    pub base_revision: Option<u64>,
+    pub session_id: String,
+    pub base_revision: u64,
     pub status: String,
     pub kind: String,
     pub unified_diff: String,
-    pub created_session_id: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct StagedFileOperationPayload {
-    pub kind: String,
-    pub source_root_id: String,
-    pub source_relative_path: String,
-    pub target_relative_path: Option<String>,
-    pub staged_at_revision: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

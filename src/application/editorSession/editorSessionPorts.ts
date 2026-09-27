@@ -26,11 +26,6 @@ export type ExternalDocumentSession = {
   readonly revision: number;
   readonly isDirty: boolean;
   readonly pendingProposalId: string | null;
-  readonly stagedFileOperation: {
-    readonly kind: string;
-    readonly sourceRelativePath: string;
-    readonly targetRelativePath: string | null;
-  } | null;
 };
 
 export type ExternalDocumentSessionChanged = {
@@ -59,8 +54,6 @@ export type ExternalDocumentSessionGateway = {
   listen(
     callback: (event: ExternalDocumentSessionChanged) => void,
   ): Promise<() => void>;
-  commitStagedOperation(sessionId: string): Promise<ExternalDocumentSession>;
-  cancelStagedOperation(sessionId: string): Promise<ExternalDocumentSession>;
 };
 
 export type ImportedMarkdownAsset = {

@@ -99,12 +99,7 @@ export function ExternalProposalReviewDialog() {
 }
 
 function proposalKindLabel(kind: string): string {
-  switch (kind) {
-    case "create_document": return "新規Document";
-    case "rename_document": return "名前変更";
-    case "delete_document": return "削除";
-    default: return "本文変更";
-  }
+  return kind === "text_edit" ? "本文変更" : kind;
 }
 
 function diffLineClass(line: string): string {

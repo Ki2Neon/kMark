@@ -1,7 +1,6 @@
 import {
   type DocumentSessionPayload,
   type ExternalApiPreferencesPayload,
-  type ExternalApiRootPayload,
   type ExternalApiStatusPayload,
   type PendingExternalProposalsPayload,
 } from "../contracts/generated";
@@ -35,14 +34,6 @@ export function getExternalApiStatus(): Promise<ExternalApiStatusPayload> {
     "get_external_api_status",
     {},
     "外部API状態を取得できませんでした。",
-  );
-}
-
-export function pickExternalApiRoot(): Promise<ExternalApiRootPayload | null> {
-  return invokeTauriCommand(
-    "pick_external_api_root",
-    {},
-    "外部APIの公開Rootを選択できませんでした。",
   );
 }
 
@@ -121,21 +112,5 @@ export function rejectExternalProposal(proposalId: string): Promise<void> {
     "reject_external_proposal",
     { proposalId },
     "外部変更案を却下できませんでした。",
-  );
-}
-
-export function commitStagedFileOperation(sessionId: string): Promise<DocumentSessionPayload> {
-  return invokeTauriCommand(
-    "commit_staged_file_operation",
-    { sessionId },
-    "File操作を確定できませんでした。",
-  );
-}
-
-export function cancelStagedFileOperation(sessionId: string): Promise<DocumentSessionPayload> {
-  return invokeTauriCommand(
-    "cancel_staged_file_operation",
-    { sessionId },
-    "File操作を取消できませんでした。",
   );
 }

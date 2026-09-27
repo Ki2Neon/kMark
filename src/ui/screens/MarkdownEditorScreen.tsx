@@ -151,7 +151,6 @@ export function MarkdownEditorScreen({
     content,
     currentDocumentFilePath,
     errorMessage,
-    externalSession,
     fileName,
     isDirty,
     isReady: isEditorReady,
@@ -164,8 +163,6 @@ export function MarkdownEditorScreen({
     defaultPreviewTextStyle,
     confirmDiscard,
     handleContentChange,
-    handleCancelStagedFileOperation,
-    handleCommitStagedFileOperation,
     handleLoadExternalDocument,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
@@ -779,9 +776,7 @@ export function MarkdownEditorScreen({
     onAppThemeChange,
     onEditFontChange,
     onEditFontSizeChange,
-    onExternalApiAddRoot: () => void externalApi.addRoot(),
     onExternalApiEnabledChange: externalApi.setEnabled,
-    onExternalApiRemoveRoot: externalApi.removeRoot,
     onLineWrappingEnabledChange,
     onSystemFontSizeChange,
     onLayoutModeChange: handleLayoutModeChange,
@@ -1023,24 +1018,6 @@ export function MarkdownEditorScreen({
 
       <ExternalProposalReviewDialog />
 
-      {externalSession?.stagedFileOperation != null ? (
-        <div className="external-operation__overlay">
-          <section className="external-operation" role="alertdialog" aria-modal="true" aria-label="File操作の確定">
-            <div>
-              <h2>File操作を確定</h2>
-              <p>
-                {externalSession?.stagedFileOperation.kind === "delete"
-                  ? `${externalSession.stagedFileOperation.sourceRelativePath} をRecycle Binへ移動`
-                  : `${externalSession?.stagedFileOperation.sourceRelativePath} を ${externalSession?.stagedFileOperation.targetRelativePath ?? ""} へ変更`}
-              </p>
-            </div>
-            <div className="external-operation__actions">
-              <button type="button" onClick={() => void handleCancelStagedFileOperation()}>取消</button>
-              <button type="button" onClick={() => void handleCommitStagedFileOperation()}>確定</button>
-            </div>
-          </section>
-        </div>
-      ) : null}
     </main>
   );
 }

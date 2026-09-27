@@ -62,37 +62,11 @@ export function useExternalApiPreferences() {
     }
   }, [persist, preferences]);
 
-  const addRoot = useCallback(async () => {
-    if (preferences === null) {
-      return;
-    }
-    try {
-      const root = await gateway.pickRoot();
-      if (root === null || preferences.roots.some((candidate) => candidate.id === root.id)) {
-        return;
-      }
-      await persist({ ...preferences, roots: [...preferences.roots, root] });
-    } catch (pickError) {
-      setError(errorMessage(pickError));
-    }
-  }, [gateway, persist, preferences]);
-
-  const removeRoot = useCallback((rootId: string) => {
-    if (preferences !== null) {
-      void persist({
-        ...preferences,
-        roots: preferences.roots.filter((root) => root.id !== rootId),
-      });
-    }
-  }, [persist, preferences]);
-
   return {
-    addRoot,
     available,
     error,
     isSaving,
     preferences,
-    removeRoot,
     setEnabled,
     status,
   };

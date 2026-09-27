@@ -1,12 +1,5 @@
-export type ExternalApiRoot = {
-  readonly id: string;
-  readonly label: string;
-  readonly path: string;
-};
-
 export type ExternalApiPreferences = {
   readonly enabled: boolean;
-  readonly roots: readonly ExternalApiRoot[];
 };
 
 export type ExternalApiStatus = {
@@ -29,7 +22,6 @@ export type ExternalApiGateway = {
   getPreferences(): Promise<ExternalApiPreferences>;
   setPreferences(preferences: ExternalApiPreferences): Promise<ExternalApiPreferences>;
   getStatus(): Promise<ExternalApiStatus>;
-  pickRoot(): Promise<ExternalApiRoot | null>;
   getPendingProposals(): Promise<readonly ExternalProposalReview[]>;
   listenForProposal(callback: () => void): Promise<() => void>;
   acceptProposal(proposalId: string): Promise<void>;

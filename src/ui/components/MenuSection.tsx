@@ -64,9 +64,7 @@ type MenuSectionProps = {
   readonly onAppFontChange: (appFontId: AppFontId) => void;
   readonly onAppThemeChange: (appThemeId: AppThemeId) => void;
   readonly onEditFontChange: (editFontId: EditFontId) => void;
-  readonly onExternalApiAddRoot: () => void;
   readonly onExternalApiEnabledChange: (enabled: boolean) => void;
-  readonly onExternalApiRemoveRoot: (rootId: string) => void;
   readonly onEditFontSizeChange: (editFontSizePx: EditFontSizePx) => void;
   readonly onSystemFontSizeChange: (systemFontSizePx: SystemFontSizePx) => void;
   readonly onLayoutModeChange: (layoutMode: LayoutMode) => void;
@@ -148,9 +146,7 @@ function MenuSectionComponent({
   onAppFontChange,
   onAppThemeChange,
   onEditFontChange,
-  onExternalApiAddRoot,
   onExternalApiEnabledChange,
-  onExternalApiRemoveRoot,
   onEditFontSizeChange,
   onSystemFontSizeChange,
   onLayoutModeChange,
@@ -1274,28 +1270,6 @@ function MenuSectionComponent({
           {externalApiStatus?.endpoint !== null && externalApiStatus?.endpoint !== undefined ? (
             <p className="menu-section__endpoint" title={externalApiStatus.endpoint}>{externalApiStatus.endpoint}</p>
           ) : null}
-          <div className="menu-section__root-list">
-            {externalApiPreferences?.roots.map((root) => (
-              <div className="menu-section__root" key={root.id}>
-                <span title={root.path}>{root.label}<small>{root.path}</small></span>
-                <button
-                  type="button"
-                  disabled={externalApiIsSaving}
-                  onClick={() => onExternalApiRemoveRoot(root.id)}
-                  aria-label={`${root.label}を公開Rootから削除`}
-                  title="Rootを削除"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="menu-section__actions">
-            <button type="button" disabled={externalApiIsSaving} onClick={onExternalApiAddRoot}>
-              <MenuIcon name="folder" />
-              <span>公開Rootを追加</span>
-            </button>
-          </div>
           {externalApiError !== null ? <p className="menu-section__field-error" role="alert">{externalApiError}</p> : null}
         </div>
       ) : null}

@@ -532,30 +532,6 @@ export function useMarkdownEditor(
     reloadPlantUml();
   }, []);
 
-  const handleCommitStagedFileOperation = useCallback(async () => {
-    const session = externalSessionRef.current;
-    if (session === null) {
-      return;
-    }
-    try {
-      applyExternalSession(await externalSessionGatewayRef.current.commitStagedOperation(session.sessionId));
-    } catch (error) {
-      controller.raiseError(store, toEditorSessionErrorMessage(error));
-    }
-  }, [applyExternalSession, controller, store]);
-
-  const handleCancelStagedFileOperation = useCallback(async () => {
-    const session = externalSessionRef.current;
-    if (session === null) {
-      return;
-    }
-    try {
-      applyExternalSession(await externalSessionGatewayRef.current.cancelStagedOperation(session.sessionId));
-    } catch (error) {
-      controller.raiseError(store, toEditorSessionErrorMessage(error));
-    }
-  }, [applyExternalSession, controller, store]);
-
   const handleErrorRaise = useCallback((message: string) => {
     controller.raiseError(store, message);
   }, [controller, store]);
@@ -590,8 +566,6 @@ export function useMarkdownEditor(
     confirmDiscard,
     handleClearPendingExternalDocuments,
     handleContentChange,
-    handleCancelStagedFileOperation,
-    handleCommitStagedFileOperation,
     handleErrorClear,
     handleErrorRaise,
     handleImportDroppedAssets,

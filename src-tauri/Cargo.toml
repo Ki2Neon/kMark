@@ -35,7 +35,6 @@ base64.workspace = true
 rand = "0.9"
 sha2.workspace = true
 tokio.workspace = true
-trash = "5.2.6"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38.2"

@@ -5,7 +5,6 @@ import {
   getExternalApiStatus,
   getPendingExternalProposals,
   listenForExternalProposalCreated,
-  pickExternalApiRoot,
   rejectExternalProposal,
   setExternalApiPreferences,
 } from "../../infra/externalApi";
@@ -17,7 +16,6 @@ export function createTauriExternalApiGateway(): ExternalApiGateway {
     getPreferences: getExternalApiPreferences,
     setPreferences: setExternalApiPreferences,
     getStatus: getExternalApiStatus,
-    pickRoot: pickExternalApiRoot,
     getPendingProposals: async () => (await getPendingExternalProposals()).proposals,
     listenForProposal: listenForExternalProposalCreated,
     acceptProposal: async (proposalId) => {

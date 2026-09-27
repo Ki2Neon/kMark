@@ -5,6 +5,7 @@ mod editor_preferences_store;
 mod external_api_file_repository;
 mod external_api_preferences_store;
 mod external_api_runtime;
+mod external_api_save_path_picker;
 mod file_system_asset_repository;
 mod file_system_markdown_document_repository;
 mod in_memory_open_request_queue;
@@ -28,6 +29,7 @@ pub(crate) use external_api_preferences_store::{
     load_external_api_preferences, persist_external_api_preferences,
 };
 pub(crate) use external_api_runtime::{generate_instance_id, ExternalApiRuntime};
+pub(crate) use external_api_save_path_picker::TauriSavePathPicker;
 pub(crate) use file_system_asset_repository::FileSystemAssetRepository;
 pub(crate) use file_system_markdown_document_repository::FileSystemMarkdownDocumentRepository;
 pub(crate) use in_memory_open_request_queue::InMemoryOpenRequestQueue;

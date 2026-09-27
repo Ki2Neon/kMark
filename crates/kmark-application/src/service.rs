@@ -1,17 +1,16 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
 };
 
 use kmark_core::ensure_markdown_file_name;
 use similar::TextDiff;
 
+use crate::model::DocumentSession;
 use crate::{
-    ApplicationError, ApplicationErrorCode, ApplicationEvent, CreateDocumentProposal,
-    CreateDocumentProposalInput, DocumentFileRepository, DocumentSession, DocumentSnapshot,
-    FileEntry, InstanceProposalStatus, ProposalStatus, ReadFileResult, RegisteredRoot, SearchMatch,
-    SessionProposal, SessionProposalInput, StagedFileOperation, StagedFileOperationKind, TextEdit,
+    ApplicationError, ApplicationErrorCode, ApplicationEvent, DocumentFileRepository,
+    DocumentSnapshot, ProposalStatus, SessionProposal, SessionProposalInput, TextEdit,
 };
 
 pub trait ApplicationEventSink: Send + Sync {
@@ -28,11 +27,8 @@ impl ApplicationEventSink for NoopApplicationEventSink {
 #[derive(Default)]
 struct ApplicationState {
     next_id: u64,
-    roots: Vec<RegisteredRoot>,
     sessions: HashMap<String, DocumentSession>,
     session_proposals: HashMap<String, SessionProposal>,
-    create_proposals: HashMap<String, CreateDocumentProposal>,
-    active_session_id: Option<String>,
 }
 
 pub struct ApplicationService {
@@ -60,14 +56,6 @@ impl ApplicationService {
         &self.instance_id
     }
 
-    pub fn replace_roots(&self, roots: Vec<RegisteredRoot>) {
-        self.lock_state().roots = roots;
-    }
-
-    pub fn roots(&self) -> Vec<RegisteredRoot> {
-        self.lock_state().roots.clone()
-    }
-
     pub fn register_frontend_session(
         &self,
         window_label: String,
@@ -76,43 +64,48 @@ impl ApplicationService {
         content: String,
         is_dirty: bool,
     ) -> Result<DocumentSnapshot, ApplicationError> {
-        let roots = self.roots();
-        let resolved_location = file_path.as_deref().and_then(|path| {
-            self.file_repository
-                .resolve_registered_path(&roots, PathBuf::from(path).as_path())
-        });
-        let persisted_fingerprint =
-            resolved_location
-                .as_ref()
-                .and_then(|(root_id, relative_path)| {
-                    roots
-                        .iter()
-                        .find(|root| root.id == *root_id)
-                        .and_then(|root| self.file_repository.fingerprint(root, relative_path).ok())
-                });
+        let disk_file = file_path
+            .as_deref()
+            .and_then(|path| self.file_repository.read_utf8(Path::new(path)).ok());
+        let normalized_path = disk_file
+            .as_ref()
+            .map(|file| file.absolute_path.clone())
+            .or_else(|| file_path.map(PathBuf::from));
 
         let mut state = self.lock_state();
+        if let Some(existing_id) = normalized_path.as_ref().and_then(|path| {
+            state
+                .sessions
+                .values()
+                .find(|session| {
+                    session
+                        .file_path
+                        .as_ref()
+                        .is_some_and(|candidate| same_path(candidate, path))
+                })
+                .map(|session| session.id.clone())
+        }) {
+            let session = state
+                .sessions
+                .get_mut(&existing_id)
+                .expect("session resolved above");
+            session.attached_window_label = Some(window_label);
+            return Ok(session.snapshot(&self.instance_id));
+        }
+
         let session_id = next_id(&self.instance_id, &mut state, "session");
-        let (root_id, relative_path) = resolved_location
-            .map(|(root_id, relative_path)| (Some(root_id), Some(relative_path)))
-            .unwrap_or((None, None));
         let session = DocumentSession {
             id: session_id.clone(),
             revision: 1,
             file_name: ensure_markdown_file_name(&file_name),
-            file_path: file_path.map(PathBuf::from),
-            root_id: root_id.clone(),
-            relative_path,
+            file_path: normalized_path,
             content,
             is_dirty,
-            externally_visible: root_id.is_some(),
             attached_window_label: Some(window_label),
-            persisted_fingerprint,
+            persisted_fingerprint: disk_file.map(|file| file.fingerprint),
             pending_proposal_id: None,
-            staged_file_operation: None,
         };
         let snapshot = session.snapshot(&self.instance_id);
-        state.active_session_id = Some(session_id.clone());
         state.sessions.insert(session_id, session);
         Ok(snapshot)
     }
@@ -126,35 +119,26 @@ impl ApplicationService {
         content: String,
         is_dirty: bool,
     ) -> Result<DocumentSnapshot, ApplicationError> {
-        let roots = self.roots();
-        let resolved_location = file_path.as_deref().and_then(|path| {
-            self.file_repository
-                .resolve_registered_path(&roots, PathBuf::from(path).as_path())
-        });
+        let next_file_name = ensure_markdown_file_name(&file_name);
+        let requested_path = file_path.map(PathBuf::from);
+        let disk_file = if !is_dirty {
+            requested_path
+                .as_deref()
+                .and_then(|path| self.file_repository.read_utf8(path).ok())
+        } else {
+            None
+        };
+        let next_file_path = disk_file
+            .as_ref()
+            .map(|file| file.absolute_path.clone())
+            .or(requested_path);
+
         let mut state = self.lock_state();
         let session = state
             .sessions
             .get_mut(session_id)
             .ok_or_else(session_not_found)?;
         ensure_revision(session.revision, expected_revision)?;
-        if matches!(
-            session
-                .staged_file_operation
-                .as_ref()
-                .map(|operation| &operation.kind),
-            Some(StagedFileOperationKind::Delete)
-        ) {
-            return Err(ApplicationError::new(
-                ApplicationErrorCode::DeleteStaged,
-                "document editing is disabled while delete is staged",
-            ));
-        }
-
-        let next_file_name = ensure_markdown_file_name(&file_name);
-        let next_file_path = file_path.map(PathBuf::from);
-        let (next_root_id, next_relative_path) = resolved_location
-            .map(|(root_id, relative_path)| (Some(root_id), Some(relative_path)))
-            .unwrap_or((None, None));
         if session.file_name == next_file_name
             && session.file_path == next_file_path
             && session.content == content
@@ -162,26 +146,25 @@ impl ApplicationService {
         {
             return Ok(session.snapshot(&self.instance_id));
         }
-
+        let path_changed = session.file_path != next_file_path;
         session.file_name = next_file_name;
         session.file_path = next_file_path;
-        session.root_id = next_root_id.clone();
-        session.relative_path = next_relative_path;
-        session.externally_visible = next_root_id.is_some() || session.externally_visible;
         session.content = content;
         session.is_dirty = is_dirty;
+        if let Some(file) = disk_file {
+            session.persisted_fingerprint = Some(file.fingerprint);
+        } else if path_changed {
+            session.persisted_fingerprint = None;
+        }
         session.revision = next_revision(session.revision)?;
         let snapshot = session.snapshot(&self.instance_id);
-        self.event_sink.publish(&ApplicationEvent::SessionChanged {
-            session_id: session_id.to_owned(),
-            revision: snapshot.revision,
-        });
+        drop(state);
+        self.publish_changed(&snapshot);
         Ok(snapshot)
     }
 
     pub fn detach_window(&self, window_label: &str) {
-        let mut state = self.lock_state();
-        for session in state.sessions.values_mut() {
+        for session in self.lock_state().sessions.values_mut() {
             if session.attached_window_label.as_deref() == Some(window_label) {
                 session.attached_window_label = None;
             }
@@ -199,128 +182,199 @@ impl ApplicationService {
             .get_mut(session_id)
             .ok_or_else(session_not_found)?;
         session.attached_window_label = Some(window_label);
-        let snapshot = session.snapshot(&self.instance_id);
-        state.active_session_id = Some(session_id.to_owned());
-        Ok(snapshot)
+        Ok(session.snapshot(&self.instance_id))
     }
 
-    pub fn activate_window(&self, window_label: &str) {
+    pub fn reserve_session_window(
+        &self,
+        session_id: &str,
+        window_label: String,
+    ) -> Result<bool, ApplicationError> {
         let mut state = self.lock_state();
-        state.active_session_id = state
+        let session = state
             .sessions
-            .values()
-            .find(|session| session.attached_window_label.as_deref() == Some(window_label))
-            .map(|session| session.id.clone());
+            .get_mut(session_id)
+            .ok_or_else(session_not_found)?;
+        if session.attached_window_label.is_some() {
+            return Ok(false);
+        }
+        session.attached_window_label = Some(window_label);
+        Ok(true)
     }
+
+    pub fn activate_window(&self, _window_label: &str) {}
 
     pub fn sessions(&self) -> Vec<DocumentSnapshot> {
-        let state = self.lock_state();
-        let mut sessions = state
+        let mut sessions = self
+            .lock_state()
             .sessions
             .values()
-            .filter(|session| session.externally_visible)
             .map(|session| session.snapshot(&self.instance_id))
             .collect::<Vec<_>>();
         sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
         sessions
     }
 
-    pub fn current_session(&self) -> Option<DocumentSnapshot> {
-        let state = self.lock_state();
-        state
-            .active_session_id
-            .as_ref()
-            .and_then(|session_id| state.sessions.get(session_id))
-            .filter(|session| session.externally_visible)
-            .map(|session| session.snapshot(&self.instance_id))
-    }
-
     pub fn session(&self, session_id: &str) -> Result<DocumentSnapshot, ApplicationError> {
         self.lock_state()
             .sessions
             .get(session_id)
-            .filter(|session| session.externally_visible)
             .map(|session| session.snapshot(&self.instance_id))
             .ok_or_else(session_not_found)
     }
 
     pub fn session_for_ui(&self, session_id: &str) -> Result<DocumentSnapshot, ApplicationError> {
+        self.session(session_id)
+    }
+
+    pub fn session_window_label(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>, ApplicationError> {
         self.lock_state()
             .sessions
             .get(session_id)
-            .map(|session| session.snapshot(&self.instance_id))
+            .map(|session| session.attached_window_label.clone())
             .ok_or_else(session_not_found)
     }
 
     pub fn session_has_attached_window(&self, session_id: &str) -> Result<bool, ApplicationError> {
-        self.lock_state()
+        self.session_window_label(session_id)
+            .map(|label| label.is_some())
+    }
+
+    pub fn create_session(&self, suggested_file_name: String) -> DocumentSnapshot {
+        let mut state = self.lock_state();
+        let session_id = next_id(&self.instance_id, &mut state, "session");
+        let session = DocumentSession {
+            id: session_id.clone(),
+            revision: 1,
+            file_name: ensure_markdown_file_name(&suggested_file_name),
+            file_path: None,
+            content: String::new(),
+            is_dirty: false,
+            attached_window_label: None,
+            persisted_fingerprint: None,
+            pending_proposal_id: None,
+        };
+        let snapshot = session.snapshot(&self.instance_id);
+        state.sessions.insert(session_id, session);
+        drop(state);
+        self.request_presentation(&snapshot.session_id);
+        snapshot
+    }
+
+    pub fn open_session(&self, absolute_path: &Path) -> Result<DocumentSnapshot, ApplicationError> {
+        validate_document_path(absolute_path)?;
+        let file = self.file_repository.read_utf8(absolute_path)?;
+        validate_document_path(&file.absolute_path)?;
+
+        let mut state = self.lock_state();
+        if let Some(snapshot) = state
             .sessions
-            .get(session_id)
-            .map(|session| session.attached_window_label.is_some())
-            .ok_or_else(session_not_found)
-    }
+            .values()
+            .find(|session| {
+                session
+                    .file_path
+                    .as_ref()
+                    .is_some_and(|path| same_path(path, &file.absolute_path))
+            })
+            .map(|session| session.snapshot(&self.instance_id))
+        {
+            drop(state);
+            self.request_presentation(&snapshot.session_id);
+            return Ok(snapshot);
+        }
 
-    pub fn read_file(
-        &self,
-        root_id: &str,
-        relative_path: &str,
-    ) -> Result<ReadFileResult, ApplicationError> {
-        let root = self.root(root_id)?;
-        self.file_repository.read_utf8(&root, relative_path)
-    }
-
-    pub fn list_entries(
-        &self,
-        root_id: &str,
-        relative_directory: &str,
-        limit: usize,
-    ) -> Result<Vec<FileEntry>, ApplicationError> {
-        let root = self.root(root_id)?;
-        self.file_repository
-            .list_entries(&root, relative_directory, limit.min(1_000))
-    }
-
-    pub fn search_files(
-        &self,
-        root_id: &str,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<SearchMatch>, ApplicationError> {
-        let root = self.root(root_id)?;
-        self.file_repository
-            .search_utf8(&root, query, limit.min(500))
-    }
-
-    pub fn open_session(
-        &self,
-        root_id: &str,
-        relative_path: &str,
-    ) -> Result<DocumentSnapshot, ApplicationError> {
-        let root = self.root(root_id)?;
-        let file = self.file_repository.read_utf8(&root, relative_path)?;
-        let file_name = PathBuf::from(&file.relative_path)
+        let file_name = file
+            .absolute_path
             .file_name()
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_else(|| "untitled.md".to_owned());
-        let mut state = self.lock_state();
         let session_id = next_id(&self.instance_id, &mut state, "session");
         let session = DocumentSession {
             id: session_id.clone(),
             revision: 1,
             file_name,
             file_path: Some(file.absolute_path),
-            root_id: Some(root.id),
-            relative_path: Some(file.relative_path),
             content: file.content,
             is_dirty: false,
-            externally_visible: true,
             attached_window_label: None,
             persisted_fingerprint: Some(file.fingerprint),
             pending_proposal_id: None,
-            staged_file_operation: None,
         };
         let snapshot = session.snapshot(&self.instance_id);
         state.sessions.insert(session_id, session);
+        drop(state);
+        self.request_presentation(&snapshot.session_id);
+        Ok(snapshot)
+    }
+
+    pub fn save_session(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        destination: Option<&Path>,
+    ) -> Result<DocumentSnapshot, ApplicationError> {
+        if let Some(path) = destination {
+            validate_document_path(path)?;
+        }
+        let mut state = self.lock_state();
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(session_not_found)?;
+        ensure_revision(session.revision, expected_revision)?;
+        if session.pending_proposal_id.is_some() {
+            return Err(ApplicationError::new(
+                ApplicationErrorCode::ProposalPending,
+                "document session has a pending proposal",
+            ));
+        }
+        let target = destination
+            .map(Path::to_path_buf)
+            .or_else(|| session.file_path.clone())
+            .ok_or_else(|| {
+                ApplicationError::new(
+                    ApplicationErrorCode::InvalidState,
+                    "untitled document requires a save destination",
+                )
+            })?;
+        validate_document_path(&target)?;
+
+        let overwrites_persisted = session
+            .file_path
+            .as_ref()
+            .is_some_and(|path| same_path(path, &target));
+        if overwrites_persisted {
+            let expected = session.persisted_fingerprint.as_ref().ok_or_else(|| {
+                ApplicationError::new(
+                    ApplicationErrorCode::InvalidState,
+                    "saved document fingerprint is unavailable",
+                )
+            })?;
+            let current = self.file_repository.fingerprint(&target)?;
+            if &current != expected {
+                return Err(ApplicationError::new(
+                    ApplicationErrorCode::DiskFileChanged,
+                    "document file changed on disk after it was opened",
+                ));
+            }
+        }
+
+        let written = self.file_repository.write_utf8(&target, &session.content)?;
+        session.file_path = Some(written.absolute_path.clone());
+        session.file_name = written
+            .absolute_path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| session.file_name.clone());
+        session.persisted_fingerprint = Some(written.fingerprint);
+        session.is_dirty = false;
+        session.revision = next_revision(session.revision)?;
+        let snapshot = session.snapshot(&self.instance_id);
+        drop(state);
+        self.publish_changed(&snapshot);
         Ok(snapshot)
     }
 
@@ -333,7 +387,6 @@ impl ApplicationService {
         let session = state
             .sessions
             .get(session_id)
-            .filter(|session| session.externally_visible)
             .ok_or_else(session_not_found)?;
         if session.pending_proposal_id.is_some() {
             return Err(ApplicationError::new(
@@ -341,16 +394,9 @@ impl ApplicationService {
                 "document session already has a pending proposal",
             ));
         }
-        let expected_revision = proposal_expected_revision(&input);
-        ensure_revision(session.revision, expected_revision)?;
+        ensure_revision(session.revision, input.expected_revision)?;
+        let proposed_content = apply_text_edits(&session.content, &input.operations)?;
         let base_content = session.content.clone();
-        let kind = build_proposal_kind(session, input)?;
-        let proposed_content = match &kind {
-            crate::model::SessionProposalKind::TextEdit { operations } => {
-                apply_text_edits(&base_content, operations)?
-            }
-            _ => base_content.clone(),
-        };
         let base_revision = session.revision;
         let base_content_hash = stable_content_hash(&base_content);
         let proposal_id = next_id(&self.instance_id, &mut state, "proposal");
@@ -360,7 +406,7 @@ impl ApplicationService {
             base_revision,
             base_content_hash,
             status: ProposalStatus::Pending,
-            kind,
+            operations: input.operations,
             unified_diff: unified_diff(&base_content, &proposed_content),
         };
         state
@@ -392,124 +438,40 @@ impl ApplicationService {
         &self,
         proposal_id: &str,
     ) -> Result<DocumentSnapshot, ApplicationError> {
-        let proposal = self.session_proposal(proposal_id)?;
+        let mut state = self.lock_state();
+        let proposal = state
+            .session_proposals
+            .get(proposal_id)
+            .cloned()
+            .ok_or_else(proposal_not_found)?;
         if proposal.status != ProposalStatus::Pending {
             return Err(ApplicationError::new(
                 ApplicationErrorCode::InvalidState,
                 "proposal is not pending",
             ));
         }
-
-        let fingerprint_for_stage = match &proposal.kind {
-            crate::model::SessionProposalKind::RenameDocument { .. }
-            | crate::model::SessionProposalKind::DeleteDocument => {
-                let state = self.lock_state();
-                let session = state
-                    .sessions
-                    .get(&proposal.session_id)
-                    .ok_or_else(session_not_found)?;
-                if session.revision != proposal.base_revision {
-                    drop(state);
-                    self.mark_proposal_stale(proposal_id, &proposal.session_id);
-                    return Err(ApplicationError::new(
-                        ApplicationErrorCode::StaleProposal,
-                        "proposal base revision is stale",
-                    ));
-                }
-                let root_id = session.root_id.clone().ok_or_else(|| {
-                    ApplicationError::new(
-                        ApplicationErrorCode::InvalidState,
-                        "saved document root is required",
-                    )
-                })?;
-                let relative_path = session.relative_path.clone().ok_or_else(|| {
-                    ApplicationError::new(
-                        ApplicationErrorCode::InvalidState,
-                        "saved document path is required",
-                    )
-                })?;
-                let expected = session.persisted_fingerprint.clone();
-                drop(state);
-                let current = self
-                    .file_repository
-                    .fingerprint(&self.root(&root_id)?, &relative_path)?;
-                if expected
-                    .as_ref()
-                    .is_some_and(|expected| expected != &current)
-                {
-                    return Err(ApplicationError::new(
-                        ApplicationErrorCode::DiskFileChanged,
-                        "source file changed after the document was opened",
-                    ));
-                }
-                Some((root_id, relative_path, current))
-            }
-            _ => None,
-        };
-
-        let mut state = self.lock_state();
-        let current_revision = state
+        let session = state
             .sessions
-            .get(&proposal.session_id)
-            .ok_or_else(session_not_found)?
-            .revision;
-        if current_revision != proposal.base_revision {
-            drop(state);
-            self.mark_proposal_stale(proposal_id, &proposal.session_id);
+            .get_mut(&proposal.session_id)
+            .ok_or_else(session_not_found)?;
+        if session.revision != proposal.base_revision
+            || stable_content_hash(&session.content) != proposal.base_content_hash
+        {
+            session.pending_proposal_id = None;
+            state
+                .session_proposals
+                .get_mut(proposal_id)
+                .expect("proposal checked above")
+                .status = ProposalStatus::StaleProposal;
             return Err(ApplicationError::new(
                 ApplicationErrorCode::StaleProposal,
                 "proposal base revision is stale",
             ));
         }
-        let session = state
-            .sessions
-            .get_mut(&proposal.session_id)
-            .expect("session checked above");
-        if stable_content_hash(&session.content) != proposal.base_content_hash {
-            drop(state);
-            self.mark_proposal_stale(proposal_id, &proposal.session_id);
-            return Err(ApplicationError::new(
-                ApplicationErrorCode::StaleProposal,
-                "proposal base content is stale",
-            ));
-        }
-
-        match &proposal.kind {
-            crate::model::SessionProposalKind::TextEdit { operations } => {
-                session.content = apply_text_edits(&session.content, operations)?;
-                session.is_dirty = true;
-            }
-            crate::model::SessionProposalKind::RenameDocument {
-                target_relative_path,
-            } => {
-                let (root_id, relative_path, fingerprint) = fingerprint_for_stage
-                    .clone()
-                    .expect("rename fingerprint resolved above");
-                session.staged_file_operation = Some(StagedFileOperation {
-                    kind: StagedFileOperationKind::Rename {
-                        target_relative_path: target_relative_path.clone(),
-                    },
-                    source_root_id: root_id,
-                    source_relative_path: relative_path,
-                    source_fingerprint: fingerprint,
-                    staged_at_revision: next_revision(session.revision)?,
-                });
-            }
-            crate::model::SessionProposalKind::DeleteDocument => {
-                let (root_id, relative_path, fingerprint) = fingerprint_for_stage
-                    .clone()
-                    .expect("delete fingerprint resolved above");
-                session.staged_file_operation = Some(StagedFileOperation {
-                    kind: StagedFileOperationKind::Delete,
-                    source_root_id: root_id,
-                    source_relative_path: relative_path,
-                    source_fingerprint: fingerprint,
-                    staged_at_revision: next_revision(session.revision)?,
-                });
-            }
-        }
-        session.revision = next_revision(session.revision)?;
+        session.content = apply_text_edits(&session.content, &proposal.operations)?;
+        session.is_dirty = true;
         session.pending_proposal_id = None;
+        session.revision = next_revision(session.revision)?;
         let snapshot = session.snapshot(&self.instance_id);
         state
             .session_proposals
@@ -517,10 +479,7 @@ impl ApplicationService {
             .expect("proposal checked above")
             .status = ProposalStatus::Accepted;
         drop(state);
-        self.event_sink.publish(&ApplicationEvent::SessionChanged {
-            session_id: snapshot.session_id.clone(),
-            revision: snapshot.revision,
-        });
+        self.publish_changed(&snapshot);
         Ok(snapshot)
     }
 
@@ -546,258 +505,70 @@ impl ApplicationService {
         Ok(())
     }
 
-    pub fn create_document_proposal(
-        &self,
-        input: CreateDocumentProposalInput,
-    ) -> CreateDocumentProposal {
-        let mut state = self.lock_state();
-        let proposal_id = next_id(&self.instance_id, &mut state, "create-proposal");
-        let proposal = CreateDocumentProposal {
-            id: proposal_id.clone(),
-            suggested_file_name: ensure_markdown_file_name(&input.suggested_file_name),
-            content: input.content.clone(),
-            status: InstanceProposalStatus::Pending,
-            unified_diff: unified_diff("", &input.content),
-        };
-        state
-            .create_proposals
-            .insert(proposal_id.clone(), proposal.clone());
-        drop(state);
-        self.event_sink
-            .publish(&ApplicationEvent::InstanceProposalCreated { proposal_id });
-        proposal
-    }
-
-    pub fn create_document_proposal_by_id(
-        &self,
-        proposal_id: &str,
-    ) -> Result<CreateDocumentProposal, ApplicationError> {
-        self.lock_state()
-            .create_proposals
-            .get(proposal_id)
-            .cloned()
-            .ok_or_else(proposal_not_found)
-    }
-
-    pub fn accept_create_document_proposal(
-        &self,
-        proposal_id: &str,
-    ) -> Result<DocumentSnapshot, ApplicationError> {
-        let mut state = self.lock_state();
-        let proposal = state
-            .create_proposals
-            .get(proposal_id)
-            .cloned()
-            .ok_or_else(proposal_not_found)?;
-        if proposal.status != InstanceProposalStatus::Pending {
-            return Err(ApplicationError::new(
-                ApplicationErrorCode::InvalidState,
-                "proposal is not pending",
-            ));
-        }
-        let session_id = next_id(&self.instance_id, &mut state, "session");
-        let session = DocumentSession {
-            id: session_id.clone(),
-            revision: 1,
-            file_name: proposal.suggested_file_name,
-            file_path: None,
-            root_id: None,
-            relative_path: None,
-            content: proposal.content,
-            is_dirty: true,
-            externally_visible: true,
-            attached_window_label: None,
-            persisted_fingerprint: None,
-            pending_proposal_id: None,
-            staged_file_operation: None,
-        };
-        let snapshot = session.snapshot(&self.instance_id);
-        state.sessions.insert(session_id.clone(), session);
-        state
-            .create_proposals
-            .get_mut(proposal_id)
-            .expect("proposal checked above")
-            .status = InstanceProposalStatus::Accepted { session_id };
-        drop(state);
-        self.event_sink.publish(&ApplicationEvent::SessionChanged {
-            session_id: snapshot.session_id.clone(),
-            revision: snapshot.revision,
-        });
-        Ok(snapshot)
-    }
-
-    pub fn reject_create_document_proposal(
-        &self,
-        proposal_id: &str,
-    ) -> Result<(), ApplicationError> {
-        let mut state = self.lock_state();
-        let proposal = state
-            .create_proposals
-            .get_mut(proposal_id)
-            .ok_or_else(proposal_not_found)?;
-        if proposal.status != InstanceProposalStatus::Pending {
-            return Err(ApplicationError::new(
-                ApplicationErrorCode::InvalidState,
-                "proposal is not pending",
-            ));
-        }
-        proposal.status = InstanceProposalStatus::Rejected;
-        Ok(())
-    }
-
-    pub fn pending_proposals(&self) -> (Vec<CreateDocumentProposal>, Vec<SessionProposal>) {
-        let state = self.lock_state();
-        let mut create = state
-            .create_proposals
-            .values()
-            .filter(|proposal| proposal.status == InstanceProposalStatus::Pending)
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut session = state
+    pub fn pending_proposals(&self) -> Vec<SessionProposal> {
+        let mut proposals = self
+            .lock_state()
             .session_proposals
             .values()
             .filter(|proposal| proposal.status == ProposalStatus::Pending)
             .cloned()
             .collect::<Vec<_>>();
-        create.sort_by(|left, right| left.id.cmp(&right.id));
-        session.sort_by(|left, right| left.id.cmp(&right.id));
-        (create, session)
+        proposals.sort_by(|left, right| left.id.cmp(&right.id));
+        proposals
     }
 
-    pub fn commit_staged_file_operation(
-        &self,
-        session_id: &str,
-    ) -> Result<DocumentSnapshot, ApplicationError> {
-        let (stage, content) = {
-            let state = self.lock_state();
-            let session = state
-                .sessions
-                .get(session_id)
-                .ok_or_else(session_not_found)?;
-            (
-                session
-                    .staged_file_operation
-                    .clone()
-                    .ok_or_else(staged_operation_not_found)?,
-                session.content.clone(),
-            )
-        };
-        let root = self.root(&stage.source_root_id)?;
-        let current = self
-            .file_repository
-            .fingerprint(&root, &stage.source_relative_path)?;
-        if current != stage.source_fingerprint {
-            return Err(ApplicationError::new(
-                ApplicationErrorCode::DiskFileChanged,
-                "source file changed after the operation was staged",
-            ));
-        }
-
-        let renamed = match &stage.kind {
-            StagedFileOperationKind::Rename {
-                target_relative_path,
-            } => Some(self.file_repository.rename(
-                &root,
-                &stage.source_relative_path,
-                target_relative_path,
-            )?),
-            StagedFileOperationKind::Delete => {
-                self.file_repository
-                    .move_to_trash(&root, &stage.source_relative_path)?;
-                None
-            }
-        };
-
-        let mut state = self.lock_state();
-        let session = state
-            .sessions
-            .get_mut(session_id)
-            .ok_or_else(session_not_found)?;
-        if session.staged_file_operation.as_ref() != Some(&stage) {
-            return Err(ApplicationError::new(
-                ApplicationErrorCode::InvalidState,
-                "staged file operation changed while committing",
-            ));
-        }
-        match renamed {
-            Some(file) => {
-                session.file_path = Some(file.absolute_path);
-                session.relative_path = Some(file.relative_path.clone());
-                session.file_name = PathBuf::from(file.relative_path)
-                    .file_name()
-                    .map(|value| value.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| session.file_name.clone());
-                session.persisted_fingerprint = Some(file.fingerprint);
-            }
-            None => {
-                session.file_path = None;
-                session.root_id = None;
-                session.relative_path = None;
-                session.persisted_fingerprint = None;
-                session.is_dirty = !content.is_empty();
-            }
-        }
-        session.staged_file_operation = None;
-        session.revision = next_revision(session.revision)?;
-        let snapshot = session.snapshot(&self.instance_id);
-        drop(state);
+    fn publish_changed(&self, snapshot: &DocumentSnapshot) {
         self.event_sink.publish(&ApplicationEvent::SessionChanged {
             session_id: snapshot.session_id.clone(),
             revision: snapshot.revision,
         });
-        Ok(snapshot)
     }
 
-    pub fn cancel_staged_file_operation(
-        &self,
-        session_id: &str,
-    ) -> Result<DocumentSnapshot, ApplicationError> {
-        let mut state = self.lock_state();
-        let session = state
-            .sessions
-            .get_mut(session_id)
-            .ok_or_else(session_not_found)?;
-        if session.staged_file_operation.take().is_none() {
-            return Err(staged_operation_not_found());
-        }
-        session.revision = next_revision(session.revision)?;
-        let snapshot = session.snapshot(&self.instance_id);
-        drop(state);
-        self.event_sink.publish(&ApplicationEvent::SessionChanged {
-            session_id: snapshot.session_id.clone(),
-            revision: snapshot.revision,
-        });
-        Ok(snapshot)
-    }
-
-    fn root(&self, root_id: &str) -> Result<RegisteredRoot, ApplicationError> {
-        self.lock_state()
-            .roots
-            .iter()
-            .find(|root| root.id == root_id)
-            .cloned()
-            .ok_or_else(|| {
-                ApplicationError::new(
-                    ApplicationErrorCode::RootNotFound,
-                    "registered root not found",
-                )
-            })
-    }
-
-    fn mark_proposal_stale(&self, proposal_id: &str, session_id: &str) {
-        let mut state = self.lock_state();
-        if let Some(proposal) = state.session_proposals.get_mut(proposal_id) {
-            proposal.status = ProposalStatus::StaleProposal;
-        }
-        if let Some(session) = state.sessions.get_mut(session_id) {
-            session.pending_proposal_id = None;
-        }
+    fn request_presentation(&self, session_id: &str) {
+        self.event_sink
+            .publish(&ApplicationEvent::SessionPresentationRequested {
+                session_id: session_id.to_owned(),
+            });
     }
 
     fn lock_state(&self) -> MutexGuard<'_, ApplicationState> {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+fn validate_document_path(path: &Path) -> Result<(), ApplicationError> {
+    if !path.is_absolute() {
+        return Err(ApplicationError::new(
+            ApplicationErrorCode::InvalidAbsolutePath,
+            "document path must be absolute",
+        ));
+    }
+    let supported = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown")
+        });
+    if !supported {
+        return Err(ApplicationError::new(
+            ApplicationErrorCode::UnsupportedFileType,
+            "Kmark can open and save Markdown files only",
+        ));
+    }
+    Ok(())
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
     }
 }
 
@@ -820,53 +591,6 @@ fn ensure_revision(current: u64, expected: u64) -> Result<(), ApplicationError> 
         Ok(())
     } else {
         Err(ApplicationError::revision_conflict(current))
-    }
-}
-
-fn proposal_expected_revision(input: &SessionProposalInput) -> u64 {
-    match input {
-        SessionProposalInput::TextEdit {
-            expected_revision, ..
-        }
-        | SessionProposalInput::RenameDocument {
-            expected_revision, ..
-        }
-        | SessionProposalInput::DeleteDocument { expected_revision } => *expected_revision,
-    }
-}
-
-fn build_proposal_kind(
-    session: &DocumentSession,
-    input: SessionProposalInput,
-) -> Result<crate::model::SessionProposalKind, ApplicationError> {
-    match input {
-        SessionProposalInput::TextEdit { operations, .. } => {
-            let _ = apply_text_edits(&session.content, &operations)?;
-            Ok(crate::model::SessionProposalKind::TextEdit { operations })
-        }
-        SessionProposalInput::RenameDocument {
-            target_relative_path,
-            ..
-        } => {
-            if session.root_id.is_none() || session.relative_path.is_none() {
-                return Err(ApplicationError::new(
-                    ApplicationErrorCode::InvalidState,
-                    "saved document is required for rename",
-                ));
-            }
-            Ok(crate::model::SessionProposalKind::RenameDocument {
-                target_relative_path,
-            })
-        }
-        SessionProposalInput::DeleteDocument { .. } => {
-            if session.root_id.is_none() || session.relative_path.is_none() {
-                return Err(ApplicationError::new(
-                    ApplicationErrorCode::InvalidState,
-                    "saved document is required for delete",
-                ));
-            }
-            Ok(crate::model::SessionProposalKind::DeleteDocument)
-        }
     }
 }
 
@@ -904,7 +628,6 @@ fn unified_diff(base: &str, proposed: &str) -> String {
 }
 
 fn stable_content_hash(content: &str) -> String {
-    // FNV-1a is used only as an in-memory stale-content guard. Disk identity uses SHA-256.
     let mut hash = 0xcbf29ce484222325u64;
     for byte in content.as_bytes() {
         hash ^= u64::from(*byte);
@@ -924,119 +647,147 @@ fn proposal_not_found() -> ApplicationError {
     ApplicationError::new(ApplicationErrorCode::ProposalNotFound, "proposal not found")
 }
 
-fn staged_operation_not_found() -> ApplicationError {
-    ApplicationError::new(
-        ApplicationErrorCode::StagedOperationNotFound,
-        "staged file operation not found",
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
+    use std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
+    };
 
     use crate::{
-        ApplicationError, ApplicationErrorCode, CreateDocumentProposalInput,
-        DocumentFileRepository, FileEntry, FileFingerprint, ReadFileResult, RegisteredRoot,
-        SearchMatch, SessionProposalInput, TextEdit,
+        ApplicationError, ApplicationErrorCode, DocumentFileRepository, FileFingerprint,
+        ReadFileResult, SessionProposalInput, TextEdit,
     };
 
     use super::{ApplicationService, NoopApplicationEventSink};
 
-    struct EmptyRepository;
+    #[derive(Default)]
+    struct MemoryRepository {
+        files: Mutex<HashMap<PathBuf, String>>,
+    }
 
-    impl DocumentFileRepository for EmptyRepository {
-        fn read_utf8(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_path: &str,
-        ) -> Result<ReadFileResult, ApplicationError> {
-            Err(ApplicationError::new(
-                ApplicationErrorCode::FileNotFound,
-                "not found",
-            ))
+    impl MemoryRepository {
+        fn with_file(path: PathBuf, content: &str) -> Self {
+            Self {
+                files: Mutex::new(HashMap::from([(path, content.to_owned())])),
+            }
         }
 
-        fn list_entries(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_directory: &str,
-            _limit: usize,
-        ) -> Result<Vec<FileEntry>, ApplicationError> {
-            Ok(Vec::new())
-        }
-
-        fn search_utf8(
-            &self,
-            _root: &RegisteredRoot,
-            _query: &str,
-            _limit: usize,
-        ) -> Result<Vec<SearchMatch>, ApplicationError> {
-            Ok(Vec::new())
-        }
-
-        fn fingerprint(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_path: &str,
-        ) -> Result<FileFingerprint, ApplicationError> {
-            Err(ApplicationError::new(
-                ApplicationErrorCode::FileNotFound,
-                "not found",
-            ))
-        }
-
-        fn rename(
-            &self,
-            _root: &RegisteredRoot,
-            _source_relative_path: &str,
-            _target_relative_path: &str,
-        ) -> Result<ReadFileResult, ApplicationError> {
-            unreachable!()
-        }
-
-        fn move_to_trash(
-            &self,
-            _root: &RegisteredRoot,
-            _relative_path: &str,
-        ) -> Result<(), ApplicationError> {
-            unreachable!()
-        }
-
-        fn resolve_registered_path(
-            &self,
-            _roots: &[RegisteredRoot],
-            _absolute_path: &Path,
-        ) -> Option<(String, String)> {
-            None
+        fn result(path: &Path, content: String) -> ReadFileResult {
+            ReadFileResult {
+                absolute_path: path.to_path_buf(),
+                fingerprint: FileFingerprint {
+                    identity: path.to_string_lossy().into_owned(),
+                    sha256: super::stable_content_hash(&content),
+                    byte_length: content.len() as u64,
+                },
+                content,
+                modified_at_epoch_ms: None,
+            }
         }
     }
 
-    fn service() -> ApplicationService {
-        ApplicationService::new(
-            "instance",
-            Arc::new(EmptyRepository),
-            Arc::new(NoopApplicationEventSink),
-        )
+    impl DocumentFileRepository for MemoryRepository {
+        fn read_utf8(&self, path: &Path) -> Result<ReadFileResult, ApplicationError> {
+            self.files
+                .lock()
+                .unwrap()
+                .get(path)
+                .cloned()
+                .map(|content| Self::result(path, content))
+                .ok_or_else(|| {
+                    ApplicationError::new(ApplicationErrorCode::FileNotFound, "not found")
+                })
+        }
+
+        fn fingerprint(&self, path: &Path) -> Result<FileFingerprint, ApplicationError> {
+            self.read_utf8(path).map(|file| file.fingerprint)
+        }
+
+        fn write_utf8(
+            &self,
+            path: &Path,
+            content: &str,
+        ) -> Result<ReadFileResult, ApplicationError> {
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), content.to_owned());
+            Ok(Self::result(path, content.to_owned()))
+        }
+    }
+
+    fn service(repository: Arc<MemoryRepository>) -> ApplicationService {
+        ApplicationService::new("instance", repository, Arc::new(NoopApplicationEventSink))
+    }
+
+    fn absolute(name: &str) -> PathBuf {
+        std::env::temp_dir().join(name)
+    }
+
+    #[test]
+    fn creates_blank_clean_untitled_session() {
+        let session =
+            service(Arc::new(MemoryRepository::default())).create_session("created".to_owned());
+        assert_eq!(session.revision, 1);
+        assert_eq!(session.file_name, "created.md");
+        assert_eq!(session.file_path, None);
+        assert_eq!(session.content, "");
+        assert!(!session.is_dirty);
+    }
+
+    #[test]
+    fn opens_canonical_document_once() {
+        let path = absolute("kmark-open-once.md");
+        let service = service(Arc::new(MemoryRepository::with_file(path.clone(), "alpha")));
+        let first = service.open_session(&path).unwrap();
+        let second = service.open_session(&path).unwrap();
+        assert_eq!(first.session_id, second.session_id);
+        assert_eq!(service.sessions().len(), 1);
+    }
+
+    #[test]
+    fn reserves_only_one_window_for_a_session() {
+        let service = service(Arc::new(MemoryRepository::default()));
+        let session = service.create_session("note.md".to_owned());
+
+        assert!(service
+            .reserve_session_window(&session.session_id, "window-a".to_owned())
+            .unwrap());
+        assert!(!service
+            .reserve_session_window(&session.session_id, "window-b".to_owned())
+            .unwrap());
+        assert_eq!(
+            service.session_window_label(&session.session_id).unwrap(),
+            Some("window-a".to_owned())
+        );
+
+        service.detach_window("window-a");
+        assert!(service
+            .reserve_session_window(&session.session_id, "window-b".to_owned())
+            .unwrap());
     }
 
     #[test]
     fn rejects_accept_when_session_revision_changed_after_proposal() {
-        let service = service();
-        let session = service
-            .accept_create_document_proposal(
-                &service
-                    .create_document_proposal(CreateDocumentProposalInput {
-                        suggested_file_name: "note.md".to_owned(),
-                        content: "alpha".to_owned(),
-                    })
-                    .id,
+        let service = service(Arc::new(MemoryRepository::default()));
+        let session = service.create_session("note.md".to_owned());
+        service
+            .sync_frontend_session(
+                &session.session_id,
+                session.revision,
+                "note.md".to_owned(),
+                None,
+                "alpha".to_owned(),
+                true,
             )
-            .expect("create visible session");
+            .unwrap();
+        let session = service.session(&session.session_id).unwrap();
         let proposal = service
             .create_session_proposal(
                 &session.session_id,
-                SessionProposalInput::TextEdit {
+                SessionProposalInput {
                     expected_revision: session.revision,
                     operations: vec![TextEdit {
                         start: 0,
@@ -1045,7 +796,7 @@ mod tests {
                     }],
                 },
             )
-            .expect("create proposal");
+            .unwrap();
         service
             .sync_frontend_session(
                 &session.session_id,
@@ -1055,97 +806,123 @@ mod tests {
                 "local edit".to_owned(),
                 true,
             )
-            .expect("edit session");
-
-        let error = service
-            .accept_session_proposal(&proposal.id)
-            .expect_err("stale proposal must fail");
-
+            .unwrap();
+        let error = service.accept_session_proposal(&proposal.id).unwrap_err();
         assert_eq!(error.code(), ApplicationErrorCode::StaleProposal);
         assert_eq!(
             service
                 .session_proposal(&proposal.id)
-                .expect("proposal")
+                .unwrap()
                 .status
                 .as_str(),
             "stale_proposal"
         );
+    }
+
+    #[test]
+    fn saves_with_revision_and_disk_fingerprint_guards() {
+        let path = absolute("kmark-save.md");
+        let repository = Arc::new(MemoryRepository::with_file(path.clone(), "alpha"));
+        let service = service(repository.clone());
+        let session = service.open_session(&path).unwrap();
+        let edited = service
+            .sync_frontend_session(
+                &session.session_id,
+                session.revision,
+                session.file_name,
+                session.file_path,
+                "beta".to_owned(),
+                true,
+            )
+            .unwrap();
+        let saved = service
+            .save_session(&edited.session_id, edited.revision, None)
+            .unwrap();
+        assert_eq!(saved.revision, edited.revision + 1);
+        assert!(!saved.is_dirty);
+        assert_eq!(repository.read_utf8(&path).unwrap().content, "beta");
+        let error = service
+            .save_session(&saved.session_id, edited.revision, None)
+            .unwrap_err();
+        assert_eq!(error.code(), ApplicationErrorCode::RevisionConflict);
+    }
+
+    #[test]
+    fn rejects_save_while_edit_proposal_is_pending() {
+        let service = service(Arc::new(MemoryRepository::default()));
+        let session = service.create_session("note.md".to_owned());
+        let session = service
+            .sync_frontend_session(
+                &session.session_id,
+                session.revision,
+                session.file_name,
+                None,
+                "alpha".to_owned(),
+                true,
+            )
+            .unwrap();
+        service
+            .create_session_proposal(
+                &session.session_id,
+                SessionProposalInput {
+                    expected_revision: session.revision,
+                    operations: vec![TextEdit {
+                        start: 0,
+                        end: 5,
+                        text: "beta".to_owned(),
+                    }],
+                },
+            )
+            .unwrap();
+
+        let error = service
+            .save_session(
+                &session.session_id,
+                session.revision,
+                Some(&absolute("pending.md")),
+            )
+            .unwrap_err();
+
+        assert_eq!(error.code(), ApplicationErrorCode::ProposalPending);
+    }
+
+    #[test]
+    fn rejects_non_absolute_and_non_markdown_open_paths() {
+        let service = service(Arc::new(MemoryRepository::default()));
         assert_eq!(
             service
-                .session(&session.session_id)
-                .expect("session")
-                .content,
-            "local edit"
+                .open_session(Path::new("note.md"))
+                .unwrap_err()
+                .code(),
+            ApplicationErrorCode::InvalidAbsolutePath
+        );
+        assert_eq!(
+            service
+                .open_session(&absolute("note.txt"))
+                .unwrap_err()
+                .code(),
+            ApplicationErrorCode::UnsupportedFileType
         );
     }
 
     #[test]
-    fn create_proposal_accepts_into_dirty_untitled_session_without_disk_path() {
-        let service = service();
-        let proposal = service.create_document_proposal(CreateDocumentProposalInput {
-            suggested_file_name: "created".to_owned(),
-            content: "# Created".to_owned(),
-        });
-
+    fn rejects_non_utf8_boundary_edits() {
+        let service = service(Arc::new(MemoryRepository::default()));
+        let session = service.create_session("note.md".to_owned());
         let session = service
-            .accept_create_document_proposal(&proposal.id)
-            .expect("accept create proposal");
-
-        assert_eq!(session.file_name, "created.md");
-        assert_eq!(session.file_path, None);
-        assert!(session.is_dirty);
-        assert_eq!(session.content, "# Created");
-    }
-
-    #[test]
-    fn tracks_whether_a_session_has_an_attached_window() {
-        let service = service();
-        let session = service
-            .accept_create_document_proposal(
-                &service
-                    .create_document_proposal(CreateDocumentProposalInput {
-                        suggested_file_name: "note.md".to_owned(),
-                        content: String::new(),
-                    })
-                    .id,
+            .sync_frontend_session(
+                &session.session_id,
+                1,
+                "note.md".to_owned(),
+                None,
+                "あいう".to_owned(),
+                true,
             )
-            .expect("accept create proposal");
-
-        assert!(!service
-            .session_has_attached_window(&session.session_id)
-            .expect("query unattached session"));
-
-        service
-            .attach_session(&session.session_id, "editor-window".to_owned())
-            .expect("attach window");
-        assert!(service
-            .session_has_attached_window(&session.session_id)
-            .expect("query attached session"));
-
-        service.detach_window("editor-window");
-        assert!(!service
-            .session_has_attached_window(&session.session_id)
-            .expect("query detached session"));
-    }
-
-    #[test]
-    fn rejects_overlapping_and_non_utf8_boundary_edits() {
-        let service = service();
-        let session = service
-            .accept_create_document_proposal(
-                &service
-                    .create_document_proposal(CreateDocumentProposalInput {
-                        suggested_file_name: "note.md".to_owned(),
-                        content: "あいう".to_owned(),
-                    })
-                    .id,
-            )
-            .expect("create visible session");
-
+            .unwrap();
         let error = service
             .create_session_proposal(
                 &session.session_id,
-                SessionProposalInput::TextEdit {
+                SessionProposalInput {
                     expected_revision: session.revision,
                     operations: vec![TextEdit {
                         start: 1,
@@ -1154,8 +931,7 @@ mod tests {
                     }],
                 },
             )
-            .expect_err("non-boundary edit must fail");
-
+            .unwrap_err();
         assert_eq!(error.code(), ApplicationErrorCode::InvalidEditRange);
     }
 }
