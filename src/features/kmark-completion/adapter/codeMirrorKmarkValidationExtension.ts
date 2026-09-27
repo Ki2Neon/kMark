@@ -1,19 +1,59 @@
-import { RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+import { RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { validateKmarkDocument } from "../core/validateKmarkDirective";
 
+const setKmarkValidationDecorations = StateEffect.define<DecorationSet>();
+
 const kmarkValidationDecorationField = StateField.define<DecorationSet>({
-  create(state) {
-    return buildKmarkValidationDecorations(state.doc.toString());
+  create() {
+    return Decoration.none;
   },
   update(decorations, transaction) {
-    if (transaction.docChanged) {
-      return buildKmarkValidationDecorations(transaction.state.doc.toString());
+    let next = decorations.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(setKmarkValidationDecorations)) {
+        next = effect.value;
+      }
     }
-
-    return decorations.map(transaction.changes);
+    return next;
   },
   provide: (field) => EditorView.decorations.from(field),
+});
+
+const kmarkValidationAnalysisPlugin = ViewPlugin.fromClass(class {
+  #timer: number | null = null;
+  #revision = 0;
+
+  constructor(view: EditorView) {
+    this.#schedule(view, 0);
+  }
+
+  update(update: ViewUpdate): void {
+    if (update.docChanged) {
+      this.#schedule(update.view, 250);
+    }
+  }
+
+  destroy(): void {
+    if (this.#timer !== null) {
+      window.clearTimeout(this.#timer);
+    }
+  }
+
+  #schedule(view: EditorView, delayMs: number): void {
+    this.#revision += 1;
+    const revision = this.#revision;
+    if (this.#timer !== null) {
+      window.clearTimeout(this.#timer);
+    }
+    this.#timer = window.setTimeout(() => {
+      this.#timer = null;
+      const decorations = buildKmarkValidationDecorations(view.state.doc.toString());
+      if (revision === this.#revision) {
+        view.dispatch({ effects: setKmarkValidationDecorations.of(decorations) });
+      }
+    }, delayMs);
+  }
 });
 
 const kmarkValidationTheme = EditorView.baseTheme({
@@ -29,6 +69,7 @@ const kmarkValidationTheme = EditorView.baseTheme({
 export function createCodeMirrorKmarkValidationExtension(): Extension {
   return [
     kmarkValidationDecorationField,
+    kmarkValidationAnalysisPlugin,
     kmarkValidationTheme,
   ];
 }

@@ -1,5 +1,8 @@
 import { type PreviewDisplayMode } from "../domain/preview";
 import {
+  type EditorDocumentSnapshotPayload,
+  type EditorMutationAckPayload,
+  type EditorMutationBatchPayload,
   type FormatMarkdownTablesPayload as GeneratedFormatMarkdownTablesPayload,
   type FinalizeGeneratedSvgRequestPayload,
   type FinalizeGeneratedSvgResultPayload,
@@ -36,6 +39,36 @@ export type FormatMarkdownTablesPayload = Readonly<GeneratedFormatMarkdownTables
 
 export function parseJsonPayload<T>(json: string): T {
   return JSON.parse(json) as T;
+}
+
+export type WebEditorDocumentHandle = InstanceType<KmarkWebModule["WebEditorDocument"]>;
+
+export async function createWebEditorDocument(input: {
+  readonly content: string;
+  readonly revision: number;
+  readonly isDirty: boolean;
+}): Promise<WebEditorDocumentHandle> {
+  await initializeKmarkWeb();
+  return new (loadKmarkWebModuleSync().WebEditorDocument)(JSON.stringify(input));
+}
+
+export function applyWebEditorMutationBatch(
+  document: WebEditorDocumentHandle,
+  batch: EditorMutationBatchPayload,
+): EditorMutationAckPayload {
+  return parseJsonPayload<EditorMutationAckPayload>(
+    document.apply_mutation_batch_json(JSON.stringify(batch)),
+  );
+}
+
+export function snapshotWebEditorDocument(
+  document: WebEditorDocumentHandle,
+): EditorDocumentSnapshotPayload {
+  return parseJsonPayload<EditorDocumentSnapshotPayload>(document.snapshot_json());
+}
+
+export function markWebEditorDocumentSaved(document: WebEditorDocumentHandle): void {
+  document.mark_saved();
 }
 
 function loadKmarkWebModuleSync(): KmarkWebModule {

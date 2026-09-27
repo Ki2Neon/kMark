@@ -2,6 +2,8 @@ import { lazy, memo, Suspense } from "react";
 import { type LayoutMode } from "../../domain/editor";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { type AppThemeId } from "../../domain/theme";
+import { type EditorTransaction } from "../../application/editorSession/editorDocumentPort";
+import { type MarkdownEditorHandle } from "./DesktopMarkdownInput";
 
 const DesktopMarkdownInput = lazy(async () => {
   const module = await import("./DesktopMarkdownInput");
@@ -13,7 +15,10 @@ const DesktopMarkdownInput = lazy(async () => {
 
 type MarkdownInputProps = {
   readonly appThemeId: AppThemeId;
-  readonly content: string;
+  readonly document: {
+    readonly key: string;
+    readonly content: string;
+  };
   readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
   readonly layoutMode: LayoutMode;
@@ -22,7 +27,8 @@ type MarkdownInputProps = {
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
   readonly onAssetPaste?: (files: readonly PastedMarkdownAssetFile[]) => Promise<string | null>;
-  readonly onContentChange: (content: string) => void;
+  readonly onEditorHandleChange?: (handle: MarkdownEditorHandle | null) => void;
+  readonly onTransaction: (transaction: EditorTransaction) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
   readonly requestedLineSelection?: {
@@ -40,7 +46,7 @@ export type PastedMarkdownAssetFile = {
 
 function MarkdownInputComponent({
   appThemeId,
-  content,
+  document,
   currentDocumentFilePath = null,
   editFontId,
   layoutMode,
@@ -49,7 +55,8 @@ function MarkdownInputComponent({
   showLineNumbers,
   onAssetDrop,
   onAssetPaste,
-  onContentChange,
+  onEditorHandleChange,
+  onTransaction,
   onCursorLineChange,
   onFocusChange,
   requestedLineSelection,
@@ -62,7 +69,7 @@ function MarkdownInputComponent({
           <DesktopMarkdownInput
             appThemeId={appThemeId}
             blurOnEscapeWhenSelectionEmpty={layoutMode === "mobile"}
-            content={content}
+            document={document}
             currentDocumentFilePath={currentDocumentFilePath}
             editFontId={editFontId}
             lineWrappingEnabled={lineWrappingEnabled}
@@ -70,7 +77,8 @@ function MarkdownInputComponent({
             showLineNumbers={showLineNumbers}
             onAssetDrop={onAssetDrop}
             onAssetPaste={onAssetPaste}
-            onContentChange={onContentChange}
+            onEditorHandleChange={onEditorHandleChange}
+            onTransaction={onTransaction}
             onCursorLineChange={onCursorLineChange}
             onFocusChange={onFocusChange}
             requestedLineSelection={requestedLineSelection}

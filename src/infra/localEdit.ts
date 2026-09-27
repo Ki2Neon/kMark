@@ -1,3 +1,4 @@
+import { type FlushEditorDraftRequestPayload } from "../contracts/generated";
 import { type StoredEdit } from "../domain/editor";
 import { isTauri } from "../runtime/runtime";
 import { createWebJsonStateStore } from "./webStateStore";
@@ -38,4 +39,17 @@ export async function persistLocalEdit(edit: StoredEdit): Promise<void> {
   }
 
   await editorDraftStore.persist(edit);
+}
+
+export async function flushEditorDraftSession(
+  sessionId: string,
+  expectedRevision: number,
+  savedAt: number | null,
+): Promise<void> {
+  const request: FlushEditorDraftRequestPayload = { sessionId, expectedRevision, savedAt };
+  await invokeTauriCommand<StoredEdit>(
+    "flush_editor_draft",
+    { request },
+    "Editor Sessionの下書き保存に失敗しました。",
+  );
 }

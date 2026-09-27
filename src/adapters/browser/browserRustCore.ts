@@ -3,7 +3,7 @@ import {
   type EditorStateActionPayload,
   type EditorStatePayload,
 } from "../../contracts/generated";
-import { type StoredEdit, type EditorState, type EditorStats } from "../../domain/editor";
+import { type StoredEdit, type EditorDocumentState, type EditorState, type EditorStats } from "../../domain/editor";
 import { type EditorPreferences, type StartupEditMode } from "../../domain/editorPreferences";
 import { type PreviewPreferences } from "../../domain/preview";
 import { type ThemePreferences } from "../../domain/theme";
@@ -59,8 +59,8 @@ export function normalizePreviewPreferences(previewPreferences: PreviewPreferenc
 export function createStartupEditorState(
   startupEditMode: StartupEditMode,
   storedEdit: StoredEdit | null,
-): EditorState {
-  return parseJsonPayload<EditorState>(
+): EditorDocumentState {
+  return parseJsonPayload<EditorDocumentState>(
     createStartupEditorStateJsonWithWasmSync(
       startupEditMode,
       storedEdit === null ? null : JSON.stringify(storedEdit),
@@ -69,11 +69,46 @@ export function createStartupEditorState(
 }
 
 export function reduceEditorState(state: EditorState, action: EditorSessionAction): EditorState {
-  const contractState: EditorStatePayload = state;
-  const contractAction: EditorStateActionPayload = action;
-  return parseJsonPayload<EditorStatePayload>(
+  if (action.type === "editor/documentMutated") {
+    return { ...state, isDirty: true, errorMessage: null };
+  }
+  const contractState: EditorStatePayload = { ...state, content: "" };
+  const contractAction = toEditorStateActionPayload(action);
+  const result = parseJsonPayload<EditorStatePayload>(
     reduceEditorStateJsonWithWasmSync(JSON.stringify(contractState), JSON.stringify(contractAction)),
   );
+  return {
+    fileName: result.fileName,
+    filePath: result.filePath,
+    isDirty: result.isDirty,
+    lastSavedAt: result.lastSavedAt,
+    errorMessage: result.errorMessage,
+  };
+}
+
+function toEditorStateActionPayload(action: EditorSessionAction): EditorStateActionPayload {
+  switch (action.type) {
+    case "editor/bootstrapLoaded":
+      return {
+        type: action.type,
+        state: {
+          content: null,
+          fileName: action.state.fileName,
+          filePath: action.state.filePath,
+          isDirty: action.state.isDirty,
+          lastSavedAt: action.state.lastSavedAt,
+          errorMessage: action.state.errorMessage,
+        },
+      };
+    case "editor/documentLoaded":
+    case "editor/documentReset":
+    case "editor/saveSucceeded":
+    case "editor/errorRaised":
+    case "editor/errorCleared":
+      return action;
+    case "editor/documentMutated":
+      throw new Error("documentMutated must be reduced without WASM serialization");
+  }
 }
 
 export function normalizeMarkdownFileName(fileName: string): string {

@@ -1,4 +1,4 @@
-import { type StoredEdit } from "../../domain/editor";
+import { type EditorDocumentState, type StoredEdit } from "../../domain/editor";
 import { type EditorState } from "../../domain/editor";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
 import { type StartupEditMode } from "../../domain/editorPreferences";
@@ -24,6 +24,7 @@ export type ExternalDocumentSession = {
   readonly filePath: string | null;
   readonly content: string;
   readonly revision: number;
+  readonly lineEnding: "lf" | "crlf";
   readonly isDirty: boolean;
   readonly pendingProposalId: string | null;
   readonly stagedFileOperation: {
@@ -104,13 +105,14 @@ export type Clock = {
 };
 
 export type EditorStateRules = {
-  createStartupState(startupEditMode: StartupEditMode, storedEdit: StoredEdit | null): EditorState;
+  createStartupState(startupEditMode: StartupEditMode, storedEdit: StoredEdit | null): EditorDocumentState;
   reduce(state: EditorState, action: EditorSessionAction): EditorState;
 };
 
 export type DraftStore = {
   load(): Promise<StoredEdit | null>;
   persist(edit: StoredEdit): Promise<void>;
+  flushSession?(sessionId: string, revision: number, savedAt: number | null): Promise<void>;
 };
 
 export type RecentFileStore = {
@@ -120,7 +122,7 @@ export type RecentFileStore = {
 
 export type MarkdownRenderer = {
   render(
-    content: string,
+    content: string | null,
     filePath: string | null,
     displayMode: PreviewDisplayMode,
     options?: PreviewRenderOptions,
@@ -130,6 +132,8 @@ export type MarkdownRenderer = {
 export type PreviewRenderOptions = {
   readonly revision: number;
   readonly documentKey: string;
+  readonly documentSessionId?: string;
+  readonly documentRevision?: number;
   readonly plantumlRenderEpoch: number;
   readonly plantumlHttpsHosts: readonly string[];
   readonly activeSourceLine?: number | null;

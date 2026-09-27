@@ -14,6 +14,7 @@ type UseConfirmSaveOnExitOptions = {
   readonly enabled: boolean;
   readonly isDirty: boolean;
   readonly onDiscardConfirmed?: (request: ExitRequestKind) => void;
+  readonly onBeforeExit?: () => Promise<void>;
   readonly onErrorRaise: (message: string) => void;
   readonly onSaveDocument: () => Promise<boolean>;
 };
@@ -36,6 +37,7 @@ export function useConfirmSaveOnExit({
   enabled,
   isDirty,
   onDiscardConfirmed,
+  onBeforeExit,
   onErrorRaise,
   onSaveDocument,
 }: UseConfirmSaveOnExitOptions): ConfirmSaveOnExitState {
@@ -46,6 +48,7 @@ export function useConfirmSaveOnExit({
   const isSavingRef = useRef(isSaving);
   const onErrorRaiseRef = useRef(onErrorRaise);
   const onDiscardConfirmedRef = useRef(onDiscardConfirmed);
+  const onBeforeExitRef = useRef(onBeforeExit);
   const onSaveDocumentRef = useRef(onSaveDocument);
   const pendingRequestRef = useRef<ExitRequestKind | null>(pendingRequest);
 
@@ -70,6 +73,10 @@ export function useConfirmSaveOnExit({
   }, [onDiscardConfirmed]);
 
   useEffect(() => {
+    onBeforeExitRef.current = onBeforeExit;
+  }, [onBeforeExit]);
+
+  useEffect(() => {
     onSaveDocumentRef.current = onSaveDocument;
   }, [onSaveDocument]);
 
@@ -78,6 +85,7 @@ export function useConfirmSaveOnExit({
   }, [pendingRequest]);
 
   const completeExitRequest = useCallback(async (request: ExitRequestKind) => {
+    await onBeforeExitRef.current?.();
     if (request === "app-exit") {
       await completeAppExit();
       return;

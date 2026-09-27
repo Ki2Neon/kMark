@@ -1,5 +1,6 @@
 use kmark_core::{
-    DesktopLayoutPreferences, EditorPreferences, EditorState, EditorStateAction, EditorStats,
+    DesktopLayoutPreferences, EditorMutationAck, EditorMutationBatch, EditorPreferences,
+    EditorState, EditorStateAction, EditorStats, EditorTextChange, EditorTransaction, LineEnding,
     MarkdownDocumentError, PageChromeConfig, PageChromeRegionConfig, PageNumberConfig, PageStyle,
     PreviewDisplayMode, PreviewPreferences, PreviewTextStyle, RecentFile, RecentFiles,
     RenderedPage, StoredEdit, TableDiagnostic, TableDiagnosticKind, ThemePreferences,
@@ -550,6 +551,20 @@ pub struct EditorDraftPayload {
     pub file_path: Option<String>,
     #[cfg_attr(feature = "bindings", ts(type = "number | null"))]
     pub saved_at: Option<u64>,
+    #[serde(default)]
+    pub line_ending: LineEndingPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct FlushEditorDraftRequestPayload {
+    pub session_id: String,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub expected_revision: u64,
+    #[cfg_attr(feature = "bindings", ts(type = "number | null"))]
+    pub saved_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -615,12 +630,106 @@ pub struct DocumentSessionPayload {
     pub session_id: String,
     #[cfg_attr(feature = "bindings", ts(type = "number"))]
     pub revision: u64,
+    pub line_ending: LineEndingPayload,
     pub file_name: String,
     pub file_path: Option<String>,
     pub content: String,
     pub is_dirty: bool,
     pub pending_proposal_id: Option<String>,
     pub staged_file_operation: Option<StagedFileOperationPayload>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub enum LineEndingPayload {
+    #[default]
+    Lf,
+    CrLf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct EditorTextChangePayload {
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub from_utf16: u64,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub to_utf16: u64,
+    pub insert: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct EditorTransactionPayload {
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub before_length_utf16: u64,
+    pub changes: Vec<EditorTextChangePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct EditorMutationBatchPayload {
+    pub client_id: String,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub batch_id: u64,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub expected_revision: u64,
+    pub transactions: Vec<EditorTransactionPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct ApplyEditorMutationBatchRequestPayload {
+    pub session_id: String,
+    pub batch: EditorMutationBatchPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct MarkEditorSessionSavedRequestPayload {
+    pub session_id: String,
+    pub file_name: String,
+    pub file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct EditorMutationAckPayload {
+    pub client_id: String,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub batch_id: u64,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub revision: u64,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub document_length_utf16: u64,
+    pub replayed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub struct EditorDocumentSnapshotPayload {
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub revision: u64,
+    pub line_ending: LineEndingPayload,
+    pub content: String,
+    pub is_dirty: bool,
+    #[cfg_attr(feature = "bindings", ts(type = "number"))]
+    pub document_length_utf16: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -888,11 +997,12 @@ impl From<&PreviewPreferences> for PreviewPreferencesPayload {
 
 impl From<EditorDraftPayload> for StoredEdit {
     fn from(value: EditorDraftPayload) -> Self {
-        Self::new(
+        Self::new_with_line_ending(
             value.file_name,
             value.content,
             value.file_path,
             value.saved_at,
+            value.line_ending.into(),
         )
     }
 }
@@ -904,6 +1014,7 @@ impl From<&StoredEdit> for EditorDraftPayload {
             content: value.content().to_owned(),
             file_path: value.file_path().map(ToOwned::to_owned),
             saved_at: value.saved_at(),
+            line_ending: value.line_ending().into(),
         }
     }
 }
@@ -996,6 +1107,66 @@ impl From<&EditorStats> for EditorStatsPayload {
             characters: value.characters(),
             lines: value.lines(),
             reading_minutes: value.reading_minutes(),
+        }
+    }
+}
+
+impl From<LineEnding> for LineEndingPayload {
+    fn from(value: LineEnding) -> Self {
+        match value {
+            LineEnding::Lf => Self::Lf,
+            LineEnding::CrLf => Self::CrLf,
+        }
+    }
+}
+
+impl From<LineEndingPayload> for LineEnding {
+    fn from(value: LineEndingPayload) -> Self {
+        match value {
+            LineEndingPayload::Lf => Self::Lf,
+            LineEndingPayload::CrLf => Self::CrLf,
+        }
+    }
+}
+
+impl From<EditorTextChangePayload> for EditorTextChange {
+    fn from(value: EditorTextChangePayload) -> Self {
+        Self {
+            from_utf16: value.from_utf16,
+            to_utf16: value.to_utf16,
+            insert: value.insert,
+        }
+    }
+}
+
+impl From<EditorTransactionPayload> for EditorTransaction {
+    fn from(value: EditorTransactionPayload) -> Self {
+        Self {
+            before_length_utf16: value.before_length_utf16,
+            changes: value.changes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<EditorMutationBatchPayload> for EditorMutationBatch {
+    fn from(value: EditorMutationBatchPayload) -> Self {
+        Self {
+            client_id: value.client_id,
+            batch_id: value.batch_id,
+            expected_revision: value.expected_revision,
+            transactions: value.transactions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&EditorMutationAck> for EditorMutationAckPayload {
+    fn from(value: &EditorMutationAck) -> Self {
+        Self {
+            client_id: value.client_id.clone(),
+            batch_id: value.batch_id,
+            revision: value.revision,
+            document_length_utf16: value.document_length_utf16,
+            replayed: value.replayed,
         }
     }
 }

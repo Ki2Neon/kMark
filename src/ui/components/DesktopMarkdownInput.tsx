@@ -1,9 +1,11 @@
-import { autocompletion, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, startCompletion, type Completion, type CompletionSource } from "@codemirror/autocomplete";
+import { autocompletion, closeBrackets, closeBracketsKeymap, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, startCompletion, type Completion, type CompletionSource } from "@codemirror/autocomplete";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorSelection, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
-import CodeMirror, { type ViewUpdate } from "@uiw/react-codemirror";
+import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { Annotation, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction, type Extension } from "@codemirror/state";
+import { Decoration, EditorView, drawSelection, highlightActiveLineGutter, highlightSpecialChars, keymap, lineNumbers, placeholder, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { type EditorTransaction } from "../../application/editorSession/editorDocumentPort";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownSelectionWrapAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
@@ -18,23 +20,6 @@ import { listMarkdownPathSuggestions } from "../../infra/markdownPathSuggestions
 import { isTauri, listenRuntimeDragDropEvent, type RuntimeDragDropEvent } from "../../runtime/runtime";
 import { MobileInputHelperBar, type MobileEditorInsertAdapter } from "./MobileInputHelperBar";
 
-const DESKTOP_EDITOR_BASIC_SETUP = {
-  autocompletion: false,
-  bracketMatching: false,
-  completionKeymap: false,
-  crosshairCursor: false,
-  dropCursor: false,
-  foldGutter: false,
-  highlightActiveLine: false,
-  highlightActiveLineGutter: false,
-  highlightSelectionMatches: false,
-  indentOnInput: false,
-  lineNumbers: false,
-  rectangularSelection: false,
-  searchKeymap: false,
-  tabSize: 2,
-} as const;
-
 const EDITOR_CONTENT_ATTRIBUTES = EditorView.contentAttributes.of({
   "aria-label": "Markdown エディター",
   spellcheck: "false",
@@ -42,6 +27,7 @@ const EDITOR_CONTENT_ATTRIBUTES = EditorView.contentAttributes.of({
 
 const setPreviewRequestedLineHighlightEffect = StateEffect.define<number>();
 const setAssetDropLineHighlightEffect = StateEffect.define<number | null>();
+const remoteEditorMutation = Annotation.define<boolean>();
 
 const previewRequestedLineHighlightField = StateField.define<DecorationSet>({
   create() {
@@ -690,7 +676,10 @@ function insertPastedAssetMarkdown(view: EditorView, selection: EditorSelection,
 type DesktopMarkdownInputProps = {
   readonly appThemeId: AppThemeId;
   readonly blurOnEscapeWhenSelectionEmpty?: boolean;
-  readonly content: string;
+  readonly document: {
+    readonly key: string;
+    readonly content: string;
+  };
   readonly currentDocumentFilePath?: string | null;
   readonly editFontId: EditFontId;
   readonly lineWrappingEnabled: boolean;
@@ -698,7 +687,8 @@ type DesktopMarkdownInputProps = {
   readonly showLineNumbers: boolean;
   readonly onAssetDrop?: (droppedFilePaths: readonly string[]) => Promise<string | null>;
   readonly onAssetPaste?: (files: readonly PastedMarkdownAssetFile[]) => Promise<string | null>;
-  readonly onContentChange: (content: string) => void;
+  readonly onEditorHandleChange?: (handle: MarkdownEditorHandle | null) => void;
+  readonly onTransaction: (transaction: EditorTransaction) => void;
   readonly onCursorLineChange?: (lineNumber: number) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
   readonly requestedLineSelection?: {
@@ -708,10 +698,16 @@ type DesktopMarkdownInputProps = {
   readonly showMobileInputHelperBar?: boolean;
 };
 
+export type MarkdownEditorHandle = {
+  applyRemoteContent(content: string): void;
+  getSnapshot(): string;
+  replaceContent(content: string): void;
+};
+
 function DesktopMarkdownInputComponent({
   appThemeId,
   blurOnEscapeWhenSelectionEmpty = false,
-  content,
+  document,
   currentDocumentFilePath = null,
   editFontId,
   lineWrappingEnabled,
@@ -719,18 +715,23 @@ function DesktopMarkdownInputComponent({
   showLineNumbers,
   onAssetDrop,
   onAssetPaste,
-  onContentChange,
+  onEditorHandleChange,
+  onTransaction,
   onCursorLineChange,
   onFocusChange,
   requestedLineSelection,
   showMobileInputHelperBar = false,
 }: DesktopMarkdownInputProps) {
+  const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<EditorView | null>(null);
-  const latestContentRef = useRef(content);
+  const appliedDocumentKeyRef = useRef<string | null>(null);
+  const onEditorHandleChangeRef = useRef(onEditorHandleChange);
+  const onTransactionRef = useRef(onTransaction);
   const lastSelectionRef = useRef<EditorSelection | null>(null);
   const lastHandledLineSelectionRequestIdRef = useRef<number | null>(null);
   const lastEmittedCursorLineRef = useRef<number | null>(null);
-  latestContentRef.current = content;
+  onEditorHandleChangeRef.current = onEditorHandleChange;
+  onTransactionRef.current = onTransaction;
 
   const emitCursorLine = useCallback((view: EditorView) => {
     const nextCursorLine = getCursorLineNumber(view);
@@ -851,33 +852,25 @@ function DesktopMarkdownInputComponent({
     applyRequestedLineSelection(editor, requestedLineSelection);
   }, [applyRequestedLineSelection, requestedLineSelection]);
 
-  useEffect(() => (
-    () => {
-      editorRef.current = null;
-    }
-  ), []);
-
-  const handleEditorChange = useCallback((value: string) => {
-    if (value === latestContentRef.current) {
-      return;
-    }
-
-    onContentChange(value);
-  }, [onContentChange]);
-
-  const handleEditorCreate = useCallback((view: EditorView) => {
-    editorRef.current = view;
-    lastSelectionRef.current = view.state.selection;
-
-    if (requestedLineSelection !== null && requestedLineSelection !== undefined) {
-      applyRequestedLineSelection(view, requestedLineSelection);
-      return;
-    }
-
-    emitCursorLine(view);
-  }, [applyRequestedLineSelection, emitCursorLine, requestedLineSelection]);
-
   const handleEditorUpdate = useCallback((viewUpdate: ViewUpdate) => {
+    for (const transaction of viewUpdate.transactions) {
+      if (!transaction.docChanged || transaction.annotation(remoteEditorMutation) === true) {
+        continue;
+      }
+      const changes: { fromUtf16: number; toUtf16: number; insert: string }[] = [];
+      transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        changes.push({
+          fromUtf16: fromA,
+          toUtf16: toA,
+          insert: inserted.toString(),
+        });
+      });
+      onTransactionRef.current({
+        beforeLengthUtf16: transaction.startState.doc.length,
+        changes,
+      });
+    }
+
     if (viewUpdate.focusChanged) {
       onFocusChange?.(viewUpdate.view.hasFocus);
     }
@@ -1114,6 +1107,16 @@ function DesktopMarkdownInputComponent({
     }
 
     return [
+      EditorState.allowMultipleSelections.of(true),
+      EditorState.lineSeparator.of("\n"),
+      indentUnit.of("  "),
+      history(),
+      highlightSpecialChars(),
+      drawSelection(),
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      closeBrackets(),
+      placeholder("ここに Markdown を書きます"),
+      keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
       markdown(),
       previewRequestedLineHighlightField,
       assetDropLineHighlightField,
@@ -1142,26 +1145,139 @@ function DesktopMarkdownInputComponent({
             : event.ctrlKey
       )),
       editorTheme,
+      EditorView.updateListener.of(handleEditorUpdate),
     ];
-  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, lineWrappingEnabled, multiCursorModifier, showLineNumbers]);
+  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, handleEditorUpdate, lineWrappingEnabled, multiCursorModifier, showLineNumbers]);
+
+  const extensionsRef = useRef(extensions);
+  extensionsRef.current = extensions;
+
+  useEffect(() => {
+    const host = editorHostRef.current;
+    if (host === null) {
+      return;
+    }
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: document.content,
+        extensions: extensionsRef.current,
+      }),
+    });
+    editorRef.current = view;
+    appliedDocumentKeyRef.current = document.key;
+    lastSelectionRef.current = view.state.selection;
+    const handle: MarkdownEditorHandle = {
+      applyRemoteContent: (content) => {
+        const current = view.state.doc.toString();
+        if (current === content) {
+          return;
+        }
+        const change = findSingleReplacement(current, content);
+        view.dispatch({
+          annotations: [
+            remoteEditorMutation.of(true),
+            Transaction.remote.of(true),
+            Transaction.addToHistory.of(false),
+          ],
+          changes: change,
+        });
+      },
+      getSnapshot: () => view.state.doc.toString(),
+      replaceContent: (content) => {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: content },
+        });
+      },
+    };
+    onEditorHandleChangeRef.current?.(handle);
+
+    if (requestedLineSelection !== null && requestedLineSelection !== undefined) {
+      applyRequestedLineSelection(view, requestedLineSelection);
+    } else {
+      emitCursorLine(view);
+    }
+
+    return () => {
+      onEditorHandleChangeRef.current?.(null);
+      editorRef.current = null;
+      view.destroy();
+    };
+  }, []);
+
+  useEffect(() => {
+    const view = editorRef.current;
+    if (view === null) {
+      return;
+    }
+    view.dispatch({ effects: StateEffect.reconfigure.of(extensions) });
+  }, [extensions]);
+
+  useEffect(() => {
+    const view = editorRef.current;
+    if (view === null || appliedDocumentKeyRef.current === document.key) {
+      return;
+    }
+    view.setState(EditorState.create({
+      doc: document.content,
+      extensions: extensionsRef.current,
+    }));
+    appliedDocumentKeyRef.current = document.key;
+    lastSelectionRef.current = view.state.selection;
+    emitCursorLine(view);
+  }, [document, emitCursorLine]);
 
   return (
     <>
-      <CodeMirror
-        basicSetup={DESKTOP_EDITOR_BASIC_SETUP}
-        height="100%"
-        indentWithTab={false}
-        onChange={handleEditorChange}
-        onCreateEditor={handleEditorCreate}
-        onUpdate={handleEditorUpdate}
-        placeholder="ここに Markdown を書きます"
-        theme={isDarkEditorTheme(appThemeId) ? "dark" : "light"}
-        value={content}
-        extensions={extensions}
-      />
+      <div ref={editorHostRef} style={{ height: "100%" }} />
       {showMobileInputHelperBar ? <MobileInputHelperBar insertAdapter={mobileInsertAdapter} /> : null}
     </>
   );
 }
 
 export const DesktopMarkdownInput = memo(DesktopMarkdownInputComponent);
+
+function findSingleReplacement(current: string, next: string): {
+  readonly from: number;
+  readonly to: number;
+  readonly insert: string;
+} {
+  let prefix = 0;
+  const prefixLimit = Math.min(current.length, next.length);
+  while (prefix < prefixLimit && current.charCodeAt(prefix) === next.charCodeAt(prefix)) {
+    prefix += 1;
+  }
+  if (prefix > 0 && isInsideSurrogatePair(current, prefix)) {
+    prefix -= 1;
+  }
+
+  let currentSuffix = current.length;
+  let nextSuffix = next.length;
+  while (
+    currentSuffix > prefix
+    && nextSuffix > prefix
+    && current.charCodeAt(currentSuffix - 1) === next.charCodeAt(nextSuffix - 1)
+  ) {
+    currentSuffix -= 1;
+    nextSuffix -= 1;
+  }
+  if (isInsideSurrogatePair(current, currentSuffix)) {
+    currentSuffix += 1;
+    nextSuffix += 1;
+  }
+
+  return {
+    from: prefix,
+    to: currentSuffix,
+    insert: next.slice(prefix, nextSuffix),
+  };
+}
+
+function isInsideSurrogatePair(value: string, offset: number): boolean {
+  if (offset <= 0 || offset >= value.length) {
+    return false;
+  }
+  const previous = value.charCodeAt(offset - 1);
+  const next = value.charCodeAt(offset);
+  return previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+}

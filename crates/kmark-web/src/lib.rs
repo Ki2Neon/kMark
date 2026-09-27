@@ -1,8 +1,9 @@
 use kmark_contract::{
-    DesktopLayoutPreferencesPayload, EditorDraftPayload, EditorPreferencesPayload,
+    DesktopLayoutPreferencesPayload, EditorDocumentSnapshotPayload, EditorDraftPayload,
+    EditorMutationAckPayload, EditorMutationBatchPayload, EditorPreferencesPayload,
     EditorStateActionPayload, EditorStateInput, EditorStatePayload, EditorStatsPayload,
     FinalizeGeneratedSvgRequestPayload, FinalizeGeneratedSvgResultPayload,
-    FormatMarkdownTablesPayload, PreviewPreferencesPayload, RecentFilePayload,
+    FormatMarkdownTablesPayload, LineEndingPayload, PreviewPreferencesPayload, RecentFilePayload,
     RenderedPreviewPayload, TableDiagnosticPayload, ThemePreferencesPayload,
 };
 use kmark_core::{
@@ -10,7 +11,7 @@ use kmark_core::{
     finalize_generated_svg, format_markdown_tables, format_markdown_tables_in_line_ranges,
     normalize_plantuml_https_hosts, reduce_editor_state, render_markdown_preview_with_file_path,
     resolve_app_font_family, resolve_document_file_stem, resolve_edit_font_family,
-    DesktopLayoutPreferences, EditorPreferences, EditorState, EditorStateAction,
+    DesktopLayoutPreferences, EditorDocument, EditorPreferences, EditorState, EditorStateAction,
     GeneratedSvgPresentation, PreviewDisplayMode, PreviewPreferences, RecentFile, RecentFiles,
     StoredEdit, TableFormatLineRange, TableFormatOptions, ThemePreferences,
 };
@@ -76,6 +77,7 @@ struct EditorDraftInput {
     content: Option<String>,
     file_path: Option<String>,
     saved_at: Option<u64>,
+    line_ending: Option<LineEndingPayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +85,62 @@ struct EditorDraftInput {
 struct RecentFileInput {
     file_name: Option<String>,
     file_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebEditorDocumentInput {
+    content: String,
+    revision: u64,
+    is_dirty: bool,
+}
+
+#[wasm_bindgen]
+pub struct WebEditorDocument {
+    document: EditorDocument,
+}
+
+#[wasm_bindgen]
+impl WebEditorDocument {
+    #[wasm_bindgen(constructor)]
+    pub fn new(input_json: String) -> Result<WebEditorDocument, JsValue> {
+        let input = serde_json::from_str::<WebEditorDocumentInput>(&input_json)
+            .map_err(|error| JsValue::from_str(&format!("invalid_editor_document:{error}")))?;
+        Ok(Self {
+            document: EditorDocument::from_external_text(
+                &input.content,
+                input.revision,
+                input.is_dirty,
+            ),
+        })
+    }
+
+    pub fn apply_mutation_batch_json(&mut self, batch_json: String) -> Result<String, JsValue> {
+        let payload =
+            serde_json::from_str::<EditorMutationBatchPayload>(&batch_json).map_err(|error| {
+                JsValue::from_str(&format!("invalid_editor_mutation_batch:{error}"))
+            })?;
+        let batch = payload.into();
+        let ack = self
+            .document
+            .apply_mutation_batch(&batch)
+            .map_err(|error| JsValue::from_str(&format!("{}:{error}", error.code())))?;
+        Ok(stringify(&EditorMutationAckPayload::from(&ack)))
+    }
+
+    pub fn snapshot_json(&self) -> String {
+        stringify(&EditorDocumentSnapshotPayload {
+            revision: self.document.revision(),
+            line_ending: self.document.line_ending().into(),
+            content: self.document.canonical_text(),
+            is_dirty: self.document.is_dirty(),
+            document_length_utf16: self.document.len_utf16() as u64,
+        })
+    }
+
+    pub fn mark_saved(&mut self) {
+        self.document.mark_saved();
+    }
 }
 
 #[wasm_bindgen]
@@ -197,11 +255,12 @@ pub fn create_startup_editor_state_json(
     let stored_edit = payload.and_then(|value| {
         let file_name = value.file_name?;
         let content = value.content?;
-        Some(StoredEdit::new(
+        Some(StoredEdit::new_with_line_ending(
             file_name,
             content,
             value.file_path,
             value.saved_at,
+            value.line_ending.unwrap_or_default().into(),
         ))
     });
     let editor_state = create_startup_editor_state(
@@ -313,7 +372,13 @@ pub fn normalize_editor_draft_json(input: Option<String>) -> Option<String> {
     let payload = parse_json::<EditorDraftInput>(input)?;
     let file_name = payload.file_name?;
     let content = payload.content?;
-    let stored_edit = StoredEdit::new(file_name, content, payload.file_path, payload.saved_at);
+    let stored_edit = StoredEdit::new_with_line_ending(
+        file_name,
+        content,
+        payload.file_path,
+        payload.saved_at,
+        payload.line_ending.unwrap_or_default().into(),
+    );
     Some(stringify(&EditorDraftPayload::from(&stored_edit)))
 }
 

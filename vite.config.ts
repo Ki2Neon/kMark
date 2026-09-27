@@ -20,10 +20,6 @@ export default defineConfig(async () => ({
       },
       output: {
         manualChunks(id) {
-          if (id.includes("@uiw/react-codemirror")) {
-            return "codemirror-react";
-          }
-
           if (id.includes("markdown-it") || id.includes("dompurify")) {
             return "markdown";
           }

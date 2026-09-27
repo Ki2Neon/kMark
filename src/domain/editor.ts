@@ -1,12 +1,15 @@
 export type LayoutMode = "desktop" | "mobile";
 
 export type EditorState = {
-  readonly content: string;
   readonly fileName: string;
   readonly filePath: string | null;
   readonly isDirty: boolean;
   readonly lastSavedAt: number | null;
   readonly errorMessage: string | null;
+};
+
+export type EditorDocumentState = EditorState & {
+  readonly content: string;
 };
 
 export type EditorStats = {
@@ -21,6 +24,7 @@ export type StoredEdit = {
   readonly fileName: string;
   readonly filePath: string | null;
   readonly savedAt: number | null;
+  readonly lineEnding: "lf" | "crlf";
 };
 
 export const DEFAULT_FILE_NAME = "untitled.md";

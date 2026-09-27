@@ -3,6 +3,7 @@ pub mod asset_import;
 pub mod desktop_layout_preferences;
 pub mod editor_draft;
 pub mod editor_preferences;
+pub mod editor_session;
 mod error;
 pub mod external_api;
 pub mod external_link;

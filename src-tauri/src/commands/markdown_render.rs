@@ -1,6 +1,8 @@
 use crate::usecase::prepare_markdown_model_assets;
+use crate::{commands::error::CommandErrorPayload, AppState};
 use kmark_contract::RenderedPreviewPayload;
 use kmark_core::{render_markdown_preview_with_file_path_and_model_assets, PreviewDisplayMode};
+use tauri::State;
 
 fn render_markdown_preview_payload(
     content: String,
@@ -35,6 +37,41 @@ pub async fn render_markdown_preview(
     })
     .await
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn render_editor_session_preview(
+    state: State<'_, AppState>,
+    session_id: String,
+    revision: u64,
+    display_mode: String,
+) -> Result<RenderedPreviewPayload, CommandErrorPayload> {
+    let snapshot = state.application.session_for_ui(&session_id)?;
+    if snapshot.revision != revision {
+        return Err(CommandErrorPayload::with_detail(
+            "revision_conflict",
+            "preview revision does not match the canonical editor revision",
+            format!("currentRevision={}", snapshot.revision),
+        ));
+    }
+    let display_mode = PreviewDisplayMode::from_str(&display_mode).ok_or_else(|| {
+        CommandErrorPayload::with_detail(
+            "unsupported_preview_display_mode",
+            "unsupported preview display mode",
+            display_mode,
+        )
+    })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        render_markdown_preview_payload(snapshot.content, snapshot.file_path, display_mode)
+    })
+    .await
+    .map_err(|error| {
+        CommandErrorPayload::with_detail(
+            "preview_render_join_failed",
+            "preview rendering task failed",
+            error.to_string(),
+        )
+    })
 }
 
 #[cfg(test)]

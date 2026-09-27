@@ -16,6 +16,7 @@ import {
   type MarkdownRenderer,
   type PreviewRenderOptions,
   type RecentFileStore,
+  type SavedMarkdownDocument,
 } from "./editorSessionPorts";
 
 export type EditorSessionStore = {
@@ -25,6 +26,7 @@ export type EditorSessionStore = {
 
 export type EditorSessionBootstrap = {
   readonly initialState: EditorState;
+  readonly content: string;
   readonly shouldSkipInitialPersist: boolean;
 };
 
@@ -77,18 +79,22 @@ export class EditorSessionController {
 
   createInitialState(startupEditMode: StartupEditMode): EditorSessionBootstrap {
     this.#documentGateway.restoreDocumentReference(null);
+    const startupState = this.#rules.createStartupState(startupEditMode, null);
     return {
-      initialState: this.#rules.createStartupState(startupEditMode, null),
+      initialState: withoutContent(startupState),
+      content: startupState.content,
       shouldSkipInitialPersist: false,
     };
   }
 
   async bootstrap(startupEditMode: StartupEditMode): Promise<EditorSessionBootstrap> {
     const storedEdit = await this.#draftStore.load();
+    const startupState = this.#rules.createStartupState(startupEditMode, null);
     this.#documentGateway.restoreDocumentReference(null);
 
     return {
-      initialState: this.#rules.createStartupState(startupEditMode, null),
+      initialState: withoutContent(startupState),
+      content: startupState.content,
       shouldSkipInitialPersist: storedEdit !== null,
     };
   }
@@ -101,11 +107,12 @@ export class EditorSessionController {
 
     return {
       initialState: {
-        ...startupState,
+        ...withoutContent(startupState),
         fileName: DEFAULT_FILE_NAME,
         filePath: null,
         lastSavedAt: null,
       },
+      content: startupState.content,
       shouldSkipInitialPersist: storedEdit !== null,
     };
   }
@@ -118,12 +125,26 @@ export class EditorSessionController {
     return this.#documentGateway.supportsNativeOpenPicker();
   }
 
-  async persistDraft(state: EditorState): Promise<void> {
+  async persistDraft(
+    state: EditorState,
+    getContent: () => string,
+    lineEnding: "lf" | "crlf",
+    sessionId: string | null = null,
+    sessionRevision: number | null = null,
+  ): Promise<void> {
+    if (sessionId !== null && this.#draftStore.flushSession !== undefined) {
+      if (sessionRevision === null) {
+        throw new Error("Editor Session revisionがありません。");
+      }
+      await this.#draftStore.flushSession(sessionId, sessionRevision, state.lastSavedAt);
+      return;
+    }
     await this.#draftStore.persist({
       fileName: state.fileName,
-      content: state.content,
+      content: getContent(),
       filePath: state.filePath,
       savedAt: state.lastSavedAt,
+      lineEnding,
     });
   }
 
@@ -143,16 +164,12 @@ export class EditorSessionController {
   }
 
   async renderPreview(
-    content: string,
+    content: string | null,
     filePath: string | null,
     displayMode: PreviewDisplayMode,
     options?: PreviewRenderOptions,
   ): Promise<RenderedPreview> {
     return this.#renderer.render(content, filePath, displayMode, options);
-  }
-
-  changeContent(store: EditorSessionStore, content: string): void {
-    store.dispatch({ type: "editor/contentChanged", content });
   }
 
   loadApplicationSession(
@@ -163,7 +180,6 @@ export class EditorSessionController {
     store.dispatch({
       type: "editor/bootstrapLoaded",
       state: {
-        content: session.content,
         fileName: session.fileName,
         filePath: session.filePath,
         isDirty: session.isDirty,
@@ -280,12 +296,15 @@ export class EditorSessionController {
     return loadedDocument;
   }
 
-  async overwriteSaveDocument(store: EditorSessionStore): Promise<boolean> {
+  async overwriteSaveDocument(
+    store: EditorSessionStore,
+    content: string,
+  ): Promise<SavedMarkdownDocument | null> {
     const state = store.getState();
-    const result = await this.#documentGateway.saveDocument(state.fileName, state.content);
+    const result = await this.#documentGateway.saveDocument(state.fileName, content);
 
     if (result === null) {
-      return false;
+      return null;
     }
 
     store.dispatch({
@@ -295,15 +314,18 @@ export class EditorSessionController {
       savedAt: this.#clock.now(),
     });
 
-    return true;
+    return result;
   }
 
-  async saveDocumentAs(store: EditorSessionStore): Promise<boolean> {
+  async saveDocumentAs(
+    store: EditorSessionStore,
+    content: string,
+  ): Promise<SavedMarkdownDocument | null> {
     const state = store.getState();
-    const result = await this.#documentGateway.saveDocumentAs(state.fileName, state.content);
+    const result = await this.#documentGateway.saveDocumentAs(state.fileName, content);
 
     if (result === null) {
-      return false;
+      return null;
     }
 
     store.dispatch({
@@ -313,7 +335,7 @@ export class EditorSessionController {
       savedAt: this.#clock.now(),
     });
 
-    return true;
+    return result;
   }
 
   async takePendingExternalDocuments(): Promise<readonly ExternalMarkdownDocument[]> {
@@ -330,10 +352,13 @@ export class EditorSessionController {
 
   async printDocument(
     store: EditorSessionStore,
+    content: string | null,
     previewDisplayMode: PreviewDisplayMode,
     plantumlHttpsHosts: readonly string[],
     plantumlDocumentKey: string,
     plantumlRenderEpoch: number,
+    documentSessionId?: string,
+    documentRevision?: number,
   ): Promise<void> {
     const state = store.getState();
 
@@ -342,12 +367,14 @@ export class EditorSessionController {
     let renderedPreview: RenderedPreview;
     try {
       const renderPromise = this.renderPreview(
-        state.content,
+        content,
         state.filePath,
         previewDisplayMode,
         {
           revision: this.#clock.now(),
           documentKey: plantumlDocumentKey,
+          documentSessionId,
+          documentRevision,
           plantumlRenderEpoch,
           plantumlHttpsHosts,
           signal: printAbortController.signal,
@@ -402,4 +429,14 @@ export class EditorSessionController {
   clearError(store: EditorSessionStore): void {
     store.dispatch({ type: "editor/errorCleared" });
   }
+}
+
+function withoutContent(state: EditorState & { readonly content: string }): EditorState {
+  return {
+    fileName: state.fileName,
+    filePath: state.filePath,
+    isDirty: state.isDirty,
+    lastSavedAt: state.lastSavedAt,
+    errorMessage: state.errorMessage,
+  };
 }

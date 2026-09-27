@@ -149,11 +149,12 @@ export function MarkdownEditorScreen({
   } = usePreviewPreferences({ manageVisibilityByAppInstance: true });
   const {
     canOpenDocumentWithNativePicker,
-    content,
+    document: editorDocument,
     currentDocumentFilePath,
     errorMessage,
     externalSession,
     fileName,
+    flushEditorSession,
     isDirty,
     isReady: isEditorReady,
     previewHtml,
@@ -164,7 +165,9 @@ export function MarkdownEditorScreen({
     defaultPreviewPageStyle,
     defaultPreviewTextStyle,
     confirmDiscard,
-    handleContentChange,
+    getContentSnapshot,
+    handleEditorHandleChange,
+    handleEditorTransaction,
     handleCancelStagedFileOperation,
     handleCommitStagedFileOperation,
     handleLoadExternalDocument,
@@ -178,6 +181,7 @@ export function MarkdownEditorScreen({
     handlePrintDocument,
     handleSaveDocumentAs,
     handleTakePendingExternalDocuments,
+    replaceEditorContent,
     subscribeToExternalDocumentRequests,
     handleErrorClear,
     handleErrorRaise,
@@ -271,7 +275,7 @@ export function MarkdownEditorScreen({
     }
 
     const saveResult = saveModelViewpointToMarkdown({
-      markdown: content,
+      markdown: getContentSnapshot(),
       modelSourceLineNumber: sourceLineStart + 1,
       viewpoint,
     });
@@ -281,8 +285,8 @@ export function MarkdownEditorScreen({
       return;
     }
 
-    handleContentChange(saveResult.markdown);
-  }, [content, handleContentChange, handleErrorRaise]);
+    replaceEditorContent(saveResult.markdown);
+  }, [getContentSnapshot, handleErrorRaise, replaceEditorContent]);
   const {
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
@@ -375,6 +379,7 @@ export function MarkdownEditorScreen({
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
     isDirty,
+    onBeforeExit: flushEditorSession,
     onDiscardConfirmed: (request) => {
       if (request === "window-close") {
         handleResetDocument();
@@ -853,7 +858,7 @@ export function MarkdownEditorScreen({
             <div className="workspace-grid__panel workspace-grid__panel--edit">
               <MarkdownInput
                 appThemeId={appThemeId}
-                content={content}
+                document={editorDocument}
                 currentDocumentFilePath={currentDocumentFilePath}
                 editFontId={editFontId}
                 layoutMode={layoutMode}
@@ -862,7 +867,8 @@ export function MarkdownEditorScreen({
                 showLineNumbers={showLineNumbers}
                 onAssetDrop={handleImportDroppedAssets}
                 onAssetPaste={handleImportPastedAssets}
-                onContentChange={handleContentChange}
+                onEditorHandleChange={handleEditorHandleChange}
+                onTransaction={handleEditorTransaction}
                 onCursorLineChange={handleEditCursorLineChange}
                 onFocusChange={handleEditFocusChange}
                 requestedLineSelection={editSelectionRequest}
@@ -943,7 +949,7 @@ export function MarkdownEditorScreen({
                   ) : section === "edit" ? (
                     <MarkdownInput
                       appThemeId={appThemeId}
-                      content={content}
+                      document={editorDocument}
                       currentDocumentFilePath={currentDocumentFilePath}
                       editFontId={editFontId}
                       layoutMode={layoutMode}
@@ -952,7 +958,8 @@ export function MarkdownEditorScreen({
                       showLineNumbers={showLineNumbers}
                       onAssetDrop={handleImportDroppedAssets}
                       onAssetPaste={handleImportPastedAssets}
-                      onContentChange={handleContentChange}
+                      onEditorHandleChange={handleEditorHandleChange}
+                      onTransaction={handleEditorTransaction}
                       onCursorLineChange={handleEditCursorLineChange}
                       onFocusChange={handleEditFocusChange}
                       requestedLineSelection={editSelectionRequest}

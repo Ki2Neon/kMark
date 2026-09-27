@@ -1,11 +1,14 @@
 pub const DEFAULT_FILE_NAME: &str = "untitled.md";
 
+use crate::{normalize_editor_text, LineEnding};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredEdit {
     file_name: String,
     content: String,
     file_path: Option<String>,
     saved_at: Option<u64>,
+    line_ending: LineEnding,
 }
 
 impl StoredEdit {
@@ -15,16 +18,35 @@ impl StoredEdit {
         file_path: Option<String>,
         saved_at: Option<u64>,
     ) -> Self {
+        let normalized = normalize_editor_text(&content.into());
+        Self::new_with_line_ending(
+            file_name,
+            normalized.text,
+            file_path,
+            saved_at,
+            normalized.line_ending,
+        )
+    }
+
+    pub fn new_with_line_ending(
+        file_name: impl Into<String>,
+        content: impl Into<String>,
+        file_path: Option<String>,
+        saved_at: Option<u64>,
+        line_ending: LineEnding,
+    ) -> Self {
         let raw_file_name = file_name.into();
+        let canonical_content = normalize_editor_text(&content.into()).text;
         let normalized_file_path = file_path
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
 
         Self {
             file_name: resolve_stored_file_name(&raw_file_name, normalized_file_path.as_deref()),
-            content: content.into(),
+            content: canonical_content,
             file_path: normalized_file_path,
             saved_at,
+            line_ending,
         }
     }
 
@@ -42,6 +64,10 @@ impl StoredEdit {
 
     pub fn saved_at(&self) -> Option<u64> {
         self.saved_at
+    }
+
+    pub fn line_ending(&self) -> LineEnding {
+        self.line_ending
     }
 }
 
@@ -123,7 +149,7 @@ fn has_markdown_extension(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_markdown_file_name, resolve_document_file_stem, StoredEdit};
+    use super::{ensure_markdown_file_name, resolve_document_file_stem, LineEnding, StoredEdit};
 
     #[test]
     fn normalizes_markdown_file_name() {
@@ -162,5 +188,19 @@ mod tests {
 
         assert_eq!(windows_edit.file_name(), "report.md");
         assert_eq!(unix_edit.file_name(), "notes.markdown");
+    }
+
+    #[test]
+    fn stores_draft_content_as_canonical_lf_without_losing_line_ending() {
+        let edit = StoredEdit::new_with_line_ending(
+            "note.md",
+            "日本\r\n🙂\rnext",
+            None,
+            None,
+            LineEnding::CrLf,
+        );
+
+        assert_eq!(edit.content(), "日本\n🙂\nnext");
+        assert_eq!(edit.line_ending(), LineEnding::CrLf);
     }
 }

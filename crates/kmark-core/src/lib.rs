@@ -1,5 +1,6 @@
 mod desktop_layout;
 mod diagram;
+mod editor_document;
 mod editor_draft;
 mod editor_preferences;
 mod editor_state;
@@ -21,6 +22,10 @@ pub use desktop_layout::{
 };
 pub use diagram::{
     extract_diagrams, validate_diagram, DiagramBlock, DiagramDiagnostic, DiagramLanguage,
+};
+pub use editor_document::{
+    normalize_editor_text, EditorDocument, EditorDocumentError, EditorMutationAck,
+    EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding, NormalizedEditorText,
 };
 pub use editor_draft::StoredEdit;
 pub use editor_draft::{ensure_markdown_file_name, resolve_document_file_stem, DEFAULT_FILE_NAME};
