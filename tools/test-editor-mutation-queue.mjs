@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { EditorState } from "@codemirror/state";
 import { EditorMutationQueue } from "../src/adapters/editor/editorMutationQueue.ts";
+
+const desktopMarkdownInputSource = readFileSync(
+  new URL("../src/ui/components/DesktopMarkdownInput.tsx", import.meta.url),
+  "utf8",
+);
 
 function deferred() {
   let resolve;
@@ -100,4 +107,23 @@ test("rejects frontend ordering drift before IPC", () => {
   );
 
   assert.throws(() => queue.enqueue(insert(4, 0, "x")), /Mutation順序違反/u);
+});
+
+test("normalizes pasted CRLF and CR before mutation generation", () => {
+  assert.doesNotMatch(desktopMarkdownInputSource, /EditorState\.lineSeparator\.of/u);
+
+  const initial = EditorState.create({ doc: "start" });
+  const transaction = initial.update({
+    changes: {
+      from: initial.doc.length,
+      insert: "\r\nfirst\rsecond\nthird",
+    },
+  });
+  const inserted = [];
+  transaction.changes.iterChanges((_fromA, _toA, _fromB, _toB, text) => {
+    inserted.push(text.toString());
+  });
+
+  assert.deepEqual(inserted, ["\nfirst\nsecond\nthird"]);
+  assert.equal(transaction.newDoc.toString(), "start\nfirst\nsecond\nthird");
 });

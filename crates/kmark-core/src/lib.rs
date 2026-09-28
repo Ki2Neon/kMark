@@ -24,8 +24,9 @@ pub use diagram::{
     extract_diagrams, validate_diagram, DiagramBlock, DiagramDiagnostic, DiagramLanguage,
 };
 pub use editor_document::{
-    normalize_editor_text, EditorDocument, EditorDocumentError, EditorMutationAck,
-    EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding, NormalizedEditorText,
+    normalize_editor_text, EditorDocument, EditorDocumentError, EditorDocumentPersistenceSnapshot,
+    EditorMutationAck, EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding,
+    NormalizedEditorText,
 };
 pub use editor_draft::StoredEdit;
 pub use editor_draft::{ensure_markdown_file_name, resolve_document_file_stem, DEFAULT_FILE_NAME};

@@ -12,6 +12,7 @@ import {
   type MarkdownAssetDataFile,
   type MarkdownAssetImporter,
   type MarkdownDocumentGateway,
+  type MarkdownDocumentSaveSource,
   type MarkdownDocumentPrinter,
   type MarkdownRenderer,
   type PreviewRenderOptions,
@@ -298,10 +299,10 @@ export class EditorSessionController {
 
   async overwriteSaveDocument(
     store: EditorSessionStore,
-    content: string,
+    source: MarkdownDocumentSaveSource,
   ): Promise<SavedMarkdownDocument | null> {
     const state = store.getState();
-    const result = await this.#documentGateway.saveDocument(state.fileName, content);
+    const result = await this.#documentGateway.saveDocument(state.fileName, source);
 
     if (result === null) {
       return null;
@@ -319,10 +320,10 @@ export class EditorSessionController {
 
   async saveDocumentAs(
     store: EditorSessionStore,
-    content: string,
+    source: MarkdownDocumentSaveSource,
   ): Promise<SavedMarkdownDocument | null> {
     const state = store.getState();
-    const result = await this.#documentGateway.saveDocumentAs(state.fileName, content);
+    const result = await this.#documentGateway.saveDocumentAs(state.fileName, source);
 
     if (result === null) {
       return null;

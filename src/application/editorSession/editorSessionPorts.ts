@@ -15,6 +15,14 @@ export type LoadedMarkdownDocument = {
 export type SavedMarkdownDocument = {
   readonly fileName: string;
   readonly filePath: string | null;
+  readonly sessionRevision: number | null;
+};
+
+export type MarkdownDocumentSaveSource = {
+  readonly sessionId: string;
+  readonly revision: number;
+  readonly lineEnding: "lf" | "crlf";
+  readonly readCanonicalContent: () => string;
 };
 
 export type ExternalDocumentSession = {
@@ -150,8 +158,8 @@ export type MarkdownDocumentGateway = {
   openDocumentFromPath(filePath: string): Promise<LoadedMarkdownDocument>;
   openDocumentFolder(filePath: string): Promise<void>;
   loadExternalDocument(document: ExternalMarkdownDocument): LoadedMarkdownDocument;
-  saveDocument(fileName: string, content: string): Promise<SavedMarkdownDocument | null>;
-  saveDocumentAs(fileName: string, content: string): Promise<SavedMarkdownDocument | null>;
+  saveDocument(fileName: string, source: MarkdownDocumentSaveSource): Promise<SavedMarkdownDocument | null>;
+  saveDocumentAs(fileName: string, source: MarkdownDocumentSaveSource): Promise<SavedMarkdownDocument | null>;
   takePendingExternalDocuments(): Promise<readonly ExternalMarkdownDocument[]>;
   clearPendingExternalDocuments(): Promise<void>;
   listenForExternalDocumentRequests(callback: () => void): Promise<() => void>;

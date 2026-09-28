@@ -35,3 +35,7 @@ const APP_THEME_ID_SET = new Set<AppThemeId>(APP_THEME_OPTIONS.map((themeOption)
 export function isAppThemeId(value: string): value is AppThemeId {
   return APP_THEME_ID_SET.has(value as AppThemeId);
 }
+
+export function isDarkAppTheme(appThemeId: AppThemeId): boolean {
+  return !(appThemeId === "vscode-light" || appThemeId === "github-light" || appThemeId === "paper");
+}

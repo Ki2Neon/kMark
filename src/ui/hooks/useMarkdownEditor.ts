@@ -21,6 +21,7 @@ import {
 import {
   type ExternalDocumentSession,
   type MarkdownAssetDataFile,
+  type MarkdownDocumentSaveSource,
 } from "../../application/editorSession/editorSessionPorts";
 import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
@@ -518,6 +519,35 @@ export function useMarkdownEditor(
     );
   }, [controller, flushEditorMutations]);
 
+  const applyActiveSessionSaved = useCallback((
+    saved: EditorDocumentSessionSnapshot,
+    preserveCachedContent = false,
+  ) => {
+    activeDocumentSessionRef.current = saved;
+    if (!preserveCachedContent) {
+      documentBindingRef.current = {
+        key: documentBindingRef.current?.key ?? saved.sessionId,
+        content: saved.content,
+      };
+    }
+    const currentExternal = externalSessionRef.current;
+    const updatedExternal = currentExternal === null
+      ? externalSessionGatewayRef.current.isSupported()
+        ? toExternalDocumentSession(saved)
+        : null
+      : {
+        ...currentExternal,
+        revision: saved.revision,
+        lineEnding: saved.lineEnding,
+        fileName: saved.fileName,
+        filePath: saved.filePath,
+        content: preserveCachedContent ? currentExternal.content : saved.content,
+        isDirty: false,
+      };
+    externalSessionRef.current = updatedExternal;
+    setExternalSession(updatedExternal);
+  }, []);
+
   const markActiveSessionSaved = useCallback(async (
     fileName: string,
     filePath: string | null,
@@ -531,28 +561,32 @@ export function useMarkdownEditor(
       fileName,
       filePath,
     );
-    activeDocumentSessionRef.current = saved;
-    documentBindingRef.current = {
-      key: documentBindingRef.current?.key ?? saved.sessionId,
-      content: saved.content,
-    };
-    const currentExternal = externalSessionRef.current;
-    const updatedExternal = currentExternal === null
-      ? externalSessionGatewayRef.current.isSupported()
-        ? toExternalDocumentSession(saved)
-        : null
-      : {
-        ...currentExternal,
-        revision: saved.revision,
-        lineEnding: saved.lineEnding,
-        fileName: saved.fileName,
-        filePath: saved.filePath,
-        content: saved.content,
+    applyActiveSessionSaved(saved);
+  }, [applyActiveSessionSaved]);
+
+  const applyRustSessionSave = useCallback((
+    source: MarkdownDocumentSaveSource,
+    fileName: string,
+    filePath: string | null,
+  ) => {
+    const active = activeDocumentSessionRef.current;
+    if (
+      active === null
+      || active.sessionId !== source.sessionId
+      || active.revision !== source.revision
+    ) {
+      throw new Error("保存後にEditor Sessionが更新されました。再保存してください。");
+    }
+    applyActiveSessionSaved(
+      {
+        ...active,
+        fileName,
+        filePath,
         isDirty: false,
-      };
-    externalSessionRef.current = updatedExternal;
-    setExternalSession(updatedExternal);
-  }, []);
+      },
+      true,
+    );
+  }, [applyActiveSessionSaved]);
 
   const handleOpenDocumentFromPicker = useCallback(async () => {
     await executeWithErrorHandling(async () => {
@@ -617,38 +651,64 @@ export function useMarkdownEditor(
 
     await executeWithErrorHandling(async () => {
       await flushEditorSession();
-      const canonical = getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current);
-      const result = await controller.overwriteSaveDocument(
-        store,
-        toPersistedEditorText(canonical, activeDocumentSessionRef.current?.lineEnding ?? "lf"),
-      );
+      const active = activeDocumentSessionRef.current;
+      if (active === null) {
+        throw new Error("保存対象のEditor Sessionがありません。");
+      }
+      const source: MarkdownDocumentSaveSource = {
+        sessionId: active.sessionId,
+        revision: active.revision,
+        lineEnding: active.lineEnding,
+        readCanonicalContent: () => getCurrentEditorContent(
+          editorHandleRef.current,
+          documentBindingRef.current,
+        ),
+      };
+      const result = await controller.overwriteSaveDocument(store, source);
       didSave = result !== null;
       if (result !== null) {
-        await markActiveSessionSaved(result.fileName, result.filePath);
+        if (result.sessionRevision === null) {
+          await markActiveSessionSaved(result.fileName, result.filePath);
+        } else {
+          applyRustSessionSave(source, result.fileName, result.filePath);
+        }
       }
     });
 
     return didSave;
-  }, [controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
+  }, [applyRustSessionSave, controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
 
   const handleSaveDocumentAs = useCallback(async () => {
     let didSave = false;
 
     await executeWithErrorHandling(async () => {
       await flushEditorSession();
-      const canonical = getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current);
-      const result = await controller.saveDocumentAs(
-        store,
-        toPersistedEditorText(canonical, activeDocumentSessionRef.current?.lineEnding ?? "lf"),
-      );
+      const active = activeDocumentSessionRef.current;
+      if (active === null) {
+        throw new Error("保存対象のEditor Sessionがありません。");
+      }
+      const source: MarkdownDocumentSaveSource = {
+        sessionId: active.sessionId,
+        revision: active.revision,
+        lineEnding: active.lineEnding,
+        readCanonicalContent: () => getCurrentEditorContent(
+          editorHandleRef.current,
+          documentBindingRef.current,
+        ),
+      };
+      const result = await controller.saveDocumentAs(store, source);
       didSave = result !== null;
       if (result !== null) {
-        await markActiveSessionSaved(result.fileName, result.filePath);
+        if (result.sessionRevision === null) {
+          await markActiveSessionSaved(result.fileName, result.filePath);
+        } else {
+          applyRustSessionSave(source, result.fileName, result.filePath);
+        }
       }
     });
 
     return didSave;
-  }, [controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
+  }, [applyRustSessionSave, controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
 
   const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {
     void executeWithErrorHandling(async () => {
@@ -861,8 +921,4 @@ function toExternalDocumentSession(
     pendingProposalId: null,
     stagedFileOperation: null,
   };
-}
-
-function toPersistedEditorText(content: string, lineEnding: "lf" | "crlf"): string {
-  return lineEnding === "crlf" ? content.replace(/\n/gu, "\r\n") : content;
 }

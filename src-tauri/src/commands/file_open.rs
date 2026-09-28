@@ -1,5 +1,6 @@
-use std::{ffi::OsStr, path::PathBuf};
+use std::{ffi::OsStr, path::PathBuf, sync::Arc};
 
+use kmark_application::ApplicationService;
 use kmark_contract::{MarkdownDocumentPayload, SavedMarkdownDocumentPayload};
 use kmark_core::{is_supported_markdown_path, MarkdownDocument};
 use tauri::{AppHandle, State};
@@ -7,9 +8,10 @@ use tauri_plugin_dialog::{DialogExt, FilePath};
 
 use super::error::CommandErrorPayload;
 use crate::{
+    infra::FileSystemMarkdownDocumentRepository,
     usecase::{
         clear_pending_markdown_open_requests as clear_pending_markdown_open_requests_usecase,
-        read_markdown_document, take_pending_markdown_documents,
+        read_markdown_document, take_pending_markdown_documents, write_editor_document_snapshot,
         write_markdown_document as write_markdown_document_usecase,
     },
     AppState,
@@ -47,6 +49,42 @@ fn saved_markdown_document_payload(path: &std::path::Path) -> SavedMarkdownDocum
         file_name,
         file_path: path.to_string_lossy().into_owned(),
     }
+}
+
+async fn persist_editor_session_snapshot(
+    application: Arc<ApplicationService>,
+    repository: FileSystemMarkdownDocumentRepository,
+    session_id: String,
+    expected_revision: u64,
+    file_path: PathBuf,
+) -> Result<SavedMarkdownDocumentPayload, CommandErrorPayload> {
+    let snapshot = application
+        .editor_document_persistence_snapshot(&session_id, expected_revision)
+        .map_err(CommandErrorPayload::from)?;
+    let write_path = file_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_editor_document_snapshot(&repository, &write_path, &snapshot)
+    })
+    .await
+    .map_err(|error| {
+        CommandErrorPayload::with_detail(
+            "markdown_save_task_failed",
+            "failed to join markdown save task",
+            error.to_string(),
+        )
+    })?
+    .map_err(CommandErrorPayload::from)?;
+
+    let saved = saved_markdown_document_payload(&file_path);
+    application
+        .mark_frontend_session_saved_at_revision(
+            &session_id,
+            expected_revision,
+            saved.file_name.clone(),
+            Some(saved.file_path.clone()),
+        )
+        .map_err(CommandErrorPayload::from)?;
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -173,6 +211,23 @@ pub fn write_markdown_document(
 }
 
 #[tauri::command]
+pub async fn write_editor_session_markdown_document(
+    state: State<'_, AppState>,
+    session_id: String,
+    expected_revision: u64,
+    path: String,
+) -> Result<SavedMarkdownDocumentPayload, CommandErrorPayload> {
+    persist_editor_session_snapshot(
+        Arc::clone(&state.application),
+        state.markdown_document_repository,
+        session_id,
+        expected_revision,
+        PathBuf::from(path),
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn save_markdown_document_as_dialog(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -211,4 +266,49 @@ pub async fn save_markdown_document_as_dialog(
         .map_err(CommandErrorPayload::from)?;
 
     Ok(Some(saved_markdown_document_payload(&file_path)))
+}
+
+#[tauri::command]
+pub async fn save_editor_session_markdown_document_as_dialog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    expected_revision: u64,
+    file_name: String,
+) -> Result<Option<SavedMarkdownDocumentPayload>, CommandErrorPayload> {
+    let app_handle = app.clone();
+    let selected_file = tauri::async_runtime::spawn_blocking(move || {
+        app_handle
+            .dialog()
+            .file()
+            .add_filter(
+                MARKDOWN_DIALOG_FILTER_NAME,
+                MARKDOWN_DIALOG_FILTER_EXTENSIONS,
+            )
+            .set_file_name(file_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| {
+        CommandErrorPayload::with_detail(
+            "markdown_save_dialog_failed",
+            "failed to open markdown save dialog",
+            error.to_string(),
+        )
+    })?;
+
+    let Some(selected_file) = selected_file else {
+        return Ok(None);
+    };
+
+    let file_path = resolve_dialog_path(selected_file)?;
+    persist_editor_session_snapshot(
+        Arc::clone(&state.application),
+        state.markdown_document_repository,
+        session_id,
+        expected_revision,
+        file_path,
+    )
+    .await
+    .map(Some)
 }

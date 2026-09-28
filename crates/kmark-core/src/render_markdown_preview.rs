@@ -12179,6 +12179,30 @@ mod tests {
     }
 
     #[test]
+    fn keeps_fit_variants_in_explicit_page_payloads() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:fit h:fit -->\n\
+             ![](fit.png)\n\
+             <!-- --- -->\n\
+             <!-- kmark w:page_fit h:page_fit -->\n\
+             ![](page-fit.png)\n\
+             <!-- --- -->\n\
+             <!-- kmark w:page_fit_contain h:page_fit_contain -->\n\
+             ![](page-fit-contain.png)",
+        );
+
+        assert_eq!(rendered_preview.page_htmls.len(), 3);
+        assert!(rendered_preview.page_htmls[0]
+            .contains("width:fit-content;max-width:100%;height:fit-content"));
+        assert!(rendered_preview.page_htmls[1].contains(
+            "width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto)"
+        ));
+        assert!(rendered_preview.page_htmls[2].contains(
+            "width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto)"
+        ));
+    }
+
+    #[test]
     fn applies_align_to_page_fit_contain_image() {
         let rendered_preview = render_markdown_preview(
             "<!-- kmark h:page_fit_contain align:center -->\n![](image.png)",

@@ -703,21 +703,6 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     max-width: 100%;
   }
 
-  .markdown-body .kmark-page-flex-spacer {
-    display: block;
-    flex: 0 0 auto;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    pointer-events: none;
-    user-select: none;
-  }
-
-  .markdown-body:not(.markdown-body--a4) .kmark-page-flex-spacer {
-    display: none;
-  }
-
   .kmark-page-header,
   .kmark-page-footer {
     position: absolute;

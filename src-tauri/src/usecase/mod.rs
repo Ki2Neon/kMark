@@ -24,4 +24,4 @@ pub use pending_markdown_open_requests::{
 };
 pub use prepare_markdown_model_assets::prepare_markdown_model_assets;
 pub use read_markdown_document::read_markdown_document;
-pub use write_markdown_document::write_markdown_document;
+pub use write_markdown_document::{write_editor_document_snapshot, write_markdown_document};

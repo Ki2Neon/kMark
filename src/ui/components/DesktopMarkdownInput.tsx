@@ -1,15 +1,16 @@
 import { autocompletion, closeBrackets, closeBracketsKeymap, completeFromList, completionKeymap, completionStatus, hasNextSnippetField, hasPrevSnippetField, snippetCompletion, startCompletion, type Completion, type CompletionSource } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { indentUnit } from "@codemirror/language";
 import { Annotation, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, drawSelection, highlightActiveLineGutter, highlightSpecialChars, keymap, lineNumbers, placeholder, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { type EditorTransaction } from "../../application/editorSession/editorDocumentPort";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
+import { ONE_DARK_EDITOR_SYNTAX_COLORS, resolveCodeMirrorSyntaxHighlighting } from "../../adapters/editor/codeMirrorSyntaxHighlighting";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownSelectionWrapAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
-import { type AppThemeId } from "../../domain/theme";
+import { isDarkAppTheme, type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorFixedGutterScrollbarMaskExtension } from "../../features/editor-scroll/adapter/codeMirrorFixedGutterScrollbarMaskExtension";
 import { createCodeMirrorShiftWheelHorizontalScrollExtension } from "../../features/editor-scroll/adapter/codeMirrorShiftWheelHorizontalScrollExtension";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
@@ -157,10 +158,6 @@ type PastedMarkdownAssetFile = {
   readonly mimeType: string;
   readonly bytes: readonly number[];
 };
-
-function isDarkEditorTheme(appThemeId: AppThemeId): boolean {
-  return !(appThemeId === "vscode-light" || appThemeId === "github-light" || appThemeId === "paper");
-}
 
 function usesMetaKeyForCtrlCmd(): boolean {
   return /Mac|iPhone|iPad/u.test(window.navigator.platform);
@@ -993,10 +990,12 @@ function DesktopMarkdownInputComponent({
     },
   }), [onAssetPaste]);
 
+  const isDarkTheme = isDarkAppTheme(appThemeId);
+  const editorSyntaxHighlighting = resolveCodeMirrorSyntaxHighlighting(isDarkTheme);
   const editorTheme = useMemo(() => EditorView.theme({
     "&": {
       backgroundColor: "transparent",
-      color: "var(--text)",
+      color: isDarkTheme ? ONE_DARK_EDITOR_SYNTAX_COLORS.ivory : "var(--text)",
       fontFamily: resolveEditFontFamily(editFontId),
       fontSize: "var(--edit-font-size)",
       height: "100%",
@@ -1019,7 +1018,7 @@ function DesktopMarkdownInputComponent({
     },
     ".cm-gutters": {
       border: "none",
-      color: "var(--text-soft)",
+      color: isDarkTheme ? ONE_DARK_EDITOR_SYNTAX_COLORS.stone : "var(--text-soft)",
       userSelect: "none",
     },
     ".cm-gutter, .cm-lineNumbers, .cm-lineNumbers .cm-gutterElement": {
@@ -1065,8 +1064,8 @@ function DesktopMarkdownInputComponent({
       color: "var(--text)",
     },
   }, {
-    dark: isDarkEditorTheme(appThemeId),
-  }), [appThemeId, editFontId, lineWrappingEnabled, showMobileInputHelperBar]);
+    dark: isDarkTheme,
+  }), [editFontId, isDarkTheme, lineWrappingEnabled, showMobileInputHelperBar]);
 
   const extensions = useMemo<Extension[]>(() => {
     const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();
@@ -1108,12 +1107,11 @@ function DesktopMarkdownInputComponent({
 
     return [
       EditorState.allowMultipleSelections.of(true),
-      EditorState.lineSeparator.of("\n"),
       indentUnit.of("  "),
       history(),
       highlightSpecialChars(),
       drawSelection(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      editorSyntaxHighlighting,
       closeBrackets(),
       placeholder("ここに Markdown を書きます"),
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
@@ -1147,7 +1145,7 @@ function DesktopMarkdownInputComponent({
       editorTheme,
       EditorView.updateListener.of(handleEditorUpdate),
     ];
-  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorTheme, handleEditorUpdate, lineWrappingEnabled, multiCursorModifier, showLineNumbers]);
+  }, [assetPasteExtension, blurOnEscapeWhenSelectionEmpty, editorCompletionSource, editorSyntaxHighlighting, editorTheme, handleEditorUpdate, lineWrappingEnabled, multiCursorModifier, showLineNumbers]);
 
   const extensionsRef = useRef(extensions);
   extensionsRef.current = extensions;

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 use ropey::Rope;
 
@@ -69,6 +69,36 @@ pub struct EditorDocument {
     line_ending: LineEnding,
     is_dirty: bool,
     last_batches: HashMap<String, AppliedBatch>,
+}
+
+/// Revision-stable Rope view used only at the persistence boundary.
+#[derive(Clone, Debug)]
+pub struct EditorDocumentPersistenceSnapshot {
+    text: Rope,
+    revision: u64,
+    line_ending: LineEnding,
+}
+
+impl EditorDocumentPersistenceSnapshot {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Streams Rope chunks and restores the document line ending without a whole-document String.
+    pub fn write_to<W>(&self, mut writer: W) -> std::io::Result<()>
+    where
+        W: Write,
+    {
+        match self.line_ending {
+            LineEnding::Lf => self.text.write_to(writer),
+            LineEnding::CrLf => {
+                for chunk in self.text.chunks() {
+                    write_crlf_chunk(&mut writer, chunk)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -255,10 +285,22 @@ impl EditorDocument {
     }
 
     pub fn persisted_text(&self) -> String {
-        let canonical = self.canonical_text();
-        match self.line_ending {
-            LineEnding::Lf => canonical,
-            LineEnding::CrLf => canonical.replace('\n', "\r\n"),
+        let extra_capacity = match self.line_ending {
+            LineEnding::Lf => 0,
+            LineEnding::CrLf => self.text.len_lines().saturating_sub(1),
+        };
+        let mut bytes = Vec::with_capacity(self.text.len_bytes() + extra_capacity);
+        self.persistence_snapshot()
+            .write_to(&mut bytes)
+            .expect("writing an editor snapshot to memory must not fail");
+        String::from_utf8(bytes).expect("an editor snapshot must remain valid UTF-8")
+    }
+
+    pub fn persistence_snapshot(&self) -> EditorDocumentPersistenceSnapshot {
+        EditorDocumentPersistenceSnapshot {
+            text: self.text.clone(),
+            revision: self.revision,
+            line_ending: self.line_ending,
         }
     }
 
@@ -393,6 +435,23 @@ impl EditorDocument {
     }
 }
 
+fn write_crlf_chunk<W>(writer: &mut W, chunk: &str) -> std::io::Result<()>
+where
+    W: Write,
+{
+    let bytes = chunk.as_bytes();
+    let mut segment_start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+        writer.write_all(&bytes[segment_start..index])?;
+        writer.write_all(b"\r\n")?;
+        segment_start = index + 1;
+    }
+    writer.write_all(&bytes[segment_start..])
+}
+
 pub fn normalize_editor_text(input: &str) -> NormalizedEditorText {
     let bytes = input.as_bytes();
     let mut crlf_count = 0usize;
@@ -514,6 +573,8 @@ fn strict_utf16_to_char(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::{
         normalize_editor_text, EditorDocument, EditorDocumentError, EditorMutationBatch,
         EditorTextChange, EditorTransaction, LineEnding,
@@ -565,6 +626,46 @@ mod tests {
         assert_eq!(document.canonical_text(), "a\nb\n");
         assert_eq!(document.persisted_text(), "a\r\nb\r\n");
         assert_eq!(document.line_ending(), LineEnding::CrLf);
+    }
+
+    #[test]
+    fn persistence_snapshot_streams_crlf_and_remains_revision_stable() {
+        #[derive(Default)]
+        struct TrackingWriter {
+            bytes: Vec<u8>,
+            largest_write: usize,
+        }
+
+        impl Write for TrackingWriter {
+            fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+                self.largest_write = self.largest_write.max(buffer.len());
+                self.bytes.extend_from_slice(buffer);
+                Ok(buffer.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let external = "日本語\r\n".repeat(4_000);
+        let mut document = EditorDocument::from_external_text(&external, 7, false);
+        let snapshot = document.persistence_snapshot();
+        document
+            .apply_mutation_batch(&batch(
+                7,
+                1,
+                vec![transaction(16_000, vec![change(0, 0, "更新\n")])],
+            ))
+            .unwrap();
+
+        let mut writer = TrackingWriter::default();
+        snapshot.write_to(&mut writer).unwrap();
+
+        assert_eq!(snapshot.revision(), 7);
+        assert_eq!(String::from_utf8(writer.bytes).unwrap(), external);
+        assert!(writer.largest_write < external.len());
+        assert_eq!(document.revision(), 8);
     }
 
     #[test]

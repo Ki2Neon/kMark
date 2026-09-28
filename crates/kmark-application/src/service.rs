@@ -6,7 +6,7 @@ use std::{
 
 use kmark_core::{
     ensure_markdown_file_name, normalize_editor_text, EditorDocument, EditorDocumentError,
-    EditorMutationAck, EditorMutationBatch,
+    EditorDocumentPersistenceSnapshot, EditorMutationAck, EditorMutationBatch,
 };
 use similar::TextDiff;
 
@@ -222,12 +222,58 @@ impl ApplicationService {
         Ok(ack)
     }
 
+    pub fn editor_document_persistence_snapshot(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<EditorDocumentPersistenceSnapshot, ApplicationError> {
+        let state = self.lock_state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(session_not_found)?;
+        ensure_revision(session.document.revision(), expected_revision)?;
+        Ok(session.document.persistence_snapshot())
+    }
+
     pub fn mark_frontend_session_saved(
         &self,
         session_id: &str,
         file_name: String,
         file_path: Option<String>,
     ) -> Result<DocumentSnapshot, ApplicationError> {
+        self.mark_frontend_session_saved_inner(session_id, None, file_name, file_path, |session| {
+            session.snapshot(&self.instance_id)
+        })
+    }
+
+    pub fn mark_frontend_session_saved_at_revision(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        file_name: String,
+        file_path: Option<String>,
+    ) -> Result<(), ApplicationError> {
+        self.mark_frontend_session_saved_inner(
+            session_id,
+            Some(expected_revision),
+            file_name,
+            file_path,
+            |_| (),
+        )
+    }
+
+    fn mark_frontend_session_saved_inner<T, F>(
+        &self,
+        session_id: &str,
+        expected_revision: Option<u64>,
+        file_name: String,
+        file_path: Option<String>,
+        project: F,
+    ) -> Result<T, ApplicationError>
+    where
+        F: FnOnce(&DocumentSession) -> T,
+    {
         let roots = self.roots();
         let resolved_location = file_path.as_deref().and_then(|path| {
             self.file_repository
@@ -247,6 +293,9 @@ impl ApplicationService {
             .sessions
             .get_mut(session_id)
             .ok_or_else(session_not_found)?;
+        if let Some(expected_revision) = expected_revision {
+            ensure_revision(session.document.revision(), expected_revision)?;
+        }
         let (root_id, relative_path) = resolved_location
             .map(|(root_id, relative_path)| (Some(root_id), Some(relative_path)))
             .unwrap_or((None, None));
@@ -257,7 +306,7 @@ impl ApplicationService {
         session.externally_visible = root_id.is_some() || session.externally_visible;
         session.persisted_fingerprint = persisted_fingerprint;
         session.document.mark_saved();
-        Ok(session.snapshot(&self.instance_id))
+        Ok(project(session))
     }
 
     pub fn detach_window(&self, window_label: &str) {
@@ -1236,6 +1285,60 @@ mod tests {
         assert_eq!(saved.revision, 1);
         assert!(!saved.is_dirty);
         assert_eq!(saved.file_name, "saved.md");
+    }
+
+    #[test]
+    fn persistence_snapshot_and_save_marker_reject_stale_revision() {
+        let service = service();
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                "a\r\nb\r\n".to_owned(),
+                false,
+            )
+            .expect("register session");
+        let snapshot = service
+            .editor_document_persistence_snapshot(&session.session_id, 1)
+            .expect("persistence snapshot");
+        let mut persisted = Vec::new();
+        snapshot.write_to(&mut persisted).expect("stream snapshot");
+        assert_eq!(String::from_utf8(persisted).unwrap(), "a\r\nb\r\n");
+
+        service
+            .apply_editor_mutation_batch(
+                &session.session_id,
+                &EditorMutationBatch {
+                    client_id: "view".to_owned(),
+                    batch_id: 1,
+                    expected_revision: 1,
+                    transactions: vec![EditorTransaction {
+                        before_length_utf16: 4,
+                        changes: vec![EditorTextChange {
+                            from_utf16: 0,
+                            to_utf16: 0,
+                            insert: "x".to_owned(),
+                        }],
+                    }],
+                },
+            )
+            .expect("apply concurrent mutation");
+
+        service
+            .mark_frontend_session_saved_at_revision(
+                &session.session_id,
+                1,
+                "saved.md".to_owned(),
+                None,
+            )
+            .expect_err("stale save marker must fail");
+        let current = service
+            .session_for_ui(&session.session_id)
+            .expect("current session");
+        assert_eq!(current.revision, 2);
+        assert!(current.is_dirty);
+        assert_eq!(current.file_name, "note.md");
     }
 
     #[test]
