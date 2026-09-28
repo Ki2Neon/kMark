@@ -19,6 +19,7 @@ import {
 import { type AppThemeId } from "../../domain/theme";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
+import { DirtyIndicator } from "../components/DirtyIndicator";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { UnsavedExitDialog } from "../components/UnsavedExitDialog";
@@ -829,6 +830,7 @@ export function MarkdownEditorScreen({
       data-resizing={isDesktopResizing ? "true" : "false"}
       style={layoutMode === "desktop" && isPreviewVisible ? desktopLayoutStyle : undefined}
     >
+      <DirtyIndicator isDirty={isDirty} />
       <input
         ref={fileInputRef}
         type="file"

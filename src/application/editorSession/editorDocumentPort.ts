@@ -23,6 +23,7 @@ export type EditorMutationAck = {
   readonly batchId: number;
   readonly revision: number;
   readonly documentLengthUtf16: number;
+  readonly isDirty: boolean;
   readonly replayed: boolean;
 };
 

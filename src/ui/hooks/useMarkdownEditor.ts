@@ -143,32 +143,46 @@ export function useMarkdownEditor(
   }, [state]);
 
   const createMutationQueue = useCallback((session: EditorDocumentSessionSnapshot) => {
-    mutationQueueRef.current = new EditorMutationQueue(
+    const queue = new EditorMutationQueue(
       editorDocumentGatewayRef.current!,
       session.sessionId,
       session.revision,
       session.documentLengthUtf16,
       {
         onAcknowledged: (ack) => {
+          if (mutationQueueRef.current !== queue) {
+            return;
+          }
           const active = activeDocumentSessionRef.current;
           if (active !== null && active.sessionId === session.sessionId) {
+            const isDirty = ack.isDirty || queue.hasPendingTransactions;
             activeDocumentSessionRef.current = {
               ...active,
               revision: ack.revision,
               documentLengthUtf16: ack.documentLengthUtf16,
-              isDirty: true,
+              isDirty,
             };
+            dispatch({ type: "editor/documentDirtyResolved", isDirty });
           }
           const current = externalSessionRef.current;
           if (current !== null && current.sessionId === session.sessionId) {
-            const updated = { ...current, revision: ack.revision, isDirty: true };
+            const updated = {
+              ...current,
+              revision: ack.revision,
+              isDirty: ack.isDirty || queue.hasPendingTransactions,
+            };
             externalSessionRef.current = updated;
             setExternalSession(updated);
           }
         },
-        onFailed: (error) => fatalRecoveryRef.current?.(session.sessionId, error),
+        onFailed: (error) => {
+          if (mutationQueueRef.current === queue) {
+            fatalRecoveryRef.current?.(session.sessionId, error);
+          }
+        },
       },
     );
+    mutationQueueRef.current = queue;
   }, []);
 
   const installAuthoritativeSession = useCallback((
@@ -523,7 +537,8 @@ export function useMarkdownEditor(
     saved: EditorDocumentSessionSnapshot,
     preserveCachedContent = false,
   ) => {
-    activeDocumentSessionRef.current = saved;
+    const isDirty = saved.isDirty || (mutationQueueRef.current?.hasPendingTransactions ?? false);
+    activeDocumentSessionRef.current = { ...saved, isDirty };
     if (!preserveCachedContent) {
       documentBindingRef.current = {
         key: documentBindingRef.current?.key ?? saved.sessionId,
@@ -533,7 +548,7 @@ export function useMarkdownEditor(
     const currentExternal = externalSessionRef.current;
     const updatedExternal = currentExternal === null
       ? externalSessionGatewayRef.current.isSupported()
-        ? toExternalDocumentSession(saved)
+        ? toExternalDocumentSession({ ...saved, isDirty })
         : null
       : {
         ...currentExternal,
@@ -542,25 +557,39 @@ export function useMarkdownEditor(
         fileName: saved.fileName,
         filePath: saved.filePath,
         content: preserveCachedContent ? currentExternal.content : saved.content,
-        isDirty: false,
+        isDirty,
       };
     externalSessionRef.current = updatedExternal;
     setExternalSession(updatedExternal);
+    dispatch({ type: "editor/documentDirtyResolved", isDirty });
   }, []);
 
   const markActiveSessionSaved = useCallback(async (
+    source: MarkdownDocumentSaveSource,
     fileName: string,
     filePath: string | null,
   ) => {
     const active = activeDocumentSessionRef.current;
-    if (active === null) {
+    if (active === null || active.sessionId !== source.sessionId) {
       throw new Error("保存対象のEditor Sessionがありません。");
+    }
+    if (active.revision !== source.revision || mutationQueueRef.current?.hasPendingTransactions) {
+      applyActiveSessionSaved({ ...active, fileName, filePath, isDirty: true }, true);
+      return;
     }
     const saved = await editorDocumentGatewayRef.current!.markSaved(
       active.sessionId,
       fileName,
       filePath,
     );
+    const current = activeDocumentSessionRef.current;
+    if (current === null || current.sessionId !== source.sessionId) {
+      throw new Error("保存対象のEditor Sessionが切り替わりました。");
+    }
+    if (current.revision !== source.revision || mutationQueueRef.current?.hasPendingTransactions) {
+      applyActiveSessionSaved({ ...current, fileName, filePath, isDirty: true }, true);
+      return;
+    }
     applyActiveSessionSaved(saved);
   }, [applyActiveSessionSaved]);
 
@@ -570,19 +599,18 @@ export function useMarkdownEditor(
     filePath: string | null,
   ) => {
     const active = activeDocumentSessionRef.current;
-    if (
-      active === null
-      || active.sessionId !== source.sessionId
-      || active.revision !== source.revision
-    ) {
-      throw new Error("保存後にEditor Sessionが更新されました。再保存してください。");
+    if (active === null || active.sessionId !== source.sessionId) {
+      throw new Error("保存対象のEditor Sessionが切り替わりました。");
     }
+    const isDirty = active.revision !== source.revision
+      ? active.isDirty || (mutationQueueRef.current?.hasPendingTransactions ?? false)
+      : mutationQueueRef.current?.hasPendingTransactions ?? false;
     applyActiveSessionSaved(
       {
         ...active,
         fileName,
         filePath,
-        isDirty: false,
+        isDirty,
       },
       true,
     );
@@ -668,7 +696,7 @@ export function useMarkdownEditor(
       didSave = result !== null;
       if (result !== null) {
         if (result.sessionRevision === null) {
-          await markActiveSessionSaved(result.fileName, result.filePath);
+          await markActiveSessionSaved(source, result.fileName, result.filePath);
         } else {
           applyRustSessionSave(source, result.fileName, result.filePath);
         }
@@ -700,7 +728,7 @@ export function useMarkdownEditor(
       didSave = result !== null;
       if (result !== null) {
         if (result.sessionRevision === null) {
-          await markActiveSessionSaved(result.fileName, result.filePath);
+          await markActiveSessionSaved(source, result.fileName, result.filePath);
         } else {
           applyRustSessionSave(source, result.fileName, result.filePath);
         }

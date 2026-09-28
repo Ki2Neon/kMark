@@ -69,8 +69,8 @@ export function createStartupEditorState(
 }
 
 export function reduceEditorState(state: EditorState, action: EditorSessionAction): EditorState {
-  if (action.type === "editor/documentMutated") {
-    return { ...state, isDirty: true, errorMessage: null };
+  if (action.type === "editor/documentMutated" || action.type === "editor/documentDirtyResolved") {
+    return { ...state, isDirty: action.type === "editor/documentMutated" ? true : action.isDirty, errorMessage: null };
   }
   const contractState: EditorStatePayload = { ...state, content: "" };
   const contractAction = toEditorStateActionPayload(action);
@@ -107,7 +107,8 @@ function toEditorStateActionPayload(action: EditorSessionAction): EditorStateAct
     case "editor/errorCleared":
       return action;
     case "editor/documentMutated":
-      throw new Error("documentMutated must be reduced without WASM serialization");
+    case "editor/documentDirtyResolved":
+      throw new Error("Editor document dirty actions must be reduced without WASM serialization");
   }
 }
 

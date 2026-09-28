@@ -64,3 +64,24 @@ test("Web session returns one-section patch equal to full renderer", () => {
     document.free();
   }
 });
+
+test("Web mutation ACK reports saved-content equality after undo", () => {
+  const document = new WebEditorDocument(JSON.stringify({ content: "a🙂b", revision: 1, isDirty: false }));
+  try {
+    const mutate = (batchId, revision, insert) => JSON.parse(document.apply_mutation_batch_json(JSON.stringify({
+      clientId: "dirty-test",
+      batchId,
+      expectedRevision: revision,
+      transactions: [{
+        beforeLengthUtf16: 4,
+        changes: [{ fromUtf16: 1, toUtf16: 3, insert }],
+      }],
+    })));
+    assert.equal(mutate(1, 1, "🚀").isDirty, true);
+    assert.equal(mutate(2, 2, "🙂").isDirty, false);
+    document.mark_saved();
+    assert.equal(mutate(3, 3, "🚀").isDirty, true);
+  } finally {
+    document.free();
+  }
+});

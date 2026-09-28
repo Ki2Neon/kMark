@@ -3,6 +3,7 @@ import { type EditorState } from "../../domain/editor";
 export type EditorSessionAction =
   | { readonly type: "editor/bootstrapLoaded"; readonly state: EditorState }
   | { readonly type: "editor/documentMutated" }
+  | { readonly type: "editor/documentDirtyResolved"; readonly isDirty: boolean }
   | {
       readonly type: "editor/documentLoaded";
       readonly fileName: string;

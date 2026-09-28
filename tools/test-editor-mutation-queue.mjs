@@ -40,6 +40,7 @@ test("keeps one request in flight and coalesces pending transactions", async () 
         batchId: batch.batchId,
         revision: batch.expectedRevision + 1,
         documentLengthUtf16: 4,
+        isDirty: true,
         replayed: false,
       };
     },
@@ -50,12 +51,14 @@ test("keeps one request in flight and coalesces pending transactions", async () 
   queue.enqueue(insert(2, 2, "b"));
   queue.enqueue(insert(3, 3, "c"));
   assert.equal(calls.length, 1);
+  assert.equal(queue.hasPendingTransactions, true);
 
   first.resolve({
     clientId: "client",
     batchId: 1,
     revision: 6,
     documentLengthUtf16: 2,
+    isDirty: true,
     replayed: false,
   });
   await queue.flush();
@@ -65,6 +68,7 @@ test("keeps one request in flight and coalesces pending transactions", async () 
   assert.equal(calls[1].expectedRevision, 6);
   assert.equal(calls[1].transactions.length, 2);
   assert.equal(queue.revision, 7);
+  assert.equal(queue.hasPendingTransactions, false);
 });
 
 test("retries the exact failed batch without advancing revision or batch id", async () => {
@@ -82,6 +86,7 @@ test("retries the exact failed batch without advancing revision or batch id", as
         batchId: batch.batchId,
         revision: batch.expectedRevision + 1,
         documentLengthUtf16: 2,
+        isDirty: true,
         replayed: true,
       };
     },

@@ -50,6 +50,10 @@ export class EditorMutationQueue {
     return this.#revision;
   }
 
+  get hasPendingTransactions(): boolean {
+    return this.#pendingTransactions.length > 0 || this.#failedBatch !== null;
+  }
+
   enqueue(transaction: EditorTransaction): void {
     if (transaction.changes.length === 0) {
       return;

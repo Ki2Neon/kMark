@@ -779,6 +779,7 @@ pub struct EditorMutationAckPayload {
     pub revision: u64,
     #[cfg_attr(feature = "bindings", ts(type = "number"))]
     pub document_length_utf16: u64,
+    pub is_dirty: bool,
     pub replayed: bool,
 }
 
@@ -1230,6 +1231,7 @@ impl From<&EditorMutationAck> for EditorMutationAckPayload {
             batch_id: value.batch_id,
             revision: value.revision,
             document_length_utf16: value.document_length_utf16,
+            is_dirty: value.is_dirty,
             replayed: value.replayed,
         }
     }

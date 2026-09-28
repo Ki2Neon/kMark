@@ -61,6 +61,7 @@ pub struct EditorMutationAck {
     pub batch_id: u64,
     pub revision: u64,
     pub document_length_utf16: u64,
+    pub is_dirty: bool,
     pub replayed: bool,
 }
 
@@ -73,6 +74,8 @@ struct AppliedBatch {
 #[derive(Clone, Debug)]
 pub struct EditorDocument {
     text: Rope,
+    /// Persistent Rope snapshot of the last saved content. None means no known clean baseline.
+    saved_text: Option<Rope>,
     revision: u64,
     line_ending: LineEnding,
     is_dirty: bool,
@@ -263,8 +266,10 @@ impl EditorDocument {
             });
         }
 
+        let text = Rope::from_str(&text);
         Ok(Self {
-            text: Rope::from_str(&text),
+            saved_text: (!is_dirty).then(|| text.clone()),
+            text,
             revision,
             line_ending,
             is_dirty,
@@ -325,6 +330,7 @@ impl EditorDocument {
     }
 
     pub fn mark_saved(&mut self) {
+        self.saved_text = Some(self.text.clone());
         self.is_dirty = false;
     }
 
@@ -342,6 +348,7 @@ impl EditorDocument {
 
         let next_revision = self.next_revision()?;
         self.text = Rope::from_str(&text);
+        self.saved_text = (!is_dirty).then(|| self.text.clone());
         self.is_dirty = is_dirty;
         self.revision = next_revision;
         Ok(())
@@ -349,6 +356,7 @@ impl EditorDocument {
 
     pub fn set_dirty_and_touch(&mut self, is_dirty: bool) -> Result<(), EditorDocumentError> {
         let next_revision = self.next_revision()?;
+        self.saved_text = (!is_dirty).then(|| self.text.clone());
         self.is_dirty = is_dirty;
         self.revision = next_revision;
         Ok(())
@@ -402,6 +410,9 @@ impl EditorDocument {
                 if batch == &applied.batch {
                     let mut replayed = applied.ack.clone();
                     replayed.replayed = true;
+                    if replayed.revision == self.revision {
+                        replayed.is_dirty = self.is_dirty;
+                    }
                     return Ok(replayed);
                 }
 
@@ -449,17 +460,22 @@ impl EditorDocument {
             .ok_or(EditorDocumentError::RevisionOverflow)?;
         let document_length_utf16 = u64::try_from(candidate.len_utf16_cu())
             .map_err(|_| EditorDocumentError::OffsetOverflow)?;
+        let is_dirty = self
+            .saved_text
+            .as_ref()
+            .is_none_or(|saved| saved != &candidate);
         let ack = EditorMutationAck {
             client_id: batch.client_id.clone(),
             batch_id: batch.batch_id,
             revision: next_revision,
             document_length_utf16,
+            is_dirty,
             replayed: false,
         };
 
         self.text = candidate;
         self.revision = next_revision;
-        self.is_dirty = true;
+        self.is_dirty = is_dirty;
         self.last_batches.insert(
             batch.client_id.clone(),
             AppliedBatch {
@@ -760,6 +776,55 @@ mod tests {
         assert_eq!(ack.revision, 41);
         assert_eq!(ack.document_length_utf16, 6);
         assert!(document.is_dirty());
+    }
+
+    #[test]
+    fn undo_to_saved_rope_clears_dirty_even_for_same_length_unicode_edits() {
+        let mut document = EditorDocument::from_external_text("a🙂b", 1, false);
+        let edit = document
+            .apply_mutation_batch(&batch(1, 1, vec![transaction(4, vec![change(1, 3, "🚀")])]))
+            .unwrap();
+        assert!(edit.is_dirty);
+        assert!(document.is_dirty());
+
+        let undo = document
+            .apply_mutation_batch(&batch(2, 2, vec![transaction(4, vec![change(1, 3, "🙂")])]))
+            .unwrap();
+        assert!(!undo.is_dirty);
+        assert!(!document.is_dirty());
+        assert_eq!(document.canonical_text(), "a🙂b");
+
+        document.mark_saved();
+        let next_edit = document
+            .apply_mutation_batch(&batch(3, 3, vec![transaction(4, vec![change(0, 1, "x")])]))
+            .unwrap();
+        assert!(next_edit.is_dirty);
+        let next_undo = document
+            .apply_mutation_batch(&batch(4, 4, vec![transaction(4, vec![change(0, 1, "a")])]))
+            .unwrap();
+        assert!(!next_undo.is_dirty);
+    }
+
+    #[test]
+    fn unknown_saved_baseline_stays_dirty_until_saved() {
+        let mut document = EditorDocument::from_external_text("a", 1, true);
+        let ack = document
+            .apply_mutation_batch(&batch(1, 1, vec![transaction(1, vec![change(0, 1, "a")])]))
+            .unwrap();
+        assert!(ack.is_dirty);
+        document.mark_saved();
+        assert!(!document.is_dirty());
+    }
+
+    #[test]
+    fn replay_after_save_marker_reports_current_dirty_state() {
+        let mut document = EditorDocument::from_external_text("a", 1, false);
+        let mutation = batch(1, 1, vec![transaction(1, vec![change(1, 1, "b")])]);
+        assert!(document.apply_mutation_batch(&mutation).unwrap().is_dirty);
+        document.mark_saved();
+        let replay = document.apply_mutation_batch(&mutation).unwrap();
+        assert!(replay.replayed);
+        assert!(!replay.is_dirty);
     }
 
     #[test]

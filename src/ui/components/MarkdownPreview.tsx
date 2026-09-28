@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent as ReactFormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent as ReactFormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent, type WheelEvent as ReactWheelEvent } from "react";
 import {
   createKmarkModelViewerScope,
   persistKmarkModelViewerSnapshots,
@@ -24,6 +24,7 @@ import {
   type RenderedPreviewPage,
 } from "../../domain/preview";
 import { shouldPreserveGeneratedSvgDiagramDom } from "./plantUmlPreviewPolicy";
+import { shouldSuppressPreviewNativeDrag } from "../../features/preview-navigation/domain/previewNativeDragPolicy";
 
 const A4_PAGE_WIDTH_FOR_FIT_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
 const MIN_A4_SCALE = 0.1;
@@ -262,12 +263,12 @@ function resolveA4ZoomAnchorElement(
     ?? null;
 }
 
-function resolveEventTargetElement(eventTarget: EventTarget | null): HTMLElement | null {
-  if (eventTarget instanceof HTMLElement) {
+function resolveEventTargetElement(eventTarget: EventTarget | null): Element | null {
+  if (eventTarget instanceof Element) {
     return eventTarget;
   }
 
-  if (eventTarget instanceof Node && eventTarget.parentElement instanceof HTMLElement) {
+  if (eventTarget instanceof Node && eventTarget.parentElement !== null) {
     return eventTarget.parentElement;
   }
 
@@ -2375,6 +2376,15 @@ function MarkdownPreviewComponent({
     setIsViewportPanning(false);
   }, [enableInteractiveViewportNavigation]);
 
+  const handlePreviewDragStart = useCallback((event: ReactDragEvent<HTMLElement>) => {
+    if (shouldSuppressPreviewNativeDrag({
+      interactionEnabled: enableInteractiveViewportNavigation,
+      pendingPanPointerId: panPointerStateRef.current?.pointerId ?? null,
+    })) {
+      event.preventDefault();
+    }
+  }, [enableInteractiveViewportNavigation]);
+
   const handlePreviewPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const panPointerState = panPointerStateRef.current;
 
@@ -2591,6 +2601,7 @@ function MarkdownPreviewComponent({
           onClick={handlePreviewClick}
           onContextMenu={handlePreviewContextMenu}
           onDoubleClick={handlePreviewDoubleClick}
+          onDragStartCapture={handlePreviewDragStart}
           onMouseDown={handlePreviewMouseDown}
           onPointerCancel={handlePreviewPointerEnd}
           onPointerDown={handlePreviewPointerDown}
@@ -2643,6 +2654,7 @@ function MarkdownPreviewComponent({
         onClick={handlePreviewClick}
         onContextMenu={handlePreviewContextMenu}
         onDoubleClick={handlePreviewDoubleClick}
+        onDragStartCapture={handlePreviewDragStart}
         onMouseDown={handlePreviewMouseDown}
         onPointerCancel={handlePreviewPointerEnd}
         onPointerDown={handlePreviewPointerDown}

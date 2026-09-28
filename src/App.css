@@ -303,6 +303,31 @@ input:focus-visible,
   user-select: none;
 }
 
+.editor-shell__dirty-indicator {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: calc(env(safe-area-inset-left, 0px) + 8px);
+  z-index: 16;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--focus);
+  box-shadow: 0 0 0 2px var(--surface);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.editor-shell__dirty-indicator[data-visible="true"] {
+  opacity: 1;
+}
+
+@media (forced-colors: active) {
+  .editor-shell__dirty-indicator {
+    background: Highlight;
+    box-shadow: 0 0 0 2px Canvas;
+  }
+}
+
 .editor-shell__mobile-nav,
 .editor-shell__toast,
 .workspace-grid__divider,

@@ -112,6 +112,12 @@ test("Standard preview changes one section without replacing unaffected DOM", as
     assert.equal(result.secondSurfaceSame, true);
     assert.match(result.secondText, /after/u);
     assert.equal(result.sectionDisplay, "contents");
+    assert.equal(result.imageDragSuppressed, true);
+    assert.equal(result.svgDragSuppressed, true);
+    assert.equal(result.dragWithoutPanAllowed, true);
+    assert.equal(result.mermaidRendered, true);
+    assert.equal(result.dirtyIndicatorVisible, true);
+    assert.equal(result.cleanIndicatorHidden, true);
   } finally {
     socket?.close();
     if (browserSocket?.readyState === WebSocket.OPEN) {
