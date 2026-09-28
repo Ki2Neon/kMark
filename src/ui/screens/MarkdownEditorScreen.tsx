@@ -158,6 +158,7 @@ export function MarkdownEditorScreen({
     isDirty,
     isReady: isEditorReady,
     previewHtml,
+    previewSectionHtmls,
     recentFiles,
     handleClearPendingExternalDocuments,
     previewPages,
@@ -909,6 +910,7 @@ export function MarkdownEditorScreen({
                     defaultPageStyle={defaultPreviewPageStyle}
                     defaultTextStyle={defaultPreviewTextStyle}
                     pages={previewPages}
+                    sectionHtmls={previewSectionHtmls}
                     previewFitMode={previewFitMode}
                     suppressTextSelectionOnDoubleClick
                     zoomScale={previewZoomScale}
@@ -980,6 +982,7 @@ export function MarkdownEditorScreen({
                       defaultPageStyle={defaultPreviewPageStyle}
                       defaultTextStyle={defaultPreviewTextStyle}
                       pages={previewPages}
+                      sectionHtmls={previewSectionHtmls}
                       previewFitMode={previewFitMode}
                       suppressTextSelectionOnDoubleClick
                       zoomScale={previewZoomScale}

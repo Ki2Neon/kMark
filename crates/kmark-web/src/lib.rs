@@ -4,16 +4,17 @@ use kmark_contract::{
     EditorStateActionPayload, EditorStateInput, EditorStatePayload, EditorStatsPayload,
     FinalizeGeneratedSvgRequestPayload, FinalizeGeneratedSvgResultPayload,
     FormatMarkdownTablesPayload, LineEndingPayload, PreviewPreferencesPayload, RecentFilePayload,
-    RenderedPreviewPayload, TableDiagnosticPayload, ThemePreferencesPayload,
+    RenderedPreviewPayload, SessionPreviewPayload, TableDiagnosticPayload, ThemePreferencesPayload,
 };
 use kmark_core::{
     create_startup_editor_state, derive_editor_stats, ensure_markdown_file_name,
     finalize_generated_svg, format_markdown_tables, format_markdown_tables_in_line_ranges,
     normalize_plantuml_https_hosts, reduce_editor_state, render_markdown_preview_with_file_path,
     resolve_app_font_family, resolve_document_file_stem, resolve_edit_font_family,
-    DesktopLayoutPreferences, EditorDocument, EditorPreferences, EditorState, EditorStateAction,
-    GeneratedSvgPresentation, PreviewDisplayMode, PreviewPreferences, RecentFile, RecentFiles,
-    StoredEdit, TableFormatLineRange, TableFormatOptions, ThemePreferences,
+    DesktopLayoutPreferences, EditorDocument, EditorMutationImpact, EditorPreferences, EditorState,
+    EditorStateAction, GeneratedSvgPresentation, PreviewDisplayMode, PreviewPreferences,
+    PreviewRenderCache, PreviewRenderChange, RecentFile, RecentFiles, StoredEdit,
+    TableFormatLineRange, TableFormatOptions, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -95,9 +96,19 @@ struct WebEditorDocumentInput {
     is_dirty: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebSessionPreviewRequest {
+    revision: u64,
+    base_revision: Option<u64>,
+    file_path: Option<String>,
+}
+
 #[wasm_bindgen]
 pub struct WebEditorDocument {
     document: EditorDocument,
+    preview_cache: Option<PreviewRenderCache>,
+    preview_impact: Option<(u64, Option<EditorMutationImpact>)>,
 }
 
 #[wasm_bindgen]
@@ -112,6 +123,8 @@ impl WebEditorDocument {
                 input.revision,
                 input.is_dirty,
             ),
+            preview_cache: None,
+            preview_impact: None,
         })
     }
 
@@ -121,11 +134,52 @@ impl WebEditorDocument {
                 JsValue::from_str(&format!("invalid_editor_mutation_batch:{error}"))
             })?;
         let batch = payload.into();
+        let impact = self.document.single_change_impact(&batch);
         let ack = self
             .document
             .apply_mutation_batch(&batch)
             .map_err(|error| JsValue::from_str(&format!("{}:{error}", error.code())))?;
+        if !ack.replayed {
+            self.preview_impact = Some((ack.revision, impact));
+        }
         Ok(stringify(&EditorMutationAckPayload::from(&ack)))
+    }
+
+    pub fn render_session_preview_json(&mut self, request_json: String) -> Result<String, JsValue> {
+        let request = serde_json::from_str::<WebSessionPreviewRequest>(&request_json)
+            .map_err(|error| JsValue::from_str(&format!("invalid_preview_request:{error}")))?;
+        if self.document.revision() != request.revision {
+            return Err(JsValue::from_str("preview_revision_gap"));
+        }
+        let impact = self
+            .preview_impact
+            .as_ref()
+            .filter(|(revision, _)| *revision == request.revision)
+            .and_then(|(_, impact)| impact.as_ref());
+        if let (Some(cache), Some(base_revision)) = (&mut self.preview_cache, request.base_revision)
+        {
+            if let Some(patch) =
+                cache.patch_with_cached_assets(&self.document, impact, request.file_path.as_deref())
+            {
+                if patch.base_revision == base_revision {
+                    return Ok(stringify(&SessionPreviewPayload::from(
+                        PreviewRenderChange::Patch(patch),
+                    )));
+                }
+            }
+        }
+        let (cache, preview) = PreviewRenderCache::new(
+            &self.document,
+            request.file_path.as_deref(),
+            &std::collections::HashMap::new(),
+        );
+        self.preview_cache = Some(cache);
+        Ok(stringify(&SessionPreviewPayload::from(
+            PreviewRenderChange::Full {
+                revision: request.revision,
+                preview,
+            },
+        )))
     }
 
     pub fn snapshot_json(&self) -> String {

@@ -1396,6 +1396,18 @@ input:focus-visible,
   transform-origin: top left;
 }
 
+.preview-section__standard-segment {
+  display: contents;
+}
+
+.preview-section__standard-content > .preview-section__standard-segment:first-child > :first-child {
+  margin-top: 0;
+}
+
+.preview-section__standard-content > .preview-section__standard-segment:last-child > :last-child {
+  margin-bottom: 0;
+}
+
 .preview-section__page-stack {
   display: grid;
   justify-items: center;

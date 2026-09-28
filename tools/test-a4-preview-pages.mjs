@@ -25,6 +25,7 @@ const [previewSource, pageLayoutSource, appStyleSource, printDocumentSource, pag
 const vite = await createServer({
   appType: "custom",
   configFile: false,
+  cacheDir: "node_modules/.vite-kmark-test-a4-preview-pages",
   optimizeDeps: { noDiscovery: true },
   server: { middlewareMode: true },
 });

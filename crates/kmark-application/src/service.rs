@@ -7,6 +7,7 @@ use std::{
 use kmark_core::{
     ensure_markdown_file_name, normalize_editor_text, EditorDocument, EditorDocumentError,
     EditorDocumentPersistenceSnapshot, EditorMutationAck, EditorMutationBatch,
+    EditorMutationImpact, KmarkModelAssetResolution, PreviewRenderCache, PreviewRenderChange,
 };
 use similar::TextDiff;
 
@@ -33,6 +34,8 @@ struct ApplicationState {
     next_id: u64,
     roots: Vec<RegisteredRoot>,
     sessions: HashMap<String, DocumentSession>,
+    preview_caches: HashMap<String, PreviewRenderCache>,
+    preview_impacts: HashMap<String, (u64, Option<EditorMutationImpact>)>,
     session_proposals: HashMap<String, SessionProposal>,
     create_proposals: HashMap<String, CreateDocumentProposal>,
     active_session_id: Option<String>,
@@ -208,10 +211,16 @@ impl ApplicationService {
             ));
         }
 
+        let impact = session.document.single_change_impact(batch);
         let ack = session
             .document
             .apply_mutation_batch(batch)
             .map_err(map_editor_document_error)?;
+        if !ack.replayed {
+            state
+                .preview_impacts
+                .insert(session_id.to_owned(), (ack.revision, impact));
+        }
         drop(state);
         if !ack.replayed {
             self.event_sink.publish(&ApplicationEvent::SessionChanged {
@@ -380,6 +389,74 @@ impl ApplicationService {
             .get(session_id)
             .map(|session| session.snapshot(&self.instance_id))
             .ok_or_else(session_not_found)
+    }
+
+    /// Builds a revision-consistent preview without holding the application lock during
+    /// Markdown rendering or infrastructure asset resolution.
+    pub fn render_session_preview<F>(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        base_revision: Option<u64>,
+        resolve_assets: F,
+    ) -> Result<PreviewRenderChange, ApplicationError>
+    where
+        F: FnOnce(Option<&str>, &str) -> HashMap<String, KmarkModelAssetResolution>,
+    {
+        let (document, file_path, cache, impact) = {
+            let mut state = self.lock_state();
+            let session = state
+                .sessions
+                .get(session_id)
+                .ok_or_else(session_not_found)?;
+            ensure_revision(session.document.revision(), expected_revision)?;
+            let document = session.document.clone();
+            let file_path = session
+                .file_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned());
+            let impact = state
+                .preview_impacts
+                .get(session_id)
+                .filter(|(revision, _)| *revision == expected_revision)
+                .and_then(|(_, impact)| impact.clone());
+            let cache = state.preview_caches.remove(session_id);
+            (document, file_path, cache, impact)
+        };
+
+        let mut patched = None;
+        if let (Some(mut cache), Some(base_revision)) = (cache, base_revision) {
+            if let Some(patch) =
+                cache.patch_with_cached_assets(&document, impact.as_ref(), file_path.as_deref())
+            {
+                if patch.base_revision == base_revision {
+                    patched = Some((cache, PreviewRenderChange::Patch(patch)));
+                }
+            }
+        }
+        let (cache, change) = patched.unwrap_or_else(|| {
+            let (cache, preview) = PreviewRenderCache::with_asset_resolver(
+                &document,
+                file_path.as_deref(),
+                resolve_assets,
+            );
+            (
+                cache,
+                PreviewRenderChange::Full {
+                    revision: expected_revision,
+                    preview,
+                },
+            )
+        });
+
+        let mut state = self.lock_state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(session_not_found)?;
+        ensure_revision(session.document.revision(), expected_revision)?;
+        state.preview_caches.insert(session_id.to_owned(), cache);
+        Ok(change)
     }
 
     pub fn session_has_attached_window(&self, session_id: &str) -> Result<bool, ApplicationError> {
@@ -1099,9 +1176,11 @@ fn staged_operation_not_found() -> ApplicationError {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
+    use std::{cell::Cell, path::Path, sync::Arc};
 
-    use kmark_core::{EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding};
+    use kmark_core::{
+        EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding, PreviewRenderChange,
+    };
 
     use crate::{
         ApplicationError, ApplicationErrorCode, CreateDocumentProposalInput,
@@ -1186,6 +1265,61 @@ mod tests {
             Arc::new(EmptyRepository),
             Arc::new(NoopApplicationEventSink),
         )
+    }
+
+    #[test]
+    fn preview_session_patches_one_section_without_reresolving_assets() {
+        let service = service();
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Section\nbefore\n<!-- --- -->\n# Tail\nlast";
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                source.to_owned(),
+                false,
+            )
+            .unwrap();
+        let resolver_calls = Cell::new(0);
+        let resolve = |_: Option<&str>, _: &str| {
+            resolver_calls.set(resolver_calls.get() + 1);
+            Default::default()
+        };
+        assert!(matches!(
+            service
+                .render_session_preview(&session.session_id, 1, None, resolve)
+                .unwrap(),
+            PreviewRenderChange::Full { .. }
+        ));
+        assert_eq!(resolver_calls.get(), 1);
+
+        let start = source.find("before").unwrap() as u64;
+        service
+            .apply_editor_mutation_batch(
+                &session.session_id,
+                &EditorMutationBatch {
+                    client_id: "view".to_owned(),
+                    batch_id: 1,
+                    expected_revision: 1,
+                    transactions: vec![EditorTransaction {
+                        before_length_utf16: source.len() as u64,
+                        changes: vec![EditorTextChange {
+                            from_utf16: start,
+                            to_utf16: start + 6,
+                            insert: "after".to_owned(),
+                        }],
+                    }],
+                },
+            )
+            .unwrap();
+        let change = service
+            .render_session_preview(&session.session_id, 2, Some(1), resolve)
+            .unwrap();
+        assert!(matches!(
+            change,
+            PreviewRenderChange::Patch(ref patch) if patch.section_index == 1
+        ));
+        assert_eq!(resolver_calls.get(), 1);
     }
 
     #[test]

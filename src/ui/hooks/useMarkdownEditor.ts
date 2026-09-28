@@ -853,6 +853,7 @@ export function useMarkdownEditor(
     isReady,
     recentFiles,
     previewHtml: renderedPreview.mode === "standard" ? renderedPreview.html : "",
+    previewSectionHtmls: renderedPreview.mode === "standard" ? renderedPreview.sectionHtmls : undefined,
     previewPages: renderedPreview.mode === "a4" ? renderedPreview.pages : [],
     renderedPreviewMode: renderedPreview.mode,
     defaultPreviewPageStyle: renderedPreview.defaultPageStyle,

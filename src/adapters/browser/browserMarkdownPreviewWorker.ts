@@ -1,11 +1,13 @@
-import { type EditorMutationAckPayload, type EditorMutationBatchPayload } from "../../contracts/generated";
+import {
+  type EditorMutationAckPayload,
+  type EditorMutationBatchPayload,
+  type SessionPreviewPayload,
+} from "../../contracts/generated";
 import { type PreviewDisplayMode } from "../../domain/preview";
 import {
   applyWebEditorMutationBatch,
   createWebEditorDocument,
-  renderMarkdownPreviewWithWasm,
-  snapshotWebEditorDocument,
-  type RenderedMarkdownPreviewPayload,
+  renderWebSessionPreview,
   type WebEditorDocumentHandle,
 } from "../../wasm/kmarkWeb";
 
@@ -25,6 +27,7 @@ export type BrowserMarkdownPreviewWorkerRequest =
     readonly type: "mutation";
   }
   | {
+    readonly baseRevision: number | null;
     readonly displayMode: PreviewDisplayMode;
     readonly filePath: string | null;
     readonly id: number;
@@ -38,7 +41,7 @@ export type BrowserMarkdownPreviewWorkerResponse =
   | { readonly ack: EditorMutationAckPayload; readonly id: number; readonly type: "acknowledged" }
   | {
     readonly id: number;
-    readonly renderedPreview: RenderedMarkdownPreviewPayload;
+    readonly renderedPreview: SessionPreviewPayload;
     readonly type: "rendered";
   }
   | {
@@ -80,17 +83,11 @@ async function handleRequest(request: BrowserMarkdownPreviewWorkerRequest): Prom
       }
       case "render": {
         const document = requireSession(request.sessionId);
-        const snapshot = snapshotWebEditorDocument(document);
-        if (snapshot.revision !== request.revision) {
-          throw new Error(
-            `preview_revision_gap:expected=${request.revision},actual=${snapshot.revision}`,
-          );
-        }
-        const renderedPreview = await renderMarkdownPreviewWithWasm(
-          snapshot.content,
-          request.filePath,
-          request.displayMode,
-        );
+        const renderedPreview = renderWebSessionPreview(document, {
+          revision: request.revision,
+          baseRevision: request.baseRevision,
+          filePath: request.filePath,
+        });
         workerScope.postMessage({
           id: request.id,
           renderedPreview,

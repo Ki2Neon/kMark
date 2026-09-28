@@ -98,6 +98,7 @@ test("CodeMirror preserves One Dark colors across runtime theme changes", async 
 
   const vite = await createServer({
     configFile: false,
+    cacheDir: "node_modules/.vite-kmark-test-editor-syntax-theme-browser",
     optimizeDeps: { noDiscovery: true },
     server: { host: "127.0.0.1", port: 0 },
   });

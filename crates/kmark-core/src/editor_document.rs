@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write};
+use std::{collections::HashMap, io::Write, ops::Range};
 
 use ropey::Rope;
 
@@ -45,6 +45,14 @@ pub struct EditorMutationBatch {
     pub batch_id: u64,
     pub expected_revision: u64,
     pub transactions: Vec<EditorTransaction>,
+}
+
+/// Exact character coordinates for a single-change batch. Complex batches return no
+/// impact hint and must use the conservative full-preview invalidation path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditorMutationImpact {
+    pub before_char_range: Range<usize>,
+    pub after_char_range: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,6 +292,18 @@ impl EditorDocument {
         self.text.to_string()
     }
 
+    /// Returns only the requested canonical character range. Positions are Rope character
+    /// offsets, not UTF-16 offsets from the mutation contract.
+    pub(crate) fn canonical_text_range(&self, char_range: Range<usize>) -> Option<String> {
+        self.text
+            .get_slice(char_range)
+            .map(|slice| slice.to_string())
+    }
+
+    pub(crate) fn canonical_rope(&self) -> &Rope {
+        &self.text
+    }
+
     pub fn persisted_text(&self) -> String {
         let extra_capacity = match self.line_ending {
             LineEnding::Lf => 0,
@@ -340,6 +360,33 @@ impl EditorDocument {
 
     pub fn set_line_ending(&mut self, line_ending: LineEnding) {
         self.line_ending = line_ending;
+    }
+
+    /// Computes a preview invalidation hint before applying a mutation. This does not
+    /// validate the batch ID; `apply_mutation_batch` remains the source of truth.
+    pub fn single_change_impact(
+        &self,
+        batch: &EditorMutationBatch,
+    ) -> Option<EditorMutationImpact> {
+        if batch.expected_revision != self.revision || batch.transactions.len() != 1 {
+            return None;
+        }
+        let transaction = &batch.transactions[0];
+        if transaction.changes.len() != 1
+            || usize::try_from(transaction.before_length_utf16).ok()? != self.len_utf16()
+        {
+            return None;
+        }
+        let change = &transaction.changes[0];
+        if change.from_utf16 > change.to_utf16 || change.insert.contains('\r') {
+            return None;
+        }
+        let from = strict_utf16_to_char(&self.text, change.from_utf16, 0, 0).ok()?;
+        let to = strict_utf16_to_char(&self.text, change.to_utf16, 0, 0).ok()?;
+        Some(EditorMutationImpact {
+            before_char_range: from..to,
+            after_char_range: from..from.checked_add(change.insert.chars().count())?,
+        })
     }
 
     pub fn apply_mutation_batch(
@@ -606,6 +653,36 @@ mod tests {
             to_utf16,
             insert: insert.to_owned(),
         }
+    }
+
+    #[test]
+    fn single_change_impact_uses_rope_character_coordinates() {
+        let document = EditorDocument::from_external_text("a🙂b\n", 7, false);
+        let mutation = batch(7, 1, vec![transaction(5, vec![change(3, 4, "語🚀")])]);
+
+        let impact = document.single_change_impact(&mutation).unwrap();
+        assert_eq!(impact.before_char_range, 2..3);
+        assert_eq!(impact.after_char_range, 2..4);
+        assert_eq!(document.canonical_text(), "a🙂b\n");
+        assert_eq!(
+            document.single_change_impact(&batch(
+                7,
+                1,
+                vec![transaction(5, vec![change(2, 3, "x")])],
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn complex_mutation_has_no_single_section_hint() {
+        let document = EditorDocument::from_external_text("abc", 1, false);
+        let mutation = batch(
+            1,
+            1,
+            vec![transaction(3, vec![change(0, 0, "x"), change(2, 2, "y")])],
+        );
+        assert_eq!(document.single_change_impact(&mutation), None);
     }
 
     #[test]

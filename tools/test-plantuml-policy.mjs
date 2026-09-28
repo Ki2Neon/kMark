@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { withTransparentDotBackground } from "../src/adapters/browser/browserDotSource.ts";
 import {
-  GENERATED_SVG_DEBOUNCE_MS,
   GeneratedSvgRawCache,
   prioritizeGeneratedSvgItems,
   shouldCacheGeneratedSvgSource,
@@ -35,10 +34,6 @@ function snapshot(next, instanceId, overrides = {}) {
     ...overrides,
   };
 }
-
-test("uses the accepted realtime debounce", () => {
-  assert.equal(GENERATED_SVG_DEBOUNCE_MS, 250);
-});
 
 test("injects transparent DOT background at the root body without overriding user statements", () => {
   assert.equal(

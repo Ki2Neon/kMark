@@ -78,6 +78,7 @@ type MarkdownPreviewProps = {
   readonly onSourceLineDoubleClick?: (lineNumber: number) => void;
   readonly onZoomScaleChange?: (zoomScale: number) => void;
   readonly pages?: readonly RenderedPreviewPage[];
+  readonly sectionHtmls?: readonly string[];
   readonly pageTransitionFadeMs?: number;
   readonly previewFitMode?: PreviewFitMode;
   readonly suppressTextSelectionOnDoubleClick?: boolean;
@@ -1658,6 +1659,7 @@ function MarkdownPreviewComponent({
   onSourceLineDoubleClick,
   onZoomScaleChange,
   pages,
+  sectionHtmls,
   pageTransitionFadeMs = 0,
   previewFitMode = "width",
   suppressTextSelectionOnDoubleClick = false,
@@ -2649,12 +2651,25 @@ function MarkdownPreviewComponent({
         onSubmit={handlePreviewSubmit}
         onWheel={handlePreviewWheel}
       >
-        <PreviewHtmlSurface
-          className="preview-section__standard-content markdown-body"
-          element="article"
-          html={html}
-          style={standardPreviewContentStyle}
-        />
+        {sectionHtmls === undefined ? (
+          <PreviewHtmlSurface
+            className="preview-section__standard-content markdown-body"
+            element="article"
+            html={html}
+            style={standardPreviewContentStyle}
+          />
+        ) : (
+          <div className="preview-section__standard-content markdown-body" style={standardPreviewContentStyle}>
+            {sectionHtmls.map((sectionHtml, index) => (
+              <PreviewHtmlSurface
+                key={index}
+                className="preview-section__standard-segment"
+                element="article"
+                html={sectionHtml}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

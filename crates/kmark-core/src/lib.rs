@@ -25,8 +25,8 @@ pub use diagram::{
 };
 pub use editor_document::{
     normalize_editor_text, EditorDocument, EditorDocumentError, EditorDocumentPersistenceSnapshot,
-    EditorMutationAck, EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding,
-    NormalizedEditorText,
+    EditorMutationAck, EditorMutationBatch, EditorMutationImpact, EditorTextChange,
+    EditorTransaction, LineEnding, NormalizedEditorText,
 };
 pub use editor_draft::StoredEdit;
 pub use editor_draft::{ensure_markdown_file_name, resolve_document_file_stem, DEFAULT_FILE_NAME};
@@ -53,10 +53,12 @@ pub use preview_preferences::{
 };
 pub use recent_files::{RecentFile, RecentFiles, MAX_RECENT_FILES};
 pub use render_markdown_preview::{
-    render_markdown_preview, render_markdown_preview_with_file_path,
-    render_markdown_preview_with_file_path_and_model_assets, CssLength, KmarkModelAssetError,
-    KmarkModelAssetResolution, PageChromeConfig, PageChromeRegionConfig, PageNumberConfig,
-    PageNumberPosition, PageNumberStyle, PageStyle, PreviewTextStyle, RenderedMarkdownPreview,
+    index_explicit_source_sections, render_markdown_preview,
+    render_markdown_preview_with_file_path,
+    render_markdown_preview_with_file_path_and_model_assets, CssLength, ExplicitSourceSection,
+    KmarkModelAssetError, KmarkModelAssetResolution, PageChromeConfig, PageChromeRegionConfig,
+    PageNumberConfig, PageNumberPosition, PageNumberStyle, PageStyle, PreviewRenderCache,
+    PreviewRenderChange, PreviewSectionPatch, PreviewTextStyle, RenderedMarkdownPreview,
     RenderedPage,
 };
 pub use table_format::{

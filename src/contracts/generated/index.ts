@@ -45,6 +45,7 @@ export type { RegisterSubWindowSourceResponsePayload } from "./RegisterSubWindow
 export type { RenderedPagePayload } from "./RenderedPagePayload";
 export type { RenderedPreviewPayload } from "./RenderedPreviewPayload";
 export type { SavedMarkdownDocumentPayload } from "./SavedMarkdownDocumentPayload";
+export type { SessionPreviewPayload } from "./SessionPreviewPayload";
 export type { SourceRangePayload } from "./SourceRangePayload";
 export type { StagedFileOperationPayload } from "./StagedFileOperationPayload";
 export type { StateEnvelope } from "./StateEnvelope";

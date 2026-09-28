@@ -98,6 +98,7 @@ test("A4 page fit and valign use fixed frame bounds in a real browser", async (c
 
   const vite = await createServer({
     configFile: false,
+    cacheDir: "node_modules/.vite-kmark-test-a4-layout-browser",
     optimizeDeps: { noDiscovery: true },
     server: { host: "127.0.0.1", port: 0 },
   });

@@ -2,8 +2,8 @@ use kmark_core::{
     DesktopLayoutPreferences, EditorMutationAck, EditorMutationBatch, EditorPreferences,
     EditorState, EditorStateAction, EditorStats, EditorTextChange, EditorTransaction, LineEnding,
     MarkdownDocumentError, PageChromeConfig, PageChromeRegionConfig, PageNumberConfig, PageStyle,
-    PreviewDisplayMode, PreviewPreferences, PreviewTextStyle, RecentFile, RecentFiles,
-    RenderedPage, StoredEdit, TableDiagnostic, TableDiagnosticKind, ThemePreferences,
+    PreviewDisplayMode, PreviewPreferences, PreviewRenderChange, PreviewTextStyle, RecentFile,
+    RecentFiles, RenderedPage, StoredEdit, TableDiagnostic, TableDiagnosticKind, ThemePreferences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -386,6 +386,70 @@ pub enum RenderedPreviewPayload {
         default_page_style: PageStylePayload,
         default_text_style: PreviewTextStylePayload,
     },
+}
+
+/// Session preview response. Source sections are transport units, not physical A4 pages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export))]
+pub enum SessionPreviewPayload {
+    Full {
+        #[cfg_attr(feature = "bindings", ts(type = "number"))]
+        revision: u64,
+        sections: Vec<Vec<RenderedPagePayload>>,
+        default_page_style: PageStylePayload,
+        default_text_style: PreviewTextStylePayload,
+    },
+    Patch {
+        #[cfg_attr(feature = "bindings", ts(type = "number"))]
+        base_revision: u64,
+        #[cfg_attr(feature = "bindings", ts(type = "number"))]
+        revision: u64,
+        section_index: usize,
+        pages: Vec<RenderedPagePayload>,
+    },
+}
+
+impl From<PreviewRenderChange> for SessionPreviewPayload {
+    fn from(change: PreviewRenderChange) -> Self {
+        match change {
+            PreviewRenderChange::Full { revision, preview } => {
+                let mut pages = preview.pages.into_iter();
+                let sections = preview
+                    .source_section_page_ranges
+                    .iter()
+                    .map(|range| {
+                        (range.start..range.end)
+                            .map(|_| {
+                                pages
+                                    .next()
+                                    .expect("section ranges must cover pages")
+                                    .into()
+                            })
+                            .collect()
+                    })
+                    .collect();
+                debug_assert!(pages.next().is_none());
+                Self::Full {
+                    revision,
+                    sections,
+                    default_page_style: preview.default_page_style.into(),
+                    default_text_style: preview.default_text_style.into(),
+                }
+            }
+            PreviewRenderChange::Patch(patch) => Self::Patch {
+                base_revision: patch.base_revision,
+                revision: patch.revision,
+                section_index: patch.section_index,
+                pages: patch.pages.into_iter().map(Into::into).collect(),
+            },
+        }
+    }
 }
 
 impl RenderedPreviewPayload {

@@ -7,6 +7,7 @@ import {
   type FinalizeGeneratedSvgRequestPayload,
   type FinalizeGeneratedSvgResultPayload,
   type RenderedPreviewPayload,
+  type SessionPreviewPayload,
   type SourceRangePayload as GeneratedSourceRangePayload,
   type TableDiagnosticKindPayload,
   type TableDiagnosticPayload as GeneratedTableDiagnosticPayload,
@@ -58,6 +59,19 @@ export function applyWebEditorMutationBatch(
 ): EditorMutationAckPayload {
   return parseJsonPayload<EditorMutationAckPayload>(
     document.apply_mutation_batch_json(JSON.stringify(batch)),
+  );
+}
+
+export function renderWebSessionPreview(
+  document: WebEditorDocumentHandle,
+  request: {
+    readonly revision: number;
+    readonly baseRevision: number | null;
+    readonly filePath: string | null;
+  },
+): SessionPreviewPayload {
+  return parseJsonPayload<SessionPreviewPayload>(
+    document.render_session_preview_json(JSON.stringify(request)),
   );
 }
 

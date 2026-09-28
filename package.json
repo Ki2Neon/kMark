@@ -31,6 +31,7 @@
     "test:editor-scroll": "node --experimental-strip-types --test tools/test-editor-shift-wheel.mjs",
     "test:editor-syntax-theme": "node --experimental-strip-types --test tools/test-editor-syntax-theme.mjs && node --test tools/test-editor-syntax-theme-browser.mjs",
     "test:editor-mutation": "node --experimental-strip-types --test tools/test-editor-mutation-queue.mjs",
+    "test:session-preview": "node --experimental-strip-types --test tools/test-session-preview-state.mjs && node --test tools/test-session-preview-wasm.mjs && node --test tools/test-session-preview-ui.mjs && node --test tools/test-session-preview-browser.mjs",
     "test:a4-preview-pages": "node --test tools/test-a4-preview-pages.mjs && pnpm run test:a4-layout-browser",
     "test:a4-layout-browser": "node --test tools/test-a4-layout-browser.mjs",
     "test:table-insert": "node --experimental-strip-types --test tools/test-table-insert.mjs",
@@ -39,6 +40,7 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "benchmark:rust": "cargo test --manifest-path src-tauri/Cargo.toml benchmark_collect_markdown_file_paths -- --ignored --nocapture",
     "benchmark:editor-session": "node tools/benchmark-editor-session.mjs",
+    "benchmark:session-preview": "node tools/benchmark-session-preview.mjs",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
   },
