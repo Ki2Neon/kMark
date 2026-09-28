@@ -7,8 +7,6 @@ import {
   type A4PageInsets,
 } from "../../domain/a4PageFit";
 
-const PAGE_FIT_STYLE_FRAGMENT = "var(--kmark-page-fit-";
-const PAGE_FIT_CONTAIN_STYLE_FRAGMENT = "var(--kmark-page-fit-contain-";
 const PAGE_LAYOUT_SPACER_ATTRIBUTE = "data-kmark-page-layout-spacer";
 const intrinsicRatios = new WeakMap<Element, number>();
 
@@ -18,12 +16,12 @@ function cssPx(value: string): number {
 }
 
 function frameInsets(style: CSSStyleDeclaration, prefix: "border" | "padding"): A4PageInsets {
-  const suffix = prefix === "border" ? "Width" : "";
+  const suffix = prefix === "border" ? "-width" : "";
   return {
-    top: cssPx(style.getPropertyValue(`${prefix}-top${suffix === "Width" ? "-width" : ""}`)),
-    right: cssPx(style.getPropertyValue(`${prefix}-right${suffix === "Width" ? "-width" : ""}`)),
-    bottom: cssPx(style.getPropertyValue(`${prefix}-bottom${suffix === "Width" ? "-width" : ""}`)),
-    left: cssPx(style.getPropertyValue(`${prefix}-left${suffix === "Width" ? "-width" : ""}`)),
+    top: cssPx(style.getPropertyValue(`${prefix}-top${suffix}`)),
+    right: cssPx(style.getPropertyValue(`${prefix}-right${suffix}`)),
+    bottom: cssPx(style.getPropertyValue(`${prefix}-bottom${suffix}`)),
+    left: cssPx(style.getPropertyValue(`${prefix}-left${suffix}`)),
   };
 }
 
@@ -45,9 +43,24 @@ function pageFrameGeometry(frame: HTMLElement): { bounds: A4PageFitRect; scale: 
   return bounds === null ? null : { bounds, scale };
 }
 
-function pageFitElements(body: HTMLElement): Element[] {
-  return Array.from(body.querySelectorAll("[style]"))
-    .filter((element) => element.getAttribute("style")?.includes(PAGE_FIT_STYLE_FRAGMENT));
+type PageFitTarget = { readonly element: Element; readonly contain: boolean };
+
+function pageFitElements(body: HTMLElement): PageFitTarget[] {
+  const targets = Array.from(body.querySelectorAll("[data-kmark-page-fit]"))
+    .map((element) => ({
+      element,
+      contain: element.getAttribute("data-kmark-page-fit") === "contain",
+    }));
+  for (const block of body.querySelectorAll<HTMLElement>("[data-kmark-generated-svg-page-fit]")) {
+    const svg = block.querySelector(".kmark-generated-svg-rendered svg");
+    if (svg !== null) {
+      targets.push({
+        element: svg,
+        contain: block.dataset.kmarkGeneratedSvgPageFit === "contain",
+      });
+    }
+  }
+  return targets;
 }
 
 function intrinsicAspectRatio(element: Element, rect: DOMRect): number {
@@ -91,7 +104,7 @@ function setCssLength(style: CSSStyleDeclaration, name: string, value: number): 
 }
 
 function syncPageFit(body: HTMLElement, bounds: A4PageFitRect, scale: number): void {
-  for (const element of pageFitElements(body)) {
+  for (const { element, contain } of pageFitElements(body)) {
     const style = (element as HTMLElement | SVGElement).style;
     const rect = element.getBoundingClientRect();
     const computed = element.ownerDocument.defaultView?.getComputedStyle(element);
@@ -102,7 +115,6 @@ function syncPageFit(body: HTMLElement, bounds: A4PageFitRect, scale: number): v
       cssPx(computed?.marginRight ?? ""),
       cssPx(computed?.marginBottom ?? ""),
     );
-    const contain = element.getAttribute("style")?.includes(PAGE_FIT_CONTAIN_STYLE_FRAGMENT) ?? false;
     const aspectRatio = contain ? intrinsicAspectRatio(element, rect) : Number.NaN;
 
     setCssLength(style, "--kmark-page-fit-width", available.width);

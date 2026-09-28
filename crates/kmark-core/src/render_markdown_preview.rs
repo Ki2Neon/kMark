@@ -3286,6 +3286,7 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(&image_context.title));
             html.push('"');
         }
+        html.push_str(&page_fit_data_attribute(image_context.style.as_deref(), "data-kmark-page-fit"));
         if let Some(style) = image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(&style));
@@ -3315,6 +3316,7 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(&image_context.title));
             html.push('"');
         }
+        html.push_str(&page_fit_data_attribute(image_context.style.as_deref(), "data-kmark-page-fit"));
         if let Some(style) = &image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(style));
@@ -3414,6 +3416,7 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(&image_context.title));
             html.push('"');
         }
+        html.push_str(&page_fit_data_attribute(image_context.style.as_deref(), "data-kmark-page-fit"));
         if let Some(style) = &image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(style));
@@ -3429,6 +3432,7 @@ impl<'a> HtmlEmitter<'a> {
             "<span class=\"kmark-model-error\" role=\"alert\"{}",
             image_context.source_line_attributes,
         );
+        html.push_str(&page_fit_data_attribute(image_context.style.as_deref(), "data-kmark-page-fit"));
         if let Some(style) = &image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(style));
@@ -5113,9 +5117,11 @@ impl KmarkRootDecoration {
     }
 
     fn data_attribute(&self) -> String {
-        self.page_valign
+        let mut attributes = self.page_valign
             .map(|valign| format!(" data-page-valign=\"{}\"", valign.name()))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        attributes.push_str(&page_fit_data_attribute(self.style.as_deref(), "data-kmark-page-fit"));
+        attributes
     }
 
     fn style_attribute(&self) -> String {
@@ -5187,6 +5193,10 @@ impl KmarkGeneratedSvgDecoration {
     }
 
     fn push_data_attributes(&self, attributes: &mut String) {
+        attributes.push_str(&page_fit_data_attribute(
+            self.svg_style.as_deref(),
+            "data-kmark-generated-svg-page-fit",
+        ));
         push_optional_data_attribute(
             attributes,
             "data-kmark-generated-svg-style",
@@ -5203,6 +5213,20 @@ impl KmarkGeneratedSvgDecoration {
             self.align.map(KmarkAlign::css_text_value),
         );
     }
+}
+
+fn page_fit_data_attribute(style: Option<&str>, attribute: &str) -> String {
+    let Some(style) = style else {
+        return String::new();
+    };
+    let mode = if style.contains("var(--kmark-page-fit-contain-") {
+        Some("contain")
+    } else if style.contains("var(--kmark-page-fit-") {
+        Some("fill")
+    } else {
+        None
+    };
+    mode.map(|mode| format!(" {attribute}=\"{mode}\"")).unwrap_or_default()
 }
 
 impl KmarkMermaidParams {
@@ -10909,6 +10933,9 @@ mod tests {
         assert!(page_fit_preview.html.contains(
             "data-kmark-generated-svg-style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;width:auto;\""
         ));
+        assert!(page_fit_preview
+            .html
+            .contains("data-kmark-generated-svg-page-fit=\"contain\""));
     }
 
     #[test]
@@ -12151,7 +12178,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
         );
     }
 
@@ -12162,7 +12189,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);box-sizing:border-box;margin:0;\">本文</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);box-sizing:border-box;margin:0;\">本文</p>"
         );
     }
 
@@ -12174,7 +12201,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"contain\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
         );
     }
 
@@ -12192,6 +12219,9 @@ mod tests {
         );
 
         assert_eq!(rendered_preview.page_htmls.len(), 3);
+        assert!(!rendered_preview.page_htmls[0].contains("data-kmark-page-fit"));
+        assert!(rendered_preview.page_htmls[1].contains("data-kmark-page-fit=\"fill\""));
+        assert!(rendered_preview.page_htmls[2].contains("data-kmark-page-fit=\"contain\""));
         assert!(rendered_preview.page_htmls[0]
             .contains("width:fit-content;max-width:100%;height:fit-content"));
         assert!(rendered_preview.page_htmls[1].contains(
@@ -12210,7 +12240,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;text-align:center\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;text-align:center\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"contain\" style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\" /></p>"
         );
     }
 
@@ -12219,13 +12249,13 @@ mod tests {
         let width_fit = render_markdown_preview("<!-- kmark w:page_fit -->\n![](image.png)");
         assert_eq!(
             width_fit.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);display:block;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"width:var(--kmark-page-fit-width,100%);display:block;box-sizing:border-box;margin:0;\" /></p>"
         );
 
         let height_fit = render_markdown_preview("<!-- kmark h:page_fit -->\n![](image.png)");
         assert_eq!(
             height_fit.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
         );
     }
 

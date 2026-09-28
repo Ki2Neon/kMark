@@ -5,6 +5,7 @@ import {
   preserveReusableKmarkModelViewers,
   type ModelViewerScope,
 } from "../../adapters/browser/browserModelRenderer";
+import { syncA4PageLayout } from "../../adapters/browser/browserPageLayout";
 import {
   A4_PAGE_WIDTH_MM,
   CSS_MM_TO_PX,
@@ -22,10 +23,6 @@ import {
   type PreviewTextStyle,
   type RenderedPreviewPage,
 } from "../../domain/preview";
-import {
-  resolveA4PageFitAvailableSize,
-  resolveA4PageFitContainSize,
-} from "../../domain/a4PageFit";
 import { shouldPreserveGeneratedSvgDiagramDom } from "./plantUmlPreviewPolicy";
 
 const A4_PAGE_WIDTH_FOR_FIT_PX = A4_PAGE_WIDTH_MM * CSS_MM_TO_PX;
@@ -56,12 +53,6 @@ const URL_SCHEME_PATTERN = /^([a-z][a-z0-9+.-]*):/iu;
 const A4_TOC_ITEM_HEADER_LABEL = "項目名";
 const A4_TOC_PAGE_HEADER_LABEL = "ページ番号";
 const A4_TOC_INDENT_STEP_EM = 1.25;
-const A4_PAGE_FIT_STYLE_FRAGMENT = "var(--kmark-page-fit-";
-const A4_PAGE_FIT_CONTAIN_STYLE_FRAGMENT = "var(--kmark-page-fit-contain-";
-const A4_PAGE_FIT_WIDTH_VARIABLE = "--kmark-page-fit-width";
-const A4_PAGE_FIT_HEIGHT_VARIABLE = "--kmark-page-fit-height";
-const A4_PAGE_FIT_CONTAIN_WIDTH_VARIABLE = "--kmark-page-fit-contain-width";
-const A4_PAGE_FIT_CONTAIN_HEIGHT_VARIABLE = "--kmark-page-fit-contain-height";
 
 type PreviewTableFitMode = "auto" | "off" | "shrink";
 type PreviewFitMode = "width" | "page";
@@ -213,85 +204,6 @@ function cssLengthToPx(value: string): number {
       return amount * 16;
     default:
       return Number.NaN;
-  }
-}
-
-function hasA4PageFitStyle(element: HTMLElement): boolean {
-  return element.getAttribute("style")?.includes(A4_PAGE_FIT_STYLE_FRAGMENT) ?? false;
-}
-
-function hasA4PageFitContainStyle(element: HTMLElement): boolean {
-  return element.getAttribute("style")?.includes(A4_PAGE_FIT_CONTAIN_STYLE_FRAGMENT) ?? false;
-}
-
-function collectA4PageFitElements(pageBody: HTMLElement): HTMLElement[] {
-  return Array.from(pageBody.querySelectorAll<HTMLElement>("[style]"))
-    .filter(hasA4PageFitStyle);
-}
-
-function getA4ElementAspectRatio(element: HTMLElement, rect: DOMRect): number {
-  if (
-    element instanceof HTMLImageElement
-    && element.naturalWidth > 0
-    && element.naturalHeight > 0
-  ) {
-    return element.naturalWidth / element.naturalHeight;
-  }
-
-  if (
-    element instanceof HTMLVideoElement
-    && element.videoWidth > 0
-    && element.videoHeight > 0
-  ) {
-    return element.videoWidth / element.videoHeight;
-  }
-
-  return rect.width > 0 && rect.height > 0 ? rect.width / rect.height : Number.NaN;
-}
-
-function formatA4PageFitLength(value: number): string {
-  return `${Math.round(value * 1_000) / 1_000}px`;
-}
-
-function setA4PageFitVariable(element: HTMLElement, name: string, value: number): void {
-  const cssValue = formatA4PageFitLength(value);
-
-  if (element.style.getPropertyValue(name) !== cssValue) {
-    element.style.setProperty(name, cssValue);
-  }
-}
-
-function syncA4PageFitVariables(previewViewport: HTMLElement, displayScale: number): void {
-  for (const pageBody of previewViewport.querySelectorAll<HTMLElement>(".preview-section__page")) {
-    const contentRect = pageBody.getBoundingClientRect();
-
-    for (const element of collectA4PageFitElements(pageBody)) {
-      const elementRect = element.getBoundingClientRect();
-      const aspectRatio = getA4ElementAspectRatio(element, elementRect);
-      const availableSize = resolveA4PageFitAvailableSize(contentRect, elementRect, displayScale);
-
-      setA4PageFitVariable(element, A4_PAGE_FIT_WIDTH_VARIABLE, availableSize.width);
-      setA4PageFitVariable(element, A4_PAGE_FIT_HEIGHT_VARIABLE, availableSize.height);
-
-      if (!hasA4PageFitContainStyle(element)) {
-        continue;
-      }
-
-      const containSize = resolveA4PageFitContainSize(
-        aspectRatio,
-        availableSize.width,
-        availableSize.height,
-      );
-
-      if (containSize === null) {
-        element.style.removeProperty(A4_PAGE_FIT_CONTAIN_WIDTH_VARIABLE);
-        element.style.removeProperty(A4_PAGE_FIT_CONTAIN_HEIGHT_VARIABLE);
-        continue;
-      }
-
-      setA4PageFitVariable(element, A4_PAGE_FIT_CONTAIN_WIDTH_VARIABLE, containSize.width);
-      setA4PageFitVariable(element, A4_PAGE_FIT_CONTAIN_HEIGHT_VARIABLE, containSize.height);
-    }
   }
 }
 
@@ -2220,39 +2132,35 @@ function MarkdownPreviewComponent({
     let animationFrameId: number | null = null;
     let disposed = false;
 
-    const syncPageFit = () => {
-      syncA4PageFitVariables(previewViewport, currentDisplayScale);
-    };
-
-    const schedulePageFit = () => {
+    const schedulePageLayout = () => {
       if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
+        return;
       }
-
       animationFrameId = window.requestAnimationFrame(() => {
         animationFrameId = null;
-        syncPageFit();
+        syncA4PageLayout(previewViewport);
       });
     };
 
-    schedulePageFit();
+    schedulePageLayout();
 
-    const resizeObserver = new ResizeObserver(schedulePageFit);
+    const resizeObserver = new ResizeObserver(schedulePageLayout);
     resizeObserver.observe(previewViewport);
-
-    for (const pageFitElement of previewViewport.querySelectorAll<HTMLElement>("[style]")) {
-      if (hasA4PageFitStyle(pageFitElement)) {
-        resizeObserver.observe(pageFitElement);
-      }
+    for (const frame of previewViewport.querySelectorAll<HTMLElement>(".preview-section__page-frame")) {
+      resizeObserver.observe(frame);
     }
+    const mutationObserver = new MutationObserver(schedulePageLayout);
+    mutationObserver.observe(previewViewport, { childList: true, subtree: true });
 
-    previewViewport.addEventListener("load", schedulePageFit, true);
-    previewViewport.addEventListener("loadedmetadata", schedulePageFit, true);
+    previewViewport.addEventListener("load", schedulePageLayout, true);
+    previewViewport.addEventListener("error", schedulePageLayout, true);
+    previewViewport.addEventListener("loadedmetadata", schedulePageLayout, true);
     void document.fonts.ready.then(() => {
       if (!disposed) {
-        schedulePageFit();
+        schedulePageLayout();
       }
     });
+    document.fonts.addEventListener?.("loadingdone", schedulePageLayout);
 
     return () => {
       disposed = true;
@@ -2262,8 +2170,11 @@ function MarkdownPreviewComponent({
       }
 
       resizeObserver.disconnect();
-      previewViewport.removeEventListener("load", schedulePageFit, true);
-      previewViewport.removeEventListener("loadedmetadata", schedulePageFit, true);
+      mutationObserver.disconnect();
+      previewViewport.removeEventListener("load", schedulePageLayout, true);
+      previewViewport.removeEventListener("error", schedulePageLayout, true);
+      previewViewport.removeEventListener("loadedmetadata", schedulePageLayout, true);
+      document.fonts.removeEventListener?.("loadingdone", schedulePageLayout);
     };
   }, [currentDisplayScale, currentPreviewPageHtmls, displayMode, html]);
 

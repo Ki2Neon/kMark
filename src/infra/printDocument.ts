@@ -1,3 +1,4 @@
+import { syncA4PageLayout } from "../adapters/browser/browserPageLayout";
 import {
   A4_MARGIN_BOTTOM_MM,
   A4_MARGIN_LEFT_MM,
@@ -1330,6 +1331,8 @@ function printA4MarkdownDocument(
       const prepareAndPrint = async () => {
         try {
           printWindowCleanup = await runtimeOptions.preparePrintWindow?.(printWindow) ?? null;
+          await printWindow.document.fonts?.ready;
+          syncA4PageLayout(printWindow.document);
         } catch (error) {
           finish(() => reject(error instanceof Error ? error : new Error("A4印刷画面の準備に失敗しました。")));
           return;
