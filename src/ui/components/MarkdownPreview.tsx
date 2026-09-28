@@ -798,16 +798,48 @@ function resolveNumberedPreviewPages(pages: readonly RenderedPreviewPage[]): rea
   });
 }
 
-function collectA4HeadingPageNumbers(pages: readonly NumberedRenderedPreviewPage[]): ReadonlyMap<string, string> {
+const MAX_A4_HEADING_CACHE_ENTRIES = 512;
+const MAX_A4_TOC_HTML_CACHE_ENTRIES = 32;
+
+type A4TocHtmlCacheEntry = {
+  readonly headingPageNumbersKey: string;
+  readonly html: string;
+};
+
+function collectA4HeadingPageNumbers(
+  pages: readonly NumberedRenderedPreviewPage[],
+  headingIdsByHtml: Map<string, readonly string[]>,
+): ReadonlyMap<string, string> {
   const pageNumbersByHeadingId = new Map<string, string>();
 
   pages.forEach((page) => {
-    const template = document.createElement("template");
-    template.innerHTML = page.html;
+    let headingIds = headingIdsByHtml.get(page.html);
+    if (headingIds !== undefined) {
+      headingIdsByHtml.delete(page.html);
+      headingIdsByHtml.set(page.html, headingIds);
+    } else {
+      if (!/<h[1-6](?=[\s>])/iu.test(page.html)) {
+        headingIds = [];
+      } else {
+        const template = document.createElement("template");
+        template.innerHTML = page.html;
+        headingIds = Array.from(
+          template.content.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]"),
+          (heading) => heading.id,
+        );
+      }
+      if (headingIdsByHtml.size >= MAX_A4_HEADING_CACHE_ENTRIES) {
+        const oldestHtml = headingIdsByHtml.keys().next().value;
+        if (oldestHtml !== undefined) {
+          headingIdsByHtml.delete(oldestHtml);
+        }
+      }
+      headingIdsByHtml.set(page.html, headingIds);
+    }
 
-    for (const heading of template.content.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]")) {
-      if (!pageNumbersByHeadingId.has(heading.id)) {
-        pageNumbersByHeadingId.set(heading.id, page.tocPageNumberText);
+    for (const headingId of headingIds) {
+      if (!pageNumbersByHeadingId.has(headingId)) {
+        pageNumbersByHeadingId.set(headingId, page.tocPageNumberText);
       }
     }
   });
@@ -1029,17 +1061,36 @@ function resolveA4TocPageNumberHtml(
 
 function resolveA4TocPageNumbers(
   pages: readonly NumberedRenderedPreviewPage[],
+  headingIdsByHtml: Map<string, readonly string[]>,
+  tocHtmlBySource: Map<string, A4TocHtmlCacheEntry>,
 ): readonly NumberedRenderedPreviewPage[] {
   if (!pages.some((page) => page.html.includes("kmark-toc"))) {
     return pages;
   }
 
-  const pageNumbersByHeadingId = collectA4HeadingPageNumbers(pages);
+  const pageNumbersByHeadingId = collectA4HeadingPageNumbers(pages, headingIdsByHtml);
+  const headingPageNumbersKey = JSON.stringify([...pageNumbersByHeadingId]);
 
-  return pages.map((page) => ({
-    ...page,
-    html: resolveA4TocPageNumberHtml(page.html, pageNumbersByHeadingId),
-  }));
+  return pages.map((page) => {
+    if (!page.html.includes("kmark-toc")) {
+      return page;
+    }
+    const cached = tocHtmlBySource.get(page.html);
+    if (cached?.headingPageNumbersKey === headingPageNumbersKey) {
+      tocHtmlBySource.delete(page.html);
+      tocHtmlBySource.set(page.html, cached);
+      return { ...page, html: cached.html };
+    }
+    const html = resolveA4TocPageNumberHtml(page.html, pageNumbersByHeadingId);
+    if (tocHtmlBySource.size >= MAX_A4_TOC_HTML_CACHE_ENTRIES) {
+      const oldestHtml = tocHtmlBySource.keys().next().value;
+      if (oldestHtml !== undefined) {
+        tocHtmlBySource.delete(oldestHtml);
+      }
+    }
+    tocHtmlBySource.set(page.html, { headingPageNumbersKey, html });
+    return { ...page, html };
+  });
 }
 
 function getPageNumberClassName(position: PageNumberPosition): string {
@@ -1421,7 +1472,7 @@ function isPreviewSurfaceFullscreen(surface: HTMLElement): boolean {
     && (fullscreenElement === surface || surface.contains(fullscreenElement));
 }
 
-function PreviewHtmlSurface({
+const PreviewHtmlSurface = memo(function PreviewHtmlSurface({
   className,
   element,
   html,
@@ -1495,7 +1546,7 @@ function PreviewHtmlSurface({
   }
 
   return <article ref={handleSurfaceRef} className={className} style={style} />;
-}
+});
 
 function parseKmarkVideoPosterTime(video: HTMLVideoElement): number | null {
   const value = Number(video.dataset.kmarkVideoPosterTime);
@@ -1695,6 +1746,8 @@ function MarkdownPreviewComponent({
   const [a4FitScale, setA4FitScale] = useState(1);
   const [activeA4PageIndex, setActiveA4PageIndex] = useState(0);
   const [isViewportPanning, setIsViewportPanning] = useState(false);
+  const headingIdsByHtmlRef = useRef(new Map<string, readonly string[]>());
+  const tocHtmlBySourceRef = useRef(new Map<string, A4TocHtmlCacheEntry>());
 
   const normalizedPages = useMemo(() => {
     if (pages !== undefined && pages.length > 0) {
@@ -1711,7 +1764,11 @@ function MarkdownPreviewComponent({
   }, [defaultPageStyle, defaultTextStyle, html, pages]);
   const a4DisplayPages = normalizedPages;
   const numberedA4DisplayPages = useMemo(
-    () => resolveA4TocPageNumbers(resolveNumberedPreviewPages(a4DisplayPages)),
+    () => resolveA4TocPageNumbers(
+      resolveNumberedPreviewPages(a4DisplayPages),
+      headingIdsByHtmlRef.current,
+      tocHtmlBySourceRef.current,
+    ),
     [a4DisplayPages],
   );
   const currentPreviewPages = displayMode === "a4" ? numberedA4DisplayPages : normalizedPages;

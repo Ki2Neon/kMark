@@ -6,9 +6,9 @@ import initKmarkWeb, { WebEditorDocument } from "../src/wasm/pkg/kmark_web.js";
 const wasmBytes = await readFile(new URL("../src/wasm/pkg/kmark_web_bg.wasm", import.meta.url));
 await initKmarkWeb({ module_or_path: wasmBytes });
 
-for (const [mebibytes, explicitBreaks] of [[1, true], [5, true], [1, false], [5, false]]) {
+for (const [mebibytes, explicitBreaks, unchangedMarkup] of [[1, true, false], [5, true, false], [1, false, false], [5, false, false], [1, true, true]]) {
   const sectionCount = mebibytes * 64;
-  const section = `${"ordinary prose ".repeat(1_000)}\n`;
+  const section = `${unchangedMarkup ? "# Section\n[guide](guide.md)\n<!-- note -->\n" : ""}${"ordinary prose ".repeat(1_000)}\n`;
   const separator = explicitBreaks ? "<!-- --- -->\n" : "";
   const source = Array.from({ length: sectionCount }, () => section).join(separator);
   const document = new WebEditorDocument(JSON.stringify({ content: source, revision: 1, isDirty: false }));
@@ -41,6 +41,7 @@ for (const [mebibytes, explicitBreaks] of [[1, true], [5, true], [1, false], [5,
       sourceMiB: Number((source.length / 1024 / 1024).toFixed(2)),
       sectionCount: explicitBreaks ? sectionCount : 1,
       explicitBreaks,
+      unchangedMarkup,
       changeKind: change.kind,
       fullMs: Number(fullMs.toFixed(2)),
       patchMs: Number(patchMs.toFixed(2)),

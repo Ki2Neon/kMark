@@ -68,11 +68,15 @@ test("Standard preview changes one section without replacing unaffected DOM", as
     await vite.listen();
     const address = vite.httpServer?.address();
     assert.ok(address && typeof address !== "string");
+    const fixtureParams = new URLSearchParams();
+    if (process.env.KMARK_TEST_A4_PARAGRAPHS) fixtureParams.set("a4Paragraphs", process.env.KMARK_TEST_A4_PARAGRAPHS);
+    if (process.env.KMARK_TEST_A4_CONTAIN) fixtureParams.set("a4Contain", process.env.KMARK_TEST_A4_CONTAIN);
+    const fixtureQuery = fixtureParams.size > 0 ? `?${fixtureParams}` : "";
     spawn(browser, [
       "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
       "--disable-extensions", "--no-sandbox", "--disable-dev-shm-usage",
       "--remote-debugging-port=0", `--user-data-dir=${profile}`,
-      `http://127.0.0.1:${address.port}/tools/fixtures/session-preview.html`,
+      `http://127.0.0.1:${address.port}/tools/fixtures/session-preview.html${fixtureQuery}`,
     ], { stdio: "ignore", windowsHide: true });
     const { port, browserUrl } = await waitForPort(profile);
     browserSocket = new WebSocket(browserUrl);
@@ -118,6 +122,20 @@ test("Standard preview changes one section without replacing unaffected DOM", as
     assert.equal(result.mermaidRendered, true);
     assert.equal(result.dirtyIndicatorVisible, true);
     assert.equal(result.cleanIndicatorHidden, true);
+    assert.equal(result.a4UnchangedHeadingSame, true);
+    assert.deepEqual(result.a4TocPageNumbers, ["2", "200"]);
+    assert.equal(result.a4MissingHeadingClearsToc, true);
+    assert.equal(result.a4RenamedHeadingUpdatesToc, true);
+    console.log(JSON.stringify({
+      pages: 200,
+      paragraphsPerPage: Number(process.env.KMARK_TEST_A4_PARAGRAPHS ?? 0),
+      containment: process.env.KMARK_TEST_A4_CONTAIN === "1",
+      nodes: result.a4NodeCount,
+      renderCommitMs: Number(result.a4UpdateMs.toFixed(2)),
+      forcedLayoutMs: Number(result.a4ForcedLayoutMs.toFixed(2)),
+      secondFrameMs: Number(result.a4UpdateToSecondFrameMs.toFixed(2)),
+      scrollHeight: result.a4ScrollHeight,
+    }));
   } finally {
     socket?.close();
     if (browserSocket?.readyState === WebSocket.OPEN) {

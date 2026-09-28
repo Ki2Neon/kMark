@@ -431,10 +431,39 @@ fn reindex_unchanged_section_boundaries(
 fn section_has_stable_document_context(old_text: &str, new_text: &str) -> bool {
     if old_text.bytes().filter(|byte| *byte == b'\n').count()
         != new_text.bytes().filter(|byte| *byte == b'\n').count()
-        || [old_text, new_text].iter().any(|text| {
-            text.contains('[') || text.contains('<') || text.contains("```") || text.contains("~~~")
-        })
     {
+        return false;
+    }
+    // Only the edited line can introduce syntax that changes a document-wide
+    // projection. Unchanged links, directives, and fences in this section do
+    // not invalidate a local body edit. Reference definitions are kept on the
+    // full path because their continuation lines can change another section.
+    if [old_text, new_text].iter().any(|text| {
+        text.lines()
+            .any(|line| line.contains('[') && line.contains("]:"))
+    }) {
+        return false;
+    }
+    let mut changed_line = None;
+    for (old_line, new_line) in old_text.split('\n').zip(new_text.split('\n')) {
+        if old_line == new_line {
+            continue;
+        }
+        if changed_line.is_some() {
+            return false;
+        }
+        changed_line = Some((old_line, new_line));
+    }
+    let Some((old_line, new_line)) = changed_line else {
+        return false;
+    };
+    if [old_line, new_line].iter().any(|line| {
+        line.contains('[')
+            || line.contains('<')
+            || line.contains("```")
+            || line.contains("~~~")
+            || line.trim_start().starts_with('#')
+    }) {
         return false;
     }
     collect_kmark_toc_document(old_text) == collect_kmark_toc_document(new_text)
@@ -10283,6 +10312,92 @@ mod tests {
             cache.parts.preview,
             render_markdown_preview(&document.canonical_text())
         );
+    }
+
+    #[test]
+    fn patches_plain_body_edit_beside_unchanged_markup_but_not_link_edit() {
+        let source = "<!-- kmark toc:true -->\n<!-- --- -->\n# Linked\n[guide](guide.md)\n<!-- note -->\nbefore\n<!-- --- -->\n# Tail";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let start = source.find("before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-markup-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + 6,
+                    insert: "after".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+        let PreviewRenderChange::Patch(patch) =
+            cache.update(&document, impact.as_ref(), None, &assets)
+        else {
+            panic!("plain edit with unchanged markup must patch one section");
+        };
+        assert_eq!(patch.section_index, 1);
+        assert_eq!(
+            cache.parts.preview,
+            render_markdown_preview(&document.canonical_text())
+        );
+
+        let current = document.canonical_text();
+        let link_start = current.find("guide.md").unwrap() as u64;
+        let link_mutation = EditorMutationBatch {
+            client_id: "preview-markup-test".to_owned(),
+            batch_id: 2,
+            expected_revision: 2,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: current.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: link_start,
+                    to_utf16: link_start + 8,
+                    insert: "other.md".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&link_mutation);
+        document.apply_mutation_batch(&link_mutation).unwrap();
+        assert!(matches!(
+            cache.update(&document, impact.as_ref(), None, &assets),
+            PreviewRenderChange::Full { .. }
+        ));
+    }
+
+    #[test]
+    fn reference_definition_continuation_uses_full_render() {
+        let source = "Note[^item]\n<!-- --- -->\n[^item]: first\n    before";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let start = source.find("before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-reference-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + 6,
+                    insert: "after".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+        let PreviewRenderChange::Full { preview, .. } =
+            cache.update(&document, impact.as_ref(), None, &assets)
+        else {
+            panic!("reference definition continuation must refresh all sections");
+        };
+        assert_eq!(preview, render_markdown_preview(&document.canonical_text()));
     }
 
     #[test]

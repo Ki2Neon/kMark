@@ -173,8 +173,11 @@ function syncPageValign(body: HTMLElement, bounds: A4PageFitRect, scale: number)
 export function syncA4PageLayout(root: ParentNode): void {
   for (const frame of root.querySelectorAll<HTMLElement>(".preview-section__page-frame")) {
     const body = frame.querySelector<HTMLElement>(":scope > .preview-section__page");
+    if (body === null || body.querySelector("[data-kmark-page-fit], [data-kmark-generated-svg-page-fit], [data-page-valign]") === null) {
+      continue;
+    }
     const geometry = pageFrameGeometry(frame);
-    if (body === null || geometry === null) {
+    if (geometry === null) {
       continue;
     }
 
