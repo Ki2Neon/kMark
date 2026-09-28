@@ -7,10 +7,10 @@ import { Decoration, EditorView, drawSelection, highlightActiveLineGutter, highl
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { type EditorTransaction } from "../../application/editorSession/editorDocumentPort";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
-import { ONE_DARK_EDITOR_SYNTAX_COLORS, resolveCodeMirrorSyntaxHighlighting } from "../../adapters/editor/codeMirrorSyntaxHighlighting";
+import { createCodeMirrorEditorTheme, resolveCodeMirrorSyntaxHighlighting } from "../../adapters/editor/codeMirrorAppearance";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownSelectionWrapAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
-import { isDarkAppTheme, type AppThemeId } from "../../domain/theme";
+import { resolveAppThemeMode, type AppThemeId } from "../../domain/theme";
 import { createCodeMirrorFixedGutterScrollbarMaskExtension } from "../../features/editor-scroll/adapter/codeMirrorFixedGutterScrollbarMaskExtension";
 import { createCodeMirrorShiftWheelHorizontalScrollExtension } from "../../features/editor-scroll/adapter/codeMirrorShiftWheelHorizontalScrollExtension";
 import { createCodeMirrorKmarkCompletionSource } from "../../features/kmark-completion/adapter/codeMirrorKmarkCompletionSource";
@@ -990,82 +990,14 @@ function DesktopMarkdownInputComponent({
     },
   }), [onAssetPaste]);
 
-  const isDarkTheme = isDarkAppTheme(appThemeId);
-  const editorSyntaxHighlighting = resolveCodeMirrorSyntaxHighlighting(isDarkTheme);
-  const editorTheme = useMemo(() => EditorView.theme({
-    "&": {
-      backgroundColor: "transparent",
-      color: isDarkTheme ? ONE_DARK_EDITOR_SYNTAX_COLORS.ivory : "var(--text)",
-      fontFamily: resolveEditFontFamily(editFontId),
-      fontSize: "var(--edit-font-size)",
-      height: "100%",
-    },
-    ".cm-content": {
-      caretColor: "var(--text)",
-      padding: "0 16px",
-    },
-    ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--text)",
-    },
-    ".cm-editor": {
-      height: "100%",
-    },
-    ".cm-focused": {
-      outline: "none",
-    },
-    "&.cm-editor .cm-gutters": {
-      backgroundColor: "var(--surface)",
-    },
-    ".cm-gutters": {
-      border: "none",
-      color: isDarkTheme ? ONE_DARK_EDITOR_SYNTAX_COLORS.stone : "var(--text-soft)",
-      userSelect: "none",
-    },
-    ".cm-gutter, .cm-lineNumbers, .cm-lineNumbers .cm-gutterElement": {
-      userSelect: "none",
-    },
-    ".cm-line": {
-      padding: "0",
-    },
-    ".cm-previewRequestedLine": {
-      backgroundColor: "color-mix(in srgb, var(--focus) 15%, transparent)",
-    },
-    ".cm-assetDropLine": {
-      backgroundColor: "color-mix(in srgb, var(--focus) 24%, transparent)",
-      boxShadow: "inset 3px 0 0 var(--focus)",
-    },
-    ".cm-panels": {
-      backgroundColor: "var(--surface-muted)",
-      borderBottom: "1px solid var(--border)",
-      color: "var(--text)",
-    },
-    ".cm-scroller": {
-      fontFamily: "inherit",
-      lineHeight: "1.7",
-      overflowX: lineWrappingEnabled ? "auto" : "scroll",
-      overflowY: "auto",
-      padding: showMobileInputHelperBar
-        ? "16px 0 calc(16px + var(--mobile-input-helper-height) + env(safe-area-inset-bottom))"
-        : "16px 0",
-    },
-    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "color-mix(in srgb, var(--focus) 35%, transparent)",
-    },
-    ".cm-tooltip": {
-      backgroundColor: "var(--surface-muted)",
-      border: "1px solid var(--border)",
-      color: "var(--text)",
-    },
-    ".cm-tooltip-autocomplete": {
-      fontFamily: "inherit",
-    },
-    ".cm-tooltip-autocomplete ul li[aria-selected]": {
-      backgroundColor: "color-mix(in srgb, var(--focus) 18%, var(--surface-muted))",
-      color: "var(--text)",
-    },
-  }, {
-    dark: isDarkTheme,
-  }), [editFontId, isDarkTheme, lineWrappingEnabled, showMobileInputHelperBar]);
+  const appThemeMode = resolveAppThemeMode(appThemeId);
+  const editorSyntaxHighlighting = resolveCodeMirrorSyntaxHighlighting(appThemeMode);
+  const editorTheme = useMemo(() => createCodeMirrorEditorTheme({
+    mode: appThemeMode,
+    fontFamily: resolveEditFontFamily(editFontId),
+    lineWrappingEnabled,
+    showMobileInputHelperBar,
+  }), [appThemeMode, editFontId, lineWrappingEnabled, showMobileInputHelperBar]);
 
   const extensions = useMemo<Extension[]>(() => {
     const ctrlCmdUsesMetaKey = usesMetaKeyForCtrlCmd();
