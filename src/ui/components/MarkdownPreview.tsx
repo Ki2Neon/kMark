@@ -6,6 +6,7 @@ import {
   type ModelViewerScope,
 } from "../../adapters/browser/browserModelRenderer";
 import { syncA4PageLayout } from "../../adapters/browser/browserPageLayout";
+import { paginateA4RenderedPage } from "../../adapters/browser/browserA4Pagination";
 import {
   A4_PAGE_WIDTH_MM,
   CSS_MM_TO_PX,
@@ -58,6 +59,21 @@ const A4_TOC_INDENT_STEP_EM = 1.25;
 type PreviewTableFitMode = "auto" | "off" | "shrink";
 type PreviewFitMode = "width" | "page";
 type ActiveSourceLineScrollMode = "center" | "none" | "page";
+
+type A4PhysicalPageEntry = {
+  readonly page: RenderedPreviewPage;
+  readonly sourceIndex: number;
+  readonly key: string;
+};
+
+function sameRenderedPageContent(left: RenderedPreviewPage, right: RenderedPreviewPage): boolean {
+  if (left === right) return true;
+  return left.html === right.html
+    && JSON.stringify(left.pageStyle) === JSON.stringify(right.pageStyle)
+    && JSON.stringify(left.textStyle) === JSON.stringify(right.textStyle)
+    && JSON.stringify(left.pageNumberConfig) === JSON.stringify(right.pageNumberConfig)
+    && JSON.stringify(left.pageChromeConfig) === JSON.stringify(right.pageChromeConfig);
+}
 
 type MarkdownPreviewProps = {
   readonly activeSourceLine?: number | null;
@@ -1748,10 +1764,20 @@ function MarkdownPreviewComponent({
   const [isViewportPanning, setIsViewportPanning] = useState(false);
   const headingIdsByHtmlRef = useRef(new Map<string, readonly string[]>());
   const tocHtmlBySourceRef = useRef(new Map<string, A4TocHtmlCacheEntry>());
+  const a4PaginationCacheRef = useRef(new Map<RenderedPreviewPage, readonly RenderedPreviewPage[]>());
+  const previousSourcePagesRef = useRef<readonly RenderedPreviewPage[]>([]);
+  const a4SourceIdsRef = useRef(new WeakMap<RenderedPreviewPage, number>());
+  const nextA4SourceIdRef = useRef(0);
+  const [a4PaginationEpoch, setA4PaginationEpoch] = useState(0);
 
   const normalizedPages = useMemo(() => {
     if (pages !== undefined && pages.length > 0) {
-      return [...pages];
+      // IPC/subwindow updates deserialize every page. Reuse unchanged source objects
+      // so only the modified page loses its physical-layout cache and DOM identity.
+      return pages.map((page, index) => {
+        const previous = previousSourcePagesRef.current[index];
+        return previous !== undefined && sameRenderedPageContent(page, previous) ? previous : page;
+      });
     }
 
     return [{
@@ -1762,7 +1788,22 @@ function MarkdownPreviewComponent({
       pageChromeConfig: DEFAULT_PAGE_CHROME_CONFIG,
     }];
   }, [defaultPageStyle, defaultTextStyle, html, pages]);
-  const a4DisplayPages = normalizedPages;
+  useLayoutEffect(() => {
+    previousSourcePagesRef.current = normalizedPages;
+  }, [normalizedPages]);
+  const a4DisplayEntries = useMemo((): readonly A4PhysicalPageEntry[] => normalizedPages.flatMap((page, sourceIndex) => {
+    let sourceId = a4SourceIdsRef.current.get(page);
+    if (sourceId === undefined) {
+      sourceId = ++nextA4SourceIdRef.current;
+      a4SourceIdsRef.current.set(page, sourceId);
+    }
+    return (a4PaginationCacheRef.current.get(page) ?? [page]).map((physicalPage, physicalIndex) => ({
+      page: physicalPage,
+      sourceIndex,
+      key: `${sourceId}:${physicalIndex}`,
+    }));
+  }), [a4PaginationEpoch, normalizedPages]);
+  const a4DisplayPages = useMemo(() => a4DisplayEntries.map((entry) => entry.page), [a4DisplayEntries]);
   const numberedA4DisplayPages = useMemo(
     () => resolveA4TocPageNumbers(
       resolveNumberedPreviewPages(a4DisplayPages),
@@ -1776,6 +1817,86 @@ function MarkdownPreviewComponent({
     () => currentPreviewPages.map((page) => page.html),
     [currentPreviewPages],
   );
+
+  useLayoutEffect(() => {
+    if (displayMode !== "a4") {
+      a4PaginationCacheRef.current.clear();
+      return;
+    }
+
+    const viewport = previewViewportRef.current;
+    const cache = a4PaginationCacheRef.current;
+    const activeSources = new Set(normalizedPages);
+    for (const cachedSource of cache.keys()) {
+      if (!activeSources.has(cachedSource)) {
+        cache.delete(cachedSource);
+      }
+    }
+
+    let timerId: number | null = null;
+    let frameId: number | null = null;
+    let disposed = false;
+    const paginateChangedPages = () => {
+      frameId = null;
+      if (disposed) return;
+      let changed = false;
+      for (const page of normalizedPages) {
+        if (cache.has(page)) continue;
+        cache.set(page, paginateA4RenderedPage(page));
+        changed = true;
+      }
+      if (changed) setA4PaginationEpoch((epoch) => epoch + 1);
+    };
+    const schedulePagination = () => {
+      if (timerId !== null) window.clearTimeout(timerId);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        frameId = window.requestAnimationFrame(paginateChangedPages);
+      }, 40);
+    };
+    const invalidateMediaPage = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const scale = target.closest<HTMLElement>(".preview-section__page-scale[data-kmark-source-page-index]");
+      if (scale === null) return;
+      const sourceIndex = Number(scale.dataset.kmarkSourcePageIndex);
+      const source = normalizedPages[sourceIndex];
+      if (source === undefined) return;
+      cache.delete(source);
+      schedulePagination();
+    };
+    const invalidateFonts = () => {
+      if (disposed) return;
+      cache.clear();
+      schedulePagination();
+    };
+
+    schedulePagination();
+    viewport?.addEventListener("load", invalidateMediaPage, true);
+    viewport?.addEventListener("error", invalidateMediaPage, true);
+    viewport?.addEventListener("loadedmetadata", invalidateMediaPage, true);
+    document.fonts.addEventListener?.("loadingdone", invalidateFonts);
+    const themeObserver = new MutationObserver(invalidateFonts);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-app-theme", "data-preview-colors"],
+    });
+    if (document.fonts.status !== "loaded") {
+      void document.fonts.ready.then(invalidateFonts);
+    }
+
+    return () => {
+      disposed = true;
+      if (timerId !== null) window.clearTimeout(timerId);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      viewport?.removeEventListener("load", invalidateMediaPage, true);
+      viewport?.removeEventListener("error", invalidateMediaPage, true);
+      viewport?.removeEventListener("loadedmetadata", invalidateMediaPage, true);
+      document.fonts.removeEventListener?.("loadingdone", invalidateFonts);
+      themeObserver.disconnect();
+    };
+  }, [displayMode, normalizedPages]);
   const resolvedActiveSourceLineScrollMode = activeSourceLineScrollMode
     ?? (followActiveSourceLine ? "center" : "none");
 
@@ -2671,8 +2792,9 @@ function MarkdownPreviewComponent({
           <div className="preview-section__page-stack">
             {numberedA4DisplayPages.map((page, index) => (
               <div
-                key={index}
+                key={a4DisplayEntries[index]?.key ?? index}
                 className="preview-section__page-scale"
+                data-kmark-source-page-index={a4DisplayEntries[index]?.sourceIndex}
                 style={getPreviewPageScaleStyle(page, effectiveA4Scale)}
               >
                 <div className="preview-section__page-frame" style={getPreviewPageStyle(getPreviewPageConfig(page))}>
