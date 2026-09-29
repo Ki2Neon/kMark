@@ -77,7 +77,7 @@ if (checkOnly) {
   for (const relativePath of expected) {
     const generated = readFileSync(join(output, relativePath), "utf8");
     const committed = readFileSync(join(committedOutput, relativePath), "utf8");
-    if (generated !== committed) {
+    if (generated.replace(/\r\n/gu, "\n") !== committed.replace(/\r\n/gu, "\n")) {
       throw new Error(`Generated contract is stale: ${relativePath}`);
     }
   }
