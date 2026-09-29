@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import "../../../src/App.css";
 import { paginateA4RenderedPage } from "../../../src/adapters/browser/browserA4Pagination";
+import { renderMermaidPreviewHtml } from "../../../src/adapters/browser/browserMermaidRenderer";
 import {
   DEFAULT_PAGE_CHROME_CONFIG,
   DEFAULT_PAGE_NUMBER_CONFIG,
@@ -76,6 +77,61 @@ test("A4 preserves page reset and page_valign boundaries in physical pages", () 
   expect(aligned.length).toBeGreaterThan(1);
   expect(aligned[0].html).toContain('data-page-valign="bottom"');
   expect(aligned[1].html).toContain('id="after-valign"');
+});
+
+test("A4 page_fit image fills the remaining area of its current page", () => {
+  const image = '<p style="margin:0"><img id="fitted-image" '
+    + 'src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221200%22 height=%22800%22/%3E" '
+    + 'data-kmark-page-fit="fill" '
+    + 'style="width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0" /></p>';
+  for (const height of [180, 400, 500, 515]) {
+    const html = `<p style="height:${height}px;margin:0">before</p>${image}`;
+    const parts = paginateA4RenderedPage(page(html));
+    expect(parts, `preceding content height ${height}px`).toHaveLength(1);
+    expect(parts[0]?.html).toContain('id="fitted-image"');
+  }
+  const a4Style = { width: "210mm", height: "297mm", marginTop: "16mm", marginRight: "16mm", marginBottom: "18mm", marginLeft: "16mm" };
+  const a4Parts = paginateA4RenderedPage(page(`<p style="height:700px;margin:0">before</p>${image}`, { style: a4Style }));
+  expect(a4Parts).toHaveLength(1);
+});
+
+test("A4 paginates a rendered page_fit_contain Mermaid diagram", async () => {
+  const source = Array.from({ length: 12 }, (_, index) => `N${index}["Step ${index}"] --> N${index + 1}["Step ${index + 1}"]`).join("\n");
+  const raw = '<div class="kmark-mermaid-block kmark-mermaid-block--image-params kmark-generated-svg-block" '
+    + 'data-kmark-mermaid-index="1" data-kmark-generated-svg-page-fit="contain" '
+    + 'data-kmark-generated-svg-style="max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;">'
+    + '<div class="kmark-mermaid-rendered kmark-generated-svg-rendered"></div>'
+    + `<details class="kmark-mermaid-source" hidden><pre><code>flowchart TD\n${source}</code></pre></details></div>`;
+  const rendered = await renderMermaidPreviewHtml(raw, { revision: 1, strict: true, surface: "paper" });
+  const parts = paginateA4RenderedPage(page(`<p style="height:250px;margin:0">before</p><h2>diagram</h2>${rendered}`));
+  expect(parts).toHaveLength(1);
+  expect(parts[0]?.html).toContain("<svg");
+
+  const preview = mountPreview();
+  try {
+    preview.render({ mode: "a4", pages: [page(`<p style="height:250px;margin:0">before</p><h2>diagram</h2>${rendered}`)],
+      defaultPageStyle: PAGE_STYLE, defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE });
+    await vi.waitFor(() => {
+      expect(preview.host.querySelector('[data-kmark-a4-pagination-ready="true"]')).not.toBeNull();
+      expect(preview.host.querySelectorAll(".preview-section__page-frame")).toHaveLength(1);
+      const frame = preview.host.querySelector<HTMLElement>(".preview-section__page-frame");
+      const svg = frame?.querySelector<SVGElement>(".kmark-mermaid-rendered svg");
+      expect(svg?.style.getPropertyValue("--kmark-page-fit-contain-height")).not.toBe("");
+      const frameStyle = getComputedStyle(frame!);
+      const contentBottom = frame!.getBoundingClientRect().bottom
+        - Number.parseFloat(frameStyle.borderBottomWidth) - Number.parseFloat(frameStyle.paddingBottom);
+      expect(svg!.getBoundingClientRect().bottom).toBeLessThanOrEqual(contentBottom + 1);
+    });
+  } finally {
+    preview.dispose();
+  }
+
+  const unfitted = rendered.replace('data-kmark-generated-svg-page-fit="contain"', "");
+  const fullPageParts = paginateA4RenderedPage(page(`<p style="height:250px;margin:0">before</p>${unfitted}`));
+  expect(fullPageParts).toHaveLength(2);
+  expect(fullPageParts[0]?.html).toContain("before");
+  expect(fullPageParts[1]?.html).toContain("<svg");
+  expect(fullPageParts[1]?.html).toContain("kmark-mermaid-source");
 });
 
 test("A4 continuation pages update numbering, print, and only the changed source page", async () => {

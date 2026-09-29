@@ -2069,6 +2069,10 @@ input:focus-visible,
   background: transparent;
 }
 
+.markdown-body .kmark-generated-svg-block[data-kmark-generated-svg-page-fit] {
+  margin-bottom: 0;
+}
+
 .markdown-body .kmark-mermaid-rendered {
   display: flex;
   justify-content: center;

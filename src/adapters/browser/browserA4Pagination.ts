@@ -452,7 +452,9 @@ function appendNode(measure: PageMeasure, node: Node): void {
     appendAtomic(measure, node);
     return;
   }
-  if (node.classList.contains("kmark-toc")) {
+  if (node.classList.contains("kmark-generated-svg-block")) {
+    appendAtomic(measure, node);
+  } else if (node.classList.contains("kmark-toc")) {
     splitToc(measure, node);
   } else if (node.tagName === "P") {
     splitParagraph(measure, node);
