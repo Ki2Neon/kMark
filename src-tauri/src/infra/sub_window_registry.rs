@@ -8,7 +8,7 @@ use std::{
 
 use fs2::FileExt;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 use crate::dto::{
     SubWindowResolvedSourceStatePayload, SubWindowSelectionPayload,
@@ -511,9 +511,7 @@ fn active_source_path(base_path: &Path) -> PathBuf {
 }
 
 fn base_directory<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, SubWindowRegistryError> {
-    let mut path = app
-        .path()
-        .app_config_dir()
+    let mut path = super::app_config_dir::app_config_dir(app)
         .map_err(|source| SubWindowRegistryError::ResolveAppConfigDir { source })?;
     path.push(REGISTRY_DIRECTORY_NAME);
     Ok(path)

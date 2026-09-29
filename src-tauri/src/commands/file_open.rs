@@ -217,14 +217,27 @@ pub async fn write_editor_session_markdown_document(
     expected_revision: u64,
     path: String,
 ) -> Result<SavedMarkdownDocumentPayload, CommandErrorPayload> {
-    persist_editor_session_snapshot(
+    eprintln!(
+        "[kmark:ipc] begin command=write_editor_session_markdown_document session={} op=save-{} rev={}",
+        session_id, expected_revision, expected_revision
+    );
+    let trace_session_id = session_id.clone();
+    let result = persist_editor_session_snapshot(
         Arc::clone(&state.application),
         state.markdown_document_repository,
         session_id,
         expected_revision,
         PathBuf::from(path),
     )
-    .await
+    .await;
+    eprintln!(
+        "[kmark:ipc] {} command=write_editor_session_markdown_document session={} op=save-{} rev={}",
+        if result.is_ok() { "end" } else { "error" },
+        trace_session_id,
+        expected_revision,
+        expected_revision
+    );
+    result
 }
 
 #[tauri::command]

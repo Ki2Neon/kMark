@@ -5,7 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, PhysicalSize, Runtime, WebviewWindow, Window};
+use tauri::{AppHandle, PhysicalSize, Runtime, WebviewWindow, Window};
 
 const WINDOW_STATE_DIRECTORY_NAME: &str = "window-state";
 const WINDOW_STATE_FILE_EXTENSION: &str = "json";
@@ -199,9 +199,7 @@ fn window_state_path<R: Runtime>(
     app: &AppHandle<R>,
     window_label: &str,
 ) -> Result<PathBuf, WindowStateError> {
-    let mut path = app
-        .path()
-        .app_config_dir()
+    let mut path = super::app_config_dir::app_config_dir(app)
         .map_err(|source| WindowStateError::ResolveAppConfigDir { source })?;
 
     path.push(WINDOW_STATE_DIRECTORY_NAME);

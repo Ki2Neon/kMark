@@ -47,31 +47,47 @@ pub async fn render_editor_session_preview(
     base_revision: Option<u64>,
     display_mode: String,
 ) -> Result<SessionPreviewPayload, CommandErrorPayload> {
-    PreviewDisplayMode::from_str(&display_mode).ok_or_else(|| {
-        CommandErrorPayload::with_detail(
-            "unsupported_preview_display_mode",
-            "unsupported preview display mode",
-            display_mode,
-        )
-    })?;
-    let application = state.application.clone();
-    let change = tauri::async_runtime::spawn_blocking(move || {
-        application.render_session_preview(
-            &session_id,
-            revision,
-            base_revision,
-            prepare_markdown_model_assets,
-        )
-    })
-    .await
-    .map_err(|error| {
-        CommandErrorPayload::with_detail(
-            "preview_render_join_failed",
-            "preview rendering task failed",
-            error.to_string(),
-        )
-    })??;
-    Ok(SessionPreviewPayload::from(change))
+    eprintln!(
+        "[kmark:ipc] begin command=render_editor_session_preview session={} op=preview-{} rev={}",
+        session_id, revision, revision
+    );
+    let trace_session_id = session_id.clone();
+    let result = async {
+        PreviewDisplayMode::from_str(&display_mode).ok_or_else(|| {
+            CommandErrorPayload::with_detail(
+                "unsupported_preview_display_mode",
+                "unsupported preview display mode",
+                display_mode,
+            )
+        })?;
+        let application = state.application.clone();
+        let change = tauri::async_runtime::spawn_blocking(move || {
+            application.render_session_preview(
+                &session_id,
+                revision,
+                base_revision,
+                prepare_markdown_model_assets,
+            )
+        })
+        .await
+        .map_err(|error| {
+            CommandErrorPayload::with_detail(
+                "preview_render_join_failed",
+                "preview rendering task failed",
+                error.to_string(),
+            )
+        })??;
+        Ok(SessionPreviewPayload::from(change))
+    }
+    .await;
+    eprintln!(
+        "[kmark:ipc] {} command=render_editor_session_preview session={} op=preview-{} rev={}",
+        if result.is_ok() { "end" } else { "error" },
+        trace_session_id,
+        revision,
+        revision
+    );
+    result
 }
 
 #[cfg(test)]

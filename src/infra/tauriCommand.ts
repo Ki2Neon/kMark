@@ -79,9 +79,29 @@ export async function invokeTauriCommand<T>(
     throw new Error("Tauri 環境が必要です。");
   }
 
+  const request = args.request as {
+    readonly sessionId?: string;
+    readonly batch?: { readonly clientId?: string; readonly batchId?: number; readonly expectedRevision?: number };
+  } | undefined;
+  const sessionId = request?.sessionId ?? (typeof args.sessionId === "string" ? args.sessionId : undefined);
+  const revision = request?.batch?.expectedRevision
+    ?? (typeof args.expectedRevision === "number" ? args.expectedRevision : undefined)
+    ?? (typeof args.revision === "number" ? args.revision : undefined);
+  const operationId = request?.batch?.clientId && request.batch.batchId !== undefined
+    ? `${request.batch.clientId}:${request.batch.batchId}`
+    : (typeof revision === "number" && command === "render_editor_session_preview" ? `preview-${revision}` : undefined)
+      ?? (typeof revision === "number" && command === "write_editor_session_markdown_document" ? `save-${revision}` : undefined);
+  const trace = { command, sessionId, operationId, revision };
+  console.info("[kmark:ipc] begin", trace);
   try {
-    return await invokeRuntimeCommand<T>(command, args);
+    const result = await invokeRuntimeCommand<T>(command, args);
+    const resultRevision = typeof result === "object" && result !== null && "revision" in result
+      ? (result as { revision?: unknown }).revision
+      : undefined;
+    console.info("[kmark:ipc] end", { ...trace, resultRevision });
+    return result;
   } catch (error) {
+    console.error("[kmark:ipc] error", trace);
     throw createCommandError(error, fallbackMessage);
   }
 }

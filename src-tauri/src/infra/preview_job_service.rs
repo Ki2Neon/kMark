@@ -28,6 +28,21 @@ pub(crate) struct TauriPreviewJobService {
 }
 
 impl TauriPreviewJobService {
+    #[cfg(feature = "e2e")]
+    pub(crate) fn pending_count(&self) -> usize {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .filter(|stored| {
+                matches!(
+                    stored.job.status,
+                    PreviewJobStatus::Queued | PreviewJobStatus::Running
+                )
+            })
+            .count()
+    }
+
     pub(crate) fn set_app(&self, app: &AppHandle) {
         *self
             .app

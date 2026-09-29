@@ -285,6 +285,21 @@ impl EditorDocument {
         self.line_ending
     }
 
+    /// Returns the most recently applied mutation across clients. A replayed ACK does not
+    /// replace this identity because its original revision is unchanged.
+    pub fn last_applied_batch(&self) -> Option<(&str, u64, u64)> {
+        self.last_batches
+            .values()
+            .max_by_key(|applied| applied.ack.revision)
+            .map(|applied| {
+                (
+                    applied.batch.client_id.as_str(),
+                    applied.batch.batch_id,
+                    applied.ack.revision,
+                )
+            })
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.is_dirty
     }
@@ -897,6 +912,63 @@ mod tests {
         assert_eq!(replay.revision, 9);
         assert_eq!(document.canonical_text(), "ab");
         assert_eq!(document.revision(), 9);
+    }
+
+    #[test]
+    fn last_applied_batch_ignores_replayed_ack_from_an_older_client() {
+        let mut document = EditorDocument::from_external_text("a", 1, false);
+        assert_eq!(document.last_applied_batch(), None);
+
+        let first = batch(1, 1, vec![transaction(1, vec![change(1, 1, "b")])]);
+        document.apply_mutation_batch(&first).unwrap();
+        let mut second = batch(2, 1, vec![transaction(2, vec![change(2, 2, "c")])]);
+        second.client_id = "other-view".to_owned();
+        document.apply_mutation_batch(&second).unwrap();
+        assert_eq!(document.last_applied_batch(), Some(("other-view", 1, 3)));
+
+        assert!(document.apply_mutation_batch(&first).unwrap().replayed);
+        assert_eq!(document.last_applied_batch(), Some(("other-view", 1, 3)));
+    }
+
+    #[test]
+    fn stale_revision_rejection_keeps_next_batch_id_available() {
+        let mut document = EditorDocument::from_external_text("a", 4, false);
+        let stale = batch(3, 1, vec![transaction(1, vec![change(1, 1, "b")])]);
+
+        assert_eq!(
+            document.apply_mutation_batch(&stale),
+            Err(EditorDocumentError::StaleRevision {
+                expected: 3,
+                actual: 4,
+            })
+        );
+        assert_eq!(document.canonical_text(), "a");
+        assert_eq!(document.revision(), 4);
+        assert!(!document.is_dirty());
+
+        let accepted = document
+            .apply_mutation_batch(&batch(4, 1, vec![transaction(1, vec![change(1, 1, "b")])]))
+            .unwrap();
+        assert_eq!(accepted.revision, 5);
+        assert_eq!(document.canonical_text(), "ab");
+    }
+
+    #[test]
+    fn revision_overflow_does_not_change_document_or_dirty_state() {
+        let mut document = EditorDocument::from_external_text("saved", u64::MAX, false);
+        let mutation = batch(
+            u64::MAX,
+            1,
+            vec![transaction(5, vec![change(5, 5, " edit")])],
+        );
+
+        assert_eq!(
+            document.apply_mutation_batch(&mutation),
+            Err(EditorDocumentError::RevisionOverflow)
+        );
+        assert_eq!(document.canonical_text(), "saved");
+        assert_eq!(document.revision(), u64::MAX);
+        assert!(!document.is_dirty());
     }
 
     #[test]

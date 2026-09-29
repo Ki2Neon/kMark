@@ -374,6 +374,31 @@ impl ApplicationService {
             .map(|session| session.snapshot(&self.instance_id))
     }
 
+    /// Returns the session attached to a window, including an unsaved startup document.
+    /// The active session wins when multiple sessions remain attached to the same window;
+    /// without an active match, an ambiguous window has no single diagnostic snapshot.
+    pub fn session_for_window(&self, window_label: &str) -> Option<DocumentSnapshot> {
+        let state = self.lock_state();
+        if let Some(session) = state
+            .active_session_id
+            .as_ref()
+            .and_then(|session_id| state.sessions.get(session_id))
+            .filter(|session| session.attached_window_label.as_deref() == Some(window_label))
+        {
+            return Some(session.snapshot(&self.instance_id));
+        }
+
+        let mut attached = state
+            .sessions
+            .values()
+            .filter(|session| session.attached_window_label.as_deref() == Some(window_label));
+        let session = attached.next()?;
+        attached
+            .next()
+            .is_none()
+            .then(|| session.snapshot(&self.instance_id))
+    }
+
     pub fn session(&self, session_id: &str) -> Result<DocumentSnapshot, ApplicationError> {
         self.lock_state()
             .sessions
@@ -389,6 +414,24 @@ impl ApplicationService {
             .get(session_id)
             .map(|session| session.snapshot(&self.instance_id))
             .ok_or_else(session_not_found)
+    }
+
+    /// The latest preview revision committed to this session's render cache.
+    /// None means no preview has been committed or rendering currently owns the cache.
+    pub fn preview_revision(&self, session_id: &str) -> Option<u64> {
+        self.lock_state()
+            .preview_caches
+            .get(session_id)
+            .map(PreviewRenderCache::revision)
+    }
+
+    /// Returns (client ID, batch ID, applied revision) from the canonical document.
+    pub fn last_applied_batch(&self, session_id: &str) -> Option<(String, u64, u64)> {
+        self.lock_state()
+            .sessions
+            .get(session_id)
+            .and_then(|session| session.document.last_applied_batch())
+            .map(|(client_id, batch_id, revision)| (client_id.to_owned(), batch_id, revision))
     }
 
     /// Builds a revision-consistent preview without holding the application lock during
@@ -1323,6 +1366,167 @@ mod tests {
     }
 
     #[test]
+    fn preview_render_discards_result_when_document_changes_during_asset_resolution() {
+        let service = service();
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Tail\nlast";
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                source.to_owned(),
+                false,
+            )
+            .unwrap();
+        let edit_at = source.find("first").unwrap() as u64;
+
+        let error = service
+            .render_session_preview(&session.session_id, 1, None, |_, _| {
+                service
+                    .apply_editor_mutation_batch(
+                        &session.session_id,
+                        &EditorMutationBatch {
+                            client_id: "view".to_owned(),
+                            batch_id: 1,
+                            expected_revision: 1,
+                            transactions: vec![EditorTransaction {
+                                before_length_utf16: source.len() as u64,
+                                changes: vec![EditorTextChange {
+                                    from_utf16: edit_at,
+                                    to_utf16: edit_at + 5,
+                                    insert: "changed".to_owned(),
+                                }],
+                            }],
+                        },
+                    )
+                    .unwrap();
+                Default::default()
+            })
+            .expect_err("rendered revision must still be current when published");
+
+        assert_eq!(error.code(), ApplicationErrorCode::RevisionConflict);
+        assert_eq!(error.current_revision(), Some(2));
+        let change = service
+            .render_session_preview(&session.session_id, 2, None, |_, _| Default::default())
+            .unwrap();
+        assert!(matches!(
+            change,
+            PreviewRenderChange::Full { revision: 2, .. }
+        ));
+        assert_eq!(
+            service.session_for_ui(&session.session_id).unwrap().content,
+            source.replacen("first", "changed", 1)
+        );
+    }
+
+    #[test]
+    fn inverse_and_forward_mutations_track_undo_redo_preview_and_saved_state() {
+        let service = service();
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Tail\nlast";
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                source.to_owned(),
+                false,
+            )
+            .unwrap();
+        assert!(matches!(
+            service
+                .render_session_preview(&session.session_id, 1, None, |_, _| Default::default())
+                .unwrap(),
+            PreviewRenderChange::Full { revision: 1, .. }
+        ));
+        assert_eq!(service.preview_revision(&session.session_id), Some(1));
+        assert_eq!(service.last_applied_batch(&session.session_id), None);
+
+        let offset = source.find("first").unwrap() as u64;
+        for (base_revision, original, replacement, dirty) in [
+            (1, "first", "after", true),
+            (2, "after", "first", false),
+            (3, "first", "after", true),
+            (4, "after", "first", true),
+            (5, "first", "after", false),
+        ] {
+            let ack = service
+                .apply_editor_mutation_batch(
+                    &session.session_id,
+                    &EditorMutationBatch {
+                        client_id: "view".to_owned(),
+                        batch_id: base_revision,
+                        expected_revision: base_revision,
+                        transactions: vec![EditorTransaction {
+                            before_length_utf16: source.len() as u64,
+                            changes: vec![EditorTextChange {
+                                from_utf16: offset,
+                                to_utf16: offset + original.len() as u64,
+                                insert: replacement.to_owned(),
+                            }],
+                        }],
+                    },
+                )
+                .unwrap();
+            let revision = base_revision + 1;
+            assert_eq!(ack.revision, revision);
+            assert_eq!(ack.is_dirty, dirty);
+            assert_eq!(
+                service.preview_revision(&session.session_id),
+                Some(base_revision)
+            );
+            assert_eq!(
+                service.last_applied_batch(&session.session_id),
+                Some(("view".to_owned(), base_revision, revision))
+            );
+            let snapshot = service.session_for_ui(&session.session_id).unwrap();
+            assert_eq!(snapshot.revision, revision);
+            assert_eq!(snapshot.content, source.replacen("first", replacement, 1));
+            assert_eq!(snapshot.is_dirty, dirty);
+
+            let preview = service
+                .render_session_preview(
+                    &session.session_id,
+                    revision,
+                    Some(base_revision),
+                    |_, _| Default::default(),
+                )
+                .unwrap();
+            assert!(matches!(
+                preview,
+                PreviewRenderChange::Patch(ref patch)
+                    if patch.base_revision == base_revision
+                        && patch.revision == revision
+                        && patch.section_index == 0
+            ));
+            assert_eq!(
+                service.preview_revision(&session.session_id),
+                Some(revision)
+            );
+            if revision == 4 {
+                service
+                    .mark_frontend_session_saved_at_revision(
+                        &session.session_id,
+                        revision,
+                        "note.md".to_owned(),
+                        None,
+                    )
+                    .unwrap();
+                assert!(
+                    !service
+                        .session_for_ui(&session.session_id)
+                        .unwrap()
+                        .is_dirty
+                );
+            }
+        }
+
+        let saved = service.session_for_ui(&session.session_id).unwrap();
+        assert_eq!(saved.revision, 6);
+        assert_eq!(saved.content, source.replacen("first", "after", 1));
+        assert!(!saved.is_dirty);
+    }
+
+    #[test]
     fn frontend_mutation_uses_canonical_lf_and_increments_once_per_batch() {
         let service = service();
         let session = service
@@ -1388,7 +1592,7 @@ mod tests {
                 false,
             )
             .expect("register session");
-        service
+        let error = service
             .apply_editor_mutation_batch(
                 &session.session_id,
                 &EditorMutationBatch {
@@ -1406,6 +1610,7 @@ mod tests {
                 },
             )
             .expect_err("surrogate midpoint must fail");
+        assert_eq!(error.code(), ApplicationErrorCode::InvalidEditRange);
         let unchanged = service
             .session_for_ui(&session.session_id)
             .expect("session");
@@ -1581,6 +1786,51 @@ mod tests {
         assert!(!service
             .session_has_attached_window(&session.session_id)
             .expect("query detached session"));
+    }
+
+    #[test]
+    fn window_session_includes_unsaved_startup_document() {
+        let service = service();
+        let startup = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "untitled.md".to_owned(),
+                None,
+                "draft".to_owned(),
+                true,
+            )
+            .unwrap();
+        assert!(service.current_session().is_none());
+        assert_eq!(
+            service.session_for_window("main").unwrap().session_id,
+            startup.session_id
+        );
+        assert!(service.session_for_window("other").is_none());
+
+        let newer = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "second.md".to_owned(),
+                None,
+                "new draft".to_owned(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            service.session_for_window("main").unwrap().session_id,
+            newer.session_id
+        );
+        service.activate_window("other");
+        assert!(service.session_for_window("main").is_none());
+        service
+            .attach_session(&startup.session_id, "main".to_owned())
+            .unwrap();
+        assert_eq!(
+            service.session_for_window("main").unwrap().session_id,
+            startup.session_id
+        );
+        service.detach_window("main");
+        assert!(service.session_for_window("main").is_none());
     }
 
     #[test]

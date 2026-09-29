@@ -406,6 +406,11 @@ pub fn run() {
         instance_id,
     ));
 
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
     #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(
         tauri_plugin_autostart::Builder::new()
@@ -757,6 +762,8 @@ pub fn run() {
             commands::editor_preferences::set_editor_preferences,
             commands::editor_session::apply_editor_mutation_batch,
             commands::editor_session::mark_editor_session_saved,
+            #[cfg(feature = "e2e")]
+            commands::e2e_diagnostics::get_e2e_debug_snapshot,
             commands::external_api::accept_external_proposal,
             commands::external_api::attach_document_session,
             commands::external_api::cancel_staged_file_operation,

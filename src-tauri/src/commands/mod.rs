@@ -1,6 +1,8 @@
 pub mod app_exit;
 pub mod asset_import;
 pub mod desktop_layout_preferences;
+#[cfg(feature = "e2e")]
+pub mod e2e_diagnostics;
 pub mod editor_draft;
 pub mod editor_preferences;
 pub mod editor_session;

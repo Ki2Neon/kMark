@@ -199,6 +199,10 @@ pub enum PreviewRenderChange {
 }
 
 impl PreviewRenderCache {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn new(
         document: &EditorDocument,
         file_path: Option<&str>,

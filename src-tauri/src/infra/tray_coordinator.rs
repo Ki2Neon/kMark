@@ -7,7 +7,7 @@ use std::{
 
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 const TRAY_COORDINATOR_DIRECTORY_NAME: &str = "tray-coordinator";
 const TRAY_OWNER_LOCK_FILE_NAME: &str = "owner.lock";
@@ -266,9 +266,7 @@ fn temporary_command_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, Tra
 }
 
 fn base_directory<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, TrayCoordinatorError> {
-    let mut path = app
-        .path()
-        .app_config_dir()
+    let mut path = super::app_config_dir::app_config_dir(app)
         .map_err(|source| TrayCoordinatorError::ResolveAppConfigDir { source })?;
 
     path.push(TRAY_COORDINATOR_DIRECTORY_NAME);

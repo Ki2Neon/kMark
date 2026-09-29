@@ -24,6 +24,10 @@ pnpm run tauri dev
 
 - `pnpm run tauri dev` : `WASM pkg` 再生成込み
 
+## テスト
+
+`pnpm test` で Rust Core と Frontend Unit を実行。Browser、実Tauri、Performance、CI のコマンドと必要環境は [テスト基盤](docs/testing.md) を参照。
+
 ## ライセンス
 
 このプロジェクト本体は MIT License です。
