@@ -1791,18 +1791,22 @@ function MarkdownPreviewComponent({
   useLayoutEffect(() => {
     previousSourcePagesRef.current = normalizedPages;
   }, [normalizedPages]);
-  const a4DisplayEntries = useMemo((): readonly A4PhysicalPageEntry[] => normalizedPages.flatMap((page, sourceIndex) => {
-    let sourceId = a4SourceIdsRef.current.get(page);
-    if (sourceId === undefined) {
-      sourceId = ++nextA4SourceIdRef.current;
-      a4SourceIdsRef.current.set(page, sourceId);
-    }
-    return (a4PaginationCacheRef.current.get(page) ?? [page]).map((physicalPage, physicalIndex) => ({
-      page: physicalPage,
-      sourceIndex,
-      key: `${sourceId}:${physicalIndex}`,
-    }));
-  }), [a4PaginationEpoch, normalizedPages]);
+  const a4DisplayEntries = useMemo((): readonly A4PhysicalPageEntry[] => {
+    // The epoch invalidates this projection after the mutable measurement cache changes.
+    void a4PaginationEpoch;
+    return normalizedPages.flatMap((page, sourceIndex) => {
+      let sourceId = a4SourceIdsRef.current.get(page);
+      if (sourceId === undefined) {
+        sourceId = ++nextA4SourceIdRef.current;
+        a4SourceIdsRef.current.set(page, sourceId);
+      }
+      return (a4PaginationCacheRef.current.get(page) ?? [page]).map((physicalPage, physicalIndex) => ({
+        page: physicalPage,
+        sourceIndex,
+        key: `${sourceId}:${physicalIndex}`,
+      }));
+    });
+  }, [a4PaginationEpoch, normalizedPages]);
   const a4DisplayPages = useMemo(() => a4DisplayEntries.map((entry) => entry.page), [a4DisplayEntries]);
   const numberedA4DisplayPages = useMemo(
     () => resolveA4TocPageNumbers(
@@ -1864,11 +1868,13 @@ function MarkdownPreviewComponent({
       const source = normalizedPages[sourceIndex];
       if (source === undefined) return;
       cache.delete(source);
+      if (viewport) viewport.dataset.kmarkA4PaginationReady = "false";
       schedulePagination();
     };
     const invalidateFonts = () => {
       if (disposed) return;
       cache.clear();
+      if (viewport) viewport.dataset.kmarkA4PaginationReady = "false";
       schedulePagination();
     };
 
@@ -2773,6 +2779,7 @@ function MarkdownPreviewComponent({
         <div
           ref={handlePreviewViewportRef}
           className="preview-section__body preview-section__body--a4"
+          data-kmark-a4-pagination-ready={normalizedPages.every((page) => a4PaginationCacheRef.current.has(page)) ? "true" : "false"}
           data-interactive-pan={enableInteractiveViewportNavigation ? "true" : "false"}
           data-panning={isViewportPanning ? "true" : "false"}
           onAuxClick={handlePreviewClick}

@@ -42,17 +42,13 @@ test("standard sections retain their DOM while one section changes", () => {
   }
 });
 
-test("A4 renders only explicit pages and retains an unchanged page", () => {
+test("A4 retains an unchanged explicit page during a local update", async () => {
   const preview = mountPreview();
   try {
-    const longHtml = Array.from({ length: 1000 }, (_, index) => `<p>line ${index}</p>`).join("");
-    preview.render({ mode: "a4", pages: [makePage(longHtml)],
-      defaultPageStyle: DEFAULT_PAGE_STYLE, defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE });
-    expect(preview.host.querySelectorAll(".preview-section__page-frame")).toHaveLength(1);
-
     const pages = [makePage("<h1>First</h1><p>before</p>"), makePage("<h1>Last</h1><p>same</p>")];
     preview.render({ mode: "a4", pages, defaultPageStyle: DEFAULT_PAGE_STYLE,
       defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE });
+    await vi.waitFor(() => expect(preview.host.querySelectorAll(".preview-section__page-frame")).toHaveLength(2));
     const lastPage = preview.host.querySelectorAll(".preview-section__page-frame")[1];
     const lastHeading = lastPage.querySelector("h1");
     preview.render({ mode: "a4", pages: [makePage("<h1>First</h1><p>after</p>"), pages[1]],

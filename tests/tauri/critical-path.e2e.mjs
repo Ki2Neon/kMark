@@ -113,10 +113,30 @@ describe('real Tauri critical path', () => {
     assert.match(savedContent, /first!/u);
     assert.equal(await $('[role="status"]').getAttribute('data-visible'), 'false');
 
-    await browser.waitUntil(async () => {
-      const draft = await editorDraft();
-      return draft?.filePath === documentPath && draft?.content === savedContent;
-    }, { timeout: 10_000, interval: 100, timeoutMsg: 'Saved document was not persisted as the editor draft' });
+    let observedDraft = null;
+    const canonicalSavedContent = savedContent.replace(/\r\n/gu, '\n');
+    const savedLineEnding = savedContent.includes('\r\n') ? 'crlf' : 'lf';
+    try {
+      await browser.waitUntil(async () => {
+        observedDraft = await editorDraft();
+        return observedDraft?.filePath === documentPath
+          && observedDraft?.content === canonicalSavedContent
+          && observedDraft?.lineEnding === savedLineEnding;
+      }, { timeout: 10_000, interval: 100, timeoutMsg: 'Saved document was not persisted as the editor draft' });
+    } catch (error) {
+      const draftContent = typeof observedDraft?.content === 'string' ? observedDraft.content : null;
+      throw new Error(`Saved draft mismatch: ${JSON.stringify({
+        draftPath: observedDraft?.filePath,
+        expectedPath: documentPath,
+        draftLength: draftContent?.length,
+        savedLength: savedContent.length,
+        draftLineEnding: observedDraft?.lineEnding,
+        savedLineEnding,
+        draftCrlfCount: draftContent?.match(/\r\n/gu)?.length ?? 0,
+        savedCrlfCount: savedContent.match(/\r\n/gu)?.length ?? 0,
+        normalizedContentEqual: draftContent?.replace(/\r\n/gu, '\n') === savedContent.replace(/\r\n/gu, '\n'),
+      })}`, { cause: error });
+    }
 
     await browser.keys([Key.Ctrl, 'n']);
     const closed = await waitForState('UI did not close the saved document', (state) => state.activeDocument === null && state.dirty === false);

@@ -1,6 +1,6 @@
 # Test migration ledger
 
-Every listed legacy runner was removed after its replacement passed. Each row has status `verified → removed`: the named replacement ran successfully before deletion of that legacy file. The relevant behavior is the migration unit, not the filename. Verification at migration: Rust Core/Application 272 tests, Vitest Unit 74 tests, Vitest Browser 15 tests, Performance Node 3 and Browser 12 tests. Real Tauri E2E is a newly added layer, not a legacy-runner replacement.
+Every listed legacy runner was removed after its replacement passed. Each row has status `verified → removed`: the named replacement ran successfully before deletion of that legacy file. The relevant behavior is the migration unit, not the filename. Verification after the auto-pagination merge: Rust Core/Application 272 tests, Vitest Unit 74 tests, Vitest Browser 19 tests, Performance Node 3 and Browser 14 tests. Real Tauri E2E is a newly added layer, not a legacy-runner replacement.
 
 | Legacy file | Guarantee | New layer |
 | --- | --- | --- |
@@ -8,8 +8,8 @@ Every listed legacy runner was removed after its replacement passed. Each row ha
 | `tools/test-session-preview-wasm.mjs` | WASM section diff, dirty equality | Rust Native + Browser WASM integration |
 | `tools/test-session-preview-ui.mjs` | SSR-rendered Preview structure | Vitest Browser Preview structure |
 | `tools/test-session-preview-browser.mjs` | DOM/page identity, TOC, scroll, visibility, Mermaid, drag, dirty; 200-page measurement | Vitest Browser functional + Performance 200-page |
-| `tools/test-a4-preview-pages.mjs` | A4 fit/valign math and SSR page structure | `tests/unit/a4-page-fit.test.mjs` + Vitest Browser layout/structure |
-| `tools/test-a4-layout-browser.mjs` | measured fit/valign geometry | Vitest Browser layout |
+| `tools/test-a4-preview-pages.mjs` | A4 fit/valign math; the auto-pagination branch replaced its obsolete SSR/explicit-only expectations | `tests/unit/a4-page-fit.test.mjs` + Vitest Browser layout/auto-pagination |
+| `tools/test-a4-layout-browser.mjs` | measured fit/valign geometry; the auto-pagination branch added content, numbering, print and DOM-reuse checks | Vitest Browser layout/auto-pagination + Performance A4 overflow |
 | `tools/test-editor-syntax-theme.mjs` | theme mapping | `tests/unit/editor-syntax-theme.test.mjs` |
 | `tools/test-editor-syntax-theme-browser.mjs` | computed syntax colors | Vitest Browser theme |
 | `tools/test-editor-mutation-queue.mjs` | serialization, retry, UTF-16 line endings | `tests/unit/editor-mutation-queue.test.mjs` + Rust Native |

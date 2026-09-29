@@ -1256,10 +1256,36 @@ function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pa
 </html>`;
 }
 
-function printA4MarkdownDocument(
+function waitForA4PaginationReady(): Promise<void> {
+  const viewport = document.querySelector<HTMLElement>(".preview-section__body--a4");
+  if (viewport?.dataset.kmarkA4PaginationReady !== "false") return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const observer = new MutationObserver(() => {
+      if (!viewport.isConnected) {
+        finish(() => reject(new Error("A4プレビューが印刷準備中に閉じられました。")));
+      } else if (viewport.dataset.kmarkA4PaginationReady === "true") {
+        finish(resolve);
+      }
+    });
+    const timeoutId = window.setTimeout(() => {
+      finish(() => reject(new Error("A4ページ分割の完了を待機中にタイムアウトしました。")));
+    }, 30_000);
+    const finish = (callback: () => void) => {
+      window.clearTimeout(timeoutId);
+      observer.disconnect();
+      callback();
+    };
+    observer.observe(viewport, { attributes: true, attributeFilter: ["data-kmark-a4-pagination-ready"] });
+    if (viewport.dataset.kmarkA4PaginationReady === "true") finish(resolve);
+  });
+}
+
+async function printA4MarkdownDocument(
   options: A4PrintMarkdownDocumentOptions,
   runtimeOptions: PrintMarkdownDocumentRuntimeOptions,
 ): Promise<void> {
+  await waitForA4PaginationReady();
   const pages = mergeGeneratedSvgIntoA4Pages(getDisplayedPreviewA4Pages(), options.pages);
 
   if (pages.length === 0) {

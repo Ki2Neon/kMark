@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Rust Core | `cargo test` | `kmark-core` and `kmark-application`: documents, UTF-16 mutations, revision checks, dirty state, section patches, stale Preview rejection and error propagation. No WebView or Tauri dependency. |
 | Frontend Unit | Vitest in Node | Pure TypeScript state, mapping, policy and adapter helpers. No DOM assertions. |
-| Browser Integration | Vitest Browser with Playwright Chromium | React DOM, layout, Worker, current-source WASM, Mermaid and local PlantUML renderer. No Tauri command mock is used as evidence of desktop integration. |
+| Browser Integration | Vitest Browser with Playwright Chromium | React DOM, A4 physical pagination and print, layout, Worker, current-source WASM, Mermaid and local PlantUML renderer. No Tauri command mock is used as evidence of desktop integration. |
 | Performance | Separate Vitest Browser suite | Browser/WASM/renderer timings and node counts. Records measurements; no fixed-time functional pass criterion. |
 
 The Rust Core owns canonical document and revision rules. The WASM and desktop crates adapt that Core to their runtime. A Browser test selects the smallest observable rendering boundary; Core correctness is asserted natively rather than repeated through every adapter.
@@ -43,6 +43,7 @@ Windows prerequisites: Rust stable with `wasm32-unknown-unknown`, `wasm-pack`, N
 | Tauri IPC, filesystem, desktop workflow | WebdriverIO Tauri | Keep a narrower Core test for the root cause |
 
 Add shared source fixtures under `tests/fixtures/documents`; deterministic generators belong under `tests/fixtures/generators`. Tests needing filesystem state copy fixtures into their own temporary directory. Do not use a user's document or config directory.
+Desktop save assertions compare the Rust draft's canonical LF content with the saved file after line-ending normalization, and verify the draft's `lineEnding` DTO separately.
 
 ## Debug workflow
 
@@ -61,7 +62,7 @@ Browser tests write screenshot, frontend log, state, machine-readable result and
 
 Performance output belongs under `artifacts/perf/`. Browser timings describe headless Chromium with the Browser adapter. They do not measure WebView2, desktop Rust or real IPC. The Tauri benchmark has a separate result file and label. No benchmark timing currently fails a PR by crossing an absolute threshold.
 
-Metric boundaries: `initialCommitMs` / `updateCommitMs` measure synchronous React `flushSync` render and effects; `scrollHeightReadMs` measures the A4 viewport `scrollHeight` read, which does not guarantee a forced layout; `updateTwoFramesMs` measures through two animation frames. `wasmInitialMs` / `wasmEditMs` measure the Rust WASM Markdown-to-HTML call; `plantumlInitialMs` / `plantumlUpdateMs` include local `@plantuml/core` SVG rendering and finalization. Tauri `editToRustRevisionMs` and `editToPreviewDomMs` begin at the WebDriver edit command and include driver overhead through the observed state or DOM condition. These values are not interchangeable.
+Metric boundaries: `initialCommitMs` / `updateCommitMs` measure synchronous React `flushSync` render and effects; `initialPaginationReadyMs` / `updatePaginationReadyMs` measure through the physical-page DOM commit, including the scheduled pagination delay. `a4-one-source-overflow` separately measures direct Browser pagination for one source page that produces at least 20 or 200 physical pages. `scrollHeightReadMs` measures the A4 viewport `scrollHeight` read, which does not guarantee a forced layout; `updateTwoFramesMs` measures through two animation frames. `wasmInitialMs` / `wasmEditMs` measure the Rust WASM Markdown-to-HTML call; `plantumlInitialMs` / `plantumlUpdateMs` include local `@plantuml/core` SVG rendering and finalization. Tauri `editToRustRevisionMs` and `editToPreviewDomMs` begin at the WebDriver edit command and include driver overhead through the observed state or DOM condition. These values are not interchangeable.
 
 ## CI
 
