@@ -21,7 +21,7 @@
     "test:tauri:smoke": "node tools/run-tauri-e2e.mjs --smoke",
     "test:perf": "pnpm run build:wasm && vitest run --config tests/perf/vitest.node.config.ts && vitest run --config tests/perf/vitest.config.ts",
     "test:perf:tauri": "node tools/run-tauri-e2e.mjs --perf",
-    "test:ci": "pnpm run typecheck && pnpm run lint && cargo fmt --all -- --check && pnpm run build:mcp-sidecar && cargo clippy --workspace --all-targets && pnpm run test:rust && pnpm run test:frontend-unit && pnpm run test:browser && pnpm run test:tauri:smoke",
+    "test:ci": "pnpm run build:wasm && pnpm run typecheck && pnpm run lint && cargo fmt --all -- --check && pnpm run build:mcp-sidecar && cargo clippy --workspace --all-targets && pnpm run test:rust && pnpm run test:frontend-unit && pnpm run test:browser && pnpm run test:tauri:smoke",
     "test:all": "pnpm run test:ci && pnpm run test:perf && pnpm run test:perf:tauri",
     "lint": "eslint src && pnpm run check:boundaries && pnpm run check:cycles",
     "build:wasm": "node tools/build-wasm.mjs",

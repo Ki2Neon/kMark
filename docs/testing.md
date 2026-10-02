@@ -27,7 +27,7 @@ No real Tauri E2E test may mock IPC, desktop Rust, or filesystem. Browser tests 
 | `pnpm test:tauri` | E2E-feature Tauri build, then real desktop critical path |
 | `pnpm test:perf` | Fresh WASM build, then Node and headless Browser performance measurements |
 | `pnpm test:perf:tauri` | E2E-feature desktop build, then WebView2/IPC performance measurements |
-| `pnpm test:ci` | Typecheck, lint, Rust fmt/Clippy, unit, Browser, Tauri smoke |
+| `pnpm test:ci` | Fresh WASM build, typecheck, lint, Rust fmt/Clippy, unit, Browser, Tauri smoke |
 | `pnpm test:all` | Functional, Browser performance and Tauri performance suites |
 
 Windows prerequisites: Rust stable with `wasm32-unknown-unknown`, `wasm-pack`, Node 24, pnpm 10, Microsoft Edge WebView2 Runtime and the Tauri Windows build prerequisites. Install dependencies with `pnpm install --frozen-lockfile`; install the managed browser with `pnpm exec playwright install chromium`. `test:browser` deliberately rebuilds `src/wasm/pkg` from the checked-out Rust source before running. CI does not accept an unavailable browser or desktop driver as a skip.
@@ -66,6 +66,6 @@ Metric boundaries: `initialCommitMs` / `updateCommitMs` measure synchronous Reac
 
 ## CI
 
-`.github/workflows/test.yml` runs on PRs and main on Windows: typecheck/lint → Rust checks and Unit → fresh WASM Browser integration → real Tauri/WebView2 smoke. Browser or Tauri launch failure fails the job. `.github/workflows/performance.yml` records Browser and Tauri benchmarks nightly and on demand; PRs do not wait on those measurements.
+`.github/workflows/test.yml` runs on PRs and main on Windows: fresh WASM build → typecheck/lint → Rust checks and Unit → Browser integration → real Tauri/WebView2 smoke. Browser or Tauri launch failure fails the job. `.github/workflows/performance.yml` records Browser and Tauri benchmarks nightly and on demand; PRs do not wait on those measurements.
 
 The four runners are intentional: Rust `cargo test`, Vitest Unit, Vitest Browser with Playwright, and WebdriverIO Tauri. Do not add a second Browser control harness or a custom CDP launcher.

@@ -11,17 +11,20 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: jetli/wasm-pack-action@v0.4.0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Build WebAssembly
+        run: pnpm build:wasm
       - name: TypeScript typecheck
         run: pnpm typecheck
       - name: Frontend lint and architecture checks
@@ -44,7 +47,7 @@ jobs:
         run: pnpm test:tauri:smoke
       - name: Failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: kmark-test-failure
           path: artifacts/
