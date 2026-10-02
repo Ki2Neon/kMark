@@ -11,6 +11,8 @@ const base = env.KMARK_BASE_PATH ?? "./";
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   base,
+  // Browser test Vite servers must not replace the live app's optimized chunks.
+  cacheDir: "node_modules/.vite-kmark-app",
   plugins: [react(), plantUmlAssetsPlugin(), plantUmlBuildAssetsPlugin()],
   build: {
     rollupOptions: {
@@ -20,10 +22,6 @@ export default defineConfig(async () => ({
       },
       output: {
         manualChunks(id) {
-          if (id.includes("@uiw/react-codemirror")) {
-            return "codemirror-react";
-          }
-
           if (id.includes("markdown-it") || id.includes("dompurify")) {
             return "markdown";
           }

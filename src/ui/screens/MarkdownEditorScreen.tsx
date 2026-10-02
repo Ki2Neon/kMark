@@ -19,6 +19,7 @@ import {
 import { type AppThemeId } from "../../domain/theme";
 import { MenuSection } from "../components/MenuSection";
 import { MarkdownInput } from "../components/MarkdownInput";
+import { DirtyIndicator } from "../components/DirtyIndicator";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { UnsavedExitDialog } from "../components/UnsavedExitDialog";
@@ -149,14 +150,16 @@ export function MarkdownEditorScreen({
   } = usePreviewPreferences({ manageVisibilityByAppInstance: true });
   const {
     canOpenDocumentWithNativePicker,
-    content,
+    document: editorDocument,
     currentDocumentFilePath,
     errorMessage,
     externalSession,
     fileName,
+    flushEditorSession,
     isDirty,
     isReady: isEditorReady,
     previewHtml,
+    previewSectionHtmls,
     recentFiles,
     handleClearPendingExternalDocuments,
     previewPages,
@@ -164,7 +167,9 @@ export function MarkdownEditorScreen({
     defaultPreviewPageStyle,
     defaultPreviewTextStyle,
     confirmDiscard,
-    handleContentChange,
+    getContentSnapshot,
+    handleEditorHandleChange,
+    handleEditorTransaction,
     handleCancelStagedFileOperation,
     handleCommitStagedFileOperation,
     handleLoadExternalDocument,
@@ -178,6 +183,7 @@ export function MarkdownEditorScreen({
     handlePrintDocument,
     handleSaveDocumentAs,
     handleTakePendingExternalDocuments,
+    replaceEditorContent,
     subscribeToExternalDocumentRequests,
     handleErrorClear,
     handleErrorRaise,
@@ -271,7 +277,7 @@ export function MarkdownEditorScreen({
     }
 
     const saveResult = saveModelViewpointToMarkdown({
-      markdown: content,
+      markdown: getContentSnapshot(),
       modelSourceLineNumber: sourceLineStart + 1,
       viewpoint,
     });
@@ -281,8 +287,8 @@ export function MarkdownEditorScreen({
       return;
     }
 
-    handleContentChange(saveResult.markdown);
-  }, [content, handleContentChange, handleErrorRaise]);
+    replaceEditorContent(saveResult.markdown);
+  }, [getContentSnapshot, handleErrorRaise, replaceEditorContent]);
   const {
     contextMenuRef: previewContextMenuRef,
     contextMenuState: previewContextMenuState,
@@ -375,6 +381,7 @@ export function MarkdownEditorScreen({
   const confirmSaveOnExit = useConfirmSaveOnExit({
     enabled: isEditorReady,
     isDirty,
+    onBeforeExit: flushEditorSession,
     onDiscardConfirmed: (request) => {
       if (request === "window-close") {
         handleResetDocument();
@@ -823,6 +830,7 @@ export function MarkdownEditorScreen({
       data-resizing={isDesktopResizing ? "true" : "false"}
       style={layoutMode === "desktop" && isPreviewVisible ? desktopLayoutStyle : undefined}
     >
+      <DirtyIndicator isDirty={isDirty} />
       <input
         ref={fileInputRef}
         type="file"
@@ -853,7 +861,7 @@ export function MarkdownEditorScreen({
             <div className="workspace-grid__panel workspace-grid__panel--edit">
               <MarkdownInput
                 appThemeId={appThemeId}
-                content={content}
+                document={editorDocument}
                 currentDocumentFilePath={currentDocumentFilePath}
                 editFontId={editFontId}
                 layoutMode={layoutMode}
@@ -862,7 +870,8 @@ export function MarkdownEditorScreen({
                 showLineNumbers={showLineNumbers}
                 onAssetDrop={handleImportDroppedAssets}
                 onAssetPaste={handleImportPastedAssets}
-                onContentChange={handleContentChange}
+                onEditorHandleChange={handleEditorHandleChange}
+                onTransaction={handleEditorTransaction}
                 onCursorLineChange={handleEditCursorLineChange}
                 onFocusChange={handleEditFocusChange}
                 requestedLineSelection={editSelectionRequest}
@@ -903,6 +912,7 @@ export function MarkdownEditorScreen({
                     defaultPageStyle={defaultPreviewPageStyle}
                     defaultTextStyle={defaultPreviewTextStyle}
                     pages={previewPages}
+                    sectionHtmls={previewSectionHtmls}
                     previewFitMode={previewFitMode}
                     suppressTextSelectionOnDoubleClick
                     zoomScale={previewZoomScale}
@@ -943,7 +953,7 @@ export function MarkdownEditorScreen({
                   ) : section === "edit" ? (
                     <MarkdownInput
                       appThemeId={appThemeId}
-                      content={content}
+                      document={editorDocument}
                       currentDocumentFilePath={currentDocumentFilePath}
                       editFontId={editFontId}
                       layoutMode={layoutMode}
@@ -952,7 +962,8 @@ export function MarkdownEditorScreen({
                       showLineNumbers={showLineNumbers}
                       onAssetDrop={handleImportDroppedAssets}
                       onAssetPaste={handleImportPastedAssets}
-                      onContentChange={handleContentChange}
+                      onEditorHandleChange={handleEditorHandleChange}
+                      onTransaction={handleEditorTransaction}
                       onCursorLineChange={handleEditCursorLineChange}
                       onFocusChange={handleEditFocusChange}
                       requestedLineSelection={editSelectionRequest}
@@ -973,6 +984,7 @@ export function MarkdownEditorScreen({
                       defaultPageStyle={defaultPreviewPageStyle}
                       defaultTextStyle={defaultPreviewTextStyle}
                       pages={previewPages}
+                      sectionHtmls={previewSectionHtmls}
                       previewFitMode={previewFitMode}
                       suppressTextSelectionOnDoubleClick
                       zoomScale={previewZoomScale}

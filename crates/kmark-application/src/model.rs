@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use kmark_core::{EditorDocument, LineEnding};
+
 use crate::FileFingerprint;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7,6 +9,7 @@ pub struct DocumentSnapshot {
     pub instance_id: String,
     pub session_id: String,
     pub revision: u64,
+    pub line_ending: LineEnding,
     pub file_name: String,
     pub file_path: Option<String>,
     pub root_id: Option<String>,
@@ -21,13 +24,11 @@ pub struct DocumentSnapshot {
 #[derive(Clone, Debug)]
 pub struct DocumentSession {
     pub(crate) id: String,
-    pub(crate) revision: u64,
+    pub(crate) document: EditorDocument,
     pub(crate) file_name: String,
     pub(crate) file_path: Option<PathBuf>,
     pub(crate) root_id: Option<String>,
     pub(crate) relative_path: Option<String>,
-    pub(crate) content: String,
-    pub(crate) is_dirty: bool,
     pub(crate) externally_visible: bool,
     pub(crate) attached_window_label: Option<String>,
     pub(crate) persisted_fingerprint: Option<FileFingerprint>,
@@ -40,7 +41,8 @@ impl DocumentSession {
         DocumentSnapshot {
             instance_id: instance_id.to_owned(),
             session_id: self.id.clone(),
-            revision: self.revision,
+            revision: self.document.revision(),
+            line_ending: self.document.line_ending(),
             file_name: self.file_name.clone(),
             file_path: self
                 .file_path
@@ -48,8 +50,8 @@ impl DocumentSession {
                 .map(|path| path.to_string_lossy().into_owned()),
             root_id: self.root_id.clone(),
             relative_path: self.relative_path.clone(),
-            content: self.content.clone(),
-            is_dirty: self.is_dirty,
+            content: self.document.canonical_text(),
+            is_dirty: self.document.is_dirty(),
             externally_visible: self.externally_visible,
             pending_proposal_id: self.pending_proposal_id.clone(),
             staged_file_operation: self.staged_file_operation.clone(),

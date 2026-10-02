@@ -13,7 +13,6 @@ import {
 } from "./browserPlantUmlEngine";
 import { resolveKmarkMermaidThemeVariables } from "./browserMermaidTheme";
 import {
-  GENERATED_SVG_DEBOUNCE_MS,
   GENERATED_SVG_RAW_CACHE_MAX_BYTES,
   GENERATED_SVG_RAW_CACHE_MAX_ENTRIES,
   prioritizeGeneratedSvgItems,
@@ -28,6 +27,8 @@ export type GeneratedSvgPreviewSurface = "standard" | "paper";
 export type RenderGeneratedSvgHtmlOptions = {
   readonly revision: number;
   readonly documentKey: string;
+  /** Stable source-section slot. Omitted by legacy whole-document callers. */
+  readonly sectionKey?: string;
   readonly plantumlRenderEpoch: number;
   readonly httpsHosts: readonly string[];
   readonly activeSourceLine?: number | null;
@@ -83,7 +84,7 @@ type PreparedDiagram = {
 
 type GeneratedSvgSnapshotScope = {
   readonly key: string;
-  readonly recordsBySurface: Map<GeneratedSvgPreviewSurface, GeneratedSvgDiagramRecord[]>;
+  readonly recordsBySection: Map<string, GeneratedSvgDiagramRecord[]>;
 };
 
 let activeSnapshotScope: GeneratedSvgSnapshotScope | null = null;
@@ -96,23 +97,6 @@ function abortError(): Error {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
-}
-
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    return Promise.reject(abortError());
-  }
-  return new Promise((resolve, reject) => {
-    const handleAbort = () => {
-      window.clearTimeout(timeoutId);
-      reject(abortError());
-    };
-    const timeoutId = window.setTimeout(() => {
-      signal.removeEventListener("abort", handleAbort);
-      resolve();
-    }, milliseconds);
-    signal.addEventListener("abort", handleAbort, { once: true });
-  });
 }
 
 function waitForTask(task: Promise<void>, signal?: AbortSignal): Promise<void> {
@@ -186,20 +170,34 @@ function cancelRecordTask(record: GeneratedSvgDiagramRecord): void {
   record.task = null;
 }
 
+/** Drop a removed section without activating or invalidating another document's scope. */
+export function discardGeneratedSvgPreviewSectionCache(
+  documentKey: string,
+  epoch: number,
+  sectionKey: string,
+  surface: GeneratedSvgPreviewSurface,
+): void {
+  const scope = activeSnapshotScope;
+  if (scope?.key !== `${documentKey}\u0000${epoch}`) return;
+  const key = `${surface}\u0000${sectionKey}`;
+  scope.recordsBySection.get(key)?.forEach(cancelRecordTask);
+  scope.recordsBySection.delete(key);
+}
+
 function activateSnapshotScope(documentKey: string, epoch: number): GeneratedSvgSnapshotScope {
   const scopeKey = `${documentKey}\u0000${epoch}`;
   if (activeSnapshotScope?.key === scopeKey) {
     return activeSnapshotScope;
   }
   if (activeSnapshotScope !== null) {
-    for (const records of activeSnapshotScope.recordsBySurface.values()) {
+    for (const records of activeSnapshotScope.recordsBySection.values()) {
       records.forEach(cancelRecordTask);
     }
   }
   getGeneratedSvgEngine().invalidateCache();
   activeSnapshotScope = {
     key: scopeKey,
-    recordsBySurface: new Map(),
+    recordsBySection: new Map(),
   };
   return activeSnapshotScope;
 }
@@ -218,7 +216,7 @@ function recordPayloadBytes(record: GeneratedSvgDiagramRecord): number {
 }
 
 function enforceSnapshotPayloadLimit(scope: GeneratedSvgSnapshotScope): void {
-  const records = [...scope.recordsBySurface.values()]
+  const records = [...scope.recordsBySection.values()]
     .flat()
     .filter((record) => record.rawSvg !== null || record.finalizedSvg !== null)
     .sort((left, right) => left.lastUsed - right.lastUsed);
@@ -289,7 +287,6 @@ function startDiagramTask(
   let task!: GeneratedSvgDiagramTask;
   const promise = (async () => {
     try {
-      await delay(GENERATED_SVG_DEBOUNCE_MS, taskAbortController.signal);
       let rawSvg = record.rawSvg;
       if (action === "render" || rawSvg === null || record.rawSignature !== record.descriptor.rawSignature) {
         rawSvg = await engine.render(
@@ -445,7 +442,8 @@ export async function renderGeneratedSvgPreviewHtmlDocuments(
   }
   const surface = options.surface ?? "standard";
   const scope = activateSnapshotScope(options.documentKey, options.plantumlRenderEpoch);
-  const previousRecords = scope.recordsBySurface.get(surface) ?? [];
+  const sectionCacheKey = `${surface}\u0000${options.sectionKey ?? "document"}`;
+  const previousRecords = scope.recordsBySection.get(sectionCacheKey) ?? [];
   const templates = htmlDocuments.map((html) => {
     const template = document.createElement("template");
     template.innerHTML = html;
@@ -519,7 +517,7 @@ export async function renderGeneratedSvgPreviewHtmlDocuments(
     return record;
   });
   previousRecords.slice(nextRecords.length).forEach(cancelRecordTask);
-  scope.recordsBySurface.set(surface, nextRecords);
+  scope.recordsBySection.set(sectionCacheKey, nextRecords);
 
   for (const block of preparedBlocks) {
     if (block.rendered === null) {

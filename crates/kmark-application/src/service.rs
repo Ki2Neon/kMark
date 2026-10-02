@@ -4,7 +4,11 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use kmark_core::ensure_markdown_file_name;
+use kmark_core::{
+    ensure_markdown_file_name, normalize_editor_text, EditorDocument, EditorDocumentError,
+    EditorDocumentPersistenceSnapshot, EditorMutationAck, EditorMutationBatch,
+    EditorMutationImpact, KmarkModelAssetResolution, PreviewRenderCache, PreviewRenderChange,
+};
 use similar::TextDiff;
 
 use crate::{
@@ -30,6 +34,8 @@ struct ApplicationState {
     next_id: u64,
     roots: Vec<RegisteredRoot>,
     sessions: HashMap<String, DocumentSession>,
+    preview_caches: HashMap<String, PreviewRenderCache>,
+    preview_impacts: HashMap<String, (u64, Option<EditorMutationImpact>)>,
     session_proposals: HashMap<String, SessionProposal>,
     create_proposals: HashMap<String, CreateDocumentProposal>,
     active_session_id: Option<String>,
@@ -98,13 +104,11 @@ impl ApplicationService {
             .unwrap_or((None, None));
         let session = DocumentSession {
             id: session_id.clone(),
-            revision: 1,
+            document: EditorDocument::from_external_text(&content, 1, is_dirty),
             file_name: ensure_markdown_file_name(&file_name),
             file_path: file_path.map(PathBuf::from),
             root_id: root_id.clone(),
             relative_path,
-            content,
-            is_dirty,
             externally_visible: root_id.is_some(),
             attached_window_label: Some(window_label),
             persisted_fingerprint,
@@ -136,7 +140,7 @@ impl ApplicationService {
             .sessions
             .get_mut(session_id)
             .ok_or_else(session_not_found)?;
-        ensure_revision(session.revision, expected_revision)?;
+        ensure_revision(session.document.revision(), expected_revision)?;
         if matches!(
             session
                 .staged_file_operation
@@ -155,10 +159,11 @@ impl ApplicationService {
         let (next_root_id, next_relative_path) = resolved_location
             .map(|(root_id, relative_path)| (Some(root_id), Some(relative_path)))
             .unwrap_or((None, None));
+        let normalized = normalize_editor_text(&content);
         if session.file_name == next_file_name
             && session.file_path == next_file_path
-            && session.content == content
-            && session.is_dirty == is_dirty
+            && session.document.canonical_text() == normalized.text
+            && session.document.is_dirty() == is_dirty
         {
             return Ok(session.snapshot(&self.instance_id));
         }
@@ -168,15 +173,149 @@ impl ApplicationService {
         session.root_id = next_root_id.clone();
         session.relative_path = next_relative_path;
         session.externally_visible = next_root_id.is_some() || session.externally_visible;
-        session.content = content;
-        session.is_dirty = is_dirty;
-        session.revision = next_revision(session.revision)?;
+        session
+            .document
+            .replace_canonical_text(normalized.text, is_dirty)
+            .map_err(map_editor_document_error)?;
+        if content.contains('\r') {
+            session.document.set_line_ending(normalized.line_ending);
+        }
         let snapshot = session.snapshot(&self.instance_id);
         self.event_sink.publish(&ApplicationEvent::SessionChanged {
             session_id: session_id.to_owned(),
             revision: snapshot.revision,
         });
         Ok(snapshot)
+    }
+
+    pub fn apply_editor_mutation_batch(
+        &self,
+        session_id: &str,
+        batch: &EditorMutationBatch,
+    ) -> Result<EditorMutationAck, ApplicationError> {
+        let mut state = self.lock_state();
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(session_not_found)?;
+        if matches!(
+            session
+                .staged_file_operation
+                .as_ref()
+                .map(|operation| &operation.kind),
+            Some(StagedFileOperationKind::Delete)
+        ) {
+            return Err(ApplicationError::new(
+                ApplicationErrorCode::DeleteStaged,
+                "document editing is disabled while delete is staged",
+            ));
+        }
+
+        let impact = session.document.single_change_impact(batch);
+        let ack = session
+            .document
+            .apply_mutation_batch(batch)
+            .map_err(map_editor_document_error)?;
+        if !ack.replayed {
+            state
+                .preview_impacts
+                .insert(session_id.to_owned(), (ack.revision, impact));
+        }
+        drop(state);
+        if !ack.replayed {
+            self.event_sink.publish(&ApplicationEvent::SessionChanged {
+                session_id: session_id.to_owned(),
+                revision: ack.revision,
+            });
+        }
+        Ok(ack)
+    }
+
+    pub fn editor_document_persistence_snapshot(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<EditorDocumentPersistenceSnapshot, ApplicationError> {
+        let state = self.lock_state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(session_not_found)?;
+        ensure_revision(session.document.revision(), expected_revision)?;
+        Ok(session.document.persistence_snapshot())
+    }
+
+    pub fn mark_frontend_session_saved(
+        &self,
+        session_id: &str,
+        file_name: String,
+        file_path: Option<String>,
+    ) -> Result<DocumentSnapshot, ApplicationError> {
+        self.mark_frontend_session_saved_inner(session_id, None, file_name, file_path, |session| {
+            session.snapshot(&self.instance_id)
+        })
+    }
+
+    pub fn mark_frontend_session_saved_at_revision(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        file_name: String,
+        file_path: Option<String>,
+    ) -> Result<(), ApplicationError> {
+        self.mark_frontend_session_saved_inner(
+            session_id,
+            Some(expected_revision),
+            file_name,
+            file_path,
+            |_| (),
+        )
+    }
+
+    fn mark_frontend_session_saved_inner<T, F>(
+        &self,
+        session_id: &str,
+        expected_revision: Option<u64>,
+        file_name: String,
+        file_path: Option<String>,
+        project: F,
+    ) -> Result<T, ApplicationError>
+    where
+        F: FnOnce(&DocumentSession) -> T,
+    {
+        let roots = self.roots();
+        let resolved_location = file_path.as_deref().and_then(|path| {
+            self.file_repository
+                .resolve_registered_path(&roots, PathBuf::from(path).as_path())
+        });
+        let persisted_fingerprint =
+            resolved_location
+                .as_ref()
+                .and_then(|(root_id, relative_path)| {
+                    roots
+                        .iter()
+                        .find(|root| root.id == *root_id)
+                        .and_then(|root| self.file_repository.fingerprint(root, relative_path).ok())
+                });
+        let mut state = self.lock_state();
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(session_not_found)?;
+        if let Some(expected_revision) = expected_revision {
+            ensure_revision(session.document.revision(), expected_revision)?;
+        }
+        let (root_id, relative_path) = resolved_location
+            .map(|(root_id, relative_path)| (Some(root_id), Some(relative_path)))
+            .unwrap_or((None, None));
+        session.file_name = ensure_markdown_file_name(&file_name);
+        session.file_path = file_path.map(PathBuf::from);
+        session.root_id = root_id.clone();
+        session.relative_path = relative_path;
+        session.externally_visible = root_id.is_some() || session.externally_visible;
+        session.persisted_fingerprint = persisted_fingerprint;
+        session.document.mark_saved();
+        Ok(project(session))
     }
 
     pub fn detach_window(&self, window_label: &str) {
@@ -235,6 +374,31 @@ impl ApplicationService {
             .map(|session| session.snapshot(&self.instance_id))
     }
 
+    /// Returns the session attached to a window, including an unsaved startup document.
+    /// The active session wins when multiple sessions remain attached to the same window;
+    /// without an active match, an ambiguous window has no single diagnostic snapshot.
+    pub fn session_for_window(&self, window_label: &str) -> Option<DocumentSnapshot> {
+        let state = self.lock_state();
+        if let Some(session) = state
+            .active_session_id
+            .as_ref()
+            .and_then(|session_id| state.sessions.get(session_id))
+            .filter(|session| session.attached_window_label.as_deref() == Some(window_label))
+        {
+            return Some(session.snapshot(&self.instance_id));
+        }
+
+        let mut attached = state
+            .sessions
+            .values()
+            .filter(|session| session.attached_window_label.as_deref() == Some(window_label));
+        let session = attached.next()?;
+        attached
+            .next()
+            .is_none()
+            .then(|| session.snapshot(&self.instance_id))
+    }
+
     pub fn session(&self, session_id: &str) -> Result<DocumentSnapshot, ApplicationError> {
         self.lock_state()
             .sessions
@@ -250,6 +414,92 @@ impl ApplicationService {
             .get(session_id)
             .map(|session| session.snapshot(&self.instance_id))
             .ok_or_else(session_not_found)
+    }
+
+    /// The latest preview revision committed to this session's render cache.
+    /// None means no preview has been committed or rendering currently owns the cache.
+    pub fn preview_revision(&self, session_id: &str) -> Option<u64> {
+        self.lock_state()
+            .preview_caches
+            .get(session_id)
+            .map(PreviewRenderCache::revision)
+    }
+
+    /// Returns (client ID, batch ID, applied revision) from the canonical document.
+    pub fn last_applied_batch(&self, session_id: &str) -> Option<(String, u64, u64)> {
+        self.lock_state()
+            .sessions
+            .get(session_id)
+            .and_then(|session| session.document.last_applied_batch())
+            .map(|(client_id, batch_id, revision)| (client_id.to_owned(), batch_id, revision))
+    }
+
+    /// Builds a revision-consistent preview without holding the application lock during
+    /// Markdown rendering or infrastructure asset resolution.
+    pub fn render_session_preview<F>(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        base_revision: Option<u64>,
+        resolve_assets: F,
+    ) -> Result<PreviewRenderChange, ApplicationError>
+    where
+        F: FnOnce(Option<&str>, &str) -> HashMap<String, KmarkModelAssetResolution>,
+    {
+        let (document, file_path, cache, impact) = {
+            let mut state = self.lock_state();
+            let session = state
+                .sessions
+                .get(session_id)
+                .ok_or_else(session_not_found)?;
+            ensure_revision(session.document.revision(), expected_revision)?;
+            let document = session.document.clone();
+            let file_path = session
+                .file_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned());
+            let impact = state
+                .preview_impacts
+                .get(session_id)
+                .filter(|(revision, _)| *revision == expected_revision)
+                .and_then(|(_, impact)| impact.clone());
+            let cache = state.preview_caches.remove(session_id);
+            (document, file_path, cache, impact)
+        };
+
+        let mut patched = None;
+        if let (Some(mut cache), Some(base_revision)) = (cache, base_revision) {
+            if let Some(patch) =
+                cache.patch_with_cached_assets(&document, impact.as_ref(), file_path.as_deref())
+            {
+                if patch.base_revision == base_revision {
+                    patched = Some((cache, PreviewRenderChange::Patch(patch)));
+                }
+            }
+        }
+        let (cache, change) = patched.unwrap_or_else(|| {
+            let (cache, preview) = PreviewRenderCache::with_asset_resolver(
+                &document,
+                file_path.as_deref(),
+                resolve_assets,
+            );
+            (
+                cache,
+                PreviewRenderChange::Full {
+                    revision: expected_revision,
+                    preview,
+                },
+            )
+        });
+
+        let mut state = self.lock_state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(session_not_found)?;
+        ensure_revision(session.document.revision(), expected_revision)?;
+        state.preview_caches.insert(session_id.to_owned(), cache);
+        Ok(change)
     }
 
     pub fn session_has_attached_window(&self, session_id: &str) -> Result<bool, ApplicationError> {
@@ -306,13 +556,11 @@ impl ApplicationService {
         let session_id = next_id(&self.instance_id, &mut state, "session");
         let session = DocumentSession {
             id: session_id.clone(),
-            revision: 1,
+            document: EditorDocument::from_external_text(&file.content, 1, false),
             file_name,
             file_path: Some(file.absolute_path),
             root_id: Some(root.id),
             relative_path: Some(file.relative_path),
-            content: file.content,
-            is_dirty: false,
             externally_visible: true,
             attached_window_label: None,
             persisted_fingerprint: Some(file.fingerprint),
@@ -342,8 +590,8 @@ impl ApplicationService {
             ));
         }
         let expected_revision = proposal_expected_revision(&input);
-        ensure_revision(session.revision, expected_revision)?;
-        let base_content = session.content.clone();
+        ensure_revision(session.document.revision(), expected_revision)?;
+        let base_content = session.document.canonical_text();
         let kind = build_proposal_kind(session, input)?;
         let proposed_content = match &kind {
             crate::model::SessionProposalKind::TextEdit { operations } => {
@@ -351,7 +599,7 @@ impl ApplicationService {
             }
             _ => base_content.clone(),
         };
-        let base_revision = session.revision;
+        let base_revision = session.document.revision();
         let base_content_hash = stable_content_hash(&base_content);
         let proposal_id = next_id(&self.instance_id, &mut state, "proposal");
         let proposal = SessionProposal {
@@ -408,7 +656,7 @@ impl ApplicationService {
                     .sessions
                     .get(&proposal.session_id)
                     .ok_or_else(session_not_found)?;
-                if session.revision != proposal.base_revision {
+                if session.document.revision() != proposal.base_revision {
                     drop(state);
                     self.mark_proposal_stale(proposal_id, &proposal.session_id);
                     return Err(ApplicationError::new(
@@ -452,7 +700,8 @@ impl ApplicationService {
             .sessions
             .get(&proposal.session_id)
             .ok_or_else(session_not_found)?
-            .revision;
+            .document
+            .revision();
         if current_revision != proposal.base_revision {
             drop(state);
             self.mark_proposal_stale(proposal_id, &proposal.session_id);
@@ -465,7 +714,7 @@ impl ApplicationService {
             .sessions
             .get_mut(&proposal.session_id)
             .expect("session checked above");
-        if stable_content_hash(&session.content) != proposal.base_content_hash {
+        if stable_content_hash(&session.document.canonical_text()) != proposal.base_content_hash {
             drop(state);
             self.mark_proposal_stale(proposal_id, &proposal.session_id);
             return Err(ApplicationError::new(
@@ -476,8 +725,11 @@ impl ApplicationService {
 
         match &proposal.kind {
             crate::model::SessionProposalKind::TextEdit { operations } => {
-                session.content = apply_text_edits(&session.content, operations)?;
-                session.is_dirty = true;
+                let content = apply_text_edits(&session.document.canonical_text(), operations)?;
+                session
+                    .document
+                    .replace_canonical_text(content, true)
+                    .map_err(map_editor_document_error)?;
             }
             crate::model::SessionProposalKind::RenameDocument {
                 target_relative_path,
@@ -492,8 +744,12 @@ impl ApplicationService {
                     source_root_id: root_id,
                     source_relative_path: relative_path,
                     source_fingerprint: fingerprint,
-                    staged_at_revision: next_revision(session.revision)?,
+                    staged_at_revision: next_revision(session.document.revision())?,
                 });
+                session
+                    .document
+                    .touch()
+                    .map_err(map_editor_document_error)?;
             }
             crate::model::SessionProposalKind::DeleteDocument => {
                 let (root_id, relative_path, fingerprint) = fingerprint_for_stage
@@ -504,11 +760,14 @@ impl ApplicationService {
                     source_root_id: root_id,
                     source_relative_path: relative_path,
                     source_fingerprint: fingerprint,
-                    staged_at_revision: next_revision(session.revision)?,
+                    staged_at_revision: next_revision(session.document.revision())?,
                 });
+                session
+                    .document
+                    .touch()
+                    .map_err(map_editor_document_error)?;
             }
         }
-        session.revision = next_revision(session.revision)?;
         session.pending_proposal_id = None;
         let snapshot = session.snapshot(&self.instance_id);
         state
@@ -598,13 +857,11 @@ impl ApplicationService {
         let session_id = next_id(&self.instance_id, &mut state, "session");
         let session = DocumentSession {
             id: session_id.clone(),
-            revision: 1,
+            document: EditorDocument::from_external_text(&proposal.content, 1, true),
             file_name: proposal.suggested_file_name,
             file_path: None,
             root_id: None,
             relative_path: None,
-            content: proposal.content,
-            is_dirty: true,
             externally_visible: true,
             attached_window_label: None,
             persisted_fingerprint: None,
@@ -679,7 +936,7 @@ impl ApplicationService {
                     .staged_file_operation
                     .clone()
                     .ok_or_else(staged_operation_not_found)?,
-                session.content.clone(),
+                session.document.canonical_text(),
             )
         };
         let root = self.root(&stage.source_root_id)?;
@@ -707,6 +964,7 @@ impl ApplicationService {
                 None
             }
         };
+        let was_rename = renamed.is_some();
 
         let mut state = self.lock_state();
         let session = state
@@ -734,11 +992,19 @@ impl ApplicationService {
                 session.root_id = None;
                 session.relative_path = None;
                 session.persisted_fingerprint = None;
-                session.is_dirty = !content.is_empty();
+                session
+                    .document
+                    .set_dirty_and_touch(!content.is_empty())
+                    .map_err(map_editor_document_error)?;
             }
         }
         session.staged_file_operation = None;
-        session.revision = next_revision(session.revision)?;
+        if was_rename {
+            session
+                .document
+                .touch()
+                .map_err(map_editor_document_error)?;
+        }
         let snapshot = session.snapshot(&self.instance_id);
         drop(state);
         self.event_sink.publish(&ApplicationEvent::SessionChanged {
@@ -760,7 +1026,10 @@ impl ApplicationService {
         if session.staged_file_operation.take().is_none() {
             return Err(staged_operation_not_found());
         }
-        session.revision = next_revision(session.revision)?;
+        session
+            .document
+            .touch()
+            .map_err(map_editor_document_error)?;
         let snapshot = session.snapshot(&self.instance_id);
         drop(state);
         self.event_sink.publish(&ApplicationEvent::SessionChanged {
@@ -823,6 +1092,22 @@ fn ensure_revision(current: u64, expected: u64) -> Result<(), ApplicationError> 
     }
 }
 
+fn map_editor_document_error(error: EditorDocumentError) -> ApplicationError {
+    match error {
+        EditorDocumentError::StaleRevision { actual, .. } => {
+            ApplicationError::revision_conflict(actual)
+        }
+        EditorDocumentError::InvalidChangeRange { .. }
+        | EditorDocumentError::OverlappingChanges { .. }
+        | EditorDocumentError::InvalidUtf16Boundary { .. }
+        | EditorDocumentError::NonCanonicalLineEnding { .. }
+        | EditorDocumentError::OffsetOverflow => {
+            ApplicationError::new(ApplicationErrorCode::InvalidEditRange, error.to_string())
+        }
+        _ => ApplicationError::new(ApplicationErrorCode::InvalidState, error.to_string()),
+    }
+}
+
 fn proposal_expected_revision(input: &SessionProposalInput) -> u64 {
     match input {
         SessionProposalInput::TextEdit {
@@ -841,7 +1126,7 @@ fn build_proposal_kind(
 ) -> Result<crate::model::SessionProposalKind, ApplicationError> {
     match input {
         SessionProposalInput::TextEdit { operations, .. } => {
-            let _ = apply_text_edits(&session.content, &operations)?;
+            let _ = apply_text_edits(&session.document.canonical_text(), &operations)?;
             Ok(crate::model::SessionProposalKind::TextEdit { operations })
         }
         SessionProposalInput::RenameDocument {
@@ -890,7 +1175,8 @@ fn apply_text_edits(content: &str, operations: &[TextEdit]) -> Result<String, Ap
     }
     let mut next = content.to_owned();
     for operation in ordered.iter().rev() {
-        next.replace_range(operation.start..operation.end, &operation.text);
+        let replacement = normalize_editor_text(&operation.text).text;
+        next.replace_range(operation.start..operation.end, &replacement);
     }
     Ok(next)
 }
@@ -933,7 +1219,11 @@ fn staged_operation_not_found() -> ApplicationError {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
+    use std::{cell::Cell, path::Path, sync::Arc};
+
+    use kmark_core::{
+        EditorMutationBatch, EditorTextChange, EditorTransaction, LineEnding, PreviewRenderChange,
+    };
 
     use crate::{
         ApplicationError, ApplicationErrorCode, CreateDocumentProposalInput,
@@ -1018,6 +1308,376 @@ mod tests {
             Arc::new(EmptyRepository),
             Arc::new(NoopApplicationEventSink),
         )
+    }
+
+    #[test]
+    fn preview_session_patches_one_section_without_reresolving_assets() {
+        let service = service();
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Section\nbefore\n<!-- --- -->\n# Tail\nlast";
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                source.to_owned(),
+                false,
+            )
+            .unwrap();
+        let resolver_calls = Cell::new(0);
+        let resolve = |_: Option<&str>, _: &str| {
+            resolver_calls.set(resolver_calls.get() + 1);
+            Default::default()
+        };
+        assert!(matches!(
+            service
+                .render_session_preview(&session.session_id, 1, None, resolve)
+                .unwrap(),
+            PreviewRenderChange::Full { .. }
+        ));
+        assert_eq!(resolver_calls.get(), 1);
+
+        let start = source.find("before").unwrap() as u64;
+        service
+            .apply_editor_mutation_batch(
+                &session.session_id,
+                &EditorMutationBatch {
+                    client_id: "view".to_owned(),
+                    batch_id: 1,
+                    expected_revision: 1,
+                    transactions: vec![EditorTransaction {
+                        before_length_utf16: source.len() as u64,
+                        changes: vec![EditorTextChange {
+                            from_utf16: start,
+                            to_utf16: start + 6,
+                            insert: "after".to_owned(),
+                        }],
+                    }],
+                },
+            )
+            .unwrap();
+        let change = service
+            .render_session_preview(&session.session_id, 2, Some(1), resolve)
+            .unwrap();
+        assert!(matches!(
+            change,
+            PreviewRenderChange::Patch(ref patch) if patch.section_index == 1
+        ));
+        assert_eq!(resolver_calls.get(), 1);
+    }
+
+    #[test]
+    fn preview_render_discards_result_when_document_changes_during_asset_resolution() {
+        let service = service();
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Tail\nlast";
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                source.to_owned(),
+                false,
+            )
+            .unwrap();
+        let edit_at = source.find("first").unwrap() as u64;
+
+        let error = service
+            .render_session_preview(&session.session_id, 1, None, |_, _| {
+                service
+                    .apply_editor_mutation_batch(
+                        &session.session_id,
+                        &EditorMutationBatch {
+                            client_id: "view".to_owned(),
+                            batch_id: 1,
+                            expected_revision: 1,
+                            transactions: vec![EditorTransaction {
+                                before_length_utf16: source.len() as u64,
+                                changes: vec![EditorTextChange {
+                                    from_utf16: edit_at,
+                                    to_utf16: edit_at + 5,
+                                    insert: "changed".to_owned(),
+                                }],
+                            }],
+                        },
+                    )
+                    .unwrap();
+                Default::default()
+            })
+            .expect_err("rendered revision must still be current when published");
+
+        assert_eq!(error.code(), ApplicationErrorCode::RevisionConflict);
+        assert_eq!(error.current_revision(), Some(2));
+        let change = service
+            .render_session_preview(&session.session_id, 2, None, |_, _| Default::default())
+            .unwrap();
+        assert!(matches!(
+            change,
+            PreviewRenderChange::Full { revision: 2, .. }
+        ));
+        assert_eq!(
+            service.session_for_ui(&session.session_id).unwrap().content,
+            source.replacen("first", "changed", 1)
+        );
+    }
+
+    #[test]
+    fn inverse_and_forward_mutations_track_undo_redo_preview_and_saved_state() {
+        let service = service();
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Tail\nlast";
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                source.to_owned(),
+                false,
+            )
+            .unwrap();
+        assert!(matches!(
+            service
+                .render_session_preview(&session.session_id, 1, None, |_, _| Default::default())
+                .unwrap(),
+            PreviewRenderChange::Full { revision: 1, .. }
+        ));
+        assert_eq!(service.preview_revision(&session.session_id), Some(1));
+        assert_eq!(service.last_applied_batch(&session.session_id), None);
+
+        let offset = source.find("first").unwrap() as u64;
+        for (base_revision, original, replacement, dirty) in [
+            (1, "first", "after", true),
+            (2, "after", "first", false),
+            (3, "first", "after", true),
+            (4, "after", "first", true),
+            (5, "first", "after", false),
+        ] {
+            let ack = service
+                .apply_editor_mutation_batch(
+                    &session.session_id,
+                    &EditorMutationBatch {
+                        client_id: "view".to_owned(),
+                        batch_id: base_revision,
+                        expected_revision: base_revision,
+                        transactions: vec![EditorTransaction {
+                            before_length_utf16: source.len() as u64,
+                            changes: vec![EditorTextChange {
+                                from_utf16: offset,
+                                to_utf16: offset + original.len() as u64,
+                                insert: replacement.to_owned(),
+                            }],
+                        }],
+                    },
+                )
+                .unwrap();
+            let revision = base_revision + 1;
+            assert_eq!(ack.revision, revision);
+            assert_eq!(ack.is_dirty, dirty);
+            assert_eq!(
+                service.preview_revision(&session.session_id),
+                Some(base_revision)
+            );
+            assert_eq!(
+                service.last_applied_batch(&session.session_id),
+                Some(("view".to_owned(), base_revision, revision))
+            );
+            let snapshot = service.session_for_ui(&session.session_id).unwrap();
+            assert_eq!(snapshot.revision, revision);
+            assert_eq!(snapshot.content, source.replacen("first", replacement, 1));
+            assert_eq!(snapshot.is_dirty, dirty);
+
+            let preview = service
+                .render_session_preview(
+                    &session.session_id,
+                    revision,
+                    Some(base_revision),
+                    |_, _| Default::default(),
+                )
+                .unwrap();
+            assert!(matches!(
+                preview,
+                PreviewRenderChange::Patch(ref patch)
+                    if patch.base_revision == base_revision
+                        && patch.revision == revision
+                        && patch.section_index == 0
+            ));
+            assert_eq!(
+                service.preview_revision(&session.session_id),
+                Some(revision)
+            );
+            if revision == 4 {
+                service
+                    .mark_frontend_session_saved_at_revision(
+                        &session.session_id,
+                        revision,
+                        "note.md".to_owned(),
+                        None,
+                    )
+                    .unwrap();
+                assert!(
+                    !service
+                        .session_for_ui(&session.session_id)
+                        .unwrap()
+                        .is_dirty
+                );
+            }
+        }
+
+        let saved = service.session_for_ui(&session.session_id).unwrap();
+        assert_eq!(saved.revision, 6);
+        assert_eq!(saved.content, source.replacen("first", "after", 1));
+        assert!(!saved.is_dirty);
+    }
+
+    #[test]
+    fn frontend_mutation_uses_canonical_lf_and_increments_once_per_batch() {
+        let service = service();
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                "a🙂\r\n".to_owned(),
+                false,
+            )
+            .expect("register session");
+        assert_eq!(session.content, "a🙂\n");
+        assert_eq!(session.line_ending, LineEnding::CrLf);
+
+        let ack = service
+            .apply_editor_mutation_batch(
+                &session.session_id,
+                &EditorMutationBatch {
+                    client_id: "view".to_owned(),
+                    batch_id: 1,
+                    expected_revision: 1,
+                    transactions: vec![
+                        EditorTransaction {
+                            before_length_utf16: 4,
+                            changes: vec![EditorTextChange {
+                                from_utf16: 1,
+                                to_utf16: 3,
+                                insert: "日本".to_owned(),
+                            }],
+                        },
+                        EditorTransaction {
+                            before_length_utf16: 4,
+                            changes: vec![EditorTextChange {
+                                from_utf16: 3,
+                                to_utf16: 3,
+                                insert: "!".to_owned(),
+                            }],
+                        },
+                    ],
+                },
+            )
+            .expect("apply mutation batch");
+
+        assert_eq!(ack.revision, 2);
+        assert_eq!(
+            service
+                .session_for_ui(&session.session_id)
+                .expect("updated session")
+                .content,
+            "a日本!\n"
+        );
+    }
+
+    #[test]
+    fn failed_frontend_batch_and_save_marker_preserve_revision_rules() {
+        let service = service();
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                "a🙂b".to_owned(),
+                false,
+            )
+            .expect("register session");
+        let error = service
+            .apply_editor_mutation_batch(
+                &session.session_id,
+                &EditorMutationBatch {
+                    client_id: "view".to_owned(),
+                    batch_id: 1,
+                    expected_revision: 1,
+                    transactions: vec![EditorTransaction {
+                        before_length_utf16: 4,
+                        changes: vec![EditorTextChange {
+                            from_utf16: 2,
+                            to_utf16: 2,
+                            insert: "x".to_owned(),
+                        }],
+                    }],
+                },
+            )
+            .expect_err("surrogate midpoint must fail");
+        assert_eq!(error.code(), ApplicationErrorCode::InvalidEditRange);
+        let unchanged = service
+            .session_for_ui(&session.session_id)
+            .expect("session");
+        assert_eq!(unchanged.revision, 1);
+        assert_eq!(unchanged.content, "a🙂b");
+        assert!(!unchanged.is_dirty);
+
+        let saved = service
+            .mark_frontend_session_saved(&session.session_id, "saved.md".to_owned(), None)
+            .expect("mark saved");
+        assert_eq!(saved.revision, 1);
+        assert!(!saved.is_dirty);
+        assert_eq!(saved.file_name, "saved.md");
+    }
+
+    #[test]
+    fn persistence_snapshot_and_save_marker_reject_stale_revision() {
+        let service = service();
+        let session = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "note.md".to_owned(),
+                None,
+                "a\r\nb\r\n".to_owned(),
+                false,
+            )
+            .expect("register session");
+        let snapshot = service
+            .editor_document_persistence_snapshot(&session.session_id, 1)
+            .expect("persistence snapshot");
+        let mut persisted = Vec::new();
+        snapshot.write_to(&mut persisted).expect("stream snapshot");
+        assert_eq!(String::from_utf8(persisted).unwrap(), "a\r\nb\r\n");
+
+        service
+            .apply_editor_mutation_batch(
+                &session.session_id,
+                &EditorMutationBatch {
+                    client_id: "view".to_owned(),
+                    batch_id: 1,
+                    expected_revision: 1,
+                    transactions: vec![EditorTransaction {
+                        before_length_utf16: 4,
+                        changes: vec![EditorTextChange {
+                            from_utf16: 0,
+                            to_utf16: 0,
+                            insert: "x".to_owned(),
+                        }],
+                    }],
+                },
+            )
+            .expect("apply concurrent mutation");
+
+        service
+            .mark_frontend_session_saved_at_revision(
+                &session.session_id,
+                1,
+                "saved.md".to_owned(),
+                None,
+            )
+            .expect_err("stale save marker must fail");
+        let current = service
+            .session_for_ui(&session.session_id)
+            .expect("current session");
+        assert_eq!(current.revision, 2);
+        assert!(current.is_dirty);
+        assert_eq!(current.file_name, "note.md");
     }
 
     #[test]
@@ -1126,6 +1786,51 @@ mod tests {
         assert!(!service
             .session_has_attached_window(&session.session_id)
             .expect("query detached session"));
+    }
+
+    #[test]
+    fn window_session_includes_unsaved_startup_document() {
+        let service = service();
+        let startup = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "untitled.md".to_owned(),
+                None,
+                "draft".to_owned(),
+                true,
+            )
+            .unwrap();
+        assert!(service.current_session().is_none());
+        assert_eq!(
+            service.session_for_window("main").unwrap().session_id,
+            startup.session_id
+        );
+        assert!(service.session_for_window("other").is_none());
+
+        let newer = service
+            .register_frontend_session(
+                "main".to_owned(),
+                "second.md".to_owned(),
+                None,
+                "new draft".to_owned(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            service.session_for_window("main").unwrap().session_id,
+            newer.session_id
+        );
+        service.activate_window("other");
+        assert!(service.session_for_window("main").is_none());
+        service
+            .attach_session(&startup.session_id, "main".to_owned())
+            .unwrap();
+        assert_eq!(
+            service.session_for_window("main").unwrap().session_id,
+            startup.session_id
+        );
+        service.detach_window("main");
+        assert!(service.session_for_window("main").is_none());
     }
 
     #[test]

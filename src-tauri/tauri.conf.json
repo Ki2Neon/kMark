@@ -12,6 +12,7 @@
   "app": {
     "windows": [],
     "security": {
+      "capabilities": ["default", "preview-capture"],
       "assetProtocol": {
         "enable": true,
         "scope": [

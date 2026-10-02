@@ -9,8 +9,10 @@ use pulldown_cmark::{
     Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, LinkType, MetadataBlockKind, Options,
     Parser, Tag, TagEnd,
 };
+use ropey::Rope;
 
 use crate::{
+    editor_document::{EditorDocument, EditorMutationImpact},
     math_render::{render_math_html, MarkdownMathDisplay},
     table_format::{has_table_delimiter_pipe, split_table_cells},
 };
@@ -22,6 +24,9 @@ pub struct RenderedMarkdownPreview {
     #[cfg(test)]
     pub page_htmls: Vec<String>,
     pub pages: Vec<RenderedPage>,
+    /// Maps each explicit source section to its rendered-page range. Empty source sections
+    /// have an empty range; page-style directives may produce multiple pages per section.
+    pub source_section_page_ranges: Vec<Range<usize>>,
     pub default_page_style: PageStyle,
     pub default_text_style: PreviewTextStyle,
 }
@@ -137,6 +142,357 @@ struct MarkdownPageSegment {
 
 struct MarkdownPageSegments {
     segments: Vec<MarkdownPageSegment>,
+    source_section_page_ranges: Vec<Range<usize>>,
+}
+
+/// Document-wide render inputs shared by every source section. These must be refreshed
+/// whenever an edit changes cross-section Markdown semantics.
+struct PreviewDocumentContext {
+    toc: KmarkTocDocument,
+    heading_numbers: KmarkHeadingNumberDocument,
+    page_config: DocumentPageConfig,
+}
+
+struct PreviewRenderParts {
+    context: PreviewDocumentContext,
+    markdown_pages: MarkdownPageSegments,
+    mermaid_start_indices: Vec<usize>,
+    preview: RenderedMarkdownPreview,
+}
+
+impl PreviewDocumentContext {
+    fn collect(content: &str) -> Self {
+        Self {
+            toc: collect_kmark_toc_document(content),
+            heading_numbers: collect_kmark_heading_number_document(content),
+            page_config: DocumentPageConfig::default_config(),
+        }
+    }
+}
+
+/// Pure Rust preview cache. A patch is emitted only when cross-section output is proven
+/// unchanged; every other edit rebuilds through the existing full renderer.
+pub struct PreviewRenderCache {
+    revision: u64,
+    rope: Rope,
+    sections: Vec<ExplicitSourceSection>,
+    file_path: Option<String>,
+    model_assets: HashMap<String, KmarkModelAssetResolution>,
+    parts: PreviewRenderParts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewSectionPatch {
+    pub base_revision: u64,
+    pub revision: u64,
+    pub section_index: usize,
+    pub pages: Vec<RenderedPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewRenderChange {
+    Full {
+        revision: u64,
+        preview: RenderedMarkdownPreview,
+    },
+    Patch(PreviewSectionPatch),
+}
+
+impl PreviewRenderCache {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn new(
+        document: &EditorDocument,
+        file_path: Option<&str>,
+        model_assets: &HashMap<String, KmarkModelAssetResolution>,
+    ) -> (Self, RenderedMarkdownPreview) {
+        Self::from_content(
+            document,
+            file_path,
+            document.canonical_text(),
+            model_assets.clone(),
+        )
+    }
+
+    /// Resolves external assets only for a full build. A successful local patch bypasses
+    /// this callback and keeps the previous asset resolutions.
+    pub fn with_asset_resolver<F>(
+        document: &EditorDocument,
+        file_path: Option<&str>,
+        resolve_assets: F,
+    ) -> (Self, RenderedMarkdownPreview)
+    where
+        F: FnOnce(Option<&str>, &str) -> HashMap<String, KmarkModelAssetResolution>,
+    {
+        let content = document.canonical_text();
+        let model_assets = resolve_assets(file_path, &content);
+        Self::from_content(document, file_path, content, model_assets)
+    }
+
+    fn from_content(
+        document: &EditorDocument,
+        file_path: Option<&str>,
+        content: String,
+        model_assets: HashMap<String, KmarkModelAssetResolution>,
+    ) -> (Self, RenderedMarkdownPreview) {
+        let parts = render_preview_parts(&content, file_path, &model_assets);
+        let preview = parts.preview.clone();
+        (
+            Self {
+                revision: document.revision(),
+                rope: document.canonical_rope().clone(),
+                sections: index_explicit_source_sections(document),
+                file_path: file_path.map(str::to_owned),
+                model_assets,
+                parts,
+            },
+            preview,
+        )
+    }
+
+    pub fn update(
+        &mut self,
+        document: &EditorDocument,
+        impact: Option<&EditorMutationImpact>,
+        file_path: Option<&str>,
+        model_assets: &HashMap<String, KmarkModelAssetResolution>,
+    ) -> PreviewRenderChange {
+        if &self.model_assets == model_assets {
+            if let Some(patch) = self.patch_with_cached_assets(document, impact, file_path) {
+                return PreviewRenderChange::Patch(patch);
+            }
+        }
+        let (replacement, preview) = Self::new(document, file_path, model_assets);
+        *self = replacement;
+        PreviewRenderChange::Full {
+            revision: document.revision(),
+            preview,
+        }
+    }
+
+    /// Attempts a local patch without resolving assets again. Safe even when another
+    /// section references a model: accepted edits cannot change an image reference or
+    /// its adjacent Kmark conversion directive.
+    pub fn patch_with_cached_assets(
+        &mut self,
+        document: &EditorDocument,
+        impact: Option<&EditorMutationImpact>,
+        file_path: Option<&str>,
+    ) -> Option<PreviewSectionPatch> {
+        let impact = impact?;
+        if document.revision() != self.revision.checked_add(1)?
+            || self.file_path.as_deref() != file_path
+            || self.sections.len() < 2
+        {
+            return None;
+        }
+        let section_index = self.sections.iter().position(|section| {
+            let range = &impact.before_char_range;
+            range.start >= section.char_range.start
+                && range.end <= section.char_range.end
+                && !(range.is_empty() && range.start == section.char_range.end)
+        })?;
+        let old_section = &self.sections[section_index];
+        let old_text = self
+            .rope
+            .get_slice(old_section.char_range.clone())?
+            .to_string();
+        let char_delta = isize::try_from(document.canonical_rope().len_chars()).ok()?
+            - isize::try_from(self.rope.len_chars()).ok()?;
+        if impact.after_char_range.start != impact.before_char_range.start
+            || isize::try_from(impact.after_char_range.len()).ok()?
+                - isize::try_from(impact.before_char_range.len()).ok()?
+                != char_delta
+        {
+            return None;
+        }
+        let new_end = old_section.char_range.end.checked_add_signed(char_delta)?;
+        let new_text = document.canonical_text_range(old_section.char_range.start..new_end)?;
+        if !section_has_stable_document_context(&old_text, &new_text) {
+            return None;
+        }
+        let new_sections = reindex_unchanged_section_boundaries(
+            document,
+            &self.sections,
+            section_index,
+            new_end,
+            char_delta,
+        )?;
+        let new_section = &new_sections[section_index];
+        if new_text.is_empty() {
+            return None;
+        }
+        let page_range = self
+            .parts
+            .preview
+            .source_section_page_ranges
+            .get(section_index)?;
+        if page_range.len() != 1 {
+            return None;
+        }
+        let page_index = page_range.start;
+        let old_segment = self.parts.markdown_pages.segments.get(page_index)?;
+        if old_segment.content != old_text || old_segment.line_offset != old_section.start_line {
+            return None;
+        }
+        let new_segment = split_markdown_pages(&new_text);
+        if new_segment.segments.len() != 1
+            || new_segment.segments[0].content != new_text
+            || new_segment.source_section_page_ranges != [0..1]
+        {
+            return None;
+        }
+        let segment = MarkdownPageSegment {
+            content: new_text,
+            line_offset: new_section.start_line,
+            page_directive: old_segment.page_directive.clone(),
+        };
+        let (page, next_mermaid_index) = render_page_segment(
+            &segment,
+            &self.parts.context,
+            file_path,
+            &self.model_assets,
+            *self.parts.mermaid_start_indices.get(page_index)?,
+        );
+        if next_mermaid_index != self.parts.mermaid_start_indices[page_index] {
+            return None;
+        }
+
+        self.parts.markdown_pages.segments[page_index] = segment;
+        self.parts.preview.pages[page_index] = page.clone();
+        #[cfg(test)]
+        {
+            self.parts.preview.page_htmls[page_index] = page.html.clone();
+            self.parts.preview.html = self.parts.preview.page_htmls.join("");
+        }
+        let base_revision = self.revision;
+        self.revision = document.revision();
+        self.rope = document.canonical_rope().clone();
+        self.sections = new_sections;
+        Some(PreviewSectionPatch {
+            base_revision,
+            revision: self.revision,
+            section_index,
+            pages: vec![page],
+        })
+    }
+}
+
+fn reindex_unchanged_section_boundaries(
+    document: &EditorDocument,
+    old_sections: &[ExplicitSourceSection],
+    changed_index: usize,
+    changed_end: usize,
+    char_delta: isize,
+) -> Option<Vec<ExplicitSourceSection>> {
+    let rope = document.canonical_rope();
+    if let Some(next_section) = old_sections.get(changed_index + 1) {
+        let marker_line = rope.char_to_line(changed_end);
+        if rope.line_to_char(marker_line) != changed_end {
+            return None;
+        }
+        let marker_slice = rope.line(marker_line);
+        let marker_text = marker_slice.to_string();
+        if !is_page_break_line(marker_text.trim_end_matches('\n'))
+            || changed_end.checked_add(marker_slice.len_chars())?
+                != next_section
+                    .char_range
+                    .start
+                    .checked_add_signed(char_delta)?
+        {
+            return None;
+        }
+    } else if changed_end != rope.len_chars() {
+        return None;
+    }
+
+    old_sections
+        .iter()
+        .enumerate()
+        .map(|(index, old)| {
+            Some(ExplicitSourceSection {
+                revision: document.revision(),
+                char_range: old
+                    .char_range
+                    .start
+                    .checked_add_signed(if index <= changed_index {
+                        0
+                    } else {
+                        char_delta
+                    })?
+                    ..old
+                        .char_range
+                        .end
+                        .checked_add_signed(if index < changed_index { 0 } else { char_delta })?,
+                start_line: old.start_line,
+            })
+        })
+        .collect()
+}
+
+fn section_has_stable_document_context(old_text: &str, new_text: &str) -> bool {
+    if old_text.bytes().filter(|byte| *byte == b'\n').count()
+        != new_text.bytes().filter(|byte| *byte == b'\n').count()
+    {
+        return false;
+    }
+    // Only the edited line can introduce syntax that changes a document-wide
+    // projection. Unchanged links, directives, and fences in this section do
+    // not invalidate a local body edit. Reference definitions are kept on the
+    // full path because their continuation lines can change another section.
+    if [old_text, new_text].iter().any(|text| {
+        text.lines()
+            .any(|line| line.contains('[') && line.contains("]:"))
+    }) {
+        return false;
+    }
+    let mut changed_line = None;
+    for (old_line, new_line) in old_text.split('\n').zip(new_text.split('\n')) {
+        if old_line == new_line {
+            continue;
+        }
+        if changed_line.is_some() {
+            return false;
+        }
+        changed_line = Some((old_line, new_line));
+    }
+    let Some((old_line, new_line)) = changed_line else {
+        return false;
+    };
+    if [old_line, new_line].iter().any(|line| {
+        line.contains('[')
+            || line.contains('<')
+            || line.contains("```")
+            || line.contains("~~~")
+            || line.trim_start().starts_with('#')
+    }) {
+        return false;
+    }
+    collect_kmark_toc_document(old_text) == collect_kmark_toc_document(new_text)
+        && collect_kmark_heading_number_document(old_text)
+            == collect_kmark_heading_number_document(new_text)
+}
+
+/// Source bounded by explicit page breaks. A section may produce multiple rendered pages
+/// when a page-style scope changes, and may later produce multiple physical A4 pages.
+/// Empty sections are retained so adjacent breaks remain visible to invalidation logic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplicitSourceSection {
+    pub revision: u64,
+    pub char_range: Range<usize>,
+    pub start_line: usize,
+}
+
+impl ExplicitSourceSection {
+    /// Rejects a section index after the document has advanced to another revision.
+    pub fn canonical_text(&self, document: &EditorDocument) -> Option<String> {
+        if self.revision != document.revision() {
+            return None;
+        }
+        document.canonical_text_range(self.char_range.clone())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -828,6 +1184,64 @@ pub fn render_markdown_preview(content: &str) -> RenderedMarkdownPreview {
     render_markdown_preview_with_file_path(content, None)
 }
 
+/// Indexes explicit page-break boundaries without materializing the whole Rope as a String.
+/// This follows the renderer's fence and multiline-comment rules. It does not include
+/// implicit page boundaries introduced by page-style directives.
+pub fn index_explicit_source_sections(document: &EditorDocument) -> Vec<ExplicitSourceSection> {
+    let rope = document.canonical_rope();
+    let mut sections = Vec::new();
+    let mut start_char = 0;
+    let mut start_line = 0;
+    let mut active_fence = None;
+    let mut inside_html_comment = false;
+
+    for (line_index, line_slice) in rope.lines().enumerate() {
+        let line_text = line_slice
+            .as_str()
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(line_slice.to_string()));
+        let line = line_text.trim_end_matches('\n');
+
+        if inside_html_comment {
+            if line.contains(PAGE_BREAK_TOKEN_CLOSE) {
+                inside_html_comment = false;
+            }
+            continue;
+        }
+        if let Some(fence) = active_fence {
+            if is_markdown_fence_close(line, fence) {
+                active_fence = None;
+            }
+            continue;
+        }
+        if let Some(fence) = parse_markdown_fence_open(line) {
+            active_fence = Some(fence);
+            continue;
+        }
+        if is_page_break_line(line) {
+            let break_start_char = rope.line_to_char(line_index);
+            sections.push(ExplicitSourceSection {
+                revision: document.revision(),
+                char_range: start_char..break_start_char,
+                start_line,
+            });
+            start_char = break_start_char + line_slice.len_chars();
+            start_line = line_index + 1;
+            continue;
+        }
+        if is_unclosed_html_comment_line(line) {
+            inside_html_comment = true;
+        }
+    }
+
+    sections.push(ExplicitSourceSection {
+        revision: document.revision(),
+        char_range: start_char..rope.len_chars(),
+        start_line,
+    });
+    sections
+}
+
 pub fn render_markdown_preview_with_file_path(
     content: &str,
     markdown_file_path: Option<&str>,
@@ -845,34 +1259,32 @@ pub fn render_markdown_preview_with_file_path_and_model_assets(
     markdown_file_path: Option<&str>,
     model_assets: &HashMap<String, KmarkModelAssetResolution>,
 ) -> RenderedMarkdownPreview {
-    let toc_document = collect_kmark_toc_document(content);
-    let heading_number_document = collect_kmark_heading_number_document(content);
+    render_preview_parts(content, markdown_file_path, model_assets).preview
+}
+
+fn render_preview_parts(
+    content: &str,
+    markdown_file_path: Option<&str>,
+    model_assets: &HashMap<String, KmarkModelAssetResolution>,
+) -> PreviewRenderParts {
+    let context = PreviewDocumentContext::collect(content);
     let markdown_pages = split_markdown_pages(content);
-    let document_page_config = DocumentPageConfig::default_config();
     let mut next_mermaid_block_index = 1usize;
+    let mut mermaid_start_indices = Vec::with_capacity(markdown_pages.segments.len());
     let pages = markdown_pages
         .segments
         .iter()
         .map(|page_segment| {
-            let page_config = document_page_config.resolve_page(&page_segment.page_directive);
-            let rendered_page = render_markdown_page(
-                &page_segment.content,
-                page_segment.line_offset,
+            mermaid_start_indices.push(next_mermaid_block_index);
+            let (rendered_page, next_index) = render_page_segment(
+                page_segment,
+                &context,
                 markdown_file_path,
                 model_assets,
-                &toc_document,
-                &heading_number_document,
                 next_mermaid_block_index,
             );
-            next_mermaid_block_index = rendered_page.next_mermaid_block_index;
-
-            RenderedPage {
-                html: rendered_page.html,
-                page_style: page_config.default_page_style,
-                text_style: page_config.default_text_style,
-                page_number_config: page_config.page_number_config,
-                page_chrome_config: page_config.page_chrome_config,
-            }
+            next_mermaid_block_index = next_index;
+            rendered_page
         })
         .collect::<Vec<_>>();
     #[cfg(test)]
@@ -881,15 +1293,51 @@ pub fn render_markdown_preview_with_file_path_and_model_assets(
         .map(|page| page.html.clone())
         .collect::<Vec<_>>();
 
-    RenderedMarkdownPreview {
+    let preview = RenderedMarkdownPreview {
         #[cfg(test)]
         html: page_htmls.join(""),
         #[cfg(test)]
         page_htmls,
         pages,
-        default_page_style: document_page_config.default_page_style,
-        default_text_style: document_page_config.default_text_style,
+        source_section_page_ranges: markdown_pages.source_section_page_ranges.clone(),
+        default_page_style: context.page_config.default_page_style.clone(),
+        default_text_style: context.page_config.default_text_style.clone(),
+    };
+    PreviewRenderParts {
+        context,
+        markdown_pages,
+        mermaid_start_indices,
+        preview,
     }
+}
+
+fn render_page_segment(
+    segment: &MarkdownPageSegment,
+    context: &PreviewDocumentContext,
+    markdown_file_path: Option<&str>,
+    model_assets: &HashMap<String, KmarkModelAssetResolution>,
+    next_mermaid_block_index: usize,
+) -> (RenderedPage, usize) {
+    let page_config = context.page_config.resolve_page(&segment.page_directive);
+    let rendered = render_markdown_page(
+        &segment.content,
+        segment.line_offset,
+        markdown_file_path,
+        model_assets,
+        &context.toc,
+        &context.heading_numbers,
+        next_mermaid_block_index,
+    );
+    (
+        RenderedPage {
+            html: rendered.html,
+            page_style: page_config.default_page_style,
+            text_style: page_config.default_text_style,
+            page_number_config: page_config.page_number_config,
+            page_chrome_config: page_config.page_chrome_config,
+        },
+        rendered.next_mermaid_block_index,
+    )
 }
 
 fn render_markdown_page(
@@ -1886,6 +2334,8 @@ fn heading_level_number(level: HeadingLevel) -> u8 {
 
 fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
     let mut page_segments = Vec::new();
+    let mut source_section_page_ranges = Vec::new();
+    let mut section_start_page_index = 0;
     let mut last_index = 0;
     let mut line_offset = 0usize;
     let mut active_fence = None;
@@ -2026,6 +2476,9 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
                 );
             }
 
+            source_section_page_ranges.push(section_start_page_index..page_segments.len());
+            section_start_page_index = page_segments.len();
+
             last_index = line_span.end;
             line_offset = line_index + 1;
             segment_has_rendered_content = false;
@@ -2127,8 +2580,11 @@ fn split_markdown_pages(content: &str) -> MarkdownPageSegments {
         });
     }
 
+    source_section_page_ranges.push(section_start_page_index..page_segments.len());
+
     MarkdownPageSegments {
         segments: page_segments,
+        source_section_page_ranges,
     }
 }
 
@@ -3286,6 +3742,10 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(&image_context.title));
             html.push('"');
         }
+        html.push_str(&page_fit_data_attribute(
+            image_context.style.as_deref(),
+            "data-kmark-page-fit",
+        ));
         if let Some(style) = image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(&style));
@@ -3315,6 +3775,10 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(&image_context.title));
             html.push('"');
         }
+        html.push_str(&page_fit_data_attribute(
+            image_context.style.as_deref(),
+            "data-kmark-page-fit",
+        ));
         if let Some(style) = &image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(style));
@@ -3414,6 +3878,10 @@ impl<'a> HtmlEmitter<'a> {
             html.push_str(&escape_html(&image_context.title));
             html.push('"');
         }
+        html.push_str(&page_fit_data_attribute(
+            image_context.style.as_deref(),
+            "data-kmark-page-fit",
+        ));
         if let Some(style) = &image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(style));
@@ -3429,6 +3897,10 @@ impl<'a> HtmlEmitter<'a> {
             "<span class=\"kmark-model-error\" role=\"alert\"{}",
             image_context.source_line_attributes,
         );
+        html.push_str(&page_fit_data_attribute(
+            image_context.style.as_deref(),
+            "data-kmark-page-fit",
+        ));
         if let Some(style) = &image_context.style {
             html.push_str(" style=\"");
             html.push_str(&escape_html(style));
@@ -5113,9 +5585,15 @@ impl KmarkRootDecoration {
     }
 
     fn data_attribute(&self) -> String {
-        self.page_valign
+        let mut attributes = self
+            .page_valign
             .map(|valign| format!(" data-page-valign=\"{}\"", valign.name()))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        attributes.push_str(&page_fit_data_attribute(
+            self.style.as_deref(),
+            "data-kmark-page-fit",
+        ));
+        attributes
     }
 
     fn style_attribute(&self) -> String {
@@ -5187,6 +5665,10 @@ impl KmarkGeneratedSvgDecoration {
     }
 
     fn push_data_attributes(&self, attributes: &mut String) {
+        attributes.push_str(&page_fit_data_attribute(
+            self.svg_style.as_deref(),
+            "data-kmark-generated-svg-page-fit",
+        ));
         push_optional_data_attribute(
             attributes,
             "data-kmark-generated-svg-style",
@@ -5203,6 +5685,21 @@ impl KmarkGeneratedSvgDecoration {
             self.align.map(KmarkAlign::css_text_value),
         );
     }
+}
+
+fn page_fit_data_attribute(style: Option<&str>, attribute: &str) -> String {
+    let Some(style) = style else {
+        return String::new();
+    };
+    let mode = if style.contains("var(--kmark-page-fit-contain-") {
+        Some("contain")
+    } else if style.contains("var(--kmark-page-fit-") {
+        Some("fill")
+    } else {
+        None
+    };
+    mode.map(|mode| format!(" {attribute}=\"{mode}\""))
+        .unwrap_or_default()
 }
 
 impl KmarkMermaidParams {
@@ -9635,10 +10132,13 @@ mod tests {
     };
 
     use super::{
-        render_markdown_preview, render_markdown_preview_with_file_path,
-        resolve_image_destination_url, CssLength, PageNumberPosition, PageNumberStyle,
-        ESCAPED_DEFINITION_MARKER_COLON,
+        index_explicit_source_sections, render_markdown_preview,
+        render_markdown_preview_with_file_path,
+        render_markdown_preview_with_file_path_and_model_assets, resolve_image_destination_url,
+        CssLength, KmarkModelAssetResolution, PageNumberPosition, PageNumberStyle,
+        PreviewRenderCache, PreviewRenderChange, ESCAPED_DEFINITION_MARKER_COLON,
     };
+    use crate::{EditorDocument, EditorMutationBatch, EditorTextChange, EditorTransaction};
 
     fn extract_toc_html(html: &str) -> &str {
         let start = html
@@ -9651,6 +10151,405 @@ mod tests {
 
     fn count_occurrences(text: &str, pattern: &str) -> usize {
         text.matches(pattern).count()
+    }
+
+    #[test]
+    fn indexes_only_explicit_breaks_outside_fences_and_multiline_comments() {
+        let source = "日本語🙂\n<!-- --- -->\nA\n```md\n<!-- --- -->\n```\nB\n<!-- comment\n<!-- --- -->\n-->\n<!-- --- -->\n終わり";
+        let document = EditorDocument::from_external_text(source, 1, false);
+        let sections = index_explicit_source_sections(&document);
+        let content = sections
+            .iter()
+            .map(|section| {
+                section
+                    .canonical_text(&document)
+                    .expect("section range must be valid")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(sections.len(), render_markdown_preview(source).pages.len());
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.start_line)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 11]
+        );
+        assert_eq!(
+            content,
+            vec![
+                "日本語🙂\n",
+                "A\n```md\n<!-- --- -->\n```\nB\n<!-- comment\n<!-- --- -->\n-->\n",
+                "終わり",
+            ]
+        );
+        assert_eq!(document.canonical_text_range(0..usize::MAX), None);
+    }
+
+    #[test]
+    fn reindexes_sections_after_utf16_mutation() {
+        let mut document = EditorDocument::from_external_text("a\nb", 1, false);
+        let old_sections = index_explicit_source_sections(&document);
+        assert_eq!(old_sections.len(), 1);
+
+        document
+            .apply_mutation_batch(&EditorMutationBatch {
+                client_id: "section-test".to_owned(),
+                batch_id: 1,
+                expected_revision: 1,
+                transactions: vec![EditorTransaction {
+                    before_length_utf16: 3,
+                    changes: vec![EditorTextChange {
+                        from_utf16: 2,
+                        to_utf16: 2,
+                        insert: "<!-- --- -->\n".to_owned(),
+                    }],
+                }],
+            })
+            .expect("mutation must apply");
+
+        let sections = index_explicit_source_sections(&document);
+        assert_eq!(old_sections[0].canonical_text(&document), None);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].start_line, 0);
+        assert_eq!(sections[1].start_line, 2);
+        assert_eq!(
+            sections[0].canonical_text(&document).as_deref(),
+            Some("a\n")
+        );
+        assert_eq!(sections[1].canonical_text(&document).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn source_section_is_independent_of_implicit_page_style_splits() {
+        let source = "# Normal\n<!-- kmark page_direction:horizontal -->\n# Wide\n<!-- kmark page_direction:vertical -->\n# Back";
+        let document = EditorDocument::from_external_text(source, 1, false);
+
+        assert_eq!(index_explicit_source_sections(&document).len(), 1);
+        let rendered = render_markdown_preview(source);
+        assert_eq!(rendered.pages.len(), 3);
+        assert_eq!(rendered.source_section_page_ranges, vec![0..3]);
+    }
+
+    #[test]
+    fn keeps_empty_source_sections_for_adjacent_breaks() {
+        let document = EditorDocument::from_external_text("<!-- --- -->\n<!-- --- -->\n", 1, false);
+        let sections = index_explicit_source_sections(&document);
+
+        assert_eq!(sections.len(), 3);
+        assert!(sections
+            .iter()
+            .all(|section| section.canonical_text(&document).as_deref() == Some("")));
+        assert_eq!(
+            render_markdown_preview(&document.canonical_text())
+                .pages
+                .len(),
+            1
+        );
+        assert_eq!(
+            render_markdown_preview(&document.canonical_text()).source_section_page_ranges,
+            vec![0..0, 0..0, 0..1]
+        );
+    }
+
+    #[test]
+    fn patches_only_changed_source_section_and_matches_full_render() {
+        let source = "# Intro\nfirst\n<!-- --- -->\n# Section\nbefore\n<!-- --- -->\n# Tail\nlast";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, original) = PreviewRenderCache::new(&document, None, &assets);
+        assert_eq!(original.source_section_page_ranges, vec![0..1, 1..2, 2..3]);
+        let start = source.find("before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + "before".len() as u64,
+                    insert: "after".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+
+        let change = cache.update(&document, impact.as_ref(), None, &assets);
+        let PreviewRenderChange::Patch(patch) = change else {
+            panic!("local prose edit must patch one source section");
+        };
+        assert_eq!(
+            (patch.base_revision, patch.revision, patch.section_index),
+            (1, 2, 1)
+        );
+        let expected = render_markdown_preview(&document.canonical_text());
+        assert_eq!(patch.pages, expected.pages[1..2]);
+        assert_eq!(cache.parts.preview, expected);
+
+        let second_source = document.canonical_text();
+        let second_start = second_source.find("last").unwrap() as u64;
+        let second_mutation = EditorMutationBatch {
+            client_id: "preview-test".to_owned(),
+            batch_id: 2,
+            expected_revision: 2,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: second_source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: second_start,
+                    to_utf16: second_start + 4,
+                    insert: "final".to_owned(),
+                }],
+            }],
+        };
+        let second_impact = document.single_change_impact(&second_mutation);
+        document.apply_mutation_batch(&second_mutation).unwrap();
+        let PreviewRenderChange::Patch(second_patch) =
+            cache.update(&document, second_impact.as_ref(), None, &assets)
+        else {
+            panic!("shifted section offset must remain patchable");
+        };
+        assert_eq!(second_patch.section_index, 2);
+        assert_eq!(second_patch.base_revision, 2);
+        assert_eq!(
+            cache.parts.preview,
+            render_markdown_preview(&document.canonical_text())
+        );
+    }
+
+    #[test]
+    fn patches_plain_body_edit_beside_unchanged_markup_but_not_link_edit() {
+        let source = "<!-- kmark toc:true -->\n<!-- --- -->\n# Linked\n[guide](guide.md)\n<!-- note -->\nbefore\n<!-- --- -->\n# Tail";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let start = source.find("before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-markup-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + 6,
+                    insert: "after".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+        let PreviewRenderChange::Patch(patch) =
+            cache.update(&document, impact.as_ref(), None, &assets)
+        else {
+            panic!("plain edit with unchanged markup must patch one section");
+        };
+        assert_eq!(patch.section_index, 1);
+        assert_eq!(
+            cache.parts.preview,
+            render_markdown_preview(&document.canonical_text())
+        );
+
+        let current = document.canonical_text();
+        let link_start = current.find("guide.md").unwrap() as u64;
+        let link_mutation = EditorMutationBatch {
+            client_id: "preview-markup-test".to_owned(),
+            batch_id: 2,
+            expected_revision: 2,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: current.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: link_start,
+                    to_utf16: link_start + 8,
+                    insert: "other.md".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&link_mutation);
+        document.apply_mutation_batch(&link_mutation).unwrap();
+        assert!(matches!(
+            cache.update(&document, impact.as_ref(), None, &assets),
+            PreviewRenderChange::Full { .. }
+        ));
+    }
+
+    #[test]
+    fn reference_definition_continuation_uses_full_render() {
+        let source = "Note[^item]\n<!-- --- -->\n[^item]: first\n    before";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let start = source.find("before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-reference-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + 6,
+                    insert: "after".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+        let PreviewRenderChange::Full { preview, .. } =
+            cache.update(&document, impact.as_ref(), None, &assets)
+        else {
+            panic!("reference definition continuation must refresh all sections");
+        };
+        assert_eq!(preview, render_markdown_preview(&document.canonical_text()));
+    }
+
+    #[test]
+    fn heading_change_uses_full_render_fallback() {
+        let source = "# First\n<!-- --- -->\n# Before\nbody";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let start = source.find("Before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + 6,
+                    insert: "After".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+
+        let PreviewRenderChange::Full { revision, preview } =
+            cache.update(&document, impact.as_ref(), None, &assets)
+        else {
+            panic!("heading change must refresh document-wide context");
+        };
+        assert_eq!(revision, 2);
+        assert_eq!(preview, render_markdown_preview(&document.canonical_text()));
+    }
+
+    #[test]
+    fn patches_plain_section_even_when_another_section_has_model_assets() {
+        let source = "![model](mesh.obj)\n<!-- --- -->\nbefore";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::from([(
+            "mesh.obj".to_owned(),
+            KmarkModelAssetResolution {
+                display_destination_url: Some("mesh.glb".to_owned()),
+                error: None,
+            },
+        )]);
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let start = source.find("before").unwrap() as u64;
+        let mutation = EditorMutationBatch {
+            client_id: "preview-model-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: start,
+                    to_utf16: start + 6,
+                    insert: "after".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+
+        let change = cache.update(&document, impact.as_ref(), None, &assets);
+        assert!(matches!(change, PreviewRenderChange::Patch(_)));
+        assert_eq!(
+            cache.parts.preview,
+            render_markdown_preview_with_file_path_and_model_assets(
+                &document.canonical_text(),
+                None,
+                &assets,
+            )
+        );
+    }
+
+    #[test]
+    fn single_section_edit_uses_full_render_without_patch_overhead() {
+        let source = "before and after";
+        let mut document = EditorDocument::from_external_text(source, 1, false);
+        let assets = std::collections::HashMap::new();
+        let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+        let mutation = EditorMutationBatch {
+            client_id: "preview-single-test".to_owned(),
+            batch_id: 1,
+            expected_revision: 1,
+            transactions: vec![EditorTransaction {
+                before_length_utf16: source.len() as u64,
+                changes: vec![EditorTextChange {
+                    from_utf16: 0,
+                    to_utf16: 6,
+                    insert: "updated".to_owned(),
+                }],
+            }],
+        };
+        let impact = document.single_change_impact(&mutation);
+        document.apply_mutation_batch(&mutation).unwrap();
+        assert!(matches!(
+            cache.update(&document, impact.as_ref(), None, &assets),
+            PreviewRenderChange::Full { .. }
+        ));
+        assert_eq!(
+            cache.parts.preview,
+            render_markdown_preview(&document.canonical_text())
+        );
+    }
+
+    #[test]
+    fn section_patch_and_fallback_cases_match_full_renderer_with_unicode_offsets() {
+        let source = "Intro🙂\n<!-- --- -->\n# Mid\nbefore\n<!-- --- -->\nTail";
+        let cases = [
+            ("before", "after", true),
+            ("before", "after\nline", false),
+            ("# Mid", "# New", false),
+            ("before", "before\n<!-- --- -->", false),
+            ("# Mid\nbefore\n", "", false),
+        ];
+        for (needle, replacement, expect_patch) in cases {
+            let mut document = EditorDocument::from_external_text(source, 1, false);
+            let assets = std::collections::HashMap::new();
+            let (mut cache, _) = PreviewRenderCache::new(&document, None, &assets);
+            let byte_start = source.find(needle).unwrap();
+            let from_utf16 = source[..byte_start].encode_utf16().count() as u64;
+            let mutation = EditorMutationBatch {
+                client_id: "preview-cases".to_owned(),
+                batch_id: 1,
+                expected_revision: 1,
+                transactions: vec![EditorTransaction {
+                    before_length_utf16: source.encode_utf16().count() as u64,
+                    changes: vec![EditorTextChange {
+                        from_utf16,
+                        to_utf16: from_utf16 + needle.encode_utf16().count() as u64,
+                        insert: replacement.to_owned(),
+                    }],
+                }],
+            };
+            let impact = document.single_change_impact(&mutation);
+            document.apply_mutation_batch(&mutation).unwrap();
+            let change = cache.update(&document, impact.as_ref(), None, &assets);
+            assert_eq!(
+                matches!(change, PreviewRenderChange::Patch(_)),
+                expect_patch,
+                "unexpected update kind for replacement of {needle:?} with {replacement:?}"
+            );
+            assert_eq!(
+                cache.parts.preview,
+                render_markdown_preview(&document.canonical_text())
+            );
+        }
     }
 
     #[test]
@@ -10909,6 +11808,9 @@ mod tests {
         assert!(page_fit_preview.html.contains(
             "data-kmark-generated-svg-style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;width:auto;\""
         ));
+        assert!(page_fit_preview
+            .html
+            .contains("data-kmark-generated-svg-page-fit=\"contain\""));
     }
 
     #[test]
@@ -12151,7 +13053,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
         );
     }
 
@@ -12162,7 +13064,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);box-sizing:border-box;margin:0;\">本文</p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto);box-sizing:border-box;margin:0;\">本文</p>"
         );
     }
 
@@ -12174,8 +13076,35 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"contain\" style=\"max-width:var(--kmark-page-fit-width,100%);width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;\" /></p>"
         );
+    }
+
+    #[test]
+    fn keeps_fit_variants_in_explicit_page_payloads() {
+        let rendered_preview = render_markdown_preview(
+            "<!-- kmark w:fit h:fit -->\n\
+             ![](fit.png)\n\
+             <!-- --- -->\n\
+             <!-- kmark w:page_fit h:page_fit -->\n\
+             ![](page-fit.png)\n\
+             <!-- --- -->\n\
+             <!-- kmark w:page_fit_contain h:page_fit_contain -->\n\
+             ![](page-fit-contain.png)",
+        );
+
+        assert_eq!(rendered_preview.page_htmls.len(), 3);
+        assert!(!rendered_preview.page_htmls[0].contains("data-kmark-page-fit"));
+        assert!(rendered_preview.page_htmls[1].contains("data-kmark-page-fit=\"fill\""));
+        assert!(rendered_preview.page_htmls[2].contains("data-kmark-page-fit=\"contain\""));
+        assert!(rendered_preview.page_htmls[0]
+            .contains("width:fit-content;max-width:100%;height:fit-content"));
+        assert!(rendered_preview.page_htmls[1].contains(
+            "width:var(--kmark-page-fit-width,100%);height:var(--kmark-page-fit-height,auto)"
+        ));
+        assert!(rendered_preview.page_htmls[2].contains(
+            "width:var(--kmark-page-fit-contain-width,auto);max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto)"
+        ));
     }
 
     #[test]
@@ -12186,7 +13115,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;text-align:center\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;text-align:center\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"contain\" style=\"max-height:var(--kmark-page-fit-height,none);height:var(--kmark-page-fit-contain-height,auto);display:block;object-fit:contain;box-sizing:border-box;margin:0;margin-left:auto;margin-right:auto;\" /></p>"
         );
     }
 
@@ -12195,13 +13124,13 @@ mod tests {
         let width_fit = render_markdown_preview("<!-- kmark w:page_fit -->\n![](image.png)");
         assert_eq!(
             width_fit.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:var(--kmark-page-fit-width,100%);display:block;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"width:var(--kmark-page-fit-width,100%);display:block;box-sizing:border-box;margin:0;\" /></p>"
         );
 
         let height_fit = render_markdown_preview("<!-- kmark h:page_fit -->\n![](image.png)");
         assert_eq!(
             height_fit.html,
-            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
+            "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"margin:0;\"><img src=\"image.png\" alt=\"\" data-source-line-start=\"1\" data-source-line-end=\"1\" data-kmark-page-fit=\"fill\" style=\"height:var(--kmark-page-fit-height,auto);display:block;box-sizing:border-box;margin:0;\" /></p>"
         );
     }
 

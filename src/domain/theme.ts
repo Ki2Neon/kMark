@@ -8,6 +8,8 @@ export type AppThemeId =
   | "monokai"
   | "paper";
 
+export type AppThemeMode = "dark" | "light";
+
 export type AppThemeOption = {
   readonly id: AppThemeId;
   readonly label: string;
@@ -32,6 +34,21 @@ export const APP_THEME_OPTIONS: readonly AppThemeOption[] = [
 
 const APP_THEME_ID_SET = new Set<AppThemeId>(APP_THEME_OPTIONS.map((themeOption) => themeOption.id));
 
+const APP_THEME_MODE_BY_ID = {
+  "vscode-dark": "dark",
+  "vscode-light": "light",
+  "github-dark": "dark",
+  "github-light": "light",
+  dracula: "dark",
+  "night-owl": "dark",
+  monokai: "dark",
+  paper: "light",
+} as const satisfies Record<AppThemeId, AppThemeMode>;
+
 export function isAppThemeId(value: string): value is AppThemeId {
   return APP_THEME_ID_SET.has(value as AppThemeId);
+}
+
+export function resolveAppThemeMode(appThemeId: AppThemeId): AppThemeMode {
+  return APP_THEME_MODE_BY_ID[appThemeId];
 }

@@ -303,6 +303,31 @@ input:focus-visible,
   user-select: none;
 }
 
+.editor-shell__dirty-indicator {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: calc(env(safe-area-inset-left, 0px) + 8px);
+  z-index: 16;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--focus);
+  box-shadow: 0 0 0 2px var(--surface);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.editor-shell__dirty-indicator[data-visible="true"] {
+  opacity: 1;
+}
+
+@media (forced-colors: active) {
+  .editor-shell__dirty-indicator {
+    background: Highlight;
+    box-shadow: 0 0 0 2px Canvas;
+  }
+}
+
 .editor-shell__mobile-nav,
 .editor-shell__toast,
 .workspace-grid__divider,
@@ -1396,6 +1421,18 @@ input:focus-visible,
   transform-origin: top left;
 }
 
+.preview-section__standard-segment {
+  display: contents;
+}
+
+.preview-section__standard-content > .preview-section__standard-segment:first-child > :first-child {
+  margin-top: 0;
+}
+
+.preview-section__standard-content > .preview-section__standard-segment:last-child > :last-child {
+  margin-bottom: 0;
+}
+
 .preview-section__page-stack {
   display: grid;
   justify-items: center;
@@ -2032,6 +2069,10 @@ input:focus-visible,
   background: transparent;
 }
 
+.markdown-body .kmark-generated-svg-block[data-kmark-generated-svg-page-fit] {
+  margin-bottom: 0;
+}
+
 .markdown-body .kmark-mermaid-rendered {
   display: flex;
   justify-content: center;
@@ -2529,21 +2570,6 @@ input:focus-visible,
 .markdown-body .kmark-page-valign {
   box-sizing: border-box;
   max-width: 100%;
-}
-
-.markdown-body .kmark-page-flex-spacer {
-  display: block;
-  flex: 0 0 auto;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  pointer-events: none;
-  user-select: none;
-}
-
-.markdown-body:not(.markdown-body--a4) .kmark-page-flex-spacer {
-  display: none;
 }
 
 .markdown-body code {

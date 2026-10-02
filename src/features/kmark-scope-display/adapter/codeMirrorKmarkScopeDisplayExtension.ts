@@ -1,4 +1,4 @@
-import { type Extension } from "@codemirror/state";
+import { StateEffect, type Extension } from "@codemirror/state";
 import { EditorView, GutterMarker, ViewPlugin, gutter, type ViewUpdate } from "@codemirror/view";
 import {
   collectKmarkScopeDisplayLines,
@@ -14,6 +14,7 @@ const SCOPE_RAIL_WIDTH_PX = 8;
 const SCOPE_MAX_VISIBLE_DEPTH_INDEX = 15;
 const SCOPE_BAR_EDGE_INSET_PX = 6;
 const SCOPE_BAR_MIN_HEIGHT_PX = 2;
+const refreshKmarkScopeDisplay = StateEffect.define<void>();
 
 type KmarkScopeBarMeasure = {
   readonly className: string;
@@ -34,19 +35,43 @@ type KmarkScopeOverlayMeasure = {
 const kmarkScopeDisplayPlugin = ViewPlugin.fromClass(class KmarkScopeDisplayPlugin {
   displayDocument: KmarkScopeDisplayDocument;
   gutterWidth: number;
+  #timer: number | null = null;
+  #revision = 0;
 
   constructor(view: EditorView) {
-    this.displayDocument = collectKmarkScopeDisplayLines(view.state.doc.toString());
-    this.gutterWidth = resolveDocumentGutterWidth(this.displayDocument.scopes);
+    this.displayDocument = { lines: [], scopes: [] };
+    this.gutterWidth = 0;
+    this.#schedule(view, 0);
   }
 
   update(update: ViewUpdate): void {
-    if (!update.docChanged) {
-      return;
+    if (update.docChanged) {
+      this.#schedule(update.view, 250);
     }
+  }
 
-    this.displayDocument = collectKmarkScopeDisplayLines(update.state.doc.toString());
-    this.gutterWidth = resolveDocumentGutterWidth(this.displayDocument.scopes);
+  destroy(): void {
+    if (this.#timer !== null) {
+      window.clearTimeout(this.#timer);
+    }
+  }
+
+  #schedule(view: EditorView, delayMs: number): void {
+    this.#revision += 1;
+    const revision = this.#revision;
+    if (this.#timer !== null) {
+      window.clearTimeout(this.#timer);
+    }
+    this.#timer = window.setTimeout(() => {
+      this.#timer = null;
+      const displayDocument = collectKmarkScopeDisplayLines(view.state.doc.toString());
+      if (revision !== this.#revision) {
+        return;
+      }
+      this.displayDocument = displayDocument;
+      this.gutterWidth = resolveDocumentGutterWidth(displayDocument.scopes);
+      view.dispatch({ effects: refreshKmarkScopeDisplay.of(undefined) });
+    }, delayMs);
   }
 });
 
@@ -68,7 +93,14 @@ const kmarkScopeOverlayPlugin = ViewPlugin.fromClass(class KmarkScopeOverlayPlug
   }
 
   update(update: ViewUpdate): void {
-    if (update.docChanged || update.geometryChanged || update.viewportChanged) {
+    if (
+      update.docChanged
+      || update.geometryChanged
+      || update.viewportChanged
+      || update.transactions.some((transaction) => (
+        transaction.effects.some((effect) => effect.is(refreshKmarkScopeDisplay))
+      ))
+    ) {
       update.view.requestMeasure(this.measureRequest);
     }
   }

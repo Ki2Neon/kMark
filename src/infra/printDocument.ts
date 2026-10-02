@@ -1,3 +1,4 @@
+import { syncA4PageLayout } from "../adapters/browser/browserPageLayout";
 import {
   A4_MARGIN_BOTTOM_MM,
   A4_MARGIN_LEFT_MM,
@@ -703,21 +704,6 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     max-width: 100%;
   }
 
-  .markdown-body .kmark-page-flex-spacer {
-    display: block;
-    flex: 0 0 auto;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    pointer-events: none;
-    user-select: none;
-  }
-
-  .markdown-body:not(.markdown-body--a4) .kmark-page-flex-spacer {
-    display: none;
-  }
-
   .kmark-page-header,
   .kmark-page-footer {
     position: absolute;
@@ -1270,10 +1256,36 @@ function createA4PrintDocumentMarkup(options: A4PrintMarkdownDocumentOptions, pa
 </html>`;
 }
 
-function printA4MarkdownDocument(
+function waitForA4PaginationReady(): Promise<void> {
+  const viewport = document.querySelector<HTMLElement>(".preview-section__body--a4");
+  if (viewport?.dataset.kmarkA4PaginationReady !== "false") return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const observer = new MutationObserver(() => {
+      if (!viewport.isConnected) {
+        finish(() => reject(new Error("A4プレビューが印刷準備中に閉じられました。")));
+      } else if (viewport.dataset.kmarkA4PaginationReady === "true") {
+        finish(resolve);
+      }
+    });
+    const timeoutId = window.setTimeout(() => {
+      finish(() => reject(new Error("A4ページ分割の完了を待機中にタイムアウトしました。")));
+    }, 30_000);
+    const finish = (callback: () => void) => {
+      window.clearTimeout(timeoutId);
+      observer.disconnect();
+      callback();
+    };
+    observer.observe(viewport, { attributes: true, attributeFilter: ["data-kmark-a4-pagination-ready"] });
+    if (viewport.dataset.kmarkA4PaginationReady === "true") finish(resolve);
+  });
+}
+
+async function printA4MarkdownDocument(
   options: A4PrintMarkdownDocumentOptions,
   runtimeOptions: PrintMarkdownDocumentRuntimeOptions,
 ): Promise<void> {
+  await waitForA4PaginationReady();
   const pages = mergeGeneratedSvgIntoA4Pages(getDisplayedPreviewA4Pages(), options.pages);
 
   if (pages.length === 0) {
@@ -1345,6 +1357,8 @@ function printA4MarkdownDocument(
       const prepareAndPrint = async () => {
         try {
           printWindowCleanup = await runtimeOptions.preparePrintWindow?.(printWindow) ?? null;
+          await printWindow.document.fonts?.ready;
+          syncA4PageLayout(printWindow.document);
         } catch (error) {
           finish(() => reject(error instanceof Error ? error : new Error("A4印刷画面の準備に失敗しました。")));
           return;

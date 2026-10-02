@@ -1,3 +1,4 @@
+mod app_config_dir;
 mod application_event_sink;
 mod desktop_layout_preferences_store;
 mod editor_draft_store;
@@ -17,6 +18,8 @@ mod theme_preferences_store;
 mod tray_coordinator;
 mod window_state;
 
+#[cfg(feature = "e2e")]
+pub(crate) use app_config_dir::app_config_dir;
 pub(crate) use application_event_sink::DeferredApplicationEventSink;
 pub(crate) use desktop_layout_preferences_store::{
     load_desktop_layout_preferences, persist_desktop_layout_preferences,

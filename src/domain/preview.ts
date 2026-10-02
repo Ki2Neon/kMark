@@ -91,12 +91,14 @@ export type RenderedPreview =
   | {
       readonly mode: "standard";
       readonly html: string;
+      readonly sectionHtmls?: readonly string[];
       readonly defaultPageStyle: PageStyle;
       readonly defaultTextStyle: PreviewTextStyle;
     }
   | {
       readonly mode: "a4";
       readonly pages: readonly RenderedPreviewPage[];
+      readonly sectionPages?: readonly (readonly RenderedPreviewPage[])[];
       readonly defaultPageStyle: PageStyle;
       readonly defaultTextStyle: PreviewTextStyle;
     };

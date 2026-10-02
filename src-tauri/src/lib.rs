@@ -406,6 +406,11 @@ pub fn run() {
         instance_id,
     ));
 
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
     #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(
         tauri_plugin_autostart::Builder::new()
@@ -751,9 +756,14 @@ pub fn run() {
             commands::desktop_layout_preferences::get_desktop_layout_preferences,
             commands::desktop_layout_preferences::set_desktop_layout_preferences,
             commands::editor_draft::get_editor_draft,
+            commands::editor_draft::flush_editor_draft,
             commands::editor_draft::set_editor_draft,
             commands::editor_preferences::get_editor_preferences,
             commands::editor_preferences::set_editor_preferences,
+            commands::editor_session::apply_editor_mutation_batch,
+            commands::editor_session::mark_editor_session_saved,
+            #[cfg(feature = "e2e")]
+            commands::e2e_diagnostics::get_e2e_debug_snapshot,
             commands::external_api::accept_external_proposal,
             commands::external_api::attach_document_session,
             commands::external_api::cancel_staged_file_operation,
@@ -779,6 +789,7 @@ pub fn run() {
             commands::file_open::open_markdown_document_dialog,
             commands::file_open::open_markdown_document_folder,
             commands::markdown_render::render_markdown_preview,
+            commands::markdown_render::render_editor_session_preview,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
             commands::recent_files::get_recent_files,
@@ -794,9 +805,11 @@ pub fn run() {
             commands::sub_window::take_sub_window_source_line_selection_requests,
             commands::sub_window::unregister_sub_window_source,
             commands::file_open::read_markdown_document_at_path,
+            commands::file_open::save_editor_session_markdown_document_as_dialog,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,
             commands::file_open::take_pending_markdown_open_requests,
+            commands::file_open::write_editor_session_markdown_document,
             commands::file_open::write_markdown_document,
             commands::theme_preferences::get_theme_preferences,
             commands::theme_preferences::set_theme_preferences,

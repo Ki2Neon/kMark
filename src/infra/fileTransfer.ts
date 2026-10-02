@@ -50,7 +50,9 @@ const MARKDOWN_OPEN_REQUESTED_EVENT = "markdown-open-requested";
 const OPEN_MARKDOWN_DOCUMENT_DIALOG_COMMAND = "open_markdown_document_dialog";
 const OPEN_MARKDOWN_DOCUMENT_FOLDER_COMMAND = "open_markdown_document_folder";
 const READ_MARKDOWN_DOCUMENT_AT_PATH_COMMAND = "read_markdown_document_at_path";
+const SAVE_EDITOR_SESSION_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND = "save_editor_session_markdown_document_as_dialog";
 const SAVE_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND = "save_markdown_document_as_dialog";
+const WRITE_EDITOR_SESSION_MARKDOWN_DOCUMENT_COMMAND = "write_editor_session_markdown_document";
 
 function getPickerWindow(): PickerWindow {
   return window as PickerWindow;
@@ -134,6 +136,26 @@ export async function overwriteMarkdownDocumentAtPath(filePath: string, content:
     {
       path: filePath,
       content,
+    },
+    "Markdown ファイルの保存に失敗しました。",
+  );
+}
+
+export async function overwriteEditorSessionMarkdownDocumentAtPath(
+  filePath: string,
+  sessionId: string,
+  expectedRevision: number,
+): Promise<SavedMarkdownDocumentPayload> {
+  if (!isTauri()) {
+    throw new Error("Tauri 環境でのみ利用できます。");
+  }
+
+  return invokeTauriCommand<SavedMarkdownDocumentPayload>(
+    WRITE_EDITOR_SESSION_MARKDOWN_DOCUMENT_COMMAND,
+    {
+      path: filePath,
+      sessionId,
+      expectedRevision,
     },
     "Markdown ファイルの保存に失敗しました。",
   );
@@ -288,4 +310,24 @@ export async function saveMarkdownDocumentAs(fileName: string, content: string):
     filePath: null,
     fileHandle: null,
   };
+}
+
+export async function saveEditorSessionMarkdownDocumentAs(
+  fileName: string,
+  sessionId: string,
+  expectedRevision: number,
+): Promise<SavedMarkdownDocumentPayload | null> {
+  if (!isTauri()) {
+    throw new Error("Tauri 環境でのみ利用できます。");
+  }
+
+  return invokeTauriCommand<SavedMarkdownDocumentPayload | null>(
+    SAVE_EDITOR_SESSION_MARKDOWN_DOCUMENT_AS_DIALOG_COMMAND,
+    {
+      fileName: normalizeMarkdownFileName(fileName),
+      sessionId,
+      expectedRevision,
+    },
+    "Markdown ファイルの保存に失敗しました。",
+  );
 }

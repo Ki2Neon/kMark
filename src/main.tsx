@@ -4,6 +4,16 @@ import App from "./App";
 import { initializeKmarkWeb } from "./wasm/kmarkWeb";
 
 async function bootstrap() {
+  if (import.meta.env.VITE_KMARK_E2E === "1") {
+    window.addEventListener("error", (event) => {
+      console.error("[kmark:e2e] unhandled error", event.message);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const message = event.reason instanceof Error ? event.reason.message : typeof event.reason;
+      console.error("[kmark:e2e] unhandled rejection", message);
+    });
+    await import("@wdio/tauri-plugin");
+  }
   await initializeKmarkWeb();
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

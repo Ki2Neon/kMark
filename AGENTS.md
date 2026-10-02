@@ -58,3 +58,11 @@ Tauri は Architecture 本体ではなく、配備対象に応じた外周 Adapt
 
 # System Instruction
 ユーザーから要件が提示されたら、まず Architecture Core を定義し、その後に Tauri Adapter を接続せよ。Tauri 前提で考えず、Tauri を交換可能な外周として扱え。処理配置判断では常に `Rust優先` とし、Frontend へ残す責務は描画・入力・最小UI状態に限定せよ。
+
+## Test and bug-fix workflow
+
+Do not stop at static analysis. Reproduce a bug with a regression test before fixing it whenever practical. Select the lowest test layer that observes the cause: Rust algorithm → `cargo test`; pure TS state → Vitest Unit; React DOM/CSS → Vitest Browser; Worker/WASM/PlantUML → Vitest Browser integration; Tauri IPC/filesystem/full workflow → real WebdriverIO Tauri E2E. Add a higher-layer test only when that boundary itself needs a guarantee.
+
+For desktop integration, trace React → `invoke` → Rust command → Application/Core → response → React → DOM. Correlate session ID, operation ID and revision in frontend and backend logs. On failure inspect `artifacts/` screenshot, `frontend.log`, `backend.log`, `state.json` and `test-result.json`. Do not mask a backend bug with a frontend workaround. Do not mock Tauri IPC, desktop Rust or filesystem in real Tauri E2E.
+
+Use revision/state-based waits with bounded timeouts and explanatory errors; do not synchronize functional tests with arbitrary sleeps. Keep temporary workspaces isolated and preserve failure artifacts. Do not treat one narrow passing test as completion: rerun the regression and related Unit tests; run Browser tests for DOM/Worker/WASM changes and Tauri E2E for IPC/desktop changes; run `cargo fmt --check`, Clippy, typecheck and lint for relevant changes. See [testing.md](docs/testing.md) for commands and migration rules.

@@ -11,9 +11,27 @@ export type KmarkDirectiveOccurrence = {
 
 export function collectKmarkDirectiveOccurrences(markdown: string): readonly KmarkDirectiveOccurrence[] {
   const occurrences: KmarkDirectiveOccurrence[] = [];
+  let activeFence: { readonly marker: string; readonly length: number } | null = null;
+  let lineStart = 0;
+  let lineEnd = markdown.indexOf("\n");
 
   for (const match of markdown.matchAll(/<!--[\s\S]*?-->/gu)) {
-    if (match.index === undefined || isInsideMarkdownCode(markdown, match.index)) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    while (lineEnd >= 0 && lineEnd < match.index) {
+      const line = markdown.slice(lineStart, lineEnd);
+      activeFence = nextMarkdownFence(line, activeFence);
+      lineStart = lineEnd + 1;
+      lineEnd = markdown.indexOf("\n", lineStart);
+    }
+
+    const lineBeforeComment = markdown.slice(lineStart, match.index);
+    const insideFence = activeFence === null
+      ? parseMarkdownFenceOpen(lineBeforeComment) !== null
+      : !isMarkdownFenceClose(lineBeforeComment, activeFence);
+    if (insideFence || isInsideInlineCode(lineBeforeComment)) {
       continue;
     }
 
@@ -38,13 +56,7 @@ export function collectKmarkDirectiveOccurrences(markdown: string): readonly Kma
   return occurrences;
 }
 
-function isInsideMarkdownCode(markdown: string, offset: number): boolean {
-  return isInsideFencedCodeBlock(markdown, offset) || isInsideInlineCode(markdown, offset);
-}
-
-function isInsideInlineCode(markdown: string, offset: number): boolean {
-  const lineStart = markdown.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
-  const lineBeforeOffset = markdown.slice(lineStart, offset);
+function isInsideInlineCode(lineBeforeOffset: string): boolean {
   const textWithoutFences = lineBeforeOffset.replace(/(`{3,}|~{3,}).*$/u, "");
   const unescapedBackticks = [...textWithoutFences].filter((character, index) => (
     character === "`" && textWithoutFences[index - 1] !== "\\"
@@ -53,23 +65,14 @@ function isInsideInlineCode(markdown: string, offset: number): boolean {
   return unescapedBackticks.length % 2 === 1;
 }
 
-function isInsideFencedCodeBlock(markdown: string, offset: number): boolean {
-  const textBeforeOffset = markdown.slice(0, offset);
-  const lines = textBeforeOffset.split(/\r?\n/u);
-  let activeFence: { readonly marker: string; readonly length: number } | null = null;
-
-  for (const line of lines) {
-    if (activeFence !== null && isMarkdownFenceClose(line, activeFence)) {
-      activeFence = null;
-      continue;
-    }
-
-    if (activeFence === null) {
-      activeFence = parseMarkdownFenceOpen(line);
-    }
+function nextMarkdownFence(
+  line: string,
+  activeFence: { readonly marker: string; readonly length: number } | null,
+): { readonly marker: string; readonly length: number } | null {
+  if (activeFence !== null) {
+    return isMarkdownFenceClose(line, activeFence) ? null : activeFence;
   }
-
-  return activeFence !== null;
+  return parseMarkdownFenceOpen(line);
 }
 
 function parseMarkdownFenceOpen(line: string): { readonly marker: string; readonly length: number } | null {

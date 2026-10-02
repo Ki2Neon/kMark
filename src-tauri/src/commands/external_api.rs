@@ -378,11 +378,12 @@ fn hex_prefix(bytes: &[u8], count: usize) -> String {
         .collect()
 }
 
-fn session_payload(snapshot: &DocumentSnapshot) -> DocumentSessionPayload {
+pub(crate) fn session_payload(snapshot: &DocumentSnapshot) -> DocumentSessionPayload {
     DocumentSessionPayload {
         instance_id: snapshot.instance_id.clone(),
         session_id: snapshot.session_id.clone(),
         revision: snapshot.revision,
+        line_ending: snapshot.line_ending.into(),
         file_name: snapshot.file_name.clone(),
         file_path: snapshot.file_path.clone(),
         content: snapshot.content.clone(),

@@ -9,7 +9,7 @@ use std::{
 use fs2::FileExt;
 use kmark_contract::{StateEnvelope, MAX_JAVASCRIPT_SAFE_INTEGER, STATE_SCHEMA_VERSION};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 const STATE_DIRECTORY_NAME: &str = "state";
 const STATE_SLOT_COUNT: usize = 2;
@@ -234,9 +234,7 @@ fn state_paths<R: Runtime>(
     scope: &'static str,
     file_name: &str,
 ) -> Result<StatePaths, JsonStateStoreError> {
-    let mut directory = app
-        .path()
-        .app_config_dir()
+    let mut directory = super::app_config_dir::app_config_dir(app)
         .map_err(|source| JsonStateStoreError::ResolveAppConfigDir { scope, source })?;
     directory.push(STATE_DIRECTORY_NAME);
     create_directory(scope, &directory)?;

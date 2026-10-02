@@ -11,7 +11,7 @@ use kmark_application::{ApplicationService, PreviewJobPort};
 use kmark_rest::{start_rest_server, RestServerHandle};
 use rand::RngCore;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 const DISCOVERY_SCHEMA_VERSION: u32 = 1;
 const EXTERNAL_API_DIRECTORY_NAME: &str = "external-api";
@@ -164,9 +164,7 @@ fn generate_token() -> String {
 }
 
 fn discovery_directory<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, ExternalApiRuntimeError> {
-    let mut path = app
-        .path()
-        .app_config_dir()
+    let mut path = super::app_config_dir::app_config_dir(app)
         .map_err(ExternalApiRuntimeError::ResolveDirectory)?;
     path.push(EXTERNAL_API_DIRECTORY_NAME);
     path.push(INSTANCE_DIRECTORY_NAME);

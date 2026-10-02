@@ -1,9 +1,13 @@
 import { type PreviewDisplayMode } from "../domain/preview";
 import {
+  type EditorDocumentSnapshotPayload,
+  type EditorMutationAckPayload,
+  type EditorMutationBatchPayload,
   type FormatMarkdownTablesPayload as GeneratedFormatMarkdownTablesPayload,
   type FinalizeGeneratedSvgRequestPayload,
   type FinalizeGeneratedSvgResultPayload,
   type RenderedPreviewPayload,
+  type SessionPreviewPayload,
   type SourceRangePayload as GeneratedSourceRangePayload,
   type TableDiagnosticKindPayload,
   type TableDiagnosticPayload as GeneratedTableDiagnosticPayload,
@@ -36,6 +40,49 @@ export type FormatMarkdownTablesPayload = Readonly<GeneratedFormatMarkdownTables
 
 export function parseJsonPayload<T>(json: string): T {
   return JSON.parse(json) as T;
+}
+
+export type WebEditorDocumentHandle = InstanceType<KmarkWebModule["WebEditorDocument"]>;
+
+export async function createWebEditorDocument(input: {
+  readonly content: string;
+  readonly revision: number;
+  readonly isDirty: boolean;
+}): Promise<WebEditorDocumentHandle> {
+  await initializeKmarkWeb();
+  return new (loadKmarkWebModuleSync().WebEditorDocument)(JSON.stringify(input));
+}
+
+export function applyWebEditorMutationBatch(
+  document: WebEditorDocumentHandle,
+  batch: EditorMutationBatchPayload,
+): EditorMutationAckPayload {
+  return parseJsonPayload<EditorMutationAckPayload>(
+    document.apply_mutation_batch_json(JSON.stringify(batch)),
+  );
+}
+
+export function renderWebSessionPreview(
+  document: WebEditorDocumentHandle,
+  request: {
+    readonly revision: number;
+    readonly baseRevision: number | null;
+    readonly filePath: string | null;
+  },
+): SessionPreviewPayload {
+  return parseJsonPayload<SessionPreviewPayload>(
+    document.render_session_preview_json(JSON.stringify(request)),
+  );
+}
+
+export function snapshotWebEditorDocument(
+  document: WebEditorDocumentHandle,
+): EditorDocumentSnapshotPayload {
+  return parseJsonPayload<EditorDocumentSnapshotPayload>(document.snapshot_json());
+}
+
+export function markWebEditorDocumentSaved(document: WebEditorDocumentHandle): void {
+  document.mark_saved();
 }
 
 function loadKmarkWebModuleSync(): KmarkWebModule {

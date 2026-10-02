@@ -11,5 +11,6 @@ path = "src/lib.rs"
 cssparser = "=0.37.0"
 pulldown-cmark = "0.13"
 quick-xml = "=0.41.0"
+ropey.workspace = true
 unicode-segmentation = "1"
 unicode-width = "0.2"

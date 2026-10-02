@@ -6,7 +6,13 @@ import { createBrowserMarkdownDocumentGateway } from "../../adapters/browser/bro
 import { createBrowserMarkdownDocumentPrinter } from "../../adapters/browser/browserMarkdownDocumentPrinter";
 import { createBrowserMarkdownRenderer } from "../../adapters/browser/browserMarkdownRenderer";
 import { createBrowserRecentFileStore } from "../../adapters/browser/browserRecentFileStore";
+import { createEditorDocumentGateway } from "../../adapters/editor/createEditorDocumentGateway";
+import { EditorMutationQueue } from "../../adapters/editor/editorMutationQueue";
 import { createTauriExternalDocumentSessionGateway } from "../../adapters/tauri/tauriExternalDocumentSessionGateway";
+import {
+  type EditorDocumentSessionSnapshot,
+  type EditorTransaction,
+} from "../../application/editorSession/editorDocumentPort";
 import {
   EditorSessionController,
   toEditorSessionErrorMessage,
@@ -15,6 +21,7 @@ import {
 import {
   type ExternalDocumentSession,
   type MarkdownAssetDataFile,
+  type MarkdownDocumentSaveSource,
 } from "../../application/editorSession/editorSessionPorts";
 import { createEditorSessionReducer } from "../../application/editorSession/editorSessionReducer";
 import { type ExternalMarkdownDocument } from "../../domain/externalMarkdownDocument";
@@ -26,6 +33,7 @@ import {
   type RenderedPreview,
 } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
+import { type MarkdownEditorHandle } from "../components/DesktopMarkdownInput";
 
 export type InitialEditorDocumentMode = "stored" | "new-untitled";
 
@@ -60,9 +68,14 @@ export function useMarkdownEditor(
   const controllerRef = useRef<EditorSessionController | null>(null);
   const externalSessionGatewayRef = useRef(createTauriExternalDocumentSessionGateway());
   const externalSessionRef = useRef<ExternalDocumentSession | null>(null);
-  const externalSessionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const lastExternalSessionSignatureRef = useRef<string | null>(null);
-  const externalSessionHydrationSignatureRef = useRef<string | null>(null);
+  const editorDocumentGatewayRef = useRef<ReturnType<typeof createEditorDocumentGateway> | null>(null);
+  const mutationQueueRef = useRef<EditorMutationQueue | null>(null);
+  const activeDocumentSessionRef = useRef<EditorDocumentSessionSnapshot | null>(null);
+  const editorHandleRef = useRef<MarkdownEditorHandle | null>(null);
+  const documentBindingRef = useRef<{ key: string; content: string } | null>(null);
+  const documentKeySequenceRef = useRef(0);
+  const fatalRecoveryRef = useRef<((sessionId: string, error: unknown) => void) | null>(null);
+  const fatalRecoverySessionRef = useRef<string | null>(null);
 
   if (plantUmlDocumentKeyRef.current === null) {
     plantUmlDocumentKeyRef.current = crypto.randomUUID();
@@ -88,16 +101,22 @@ export function useMarkdownEditor(
     });
   }
 
+  if (editorDocumentGatewayRef.current === null) {
+    editorDocumentGatewayRef.current = createEditorDocumentGateway();
+  }
+
   const controller = controllerRef.current;
+  const initialBootstrapRef = useRef<ReturnType<EditorSessionController["createInitialState"]> | null>(null);
+  if (initialBootstrapRef.current === null) {
+    initialBootstrapRef.current = controller.createInitialState(startupEditMode);
+  }
+  const initialBootstrap = initialBootstrapRef.current;
   const reducer = useMemo(() => createEditorSessionReducer(rulesRef.current!), []);
   const [isReady, setIsReady] = useState(false);
   const [recentFiles, setRecentFiles] = useState<readonly RecentFile[]>([]);
   const [plantumlRenderEpoch, reloadPlantUml] = useReducer((epoch: number) => epoch + 1, 0);
-  const [state, dispatch] = useReducer(
-    reducer,
-    startupEditMode,
-    (initialStartupEditMode) => controller.createInitialState(initialStartupEditMode).initialState,
-  );
+  const [contentEpoch, markContentChanged] = useReducer((epoch: number) => epoch + 1, 0);
+  const [state, dispatch] = useReducer(reducer, initialBootstrap.initialState);
   const [externalSession, setExternalSession] = useState<ExternalDocumentSession | null>(null);
   const stateRef = useRef(state);
   const store = useMemo<EditorSessionStore>(() => ({
@@ -112,29 +131,130 @@ export function useMarkdownEditor(
     defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE,
   });
 
+  if (documentBindingRef.current === null) {
+    documentBindingRef.current = {
+      key: "editor-document-pending",
+      content: initialBootstrap.content,
+    };
+  }
+
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  const applyExternalSession = useCallback((session: ExternalDocumentSession) => {
-    const signature = sessionSignature(session);
+  const createMutationQueue = useCallback((session: EditorDocumentSessionSnapshot) => {
+    const queue = new EditorMutationQueue(
+      editorDocumentGatewayRef.current!,
+      session.sessionId,
+      session.revision,
+      session.documentLengthUtf16,
+      {
+        onAcknowledged: (ack) => {
+          if (mutationQueueRef.current !== queue) {
+            return;
+          }
+          const active = activeDocumentSessionRef.current;
+          if (active !== null && active.sessionId === session.sessionId) {
+            const isDirty = ack.isDirty || queue.hasPendingTransactions;
+            activeDocumentSessionRef.current = {
+              ...active,
+              revision: ack.revision,
+              documentLengthUtf16: ack.documentLengthUtf16,
+              isDirty,
+            };
+            dispatch({ type: "editor/documentDirtyResolved", isDirty });
+          }
+          const current = externalSessionRef.current;
+          if (current !== null && current.sessionId === session.sessionId) {
+            const updated = {
+              ...current,
+              revision: ack.revision,
+              isDirty: ack.isDirty || queue.hasPendingTransactions,
+            };
+            externalSessionRef.current = updated;
+            setExternalSession(updated);
+          }
+        },
+        onFailed: (error) => {
+          if (mutationQueueRef.current === queue) {
+            fatalRecoveryRef.current?.(session.sessionId, error);
+          }
+        },
+      },
+    );
+    mutationQueueRef.current = queue;
+  }, []);
+
+  const installAuthoritativeSession = useCallback((
+    session: EditorDocumentSessionSnapshot,
+    external: ExternalDocumentSession | null = null,
+  ) => {
+    documentKeySequenceRef.current += 1;
+    documentBindingRef.current = {
+      key: `${session.sessionId}:${documentKeySequenceRef.current}`,
+      content: session.content,
+    };
+    activeDocumentSessionRef.current = session;
+    createMutationQueue(session);
+    const externalValue = external ?? (
+      externalSessionGatewayRef.current.isSupported()
+        ? toExternalDocumentSession(session)
+        : null
+    );
+    externalSessionRef.current = externalValue;
+    setExternalSession(externalValue);
+    controller.loadApplicationSession(store, session);
+    markContentChanged();
+    reloadPlantUml();
+  }, [controller, createMutationQueue, store]);
+
+  const applyRemoteSession = useCallback((session: ExternalDocumentSession) => {
+    const snapshot = toEditorDocumentSessionSnapshot(session);
+    editorHandleRef.current?.applyRemoteContent(session.content);
+    documentBindingRef.current = {
+      key: documentBindingRef.current?.key ?? session.sessionId,
+      content: session.content,
+    };
+    activeDocumentSessionRef.current = snapshot;
+    createMutationQueue(snapshot);
     externalSessionRef.current = session;
-    lastExternalSessionSignatureRef.current = signature;
     setExternalSession(session);
-    const current = stateRef.current;
+    controller.loadApplicationSession(store, session);
+    markContentChanged();
+    reloadPlantUml();
+  }, [controller, createMutationQueue, store]);
+
+  fatalRecoveryRef.current = (sessionId, error) => {
     if (
-      current.content !== session.content
-      || current.fileName !== session.fileName
-      || current.filePath !== session.filePath
-      || current.isDirty !== session.isDirty
+      activeDocumentSessionRef.current?.sessionId !== sessionId
+      || fatalRecoverySessionRef.current === sessionId
     ) {
-      externalSessionHydrationSignatureRef.current = signature;
-      controller.loadApplicationSession(store, session);
-      reloadPlantUml();
-    } else {
-      externalSessionHydrationSignatureRef.current = null;
+      return;
     }
-  }, [controller, store]);
+    fatalRecoverySessionRef.current = sessionId;
+    controller.raiseError(store, toEditorSessionErrorMessage(error));
+    void controller.persistDraft(
+      stateRef.current,
+      () => getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current),
+      activeDocumentSessionRef.current?.lineEnding ?? "lf",
+      null,
+      null,
+    )
+      .then(() => editorDocumentGatewayRef.current!.getSnapshot(sessionId))
+      .then((authoritative) => {
+        if (activeDocumentSessionRef.current?.sessionId === sessionId) {
+          installAuthoritativeSession(authoritative);
+        }
+      })
+      .catch((recoveryError) => {
+        controller.raiseError(store, toEditorSessionErrorMessage(recoveryError));
+      })
+      .finally(() => {
+        if (fatalRecoverySessionRef.current === sessionId) {
+          fatalRecoverySessionRef.current = null;
+        }
+      });
+  };
 
   useEffect(() => {
     const gateway = externalSessionGatewayRef.current;
@@ -143,48 +263,25 @@ export function useMarkdownEditor(
     }
     let disposed = false;
     let unlisten: (() => void) | null = null;
-    const enqueue = (operation: () => Promise<void>) => {
-      externalSessionQueueRef.current = externalSessionQueueRef.current
-        .then(operation)
-        .catch((error) => {
-          if (!disposed) {
-            controller.raiseError(store, toEditorSessionErrorMessage(error));
-          }
-        });
-    };
-
-    enqueue(async () => {
-      const session = initialExternalSessionId === null
-        ? await gateway.register({
-          fileName: stateRef.current.fileName,
-          filePath: stateRef.current.filePath,
-          content: stateRef.current.content,
-          isDirty: stateRef.current.isDirty,
-        })
-        : await gateway.attach(initialExternalSessionId);
-      if (!disposed) {
-        applyExternalSession(session);
-      }
-    });
 
     void gateway.listen((event) => {
       const current = externalSessionRef.current;
       if (current === null || current.sessionId !== event.sessionId || current.revision >= event.revision) {
         return;
       }
-      enqueue(async () => {
-        const synchronizedSignature = lastExternalSessionSignatureRef.current;
-        if (editorStateSignature(stateRef.current) !== synchronizedSignature) {
-          return;
+      void (async () => {
+        try {
+          await mutationQueueRef.current?.flush();
+          const session = await gateway.get(event.sessionId);
+          if (!disposed && session.revision > (externalSessionRef.current?.revision ?? 0)) {
+            applyRemoteSession(session);
+          }
+        } catch (error) {
+          if (!disposed) {
+            controller.raiseError(store, toEditorSessionErrorMessage(error));
+          }
         }
-        const session = await gateway.get(event.sessionId);
-        if (
-          !disposed
-          && editorStateSignature(stateRef.current) === synchronizedSignature
-        ) {
-          applyExternalSession(session);
-        }
-      });
+      })();
     }).then((dispose) => {
       if (disposed) {
         dispose();
@@ -199,57 +296,7 @@ export function useMarkdownEditor(
       disposed = true;
       unlisten?.();
     };
-  }, [applyExternalSession, controller, initialExternalSessionId, isReady, store]);
-
-  useEffect(() => {
-    const gateway = externalSessionGatewayRef.current;
-    if (!isReady || !gateway.isSupported()) {
-      return;
-    }
-    const session = externalSessionRef.current;
-    const signature = editorStateSignature(state);
-    const hydrationSignature = externalSessionHydrationSignatureRef.current;
-    if (hydrationSignature !== null) {
-      if (signature === hydrationSignature) {
-        externalSessionHydrationSignatureRef.current = null;
-      }
-      return;
-    }
-    if (session === null || signature === lastExternalSessionSignatureRef.current) {
-      return;
-    }
-    externalSessionQueueRef.current = externalSessionQueueRef.current
-      .then(async () => {
-        const current = externalSessionRef.current;
-        if (current === null) {
-          return;
-        }
-        const snapshot = await gateway.sync({
-          sessionId: current.sessionId,
-          expectedRevision: current.revision,
-          fileName: state.fileName,
-          filePath: state.filePath,
-          content: state.content,
-          isDirty: state.isDirty,
-        });
-        externalSessionRef.current = snapshot;
-        lastExternalSessionSignatureRef.current = sessionSignature(snapshot);
-        setExternalSession(snapshot);
-      })
-      .catch(async (error) => {
-        const current = externalSessionRef.current;
-        if (current !== null && commandErrorCode(error) === "revision_conflict") {
-          try {
-            applyExternalSession(await gateway.get(current.sessionId));
-            return;
-          } catch (refreshError) {
-            controller.raiseError(store, toEditorSessionErrorMessage(refreshError));
-            return;
-          }
-        }
-        controller.raiseError(store, toEditorSessionErrorMessage(error));
-      });
-  }, [applyExternalSession, controller, isReady, state, store]);
+  }, [applyRemoteSession, controller, isReady, store]);
 
   const applyRecentFilesRequest = useCallback(async (
     operation: () => Promise<readonly RecentFile[] | null>,
@@ -271,16 +318,40 @@ export function useMarkdownEditor(
       ? controller.bootstrapNewUntitled(startupEditMode)
       : controller.bootstrap(startupEditMode);
 
-    void bootstrapPromise.then((bootstrap) => {
+    void bootstrapPromise.then(async (bootstrap) => {
       if (isDisposed) {
         return;
       }
 
       shouldSkipInitialEditPersistRef.current = bootstrap.shouldSkipInitialPersist;
-      dispatch({
-        type: "editor/bootstrapLoaded",
-        state: bootstrap.initialState,
-      });
+      const externalGateway = externalSessionGatewayRef.current;
+      if (externalGateway.isSupported()) {
+        const external = initialExternalSessionId === null
+          ? await externalGateway.register({
+            fileName: bootstrap.initialState.fileName,
+            filePath: bootstrap.initialState.filePath,
+            content: bootstrap.content,
+            isDirty: bootstrap.initialState.isDirty,
+          })
+          : await externalGateway.attach(initialExternalSessionId);
+        if (isDisposed) {
+          return;
+        }
+        installAuthoritativeSession(toEditorDocumentSessionSnapshot(external), external);
+      } else {
+        const session = initialExternalSessionId === null
+          ? await editorDocumentGatewayRef.current!.bootstrap({
+            fileName: bootstrap.initialState.fileName,
+            filePath: bootstrap.initialState.filePath,
+            content: bootstrap.content,
+            isDirty: bootstrap.initialState.isDirty,
+          })
+          : await editorDocumentGatewayRef.current!.attach(initialExternalSessionId);
+        if (isDisposed) {
+          return;
+        }
+        installAuthoritativeSession(session);
+      }
       setIsReady(true);
     }).catch((error) => {
       if (isDisposed) {
@@ -294,7 +365,7 @@ export function useMarkdownEditor(
     return () => {
       isDisposed = true;
     };
-  }, [controller, initialDocumentMode, startupEditMode, store]);
+  }, [controller, initialDocumentMode, initialExternalSessionId, installAuthoritativeSession, startupEditMode, store]);
 
   useEffect(() => {
     let isDisposed = false;
@@ -323,10 +394,24 @@ export function useMarkdownEditor(
       return;
     }
 
-    void controller.persistDraft(state).catch((error) => {
-      controller.raiseError(store, toEditorSessionErrorMessage(error));
-    });
-  }, [controller, isReady, state, store]);
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        await mutationQueueRef.current?.flush();
+        const active = activeDocumentSessionRef.current;
+        await controller.persistDraft(
+          stateRef.current,
+          () => getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current),
+          active?.lineEnding ?? "lf",
+          active?.sessionId ?? null,
+          active?.revision ?? null,
+        );
+      })().catch((error) => {
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [contentEpoch, controller, isReady, state.fileName, state.filePath, state.lastSavedAt, store]);
 
   useEffect(() => {
     if (!isReady) {
@@ -346,34 +431,49 @@ export function useMarkdownEditor(
       });
     };
 
-    void controller.renderPreview(state.content, state.filePath, previewDisplayMode, {
-      revision: requestId,
-      documentKey: plantUmlDocumentKey,
-      plantumlRenderEpoch,
-      plantumlHttpsHosts,
-      activeSourceLine,
-      signal: abortController.signal,
-      onUpdate: applyRenderedPreview,
-    })
-      .then((nextRenderedPreview) => {
-        applyRenderedPreview(nextRenderedPreview);
-      })
-      .catch((error) => {
-        if (disposed || renderRequestIdRef.current !== requestId) {
-          return;
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        await mutationQueueRef.current?.flush();
+        if (disposed) {
+          throw new DOMException("Preview request aborted", "AbortError");
         }
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
+        const active = activeDocumentSessionRef.current;
+        const content = active === null
+          ? getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current)
+          : null;
+        return controller.renderPreview(content, state.filePath, previewDisplayMode, {
+          revision: requestId,
+          documentKey: plantUmlDocumentKey,
+          documentSessionId: active?.sessionId,
+          documentRevision: active?.revision,
+          plantumlRenderEpoch,
+          plantumlHttpsHosts,
+          activeSourceLine,
+          signal: abortController.signal,
+          onUpdate: applyRenderedPreview,
+        });
+      })()
+        .then((nextRenderedPreview) => {
+          applyRenderedPreview(nextRenderedPreview);
+        })
+        .catch((error) => {
+          if (disposed || renderRequestIdRef.current !== requestId) {
+            return;
+          }
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
 
-        controller.raiseError(store, toEditorSessionErrorMessage(error));
-      });
+          controller.raiseError(store, toEditorSessionErrorMessage(error));
+        });
+    }, 150);
 
     return () => {
       disposed = true;
+      window.clearTimeout(timeoutId);
       abortController.abort();
     };
-  }, [controller, currentDocumentFilePath, isReady, plantUmlDocumentKey, plantumlHttpsHosts, plantumlRenderEpoch, previewColorKey, previewDisplayMode, state.content, state.fileName, state.filePath, store]);
+  }, [activeSourceLine, contentEpoch, controller, currentDocumentFilePath, isReady, plantUmlDocumentKey, plantumlHttpsHosts, plantumlRenderEpoch, previewColorKey, previewDisplayMode, state.fileName, state.filePath, store]);
 
   const executeWithErrorHandling = useCallback(
     async (operation: () => Promise<void>) => {
@@ -386,15 +486,143 @@ export function useMarkdownEditor(
     [controller, store],
   );
 
-  const handleContentChange = useCallback((content: string) => {
-    controller.changeContent(store, content);
+  const handleEditorTransaction = useCallback((transaction: EditorTransaction) => {
+    try {
+      mutationQueueRef.current?.enqueue(transaction);
+      dispatch({ type: "editor/documentMutated" });
+      markContentChanged();
+    } catch (error) {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    }
   }, [controller, store]);
+
+  const handleEditorHandleChange = useCallback((handle: MarkdownEditorHandle | null) => {
+    editorHandleRef.current = handle;
+    if (handle !== null) {
+      markContentChanged();
+    }
+  }, []);
+
+  const installLoadedDocument = useCallback(async (loadedDocument: {
+    readonly fileName: string;
+    readonly filePath: string | null;
+    readonly content: string;
+  }, isDirty = false) => {
+    const session = await editorDocumentGatewayRef.current!.bootstrap({
+      fileName: loadedDocument.fileName,
+      filePath: loadedDocument.filePath,
+      content: loadedDocument.content,
+      isDirty,
+    });
+    installAuthoritativeSession(session);
+  }, [installAuthoritativeSession]);
+
+  const flushEditorMutations = useCallback(async () => {
+    await mutationQueueRef.current?.flush();
+  }, []);
+
+  const flushEditorSession = useCallback(async () => {
+    await flushEditorMutations();
+    const active = activeDocumentSessionRef.current;
+    await controller.persistDraft(
+      stateRef.current,
+      () => getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current),
+      active?.lineEnding ?? "lf",
+      active?.sessionId ?? null,
+      active?.revision ?? null,
+    );
+  }, [controller, flushEditorMutations]);
+
+  const applyActiveSessionSaved = useCallback((
+    saved: EditorDocumentSessionSnapshot,
+    preserveCachedContent = false,
+  ) => {
+    const isDirty = saved.isDirty || (mutationQueueRef.current?.hasPendingTransactions ?? false);
+    activeDocumentSessionRef.current = { ...saved, isDirty };
+    if (!preserveCachedContent) {
+      documentBindingRef.current = {
+        key: documentBindingRef.current?.key ?? saved.sessionId,
+        content: saved.content,
+      };
+    }
+    const currentExternal = externalSessionRef.current;
+    const updatedExternal = currentExternal === null
+      ? externalSessionGatewayRef.current.isSupported()
+        ? toExternalDocumentSession({ ...saved, isDirty })
+        : null
+      : {
+        ...currentExternal,
+        revision: saved.revision,
+        lineEnding: saved.lineEnding,
+        fileName: saved.fileName,
+        filePath: saved.filePath,
+        content: preserveCachedContent ? currentExternal.content : saved.content,
+        isDirty,
+      };
+    externalSessionRef.current = updatedExternal;
+    setExternalSession(updatedExternal);
+    dispatch({ type: "editor/documentDirtyResolved", isDirty });
+  }, []);
+
+  const markActiveSessionSaved = useCallback(async (
+    source: MarkdownDocumentSaveSource,
+    fileName: string,
+    filePath: string | null,
+  ) => {
+    const active = activeDocumentSessionRef.current;
+    if (active === null || active.sessionId !== source.sessionId) {
+      throw new Error("保存対象のEditor Sessionがありません。");
+    }
+    if (active.revision !== source.revision || mutationQueueRef.current?.hasPendingTransactions) {
+      applyActiveSessionSaved({ ...active, fileName, filePath, isDirty: true }, true);
+      return;
+    }
+    const saved = await editorDocumentGatewayRef.current!.markSaved(
+      active.sessionId,
+      fileName,
+      filePath,
+    );
+    const current = activeDocumentSessionRef.current;
+    if (current === null || current.sessionId !== source.sessionId) {
+      throw new Error("保存対象のEditor Sessionが切り替わりました。");
+    }
+    if (current.revision !== source.revision || mutationQueueRef.current?.hasPendingTransactions) {
+      applyActiveSessionSaved({ ...current, fileName, filePath, isDirty: true }, true);
+      return;
+    }
+    applyActiveSessionSaved(saved);
+  }, [applyActiveSessionSaved]);
+
+  const applyRustSessionSave = useCallback((
+    source: MarkdownDocumentSaveSource,
+    fileName: string,
+    filePath: string | null,
+  ) => {
+    const active = activeDocumentSessionRef.current;
+    if (active === null || active.sessionId !== source.sessionId) {
+      throw new Error("保存対象のEditor Sessionが切り替わりました。");
+    }
+    const isDirty = active.revision !== source.revision
+      ? active.isDirty || (mutationQueueRef.current?.hasPendingTransactions ?? false)
+      : mutationQueueRef.current?.hasPendingTransactions ?? false;
+    applyActiveSessionSaved(
+      {
+        ...active,
+        fileName,
+        filePath,
+        isDirty,
+      },
+      true,
+    );
+  }, [applyActiveSessionSaved]);
 
   const handleOpenDocumentFromPicker = useCallback(async () => {
     await executeWithErrorHandling(async () => {
+      await flushEditorSession();
       const loadedDocument = await controller.openDocumentFromPicker(store);
 
       if (loadedDocument !== null) {
+        await installLoadedDocument(loadedDocument);
         reloadPlantUml();
         if (loadedDocument.filePath !== null) {
           await applyRecentFilesRequest(() => (
@@ -403,13 +631,14 @@ export function useMarkdownEditor(
         }
       }
     });
-  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, flushEditorSession, installLoadedDocument, store]);
 
   const handleOpenCurrentDocumentFolder = useCallback(async () => {
     await executeWithErrorHandling(async () => {
+      await flushEditorSession();
       await controller.openCurrentDocumentFolder(store);
     });
-  }, [controller, executeWithErrorHandling]);
+  }, [controller, executeWithErrorHandling, flushEditorSession, store]);
 
   const handlePickedFile = useCallback(async (file: File | null) => {
     if (file === null) {
@@ -417,7 +646,9 @@ export function useMarkdownEditor(
     }
 
     await executeWithErrorHandling(async () => {
+      await flushEditorSession();
       const loadedDocument = await controller.openDocumentFromFile(store, file);
+      await installLoadedDocument(loadedDocument);
       reloadPlantUml();
 
       if (loadedDocument.filePath !== null) {
@@ -426,11 +657,13 @@ export function useMarkdownEditor(
         ));
       }
     });
-  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, flushEditorSession, installLoadedDocument, store]);
 
   const handleOpenRecentFile = useCallback(async (recentFile: RecentFile) => {
     await executeWithErrorHandling(async () => {
+      await flushEditorSession();
       const loadedDocument = await controller.openDocumentFromRecentFile(store, recentFile);
+      await installLoadedDocument(loadedDocument);
       reloadPlantUml();
 
       if (loadedDocument.filePath !== null) {
@@ -439,38 +672,82 @@ export function useMarkdownEditor(
         ));
       }
     });
-  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, store]);
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, flushEditorSession, installLoadedDocument, store]);
 
   const handleOverwriteSaveDocument = useCallback(async () => {
     let didSave = false;
 
     await executeWithErrorHandling(async () => {
-      didSave = await controller.overwriteSaveDocument(store);
+      await flushEditorSession();
+      const active = activeDocumentSessionRef.current;
+      if (active === null) {
+        throw new Error("保存対象のEditor Sessionがありません。");
+      }
+      const source: MarkdownDocumentSaveSource = {
+        sessionId: active.sessionId,
+        revision: active.revision,
+        lineEnding: active.lineEnding,
+        readCanonicalContent: () => getCurrentEditorContent(
+          editorHandleRef.current,
+          documentBindingRef.current,
+        ),
+      };
+      const result = await controller.overwriteSaveDocument(store, source);
+      didSave = result !== null;
+      if (result !== null) {
+        if (result.sessionRevision === null) {
+          await markActiveSessionSaved(source, result.fileName, result.filePath);
+        } else {
+          applyRustSessionSave(source, result.fileName, result.filePath);
+        }
+      }
     });
 
     return didSave;
-  }, [controller, executeWithErrorHandling, store]);
+  }, [applyRustSessionSave, controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
 
   const handleSaveDocumentAs = useCallback(async () => {
     let didSave = false;
 
     await executeWithErrorHandling(async () => {
-      didSave = await controller.saveDocumentAs(store);
+      await flushEditorSession();
+      const active = activeDocumentSessionRef.current;
+      if (active === null) {
+        throw new Error("保存対象のEditor Sessionがありません。");
+      }
+      const source: MarkdownDocumentSaveSource = {
+        sessionId: active.sessionId,
+        revision: active.revision,
+        lineEnding: active.lineEnding,
+        readCanonicalContent: () => getCurrentEditorContent(
+          editorHandleRef.current,
+          documentBindingRef.current,
+        ),
+      };
+      const result = await controller.saveDocumentAs(store, source);
+      didSave = result !== null;
+      if (result !== null) {
+        if (result.sessionRevision === null) {
+          await markActiveSessionSaved(source, result.fileName, result.filePath);
+        } else {
+          applyRustSessionSave(source, result.fileName, result.filePath);
+        }
+      }
     });
 
     return didSave;
-  }, [controller, executeWithErrorHandling, store]);
+  }, [applyRustSessionSave, controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
 
   const handleLoadExternalDocument = useCallback((document: ExternalMarkdownDocument) => {
-    const loadedDocument = controller.loadExternalDocument(store, document);
-    reloadPlantUml();
-
-    void applyRecentFilesRequest(() => (
-      controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
-    )).catch((error) => {
-      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    void executeWithErrorHandling(async () => {
+      await flushEditorSession();
+      const loadedDocument = controller.loadExternalDocument(store, document);
+      await installLoadedDocument(loadedDocument);
+      await applyRecentFilesRequest(() => (
+        controller.recordRecentFile(loadedDocument.fileName, loadedDocument.filePath)
+      ));
     });
-  }, [applyRecentFilesRequest, controller, store]);
+  }, [applyRecentFilesRequest, controller, executeWithErrorHandling, flushEditorSession, installLoadedDocument, store]);
 
   const handleTakePendingExternalDocuments = useCallback(async () => {
     try {
@@ -495,15 +772,21 @@ export function useMarkdownEditor(
     previewDisplayMode: PreviewDisplayMode,
   ) => {
     await executeWithErrorHandling(async () => {
+      await flushEditorSession();
       await controller.printDocument(
         store,
+        activeDocumentSessionRef.current === null
+          ? getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current)
+          : null,
         previewDisplayMode,
         plantumlHttpsHosts,
         plantUmlDocumentKey,
         plantumlRenderEpoch,
+        activeDocumentSessionRef.current?.sessionId,
+        activeDocumentSessionRef.current?.revision,
       );
     });
-  }, [controller, executeWithErrorHandling, plantUmlDocumentKey, plantumlHttpsHosts, plantumlRenderEpoch, store]);
+  }, [controller, executeWithErrorHandling, flushEditorSession, plantUmlDocumentKey, plantumlHttpsHosts, plantumlRenderEpoch, store]);
 
   const handleImportDroppedAssets = useCallback(async (droppedFilePaths: readonly string[]) => {
     try {
@@ -524,9 +807,13 @@ export function useMarkdownEditor(
   }, [controller, store]);
 
   const handleResetDocument = useCallback(() => {
-    controller.resetDocument(store);
-    reloadPlantUml();
-  }, [controller, store]);
+    void executeWithErrorHandling(async () => {
+      await flushEditorSession();
+      controller.resetDocument(store);
+      const reset = controller.createInitialState("start-page");
+      await installLoadedDocument({ ...reset.initialState, content: reset.content });
+    });
+  }, [controller, executeWithErrorHandling, flushEditorSession, installLoadedDocument, store]);
 
   const handleReloadPlantUml = useCallback(() => {
     reloadPlantUml();
@@ -538,11 +825,12 @@ export function useMarkdownEditor(
       return;
     }
     try {
-      applyExternalSession(await externalSessionGatewayRef.current.commitStagedOperation(session.sessionId));
+      await flushEditorSession();
+      applyRemoteSession(await externalSessionGatewayRef.current.commitStagedOperation(session.sessionId));
     } catch (error) {
       controller.raiseError(store, toEditorSessionErrorMessage(error));
     }
-  }, [applyExternalSession, controller, store]);
+  }, [applyRemoteSession, controller, flushEditorSession, store]);
 
   const handleCancelStagedFileOperation = useCallback(async () => {
     const session = externalSessionRef.current;
@@ -550,11 +838,12 @@ export function useMarkdownEditor(
       return;
     }
     try {
-      applyExternalSession(await externalSessionGatewayRef.current.cancelStagedOperation(session.sessionId));
+      await flushEditorSession();
+      applyRemoteSession(await externalSessionGatewayRef.current.cancelStagedOperation(session.sessionId));
     } catch (error) {
       controller.raiseError(store, toEditorSessionErrorMessage(error));
     }
-  }, [applyExternalSession, controller, store]);
+  }, [applyRemoteSession, controller, flushEditorSession, store]);
 
   const handleErrorRaise = useCallback((message: string) => {
     controller.raiseError(store, message);
@@ -563,6 +852,14 @@ export function useMarkdownEditor(
   const handleErrorClear = useCallback(() => {
     controller.clearError(store);
   }, [controller, store]);
+
+  const getContentSnapshot = useCallback(() => (
+    getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current)
+  ), []);
+
+  const replaceEditorContent = useCallback((content: string) => {
+    editorHandleRef.current?.replaceContent(content);
+  }, []);
 
   const confirmDiscard = useCallback(() => {
     if (!state.isDirty) {
@@ -574,22 +871,26 @@ export function useMarkdownEditor(
 
   return {
     canOpenDocumentWithNativePicker: controller.supportsNativeOpenPicker(),
-    content: state.content,
+    document: documentBindingRef.current,
     currentDocumentFilePath,
     errorMessage: state.errorMessage,
     externalSession,
     fileName: state.fileName,
+    flushEditorSession,
     isDirty: state.isDirty,
     isReady,
     recentFiles,
     previewHtml: renderedPreview.mode === "standard" ? renderedPreview.html : "",
+    previewSectionHtmls: renderedPreview.mode === "standard" ? renderedPreview.sectionHtmls : undefined,
     previewPages: renderedPreview.mode === "a4" ? renderedPreview.pages : [],
     renderedPreviewMode: renderedPreview.mode,
     defaultPreviewPageStyle: renderedPreview.defaultPageStyle,
     defaultPreviewTextStyle: renderedPreview.defaultTextStyle,
     confirmDiscard,
     handleClearPendingExternalDocuments,
-    handleContentChange,
+    getContentSnapshot,
+    handleEditorHandleChange,
+    handleEditorTransaction,
     handleCancelStagedFileOperation,
     handleCommitStagedFileOperation,
     handleErrorClear,
@@ -607,26 +908,46 @@ export function useMarkdownEditor(
     handlePrintDocument,
     handleSaveDocumentAs,
     handleTakePendingExternalDocuments,
+    replaceEditorContent,
     subscribeToExternalDocumentRequests,
   };
 }
 
-function editorStateSignature(state: {
-  readonly content: string;
-  readonly fileName: string;
-  readonly filePath: string | null;
-  readonly isDirty: boolean;
-}): string {
-  return JSON.stringify([state.content, state.fileName, state.filePath, state.isDirty]);
+function getCurrentEditorContent(
+  handle: MarkdownEditorHandle | null,
+  binding: { readonly content: string } | null,
+): string {
+  return handle?.getSnapshot() ?? binding?.content ?? "";
 }
 
-function sessionSignature(session: ExternalDocumentSession): string {
-  return editorStateSignature(session);
+function toEditorDocumentSessionSnapshot(
+  session: ExternalDocumentSession,
+): EditorDocumentSessionSnapshot {
+  return {
+    sessionId: session.sessionId,
+    revision: session.revision,
+    lineEnding: session.lineEnding,
+    content: session.content,
+    documentLengthUtf16: session.content.length,
+    fileName: session.fileName,
+    filePath: session.filePath,
+    isDirty: session.isDirty,
+  };
 }
 
-function commandErrorCode(error: unknown): string | null {
-  if (error instanceof Error && "code" in error && typeof error.code === "string") {
-    return error.code;
-  }
-  return null;
+function toExternalDocumentSession(
+  session: EditorDocumentSessionSnapshot,
+): ExternalDocumentSession {
+  return {
+    instanceId: "local-web",
+    sessionId: session.sessionId,
+    revision: session.revision,
+    lineEnding: session.lineEnding,
+    fileName: session.fileName,
+    filePath: session.filePath,
+    content: session.content,
+    isDirty: session.isDirty,
+    pendingProposalId: null,
+    stagedFileOperation: null,
+  };
 }

@@ -1,9 +1,15 @@
-import { collectKmarkDirectiveOccurrences } from "./scanKmarkDirectives";
+import { collectKmarkDirectiveOccurrences, type KmarkDirectiveOccurrence } from "./scanKmarkDirectives";
 
 export function collectKmarkDefinitions(markdown: string): readonly string[] {
+  return collectKmarkDefinitionsFromOccurrences(collectKmarkDirectiveOccurrences(markdown));
+}
+
+export function collectKmarkDefinitionsFromOccurrences(
+  occurrences: readonly KmarkDirectiveOccurrence[],
+): readonly string[] {
   const definitions = new Set<string>();
 
-  for (const occurrence of collectKmarkDirectiveOccurrences(markdown)) {
+  for (const occurrence of occurrences) {
     for (const token of occurrence.directiveText.matchAll(/[^\s{}]+/gu)) {
       const [name, value] = token[0].split(":", 2);
 

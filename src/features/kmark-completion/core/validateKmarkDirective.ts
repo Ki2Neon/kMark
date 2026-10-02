@@ -1,5 +1,5 @@
 import { KMARK_PARAM_SPECS } from "../schema/kmarkParamSpecs";
-import { collectKmarkDefinitions, normalizeKmarkDefinitionName } from "./collectKmarkDefinitions";
+import { collectKmarkDefinitionsFromOccurrences, normalizeKmarkDefinitionName } from "./collectKmarkDefinitions";
 import { collectKmarkDirectiveOccurrences, type KmarkDirectiveOccurrence } from "./scanKmarkDirectives";
 import { type KmarkParamSpec, type KmarkValidationWarning } from "./types";
 
@@ -27,9 +27,10 @@ export function validateKmarkDirective(input: {
 export function validateKmarkDocument(markdown: string): readonly KmarkValidationWarning[] {
   const warnings: KmarkValidationWarning[] = [];
   const scopeStack: KmarkDirectiveOccurrence[] = [];
-  const definedStyleNames = new Set(collectKmarkDefinitions(markdown));
+  const occurrences = collectKmarkDirectiveOccurrences(markdown);
+  const definedStyleNames = new Set(collectKmarkDefinitionsFromOccurrences(occurrences));
 
-  for (const occurrence of collectKmarkDirectiveOccurrences(markdown)) {
+  for (const occurrence of occurrences) {
     warnings.push(...validateKmarkDirectiveTokens({
       directiveText: occurrence.directiveText,
       rangeStart: occurrence.rangeStart,

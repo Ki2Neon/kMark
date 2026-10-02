@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.accou.kmark.e2e",
+  "build": {
+    "beforeBuildCommand": "pnpm run build:web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        "preview-capture",
+        {
+          "identifier": "e2e",
+          "description": "WebDriver access in dedicated e2e builds only",
+          "webviews": ["main"],
+          "permissions": ["wdio:default", "wdio-webdriver:default"]
+        }
+      ]
+    }
+  }
+}
