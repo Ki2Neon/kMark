@@ -16,6 +16,7 @@ export type SavedMarkdownDocument = {
   readonly fileName: string;
   readonly filePath: string | null;
   readonly sessionRevision: number | null;
+  readonly diskVersion?: string;
 };
 
 export type MarkdownDocumentSaveSource = {
@@ -23,6 +24,8 @@ export type MarkdownDocumentSaveSource = {
   readonly revision: number;
   readonly lineEnding: "lf" | "crlf";
   readonly readCanonicalContent: () => string;
+  readonly expectedDiskVersion?: string;
+  readonly overwriteExpectedVersion?: string;
 };
 
 export type ExternalDocumentSession = {

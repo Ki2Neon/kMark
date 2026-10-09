@@ -24,11 +24,12 @@ import { MarkdownPreview } from "../components/MarkdownPreview";
 import { PreviewContextMenu } from "../components/PreviewContextMenu";
 import { UnsavedExitDialog } from "../components/UnsavedExitDialog";
 import { ExternalProposalReviewDialog } from "../components/ExternalProposalReviewDialog";
+import { ExternalFileConflictDialog } from "../components/ExternalFileConflictDialog";
 import { useConfirmSaveOnExit } from "../hooks/useConfirmSaveOnExit";
 import { useDesktopMenuVisibility } from "../hooks/useDesktopMenuVisibility";
 import { useDesktopWorkspaceSplit } from "../hooks/useDesktopWorkspaceSplit";
 import { useExternalMarkdownRequests } from "../hooks/useExternalMarkdownRequests";
-import { type InitialEditorDocumentMode, useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { type EditorSearchMode, type InitialEditorDocumentMode, useMarkdownEditor } from "../hooks/useMarkdownEditor";
 import { useMarkdownEditorShortcuts } from "../hooks/useMarkdownEditorShortcuts";
 import { type MobileSectionId, useMobileSectionNavigation } from "../hooks/useMobileSectionNavigation";
 import { MAX_PREVIEW_ZOOM_SCALE, MIN_PREVIEW_ZOOM_SCALE, usePreviewInteraction } from "../hooks/usePreviewInteraction";
@@ -153,10 +154,13 @@ export function MarkdownEditorScreen({
     document: editorDocument,
     currentDocumentFilePath,
     errorMessage,
+    externalFileConflict,
+    externalFileError,
     externalSession,
     fileName,
     flushEditorSession,
     isDirty,
+    isExternalFileBusy,
     isReady: isEditorReady,
     previewHtml,
     previewSectionHtmls,
@@ -168,11 +172,15 @@ export function MarkdownEditorScreen({
     defaultPreviewTextStyle,
     confirmDiscard,
     getContentSnapshot,
+    openEditorSearch,
     handleEditorHandleChange,
     handleEditorTransaction,
     handleCancelStagedFileOperation,
     handleCommitStagedFileOperation,
     handleLoadExternalDocument,
+    handleExternalFileCancel,
+    handleExternalFileDiscard,
+    handleExternalFileOverwrite,
     handleOpenCurrentDocumentFolder,
     handleOpenDocumentFromPicker,
     handleOpenRecentFile,
@@ -749,9 +757,19 @@ export function MarkdownEditorScreen({
     dismissMobileMenu();
   }, [closeDesktopMenu, dismissMobileMenu, layoutMode]);
 
+  const handleShortcutSearch = useCallback((mode: EditorSearchMode) => {
+    if (layoutMode === "desktop") {
+      closeDesktopMenu();
+    } else {
+      requestMobileSection("edit");
+    }
+    openEditorSearch(mode);
+  }, [closeDesktopMenu, layoutMode, openEditorSearch, requestMobileSection]);
+
   useMarkdownEditorShortcuts({
     enabled: isEditorReady && !confirmSaveOnExit.isOpen,
     onDismissMenu: handleShortcutDismissMenu,
+    onFindDocument: () => handleShortcutSearch("find"),
     onMenuToggle: handleShortcutMenuToggle,
     onNewDocument: handleShortcutNewDocument,
     onOpenDocument: handleShortcutOpenDocument,
@@ -759,6 +777,7 @@ export function MarkdownEditorScreen({
       closeDesktopMenu();
       void handlePrintDocument(previewDisplayMode);
     },
+    onReplaceDocument: () => handleShortcutSearch("replace"),
     onSaveDocument: () => {
       void handleOverwriteSaveDocument();
     },
@@ -1032,6 +1051,17 @@ export function MarkdownEditorScreen({
           onCancel={confirmSaveOnExit.onCancel}
           onDiscard={confirmSaveOnExit.onDiscard}
           onSave={confirmSaveOnExit.onSave}
+        />
+      ) : null}
+
+      {externalFileConflict !== null ? (
+        <ExternalFileConflictDialog
+          fileName={normalizedFileName}
+          errorMessage={externalFileError}
+          isBusy={isExternalFileBusy}
+          onCancel={handleExternalFileCancel}
+          onDiscard={handleExternalFileDiscard}
+          onOverwrite={handleExternalFileOverwrite}
         />
       ) : null}
 

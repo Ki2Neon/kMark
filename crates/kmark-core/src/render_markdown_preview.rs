@@ -148,7 +148,7 @@ struct MarkdownPageSegments {
 /// Document-wide render inputs shared by every source section. These must be refreshed
 /// whenever an edit changes cross-section Markdown semantics.
 struct PreviewDocumentContext {
-    toc: KmarkTocDocument,
+    headings: KmarkHeadingDocument,
     heading_numbers: KmarkHeadingNumberDocument,
     page_config: DocumentPageConfig,
 }
@@ -163,7 +163,7 @@ struct PreviewRenderParts {
 impl PreviewDocumentContext {
     fn collect(content: &str) -> Self {
         Self {
-            toc: collect_kmark_toc_document(content),
+            headings: collect_kmark_heading_document(content),
             heading_numbers: collect_kmark_heading_number_document(content),
             page_config: DocumentPageConfig::default_config(),
         }
@@ -470,7 +470,7 @@ fn section_has_stable_document_context(old_text: &str, new_text: &str) -> bool {
     }) {
         return false;
     }
-    collect_kmark_toc_document(old_text) == collect_kmark_toc_document(new_text)
+    collect_kmark_heading_document(old_text) == collect_kmark_heading_document(new_text)
         && collect_kmark_heading_number_document(old_text)
             == collect_kmark_heading_number_document(new_text)
 }
@@ -1051,9 +1051,10 @@ struct DocumentPageConfig {
     page_chrome_config: PageChromeConfig,
 }
 
+/// Document-wide heading identities shared by ordinary links and generated TOC links.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct KmarkTocDocument {
-    headings: Vec<KmarkTocHeading>,
+struct KmarkHeadingDocument {
+    headings: Vec<KmarkHeadingEntry>,
     generated_heading_ids: HashMap<usize, String>,
 }
 
@@ -1063,7 +1064,7 @@ struct KmarkHeadingNumberDocument {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct KmarkTocHeading {
+struct KmarkHeadingEntry {
     source_line: usize,
     level: u8,
     text: String,
@@ -1081,14 +1082,8 @@ struct KmarkTocConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct KmarkTocRenderNode<'a> {
-    heading: &'a KmarkTocHeading,
+    heading: &'a KmarkHeadingEntry,
     children: Vec<KmarkTocRenderNode<'a>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct KmarkTocDirective {
-    source_line: usize,
-    params: KmarkTocParams,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1100,7 +1095,7 @@ struct KmarkHeadingNumberConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingKmarkTocHeading {
+struct PendingKmarkHeading {
     source_line: usize,
     level: u8,
     explicit_id: Option<String>,
@@ -1124,7 +1119,7 @@ struct HtmlEmitter<'a> {
     source_line_by_clean_line: &'a [usize],
     markdown_file_path: Option<&'a str>,
     model_assets: &'a HashMap<String, KmarkModelAssetResolution>,
-    toc_document: &'a KmarkTocDocument,
+    heading_document: &'a KmarkHeadingDocument,
     heading_number_document: &'a KmarkHeadingNumberDocument,
     line_starts: Vec<usize>,
     html: String,
@@ -1324,7 +1319,7 @@ fn render_page_segment(
         segment.line_offset,
         markdown_file_path,
         model_assets,
-        &context.toc,
+        &context.headings,
         &context.heading_numbers,
         next_mermaid_block_index,
     );
@@ -1345,7 +1340,7 @@ fn render_markdown_page(
     line_offset: usize,
     markdown_file_path: Option<&str>,
     model_assets: &HashMap<String, KmarkModelAssetResolution>,
-    toc_document: &KmarkTocDocument,
+    heading_document: &KmarkHeadingDocument,
     heading_number_document: &KmarkHeadingNumberDocument,
     next_mermaid_block_index: usize,
 ) -> HtmlRenderOutput {
@@ -1357,7 +1352,7 @@ fn render_markdown_page(
         &preprocessed.source_line_by_clean_line,
         markdown_file_path,
         model_assets,
-        toc_document,
+        heading_document,
         heading_number_document,
         next_mermaid_block_index,
     );
@@ -1924,23 +1919,18 @@ fn starts_standalone_html_comment_block(line: &str) -> bool {
     trimmed.starts_with(PAGE_BREAK_TOKEN_OPEN) && !trimmed.contains(PAGE_BREAK_TOKEN_CLOSE)
 }
 
-fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
+fn collect_kmark_heading_document(content: &str) -> KmarkHeadingDocument {
     let preprocessed = preprocess_markdown_comments(content, 0);
     let events = collect_preprocessed_markdown_events(&preprocessed);
     let line_starts = collect_line_starts(&preprocessed.content);
     let mut headings = Vec::new();
-    let mut directives = Vec::new();
-    let mut pending_heading: Option<PendingKmarkTocHeading> = None;
+    let mut pending_heading: Option<PendingKmarkHeading> = None;
 
     for owned_event in events {
-        let OwnedEvent {
-            event,
-            range,
-            source_line_range,
-        } = owned_event;
+        let OwnedEvent { event, range, .. } = owned_event;
         match event {
             Event::Start(Tag::Heading { level, id, .. }) => {
-                pending_heading = Some(PendingKmarkTocHeading {
+                pending_heading = Some(PendingKmarkHeading {
                     source_line: resolve_source_line_number(
                         &line_starts,
                         &preprocessed.source_line_by_clean_line,
@@ -1957,7 +1947,7 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
                     let text = normalize_toc_heading_text(&pending.text);
 
                     if !text.is_empty() {
-                        headings.push(KmarkTocHeading {
+                        headings.push(KmarkHeadingEntry {
                             source_line: pending.source_line,
                             level: pending.level,
                             text,
@@ -1987,32 +1977,13 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
                     if let Some(pending) = pending_heading.as_mut() {
                         pending.text.push(' ');
                     }
-                    continue;
-                }
-
-                if let Some(KmarkComment::Params(bundle)) = parse_kmark_comment(html.as_ref()) {
-                    if bundle.toc.enabled == Some(true) {
-                        let (_, end_line) = source_line_range.unwrap_or_else(|| {
-                            resolve_source_line_range(
-                                &preprocessed.content,
-                                &line_starts,
-                                0,
-                                &preprocessed.source_line_by_clean_line,
-                                &range,
-                            )
-                        });
-                        directives.push(KmarkTocDirective {
-                            source_line: end_line,
-                            params: bundle.toc,
-                        });
-                    }
                 }
             }
             _ => {}
         }
     }
 
-    apply_generated_toc_heading_ids(&mut headings, &directives);
+    assign_generated_heading_ids(&mut headings);
     let generated_heading_ids = headings
         .iter()
         .filter_map(|heading| {
@@ -2023,7 +1994,7 @@ fn collect_kmark_toc_document(content: &str) -> KmarkTocDocument {
         })
         .collect();
 
-    KmarkTocDocument {
+    KmarkHeadingDocument {
         headings,
         generated_heading_ids,
     }
@@ -2263,58 +2234,39 @@ fn join_heading_number_components(counters: &[u32], separator: &str) -> String {
         .join(separator)
 }
 
-fn apply_generated_toc_heading_ids(
-    headings: &mut [KmarkTocHeading],
-    directives: &[KmarkTocDirective],
-) {
+fn assign_generated_heading_ids(headings: &mut [KmarkHeadingEntry]) {
+    // Reserve explicit IDs first so an earlier generated slug cannot steal one.
     let mut used_ids = headings
         .iter()
         .filter_map(|heading| heading.explicit_id.clone())
         .collect::<HashSet<_>>();
-    let mut generated_lines = HashSet::new();
 
-    for directive in directives {
-        let config = directive.params.to_config();
-
-        if !config.links {
-            continue;
+    for heading in headings
+        .iter_mut()
+        .filter(|heading| heading.explicit_id.is_none())
+    {
+        let base = heading_slug(&heading.text);
+        let base = if base.is_empty() { "section" } else { &base };
+        let mut candidate = base.to_string();
+        let mut suffix = 1usize;
+        while !used_ids.insert(candidate.clone()) {
+            candidate = format!("{base}-{suffix}");
+            suffix += 1;
         }
-
-        for heading in headings.iter_mut().filter(|heading| {
-            heading.source_line > directive.source_line
-                && heading.level >= config.min_depth
-                && heading.level <= config.max_depth
-                && heading.explicit_id.is_none()
-        }) {
-            if generated_lines.contains(&heading.source_line) {
-                continue;
-            }
-
-            let id = next_generated_toc_heading_id(heading.source_line, &mut used_ids);
-            heading.generated_id = Some(id);
-            generated_lines.insert(heading.source_line);
-        }
+        heading.generated_id = Some(candidate);
     }
 }
 
-fn next_generated_toc_heading_id(source_line: usize, used_ids: &mut HashSet<String>) -> String {
-    let base = format!("kmark-heading-{}", source_line + 1);
-
-    if used_ids.insert(base.clone()) {
-        return base;
-    }
-
-    let mut suffix = 2usize;
-
-    loop {
-        let candidate = format!("{base}-{suffix}");
-
-        if used_ids.insert(candidate.clone()) {
-            return candidate;
+fn heading_slug(text: &str) -> String {
+    let mut slug = String::new();
+    for character in text.trim().chars() {
+        if character == ' ' {
+            slug.push('-');
+        } else if character.is_alphanumeric() || matches!(character, '-' | '_') {
+            slug.extend(character.to_lowercase());
         }
-
-        suffix += 1;
     }
+    slug
 }
 
 fn normalize_toc_heading_text(text: &str) -> String {
@@ -2938,7 +2890,7 @@ impl<'a> HtmlEmitter<'a> {
         source_line_by_clean_line: &'a [usize],
         markdown_file_path: Option<&'a str>,
         model_assets: &'a HashMap<String, KmarkModelAssetResolution>,
-        toc_document: &'a KmarkTocDocument,
+        heading_document: &'a KmarkHeadingDocument,
         heading_number_document: &'a KmarkHeadingNumberDocument,
         next_mermaid_block_index: usize,
     ) -> Self {
@@ -2948,7 +2900,7 @@ impl<'a> HtmlEmitter<'a> {
             source_line_by_clean_line,
             markdown_file_path,
             model_assets,
-            toc_document,
+            heading_document,
             heading_number_document,
             line_starts: collect_line_starts(content),
             html: String::new(),
@@ -3189,7 +3141,7 @@ impl<'a> HtmlEmitter<'a> {
                     html.push_str(" id=\"");
                     html.push_str(&escape_html(&id));
                     html.push('"');
-                } else if let Some(id) = self.toc_document.generated_heading_id(source_line) {
+                } else if let Some(id) = self.heading_document.generated_heading_id(source_line) {
                     html.push_str(" id=\"");
                     html.push_str(&escape_html(id));
                     html.push('"');
@@ -3388,11 +3340,15 @@ impl<'a> HtmlEmitter<'a> {
                     LinkType::Email => format!("mailto:{dest_url}"),
                     _ => dest_url.to_string(),
                 };
-                let mut html = format!(
-                    "<a href=\"{}\" target=\"_blank\" rel=\"{}\"",
-                    escape_html(&href),
-                    LINK_REL,
-                );
+                let mut html = if href.starts_with('#') {
+                    format!("<a href=\"{}\"", escape_html(&href))
+                } else {
+                    format!(
+                        "<a href=\"{}\" target=\"_blank\" rel=\"{}\"",
+                        escape_html(&href),
+                        LINK_REL,
+                    )
+                };
                 if !title.is_empty() {
                     html.push_str(" title=\"");
                     html.push_str(&escape_html(&title));
@@ -4491,12 +4447,36 @@ impl<'a> HtmlEmitter<'a> {
     fn push_kmark_toc(&mut self, pending: &PendingKmarkParams) {
         let config = pending.bundle.toc.to_config();
         let headings = self
-            .toc_document
+            .heading_document
             .headings_after_line(pending.end_line, &config);
         let layer = self.resolve_kmark_bundle_layer(&pending.bundle);
         let resolved_params = layer.resolved_params();
+        let mut style = resolved_params.to_single_block_root_style();
+        let number_width = headings
+            .iter()
+            .filter_map(|heading| {
+                self.heading_number_document
+                    .heading_number_text(heading.source_line)
+            })
+            // Heading numbers are digits/punctuation, except the chapter pattern (第N章).
+            .map(|number| {
+                number
+                    .chars()
+                    .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+                    .sum::<usize>()
+            })
+            .max();
+        if let Some(width) = number_width {
+            let style = style.get_or_insert_with(String::new);
+            if !style.is_empty() {
+                style.push(';');
+            }
+            style.push_str(&format!(
+                "--kmark-toc-number-width:{width}ch;--kmark-toc-number-gap:0.45em"
+            ));
+        }
         let decoration = KmarkRootDecoration {
-            style: resolved_params.to_single_block_root_style(),
+            style,
             page_valign: resolved_params.page.valign,
         };
         let title = pending
@@ -5085,12 +5065,12 @@ impl<'a> HtmlEmitter<'a> {
     }
 }
 
-impl KmarkTocDocument {
+impl KmarkHeadingDocument {
     fn headings_after_line<'a>(
         &'a self,
         source_line: usize,
         config: &KmarkTocConfig,
-    ) -> Vec<&'a KmarkTocHeading> {
+    ) -> Vec<&'a KmarkHeadingEntry> {
         self.headings
             .iter()
             .filter(|heading| {
@@ -5108,7 +5088,7 @@ impl KmarkTocDocument {
     }
 }
 
-impl KmarkTocHeading {
+impl KmarkHeadingEntry {
     fn link_id(&self) -> Option<&str> {
         self.explicit_id.as_deref().or(self.generated_id.as_deref())
     }
@@ -5146,7 +5126,7 @@ impl KmarkTocParams {
     }
 }
 
-fn build_kmark_toc_tree<'a>(headings: &[&'a KmarkTocHeading]) -> Vec<KmarkTocRenderNode<'a>> {
+fn build_kmark_toc_tree<'a>(headings: &[&'a KmarkHeadingEntry]) -> Vec<KmarkTocRenderNode<'a>> {
     let mut roots = Vec::new();
     let mut stack: Vec<(u8, Vec<usize>)> = Vec::new();
 
@@ -5229,13 +5209,13 @@ fn push_kmark_toc_node_list(
 
 fn push_kmark_toc_node_label(
     html: &mut String,
-    heading: &KmarkTocHeading,
+    heading: &KmarkHeadingEntry,
     links: bool,
     heading_number_document: &KmarkHeadingNumberDocument,
 ) {
     if links {
         if let Some(id) = heading.link_id() {
-            html.push_str("<a class=\"kmark-toc__link\" href=\"#");
+            html.push_str("<a class=\"kmark-toc__link kmark-toc__label\" href=\"#");
             html.push_str(&escape_html(id));
             html.push_str("\">");
             push_kmark_toc_node_label_content(html, heading, heading_number_document);
@@ -5244,14 +5224,14 @@ fn push_kmark_toc_node_label(
         }
     }
 
-    html.push_str("<span class=\"kmark-toc__text\">");
+    html.push_str("<span class=\"kmark-toc__text kmark-toc__label\">");
     push_kmark_toc_node_label_content(html, heading, heading_number_document);
     html.push_str("</span>");
 }
 
 fn push_kmark_toc_node_label_content(
     html: &mut String,
-    heading: &KmarkTocHeading,
+    heading: &KmarkHeadingEntry,
     heading_number_document: &KmarkHeadingNumberDocument,
 ) {
     if let Some(number_text) = heading_number_document.heading_number_text(heading.source_line) {
@@ -5260,7 +5240,9 @@ fn push_kmark_toc_node_label_content(
         html.push_str("</span>");
     }
 
+    html.push_str("<span class=\"kmark-toc__heading\">");
     html.push_str(&escape_html(&heading.text));
+    html.push_str("</span>");
 }
 
 impl KmarkParamBundle {
@@ -10560,12 +10542,12 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p><ul><li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li></ul>"
+            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\" id=\"title\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p><ul><li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li></ul>"
         );
         assert_eq!(
             rendered_preview.page_htmls,
             vec![
-                "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p>",
+                "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\" id=\"title\">Title</h1><p data-source-line-start=\"1\" data-source-line-end=\"1\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noreferrer noopener\">site</a></p>",
                 "<ul><li data-source-line-start=\"3\" data-source-line-end=\"3\">item</li></ul>",
             ]
         );
@@ -10627,7 +10609,7 @@ mod tests {
 
         assert_eq!(
             rendered_preview.html,
-            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\">Title</h1><p data-source-line-start=\"2\" data-source-line-end=\"2\">text</p>"
+            "<h1 data-source-line-start=\"0\" data-source-line-end=\"0\" id=\"title\">Title</h1><p data-source-line-start=\"2\" data-source-line-end=\"2\">text</p>"
         );
         assert!(!rendered_preview.html.contains("note comment"));
     }
@@ -10703,19 +10685,19 @@ mod tests {
 
         assert_eq!(rendered_preview.pages.len(), 2);
         assert!(toc_html.contains("<div class=\"kmark-toc__title\">目次</div>"));
-        assert!(toc_html.contains("href=\"#kmark-heading-5\""));
-        assert!(toc_html.contains("href=\"#kmark-heading-8\""));
-        assert!(toc_html.contains("href=\"#kmark-heading-10\""));
-        assert!(toc_html.contains(">First</a>"));
-        assert!(toc_html.contains(">Child</a>"));
-        assert!(toc_html.contains(">Later</a>"));
+        assert!(toc_html.contains("href=\"#first\""));
+        assert!(toc_html.contains("href=\"#child\""));
+        assert!(toc_html.contains("href=\"#later\""));
+        assert!(toc_html.contains("<span class=\"kmark-toc__heading\">First</span></a>"));
+        assert!(toc_html.contains("<span class=\"kmark-toc__heading\">Child</span></a>"));
+        assert!(toc_html.contains("<span class=\"kmark-toc__heading\">Later</span></a>"));
         assert!(!toc_html.contains("Before"));
-        assert!(rendered_preview
-            .html
-            .contains("<h2 data-source-line-start=\"4\" data-source-line-end=\"4\" id=\"kmark-heading-5\">First</h2>"));
-        assert!(rendered_preview
-            .html
-            .contains("<h3 data-source-line-start=\"7\" data-source-line-end=\"7\" id=\"kmark-heading-8\">Child</h3>"));
+        assert!(rendered_preview.html.contains(
+            "<h2 data-source-line-start=\"4\" data-source-line-end=\"4\" id=\"first\">First</h2>"
+        ));
+        assert!(rendered_preview.html.contains(
+            "<h3 data-source-line-start=\"7\" data-source-line-end=\"7\" id=\"child\">Child</h3>"
+        ));
     }
 
     #[test]
@@ -10725,9 +10707,9 @@ mod tests {
 
         assert_eq!(rendered_preview.pages.len(), 2);
         assert!(rendered_preview.page_htmls[0].contains("<nav class=\"kmark-toc\""));
-        assert!(rendered_preview.page_htmls[0].contains("href=\"#kmark-heading-3\""));
+        assert!(rendered_preview.page_htmls[0].contains("href=\"#later\""));
         assert!(rendered_preview.page_htmls[1].contains(
-            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" id=\"kmark-heading-3\">Later</h1>"
+            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" id=\"later\">Later</h1>"
         ));
     }
 
@@ -10749,7 +10731,9 @@ mod tests {
         assert!(toc_html.contains(">Three</span>"));
         assert!(!toc_html.contains("One"));
         assert!(!toc_html.contains("Four"));
-        assert!(!rendered_preview.html.contains("id=\"kmark-heading-"));
+        assert!(rendered_preview.html.contains(
+            "<h2 data-source-line-start=\"2\" data-source-line-end=\"2\" id=\"two\">Two</h2>"
+        ));
     }
 
     #[test]
@@ -10763,10 +10747,12 @@ mod tests {
 
         assert!(toc_html
             .contains("style=\"width:80%;margin-left:auto;margin-right:auto;text-align:center\""));
-        assert!(rendered_preview
-            .html
-            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"kmark-heading-2\">Title</h1>"));
-        assert!(!rendered_preview.html.contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"kmark-heading-2\" style="));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"title\">Title</h1>"
+        ));
+        assert!(!rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"title\" style="
+        ));
     }
 
     #[test]
@@ -10776,10 +10762,63 @@ mod tests {
         let toc_html = extract_toc_html(&rendered_preview.html);
 
         assert!(toc_html.contains("href=\"#manual\""));
-        assert!(toc_html.contains("href=\"#kmark-heading-3\""));
+        assert!(toc_html.contains("href=\"#auto\""));
         assert!(rendered_preview.html.contains(
             "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"manual\">Manual</h1>"
         ));
+    }
+
+    #[test]
+    fn generates_heading_link_targets_without_toc_across_page_breaks() {
+        let rendered_preview = render_markdown_preview(
+            "[文面](#リンク先見出し名称) [次](#重複-1)\n\n\
+             ## リンク先見出し名称\n\n\
+             ## 重複\n\n\
+             <!-- --- -->\n\n\
+             ## 重複",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("<a href=\"#リンク先見出し名称\">文面</a>"));
+        assert!(rendered_preview.html.contains("href=\"#重複-1\""));
+        assert!(rendered_preview
+            .html
+            .contains("id=\"リンク先見出し名称\">リンク先見出し名称</h2>"));
+        assert!(rendered_preview.page_htmls[0].contains("id=\"重複\">重複</h2>"));
+        assert!(rendered_preview.page_htmls[1].contains("id=\"重複-1\">重複</h2>"));
+    }
+
+    #[test]
+    fn heading_ids_use_visible_text_and_reserve_explicit_ids() {
+        let rendered_preview = render_markdown_preview(
+            "## *Mixed* Case!\n\n\
+             ## Custom\n\n\
+             ## Pinned {#custom}\n\n\
+             ## 🙂\n\n\
+             ## !",
+        );
+
+        assert!(rendered_preview
+            .html
+            .contains("id=\"mixed-case\"><em>Mixed</em> Case!</h2>"));
+        assert!(rendered_preview
+            .html
+            .contains("id=\"custom-1\">Custom</h2>"));
+        assert!(rendered_preview.html.contains("id=\"custom\">Pinned</h2>"));
+        assert!(rendered_preview.html.contains("id=\"section\">🙂</h2>"));
+        assert!(rendered_preview.html.contains("id=\"section-1\">!</h2>"));
+    }
+
+    #[test]
+    fn toc_links_use_the_same_ids_as_duplicate_headings() {
+        let rendered_preview = render_markdown_preview("<!-- kmark toc:true -->\n## Same\n## Same");
+        let toc_html = extract_toc_html(&rendered_preview.html);
+
+        assert!(toc_html.contains("href=\"#same\""));
+        assert!(toc_html.contains("href=\"#same-1\""));
+        assert!(rendered_preview.html.contains("id=\"same\">Same</h2>"));
+        assert!(rendered_preview.html.contains("id=\"same-1\">Same</h2>"));
     }
 
     #[test]
@@ -10795,8 +10834,9 @@ mod tests {
         );
         let toc_html = extract_toc_html(&rendered_preview.html);
 
-        assert!(toc_html.contains("><span class=\"kmark-heading-number\">1.</span>Overview</a>"));
-        assert!(toc_html.contains("><span class=\"kmark-heading-number\">1.1</span>Detail</a>"));
+        assert!(toc_html.contains("--kmark-toc-number-width:3ch"));
+        assert!(toc_html.contains("><span class=\"kmark-heading-number\">1.</span><span class=\"kmark-toc__heading\">Overview</span></a>"));
+        assert!(toc_html.contains("><span class=\"kmark-heading-number\">1.1</span><span class=\"kmark-toc__heading\">Detail</span></a>"));
         assert!(!toc_html.contains("Title"));
     }
 
@@ -11133,7 +11173,7 @@ mod tests {
         assert_eq!(rendered_preview.pages.len(), 1);
         assert_eq!(
             rendered_preview.pages[0].html,
-            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\">Body</h1>"
+            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" id=\"body\">Body</h1>"
         );
         assert_eq!(
             rendered_preview.pages[0]
@@ -12850,7 +12890,7 @@ mod tests {
 
         assert!(rendered_preview
             .html
-            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">赤い見出し</h1>"));
+            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"赤い見出し\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">赤い見出し</h1>"));
         assert!(rendered_preview.html.contains(
             "<p data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">赤い本文</p>"
         ));
@@ -12876,9 +12916,9 @@ mod tests {
             "<!-- kmark w:40mm h:12mm border_size:2px border_color:red radius:4px bg:#fff0f0 opacity:0.8 rotate:-10 shadow:true padding:2mm 4mm margin:2mm align:right color:#c00 font_size:12pt font_weight:bold font_family:\"Yu Gothic\" letter_spacing:0.08em line_height:1.2 -->\n# 社外秘",
         );
 
-        assert!(rendered_preview
-            .html
-            .contains("<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\""));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"社外秘\" style=\""
+        ));
         assert!(rendered_preview.html.contains("width:40mm"));
         assert!(rendered_preview.html.contains("height:12mm"));
         assert!(rendered_preview.html.contains("border-width:2px"));
@@ -12907,7 +12947,7 @@ mod tests {
             render_markdown_preview("<!-- kmark color:red align:right -->\n# 見出し\n\n本文");
 
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;color:red;text-align:right\">見出し</h1>"
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"見出し\" style=\"display:table;width:fit-content;max-width:100%;box-sizing:border-box;margin-left:auto;color:red;text-align:right\">見出し</h1>"
         ));
         assert!(rendered_preview
             .html
@@ -12965,7 +13005,7 @@ mod tests {
             "<p data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">本文</p>"
         ));
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">見出し</h1>"
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" id=\"見出し\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;\">見出し</h1>"
         ));
     }
 
@@ -12976,7 +13016,7 @@ mod tests {
         );
 
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;font-weight:700;\">見出し</h1>"
+            "<h1 data-source-line-start=\"2\" data-source-line-end=\"2\" id=\"見出し\" style=\"border-width:1px;border-style:solid;border-color:red;border-radius:2px;display:table;width:fit-content;max-width:100%;box-sizing:border-box;color:red;font-weight:700;\">見出し</h1>"
         ));
     }
 
@@ -13041,7 +13081,7 @@ mod tests {
         let block = render_markdown_preview("<!-- kmark w:fit -->\n# 見出し");
         assert_eq!(
             block.html,
-            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" style=\"width:fit-content;max-width:100%;box-sizing:border-box;\">見出し</h1>"
+            "<h1 data-source-line-start=\"1\" data-source-line-end=\"1\" id=\"見出し\" style=\"width:fit-content;max-width:100%;box-sizing:border-box;\">見出し</h1>"
         );
     }
 
@@ -13290,7 +13330,7 @@ mod tests {
         let rendered_preview = render_markdown_preview(markdown);
 
         assert!(rendered_preview.html.contains(
-            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\">ドキュメントタイトル</h1>"
+            "<h1 data-source-line-start=\"3\" data-source-line-end=\"3\" id=\"ドキュメントタイトル\">ドキュメントタイトル</h1>"
         ));
         assert!(rendered_preview
             .html
@@ -13328,12 +13368,12 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">1.</span>A"));
+        assert!(rendered_preview.html.contains(
+            "<h2 data-source-line-start=\"8\" data-source-line-end=\"8\" id=\"b\">B</h2>"
+        ));
         assert!(rendered_preview
             .html
-            .contains("<h2 data-source-line-start=\"8\" data-source-line-end=\"8\">B</h2>"));
-        assert!(rendered_preview
-            .html
-            .contains("<h3 data-source-line-start=\"9\" data-source-line-end=\"9\">B child</h3>"));
+            .contains("<h3 data-source-line-start=\"9\" data-source-line-end=\"9\" id=\"b-child\">B child</h3>"));
         assert!(rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">2.</span>C"));
@@ -13341,7 +13381,7 @@ mod tests {
             .html
             .contains("<span class=\"kmark-heading-number\">2.1</span>C child"));
         assert!(rendered_preview.html.contains(
-            "<h2 data-source-line-start=\"18\" data-source-line-end=\"18\">Outside</h2>"
+            "<h2 data-source-line-start=\"18\" data-source-line-end=\"18\" id=\"outside\">Outside</h2>"
         ));
         assert!(!rendered_preview
             .html
@@ -13365,9 +13405,9 @@ mod tests {
         assert!(rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">1.1</span>背景"));
-        assert!(rendered_preview
-            .html
-            .contains("<h4 data-source-line-start=\"5\" data-source-line-end=\"5\">詳細</h4>"));
+        assert!(rendered_preview.html.contains(
+            "<h4 data-source-line-start=\"5\" data-source-line-end=\"5\" id=\"詳細\">詳細</h4>"
+        ));
     }
 
     #[test]
@@ -13457,9 +13497,9 @@ mod tests {
              <!-- kmark } -->",
         );
 
-        assert!(rendered_preview
-            .html
-            .contains("<h1 data-source-line-start=\"6\" data-source-line-end=\"6\">Title</h1>"));
+        assert!(rendered_preview.html.contains(
+            "<h1 data-source-line-start=\"6\" data-source-line-end=\"6\" id=\"title\">Title</h1>"
+        ));
         assert!(rendered_preview
             .html
             .contains("<span class=\"kmark-heading-number\">1.</span>A"));

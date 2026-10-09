@@ -334,6 +334,7 @@ input:focus-visible,
 .menu-section,
 .preview-context-menu,
 .unsaved-exit-dialog,
+.external-file-conflict-dialog,
 .mobile-input-helper-bar {
   user-select: none;
 }
@@ -1257,6 +1258,144 @@ input:focus-visible,
 .unsaved-exit-dialog__actions button:disabled {
   cursor: default;
   opacity: 0.62;
+}
+
+.external-file-conflict-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: var(--overlay);
+}
+
+.external-file-conflict-dialog {
+  display: grid;
+  gap: 20px;
+  width: min(600px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.external-file-conflict-dialog__body {
+  display: grid;
+  gap: 12px;
+}
+
+.external-file-conflict-dialog h2,
+.external-file-conflict-dialog p {
+  margin: 0;
+}
+
+.external-file-conflict-dialog h2 {
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.external-file-conflict-dialog p {
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.external-file-conflict-dialog__file {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.external-file-conflict-dialog__file-label {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.external-file-conflict-dialog__file strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.external-file-conflict-dialog .external-file-conflict-dialog__error {
+  color: var(--danger);
+}
+
+.external-file-conflict-dialog__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.external-file-conflict-dialog__actions button {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 11px 14px;
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+  color: var(--text);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.external-file-conflict-dialog__action-title {
+  font-size: 0.88rem;
+  line-height: 1.3;
+}
+
+.external-file-conflict-dialog__action-detail {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.external-file-conflict-dialog__actions button:disabled,
+.external-file-conflict-dialog__cancel:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.external-file-conflict-dialog__discard {
+  border-color: color-mix(in srgb, var(--danger) 18%, var(--border-strong));
+  background: color-mix(in srgb, var(--danger-bg) 30%, var(--surface-muted));
+}
+
+.external-file-conflict-dialog__actions button:hover:not(:disabled) {
+  border-color: var(--control-hover-border);
+}
+
+.external-file-conflict-dialog__discard:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-bg) 50%, var(--surface-muted));
+}
+
+.external-file-conflict-dialog__cancel {
+  justify-self: end;
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.external-file-conflict-dialog__cancel:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .external-proposal__overlay,
@@ -2373,9 +2512,27 @@ input:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.markdown-body .kmark-toc__label {
+  display: grid;
+  grid-template-columns: var(--kmark-toc-number-width, 0) minmax(0, 1fr);
+  column-gap: var(--kmark-toc-number-gap, 0);
+  align-items: baseline;
+}
+
+.markdown-body .kmark-toc__label > .kmark-heading-number {
+  grid-column: 1;
+  margin-right: 0;
+}
+
+.markdown-body .kmark-toc__heading {
+  grid-column: 2;
+  min-width: 0;
+}
+
 .markdown-body .kmark-toc__header-page,
 .markdown-body .kmark-toc__page {
-  justify-self: start;
+  justify-self: stretch;
+  text-align: left;
   white-space: nowrap;
 }
 
@@ -2738,7 +2895,8 @@ input:focus-visible,
     gap: 16px;
   }
 
-  .unsaved-exit-dialog__actions {
+  .unsaved-exit-dialog__actions,
+  .external-file-conflict-dialog__actions {
     grid-template-columns: 1fr;
   }
 

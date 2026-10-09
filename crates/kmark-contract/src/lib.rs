@@ -152,6 +152,7 @@ pub struct MarkdownDocumentPayload {
 pub struct SavedMarkdownDocumentPayload {
     pub file_name: String,
     pub file_path: String,
+    pub disk_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

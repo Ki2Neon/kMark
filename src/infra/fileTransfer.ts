@@ -145,6 +145,8 @@ export async function overwriteEditorSessionMarkdownDocumentAtPath(
   filePath: string,
   sessionId: string,
   expectedRevision: number,
+  expectedDiskVersion: string,
+  overwriteExpectedVersion?: string,
 ): Promise<SavedMarkdownDocumentPayload> {
   if (!isTauri()) {
     throw new Error("Tauri 環境でのみ利用できます。");
@@ -156,6 +158,8 @@ export async function overwriteEditorSessionMarkdownDocumentAtPath(
       path: filePath,
       sessionId,
       expectedRevision,
+      expectedDiskVersion,
+      overwriteExpectedVersion,
     },
     "Markdown ファイルの保存に失敗しました。",
   );

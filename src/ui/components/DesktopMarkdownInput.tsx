@@ -8,6 +8,7 @@ import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { type EditorTransaction } from "../../application/editorSession/editorDocumentPort";
 import { resolveEditFontFamily } from "../../adapters/browser/browserRustCore";
 import { createCodeMirrorEditorTheme, resolveCodeMirrorSyntaxHighlighting } from "../../adapters/editor/codeMirrorAppearance";
+import { CODE_MIRROR_SEARCH_EXTENSION, openCodeMirrorReplace, openCodeMirrorSearch } from "../../adapters/editor/codeMirrorSearch";
 import { MARKDOWN_SNIPPET_DEFINITIONS, getMarkdownEnterAction, getMarkdownSelectionWrapAction, getMarkdownTabAction } from "../../domain/markdownEditing";
 import { type EditFontId, type MultiCursorModifier } from "../../domain/editorPreferences";
 import { resolveAppThemeMode, type AppThemeId } from "../../domain/theme";
@@ -698,7 +699,10 @@ type DesktopMarkdownInputProps = {
 export type MarkdownEditorHandle = {
   applyRemoteContent(content: string): void;
   getSnapshot(): string;
+  openSearch(): void;
+  openReplace(): void;
   replaceContent(content: string): void;
+  setExternalReloadLocked(locked: boolean): void;
 };
 
 function DesktopMarkdownInputComponent({
@@ -721,6 +725,7 @@ function DesktopMarkdownInputComponent({
 }: DesktopMarkdownInputProps) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<EditorView | null>(null);
+  const externalReloadLockedRef = useRef(false);
   const appliedDocumentKeyRef = useRef<string | null>(null);
   const onEditorHandleChangeRef = useRef(onEditorHandleChange);
   const onTransactionRef = useRef(onTransaction);
@@ -1039,6 +1044,13 @@ function DesktopMarkdownInputComponent({
 
     return [
       EditorState.allowMultipleSelections.of(true),
+      EditorState.transactionFilter.of((transaction) => (
+        externalReloadLockedRef.current
+          && transaction.docChanged
+          && !transaction.annotation(remoteEditorMutation)
+          ? []
+          : transaction
+      )),
       indentUnit.of("  "),
       history(),
       highlightSpecialChars(),
@@ -1047,6 +1059,7 @@ function DesktopMarkdownInputComponent({
       closeBrackets(),
       placeholder("ここに Markdown を書きます"),
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
+      CODE_MIRROR_SEARCH_EXTENSION,
       markdown(),
       previewRequestedLineHighlightField,
       assetDropLineHighlightField,
@@ -1114,10 +1127,15 @@ function DesktopMarkdownInputComponent({
         });
       },
       getSnapshot: () => view.state.doc.toString(),
+      openSearch: () => { openCodeMirrorSearch(view); },
+      openReplace: () => { openCodeMirrorReplace(view); },
       replaceContent: (content) => {
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: content },
         });
+      },
+      setExternalReloadLocked: (locked) => {
+        externalReloadLockedRef.current = locked;
       },
     };
     onEditorHandleChangeRef.current?.(handle);

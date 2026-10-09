@@ -155,6 +155,40 @@ export function createCodeMirrorEditorTheme({
       borderBottom: "1px solid var(--border)",
       color: "var(--text)",
     },
+    ".cm-panel.cm-search": {
+      borderBottom: "1px solid var(--border)",
+      fontFamily: "var(--app-font-family)",
+      fontSize: "var(--app-font-size)",
+      padding: "8px 32px 8px 12px",
+    },
+    ".cm-panel.cm-search input.cm-textfield": {
+      backgroundColor: "var(--surface)",
+      border: "1px solid var(--border-strong)",
+      color: "var(--text)",
+      maxWidth: "min(100%, 18rem)",
+      padding: "4px 6px",
+    },
+    ".cm-panel.cm-search button.cm-button": {
+      backgroundColor: "var(--surface)",
+      border: "1px solid var(--border-strong)",
+      color: "var(--text)",
+      padding: "4px 8px",
+    },
+    ".cm-panel.cm-search button.cm-button:hover": {
+      backgroundColor: "var(--surface-muted)",
+    },
+    ".cm-panel.cm-search [name=close]": {
+      color: "var(--text)",
+      fontSize: "1.25em",
+      lineHeight: "1",
+      padding: "2px 5px",
+    },
+    ".cm-searchMatch": {
+      backgroundColor: "color-mix(in srgb, var(--focus) 25%, transparent)",
+    },
+    ".cm-searchMatch-selected": {
+      backgroundColor: "color-mix(in srgb, var(--focus) 50%, transparent)",
+    },
     ".cm-scroller": {
       fontFamily: "inherit",
       lineHeight: "1.7",

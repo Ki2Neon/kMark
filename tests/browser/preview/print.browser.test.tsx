@@ -1,6 +1,7 @@
 import { commands } from "vitest/browser";
 import { expect, test } from "vitest";
 import "../../../src/App.css";
+import { renderMarkdownPreview } from "../../../src/adapters/browser/browserMarkdownPreviewRenderer";
 import { printMarkdownDocument } from "../../../src/infra/printDocument";
 import {
   DEFAULT_PAGE_CHROME_CONFIG,
@@ -47,6 +48,35 @@ test("A4 print document uses the actual print stylesheet and page geometry", asy
     expect(observed).toBe(true);
   } finally {
     await commands.emulateMedia("screen");
+    preview.dispose();
+  }
+});
+
+test("A4 print document retains Markdown heading link destinations", async () => {
+  const rendered = await renderMarkdownPreview(
+    "[文面](#リンク先見出し名称)\n\n<!-- --- -->\n\n## リンク先見出し名称",
+    null,
+    "a4",
+    {
+      revision: 1,
+      documentKey: crypto.randomUUID(),
+      plantumlRenderEpoch: 0,
+      plantumlHttpsHosts: [],
+    },
+  );
+  if (rendered.mode !== "a4") throw new Error("Expected A4 preview");
+  const preview = mountPreview();
+  try {
+    preview.render(rendered);
+    await printMarkdownDocument({ displayMode: "a4", title: "Heading links", pages: rendered.pages }, {
+      preparePrintWindow(printWindow) {
+        const root = printWindow.document.querySelector<HTMLElement>("#kmark-print-root");
+        expect(root?.querySelector('a[href="#リンク先見出し名称"]')).not.toBeNull();
+        expect(root?.querySelector('h2[id="リンク先見出し名称"]')).not.toBeNull();
+        printWindow.print = () => { printWindow.dispatchEvent(new Event("afterprint")); };
+      },
+    });
+  } finally {
     preview.dispose();
   }
 });

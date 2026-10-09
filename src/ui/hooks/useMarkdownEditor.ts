@@ -33,9 +33,18 @@ import {
   type RenderedPreview,
 } from "../../domain/preview";
 import { type RecentFile } from "../../domain/recentFiles";
+import {
+  listenForExternalMarkdownFileChange,
+  readWatchedMarkdownDocument,
+  unwatchMarkdownDocument,
+  watchMarkdownDocument,
+  type ExternalMarkdownFileChange,
+} from "../../infra/externalFileWatch";
+import { isTauri } from "../../runtime/runtime";
 import { type MarkdownEditorHandle } from "../components/DesktopMarkdownInput";
 
 export type InitialEditorDocumentMode = "stored" | "new-untitled";
+export type EditorSearchMode = "find" | "replace";
 
 const EMPTY_PLANTUML_HTTPS_HOSTS: readonly string[] = [];
 
@@ -72,10 +81,21 @@ export function useMarkdownEditor(
   const mutationQueueRef = useRef<EditorMutationQueue | null>(null);
   const activeDocumentSessionRef = useRef<EditorDocumentSessionSnapshot | null>(null);
   const editorHandleRef = useRef<MarkdownEditorHandle | null>(null);
+  const pendingSearchModeRef = useRef<EditorSearchMode | null>(null);
   const documentBindingRef = useRef<{ key: string; content: string } | null>(null);
   const documentKeySequenceRef = useRef(0);
   const fatalRecoveryRef = useRef<((sessionId: string, error: unknown) => void) | null>(null);
   const fatalRecoverySessionRef = useRef<string | null>(null);
+  const savedFileContentRef = useRef<{ readonly path: string; readonly content: string } | null>(null);
+  const watchedDiskRef = useRef<{ readonly path: string; readonly version: string } | null>(null);
+  const externalFileConflictRef = useRef<ExternalMarkdownFileChange | null>(null);
+  const externalFileWatchEpochRef = useRef(0);
+  const externalFileWatchLifecycleRef = useRef<Promise<void>>(Promise.resolve());
+  const externalFileChangeTaskRef = useRef<Promise<void>>(Promise.resolve());
+  const [externalFileConflict, setExternalFileConflict] = useState<ExternalMarkdownFileChange | null>(null);
+  const [isExternalFileConflictOpen, setIsExternalFileConflictOpen] = useState(false);
+  const [isExternalFileBusy, setIsExternalFileBusy] = useState(false);
+  const [externalFileError, setExternalFileError] = useState<string | null>(null);
 
   if (plantUmlDocumentKeyRef.current === null) {
     plantUmlDocumentKeyRef.current = crypto.randomUUID();
@@ -124,6 +144,7 @@ export function useMarkdownEditor(
     getState: () => stateRef.current,
   }), [dispatch]);
   const currentDocumentFilePath = state.filePath;
+  const currentDocumentKey = documentBindingRef.current?.key ?? null;
   const [renderedPreview, setRenderedPreview] = useState<RenderedPreview>({
     mode: "standard",
     html: "",
@@ -195,6 +216,9 @@ export function useMarkdownEditor(
       content: session.content,
     };
     activeDocumentSessionRef.current = session;
+    savedFileContentRef.current = session.filePath !== null && !session.isDirty
+      ? { path: session.filePath, content: session.content }
+      : null;
     createMutationQueue(session);
     const externalValue = external ?? (
       externalSessionGatewayRef.current.isSupported()
@@ -216,6 +240,11 @@ export function useMarkdownEditor(
       content: session.content,
     };
     activeDocumentSessionRef.current = snapshot;
+    if (!snapshot.isDirty && snapshot.filePath !== null) {
+      savedFileContentRef.current = { path: snapshot.filePath, content: snapshot.content };
+    } else if (savedFileContentRef.current?.path !== snapshot.filePath) {
+      savedFileContentRef.current = null;
+    }
     createMutationQueue(snapshot);
     externalSessionRef.current = session;
     setExternalSession(session);
@@ -496,12 +525,31 @@ export function useMarkdownEditor(
     }
   }, [controller, store]);
 
+  const openEditorSearch = useCallback((mode: EditorSearchMode) => {
+    const handle = editorHandleRef.current;
+    if (handle === null) {
+      pendingSearchModeRef.current = mode;
+      return;
+    }
+
+    if (mode === "replace") {
+      handle.openReplace();
+    } else {
+      handle.openSearch();
+    }
+  }, []);
+
   const handleEditorHandleChange = useCallback((handle: MarkdownEditorHandle | null) => {
     editorHandleRef.current = handle;
     if (handle !== null) {
       markContentChanged();
+      const pendingMode = pendingSearchModeRef.current;
+      pendingSearchModeRef.current = null;
+      if (pendingMode !== null) {
+        openEditorSearch(pendingMode);
+      }
     }
-  }, []);
+  }, [openEditorSearch]);
 
   const installLoadedDocument = useCallback(async (loadedDocument: {
     readonly fileName: string;
@@ -597,6 +645,7 @@ export function useMarkdownEditor(
     source: MarkdownDocumentSaveSource,
     fileName: string,
     filePath: string | null,
+    diskVersion?: string,
   ) => {
     const active = activeDocumentSessionRef.current;
     if (active === null || active.sessionId !== source.sessionId) {
@@ -614,7 +663,131 @@ export function useMarkdownEditor(
       },
       true,
     );
+    if (filePath !== null) {
+      savedFileContentRef.current = { path: filePath, content: source.readCanonicalContent() };
+      if (diskVersion !== undefined) {
+        watchedDiskRef.current = { path: filePath, version: diskVersion };
+      }
+    }
   }, [applyActiveSessionSaved]);
+
+  const applyExternalFileChange = useCallback(async (
+    change: ExternalMarkdownFileChange,
+    discardLocal = false,
+  ) => {
+    const initial = activeDocumentSessionRef.current;
+    if (initial === null || initial.filePath !== change.path) {
+      return;
+    }
+
+    const editorHandle = editorHandleRef.current;
+    editorHandle?.setExternalReloadLocked(true);
+    try {
+      await mutationQueueRef.current?.flush();
+      const active = activeDocumentSessionRef.current;
+      if (active === null || active.sessionId !== initial.sessionId || active.filePath !== change.path) {
+        return;
+      }
+
+      if (!discardLocal && (active.isDirty || mutationQueueRef.current?.hasPendingTransactions)) {
+        externalFileConflictRef.current = change;
+        setExternalFileConflict(change);
+        setExternalFileError(null);
+        setIsExternalFileConflictOpen(true);
+        return;
+      }
+
+      const session = await externalSessionGatewayRef.current.sync({
+        sessionId: active.sessionId,
+        expectedRevision: active.revision,
+        fileName: active.fileName,
+        filePath: change.path,
+        content: change.content,
+        isDirty: false,
+      });
+      if (activeDocumentSessionRef.current?.sessionId !== active.sessionId
+        || activeDocumentSessionRef.current.filePath !== change.path) {
+        return;
+      }
+      if (session.revision >= activeDocumentSessionRef.current.revision) {
+        applyRemoteSession(session);
+      }
+      watchedDiskRef.current = { path: change.path, version: change.version };
+      externalFileConflictRef.current = null;
+      setExternalFileConflict(null);
+      setIsExternalFileConflictOpen(false);
+      setExternalFileError(null);
+    } finally {
+      editorHandle?.setExternalReloadLocked(false);
+    }
+  }, [applyRemoteSession]);
+
+  const queueExternalFileChange = useCallback((change: ExternalMarkdownFileChange) => {
+    const task = externalFileChangeTaskRef.current.then(() => applyExternalFileChange(change));
+    externalFileChangeTaskRef.current = task.catch((error) => {
+      controller.raiseError(store, toEditorSessionErrorMessage(error));
+    });
+    return task;
+  }, [applyExternalFileChange, controller, store]);
+
+  useEffect(() => {
+    if (!isReady || currentDocumentFilePath === null || !isTauri()) {
+      return;
+    }
+
+    const path = currentDocumentFilePath;
+    const epoch = externalFileWatchEpochRef.current + 1;
+    externalFileWatchEpochRef.current = epoch;
+    let disposed = false;
+    let generation: number | null = null;
+    let unlisten: (() => void) | null = null;
+
+    externalFileWatchLifecycleRef.current = externalFileWatchLifecycleRef.current.then(async () => {
+      if (disposed) {
+        return;
+      }
+      watchedDiskRef.current = null;
+      externalFileConflictRef.current = null;
+      setExternalFileConflict(null);
+      setIsExternalFileConflictOpen(false);
+      unlisten = await listenForExternalMarkdownFileChange((change) => {
+        if (!disposed && externalFileWatchEpochRef.current === epoch && change.path === path) {
+          void queueExternalFileChange(change);
+        }
+      });
+      if (disposed) {
+        return;
+      }
+      const knownContent = savedFileContentRef.current?.path === path
+        ? savedFileContentRef.current.content
+        : null;
+      const observed = await watchMarkdownDocument(path, knownContent);
+      generation = observed.generation;
+      if (disposed || externalFileWatchEpochRef.current !== epoch) {
+        return;
+      }
+      watchedDiskRef.current = { path, version: observed.version };
+      if (observed.changed) {
+        await queueExternalFileChange(observed);
+      }
+    }).catch((error) => {
+      if (!disposed) {
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      }
+    });
+
+    return () => {
+      disposed = true;
+      externalFileWatchLifecycleRef.current = externalFileWatchLifecycleRef.current.then(async () => {
+        unlisten?.();
+        if (generation !== null) {
+          await unwatchMarkdownDocument(path, generation);
+        }
+      }).catch((error) => {
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      });
+    };
+  }, [controller, currentDocumentFilePath, currentDocumentKey, isReady, queueExternalFileChange, store]);
 
   const handleOpenDocumentFromPicker = useCallback(async () => {
     await executeWithErrorHandling(async () => {
@@ -674,37 +847,116 @@ export function useMarkdownEditor(
     });
   }, [applyRecentFilesRequest, controller, executeWithErrorHandling, flushEditorSession, installLoadedDocument, store]);
 
-  const handleOverwriteSaveDocument = useCallback(async () => {
-    let didSave = false;
-
-    await executeWithErrorHandling(async () => {
+  const saveCurrentDocument = useCallback(async (overwriteExpectedVersion?: string) => {
+    try {
+      await externalFileChangeTaskRef.current;
       await flushEditorSession();
       const active = activeDocumentSessionRef.current;
       if (active === null) {
         throw new Error("保存対象のEditor Sessionがありません。");
       }
+      let expectedDiskVersion: string | undefined;
+      if (isTauri() && active.filePath !== null) {
+        await externalFileWatchLifecycleRef.current;
+        if (externalFileConflictRef.current?.path === active.filePath && overwriteExpectedVersion === undefined) {
+          setIsExternalFileConflictOpen(true);
+          return false;
+        }
+        let watched = watchedDiskRef.current;
+        if (watched?.path !== active.filePath) {
+          const latest = await readWatchedMarkdownDocument(active.filePath);
+          const saved = savedFileContentRef.current;
+          if (saved?.path === active.filePath
+            && canonicalizeLineEndings(latest.content) !== canonicalizeLineEndings(saved.content)) {
+            await queueExternalFileChange(latest);
+            return false;
+          }
+          watched = { path: active.filePath, version: latest.version };
+          watchedDiskRef.current = watched;
+        }
+        expectedDiskVersion = watched.version;
+      }
+      const content = getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current);
       const source: MarkdownDocumentSaveSource = {
         sessionId: active.sessionId,
         revision: active.revision,
         lineEnding: active.lineEnding,
-        readCanonicalContent: () => getCurrentEditorContent(
-          editorHandleRef.current,
-          documentBindingRef.current,
-        ),
+        readCanonicalContent: () => content,
+        expectedDiskVersion,
+        overwriteExpectedVersion,
       };
       const result = await controller.overwriteSaveDocument(store, source);
-      didSave = result !== null;
       if (result !== null) {
         if (result.sessionRevision === null) {
           await markActiveSessionSaved(source, result.fileName, result.filePath);
         } else {
-          applyRustSessionSave(source, result.fileName, result.filePath);
+          applyRustSessionSave(source, result.fileName, result.filePath, result.diskVersion);
         }
+        externalFileConflictRef.current = null;
+        setExternalFileConflict(null);
+        setIsExternalFileConflictOpen(false);
+        setExternalFileError(null);
       }
-    });
+      return result !== null;
+    } catch (error) {
+      const path = activeDocumentSessionRef.current?.filePath;
+      if (isExternalDocumentChangedError(error) && path !== null && path !== undefined) {
+        try {
+          const latest = await readWatchedMarkdownDocument(path);
+          await queueExternalFileChange(latest);
+        } catch (refreshError) {
+          controller.raiseError(store, toEditorSessionErrorMessage(refreshError));
+        }
+      } else {
+        controller.raiseError(store, toEditorSessionErrorMessage(error));
+      }
+      return false;
+    }
+  }, [applyRustSessionSave, controller, flushEditorSession, markActiveSessionSaved, queueExternalFileChange, store]);
 
-    return didSave;
-  }, [applyRustSessionSave, controller, executeWithErrorHandling, flushEditorSession, markActiveSessionSaved, store]);
+  const handleOverwriteSaveDocument = useCallback(() => saveCurrentDocument(), [saveCurrentDocument]);
+
+  const handleExternalFileDiscard = useCallback(async () => {
+    const conflict = externalFileConflictRef.current;
+    if (conflict === null) {
+      return;
+    }
+    setIsExternalFileBusy(true);
+    setExternalFileError(null);
+    try {
+      const task = externalFileChangeTaskRef.current.then(async () => {
+        const latest = await readWatchedMarkdownDocument(conflict.path);
+        await applyExternalFileChange(latest, true);
+      });
+      externalFileChangeTaskRef.current = task.catch(() => {});
+      await task;
+    } catch (error) {
+      setExternalFileError(toEditorSessionErrorMessage(error));
+    } finally {
+      setIsExternalFileBusy(false);
+    }
+  }, [applyExternalFileChange]);
+
+  const handleExternalFileOverwrite = useCallback(async () => {
+    const conflict = externalFileConflictRef.current;
+    if (conflict === null) {
+      return;
+    }
+    setIsExternalFileBusy(true);
+    setExternalFileError(null);
+    try {
+      const saved = await saveCurrentDocument(conflict.version);
+      if (!saved && externalFileConflictRef.current?.version === conflict.version) {
+        setExternalFileError("上書きできませんでした。ファイルの状態を確認してください。");
+      }
+    } finally {
+      setIsExternalFileBusy(false);
+    }
+  }, [saveCurrentDocument]);
+
+  const handleExternalFileCancel = useCallback(() => {
+    setIsExternalFileConflictOpen(false);
+  }, []);
 
   const handleSaveDocumentAs = useCallback(async () => {
     let didSave = false;
@@ -715,14 +967,12 @@ export function useMarkdownEditor(
       if (active === null) {
         throw new Error("保存対象のEditor Sessionがありません。");
       }
+      const content = getCurrentEditorContent(editorHandleRef.current, documentBindingRef.current);
       const source: MarkdownDocumentSaveSource = {
         sessionId: active.sessionId,
         revision: active.revision,
         lineEnding: active.lineEnding,
-        readCanonicalContent: () => getCurrentEditorContent(
-          editorHandleRef.current,
-          documentBindingRef.current,
-        ),
+        readCanonicalContent: () => content,
       };
       const result = await controller.saveDocumentAs(store, source);
       didSave = result !== null;
@@ -730,7 +980,7 @@ export function useMarkdownEditor(
         if (result.sessionRevision === null) {
           await markActiveSessionSaved(source, result.fileName, result.filePath);
         } else {
-          applyRustSessionSave(source, result.fileName, result.filePath);
+          applyRustSessionSave(source, result.fileName, result.filePath, result.diskVersion);
         }
       }
     });
@@ -874,10 +1124,13 @@ export function useMarkdownEditor(
     document: documentBindingRef.current,
     currentDocumentFilePath,
     errorMessage: state.errorMessage,
+    externalFileConflict: isExternalFileConflictOpen ? externalFileConflict : null,
+    externalFileError,
     externalSession,
     fileName: state.fileName,
     flushEditorSession,
     isDirty: state.isDirty,
+    isExternalFileBusy,
     isReady,
     recentFiles,
     previewHtml: renderedPreview.mode === "standard" ? renderedPreview.html : "",
@@ -889,12 +1142,16 @@ export function useMarkdownEditor(
     confirmDiscard,
     handleClearPendingExternalDocuments,
     getContentSnapshot,
+    openEditorSearch,
     handleEditorHandleChange,
     handleEditorTransaction,
     handleCancelStagedFileOperation,
     handleCommitStagedFileOperation,
     handleErrorClear,
     handleErrorRaise,
+    handleExternalFileCancel,
+    handleExternalFileDiscard,
+    handleExternalFileOverwrite,
     handleImportDroppedAssets,
     handleImportPastedAssets,
     handleLoadExternalDocument,
@@ -918,6 +1175,17 @@ function getCurrentEditorContent(
   binding: { readonly content: string } | null,
 ): string {
   return handle?.getSnapshot() ?? binding?.content ?? "";
+}
+
+function canonicalizeLineEndings(content: string): string {
+  return content.replace(/\r\n?|\n/gu, "\n");
+}
+
+function isExternalDocumentChangedError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "external_document_changed";
 }
 
 function toEditorDocumentSessionSnapshot(

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, renameSync } from 'node:fs';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Key } from 'webdriverio';
 
@@ -77,6 +77,35 @@ async function editFirstDiagram(text) {
 describe('real Tauri critical path', () => {
   it('opens, edits, previews, saves, reloads and reports Rust errors through WebView2', async () => {
     await $(editorSelector).waitForDisplayed();
+    await browser.execute((selector) => document.querySelector(selector)?.focus(), editorSelector);
+    await browser.keys([Key.Ctrl, 'f']);
+    await waitForDom('Ctrl+F did not open Edit search in WebView2', () => document.querySelector('.section--edit .cm-search input[name="search"]') !== null);
+    await browser.keys([Key.Escape]);
+    await waitForDom('Edit search panel did not close', () => document.querySelector('.section--edit .cm-search') === null);
+    await browser.execute((selector) => document.querySelector(selector)?.focus(), editorSelector);
+    await browser.keys([Key.Ctrl, Key.Shift, 'f']);
+    await waitForDom('Ctrl+Shift+F did not open Edit replace in WebView2', () => document.querySelector('.section--edit .cm-search input[name="replace"]') !== null);
+    await browser.keys([Key.Escape]);
+    await waitForDom('Edit replace panel did not close', () => document.querySelector('.section--edit .cm-search') === null);
+    await browser.keys([Key.Ctrl, Key.Shift, 'b']);
+    const shortcutMenu = await $('[role="dialog"][aria-label="メニュー"]');
+    await shortcutMenu.waitForDisplayed();
+    await browser.execute(() => {
+      const toggle = document.querySelector('input[aria-label="行番号の表示を切り替え"]');
+      if (toggle instanceof HTMLInputElement && !toggle.checked) toggle.click();
+    });
+    await browser.keys([Key.Escape]);
+    await waitForDom('Edit line numbers did not appear', () => document.querySelector('.cm-lineNumbers .cm-gutterElement') !== null);
+    await $('.cm-lineNumbers .cm-gutterElement').click();
+    await browser.keys([Key.Ctrl, 'f']);
+    await waitForDom('Ctrl+F from line numbers did not open Edit search', () => document.querySelector('.section--edit .cm-search input[name="search"]') !== null);
+    await browser.keys([Key.Escape]);
+    await waitForDom('Edit search panel did not close after gutter shortcut', () => document.querySelector('.section--edit .cm-search') === null);
+    await $('.cm-lineNumbers .cm-gutterElement').click();
+    await browser.keys([Key.Ctrl, Key.Shift, 'f']);
+    await waitForDom('Ctrl+Shift+F from line numbers did not open Edit replace', () => document.querySelector('.section--edit .cm-search input[name="replace"]') !== null);
+    await browser.keys([Key.Escape]);
+    await waitForDom('Edit replace panel did not close after gutter shortcut', () => document.querySelector('.section--edit .cm-search') === null);
     const opened = await waitForState('startup file not registered in Rust', (state) => state.activeDocument === documentPath);
     assert.equal(opened.appConfigDir, join(process.env.KMARK_E2E_RUN_ROOT, 'app-config'), 'E2E app state is not isolated in the temporary workspace');
     assert.equal(opened.documentRevision, 1);
@@ -138,6 +167,32 @@ describe('real Tauri critical path', () => {
       })}`, { cause: error });
     }
 
+    const cleanExternalContent = `${savedContent}\nexternal-clean-marker\n`;
+    writeFileSync(documentPath, cleanExternalContent, 'utf8');
+    await waitForDom('Saved document did not reload an external edit', () => document.querySelector('[aria-label="Markdown エディター"]')?.textContent?.includes('external-clean-marker'));
+    await waitForState('External reload marked the saved document dirty', (state) => state.dirty === false);
+
+    await editAtDocumentStart('LOCAL-');
+    await waitForState('Local edit before external conflict was not dirty', (state) => state.dirty === true);
+    const discardedDiskContent = `${cleanExternalContent}\nexternal-discard-marker\n`;
+    writeFileSync(documentPath, discardedDiskContent, 'utf8');
+    await $('.external-file-conflict-dialog[role="alertdialog"]').waitForDisplayed();
+    await $('.external-file-conflict-dialog__discard').click();
+    await waitForDom('Discard did not load the external document', () => {
+      const content = document.querySelector('[aria-label="Markdown エディター"]')?.textContent ?? '';
+      return content.includes('external-discard-marker') && !content.includes('LOCAL-');
+    });
+    await waitForState('Discard did not clear dirty state', (state) => state.dirty === false);
+
+    await editAtDocumentStart('OVERWRITE-');
+    await waitForState('Local edit before overwrite was not dirty', (state) => state.dirty === true);
+    writeFileSync(documentPath, `${discardedDiskContent}\nexternal-overwrite-marker\n`, 'utf8');
+    await $('.external-file-conflict-dialog[role="alertdialog"]').waitForDisplayed();
+    await $('.external-file-conflict-dialog__overwrite').click();
+    await waitForState('Confirmed overwrite did not save the local document', (state) => state.dirty === false);
+    assert.match(readFileSync(documentPath, 'utf8'), /OVERWRITE-/u);
+    assert.doesNotMatch(readFileSync(documentPath, 'utf8'), /external-overwrite-marker/u);
+
     await browser.keys([Key.Ctrl, 'n']);
     const closed = await waitForState('UI did not close the saved document', (state) => state.activeDocument === null && state.dirty === false);
     assert.notEqual(closed.sessionId, opened.sessionId, 'New document reused the saved Rust session');
@@ -163,7 +218,7 @@ describe('real Tauri critical path', () => {
     await waitForState('Final edit did not reach Rust before failure test', (state) => state.dirty === true);
     await browser.keys([Key.Ctrl, 's']);
     await $('[role="alert"]').waitForDisplayed();
-    assert.match(await $('[role="alert"]').getText(), /保存|失敗|write/u);
+    assert.match(await $('[role="alert"]').getText(), /保存|失敗|write|read markdown document/u);
     assert.equal((await diagnostic()).dirty, true, 'Failed Rust save cleared the dirty state');
   });
 });

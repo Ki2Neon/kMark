@@ -515,9 +515,27 @@ const PRINT_DOCUMENT_FALLBACK_STYLE = `
     overflow-wrap: anywhere;
   }
 
+  .markdown-body .kmark-toc__label {
+    display: grid;
+    grid-template-columns: var(--kmark-toc-number-width, 0) minmax(0, 1fr);
+    column-gap: var(--kmark-toc-number-gap, 0);
+    align-items: baseline;
+  }
+
+  .markdown-body .kmark-toc__label > .kmark-heading-number {
+    grid-column: 1;
+    margin-right: 0;
+  }
+
+  .markdown-body .kmark-toc__heading {
+    grid-column: 2;
+    min-width: 0;
+  }
+
   .markdown-body .kmark-toc__header-page,
   .markdown-body .kmark-toc__page {
-    justify-self: start;
+    justify-self: stretch;
+    text-align: left;
     white-space: nowrap;
   }
 

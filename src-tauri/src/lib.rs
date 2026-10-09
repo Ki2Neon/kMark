@@ -90,6 +90,10 @@ pub(crate) struct AppState {
     pub(crate) preview_jobs: Arc<TauriPreviewJobService>,
     pub(crate) asset_repository: FileSystemAssetRepository,
     pub(crate) markdown_document_repository: FileSystemMarkdownDocumentRepository,
+    pub(crate) markdown_document_watches:
+        Arc<Mutex<HashMap<String, commands::file_open::WatchedMarkdownDocument>>>,
+    pub(crate) markdown_document_io_gate: Arc<Mutex<()>>,
+    pub(crate) next_markdown_document_watch_generation: AtomicU64,
     pub(crate) open_request_queue: InMemoryOpenRequestQueue,
     pub(crate) theme_preferences: Mutex<ThemePreferences>,
     pub(crate) desktop_layout_preferences: Mutex<DesktopLayoutPreferences>,
@@ -120,6 +124,9 @@ impl AppState {
             preview_jobs: Arc::new(TauriPreviewJobService::default()),
             asset_repository: FileSystemAssetRepository,
             markdown_document_repository: FileSystemMarkdownDocumentRepository,
+            markdown_document_watches: Arc::new(Mutex::new(HashMap::new())),
+            markdown_document_io_gate: Arc::new(Mutex::new(())),
+            next_markdown_document_watch_generation: AtomicU64::new(1),
             open_request_queue: InMemoryOpenRequestQueue::default(),
             theme_preferences: Mutex::new(ThemePreferences::default()),
             desktop_layout_preferences: Mutex::new(DesktopLayoutPreferences::default()),
@@ -495,6 +502,10 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Destroyed => {
+                commands::file_open::remove_markdown_document_watch(
+                    &window.app_handle().state::<AppState>(),
+                    window.label(),
+                );
                 window
                     .app_handle()
                     .state::<AppState>()
@@ -805,6 +816,9 @@ pub fn run() {
             commands::sub_window::take_sub_window_source_line_selection_requests,
             commands::sub_window::unregister_sub_window_source,
             commands::file_open::read_markdown_document_at_path,
+            commands::file_open::read_watched_markdown_document,
+            commands::file_open::watch_markdown_document,
+            commands::file_open::unwatch_markdown_document,
             commands::file_open::save_editor_session_markdown_document_as_dialog,
             commands::file_open::save_markdown_document_as_dialog,
             commands::system_fonts::list_system_font_families,

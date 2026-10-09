@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import "../../../src/App.css";
+import { renderMarkdownPreview } from "../../../src/adapters/browser/browserMarkdownPreviewRenderer";
 import {
   DEFAULT_PAGE_CHROME_CONFIG,
   DEFAULT_PAGE_NUMBER_CONFIG,
@@ -102,6 +103,106 @@ test("A4 table of contents tracks changed headings", () => {
     expect(preview.host.querySelector(".kmark-toc__page")?.textContent).toBe("");
     renderPages([makePage(toc.replace("#first", "#renamed")), ...renamed.slice(1)]);
     expect(preview.host.querySelector(".kmark-toc__page")?.textContent).toBe("2");
+  } finally {
+    preview.dispose();
+  }
+});
+
+test("generated TOC titles align independently of heading number length", async () => {
+  const markdown = [
+    "<!-- kmark toc:true toc_min_depth:2 toc_depth:2 -->",
+    "<!-- kmark heading_number:true heading_number_from:2 heading_number_depth:2 -->",
+    "<!-- kmark { -->",
+    "# Document",
+    ...Array.from({ length: 10 }, (_, index) => `## Section ${index + 1}`),
+    "<!-- kmark } -->",
+  ].join("\n");
+  const rendered = await renderMarkdownPreview(markdown, null, "standard", {
+    revision: 1,
+    documentKey: crypto.randomUUID(),
+    plantumlRenderEpoch: 0,
+    plantumlHttpsHosts: [],
+  });
+  if (rendered.mode !== "standard") {
+    throw new Error("Expected a standard preview");
+  }
+  const preview = mountPreview();
+  try {
+    const checkAlignment = () => {
+      const labels = Array.from(preview.host.querySelectorAll<HTMLElement>(".kmark-toc__label"));
+      expect(labels).toHaveLength(10);
+      const firstNumber = labels[0].querySelector<HTMLElement>(".kmark-heading-number")!;
+      const lastNumber = labels[9].querySelector<HTMLElement>(".kmark-heading-number")!;
+      const firstTitle = labels[0].querySelector<HTMLElement>(".kmark-toc__heading")!;
+      const lastTitle = labels[9].querySelector<HTMLElement>(".kmark-toc__heading")!;
+      expect(firstNumber.textContent).toBe("1.");
+      expect(lastNumber.textContent).toBe("10.");
+      expect(Math.abs(firstNumber.getBoundingClientRect().left - lastNumber.getBoundingClientRect().left)).toBeLessThan(1);
+      expect(Math.abs(firstTitle.getBoundingClientRect().left - lastTitle.getBoundingClientRect().left)).toBeLessThan(1);
+      expect(firstTitle.getBoundingClientRect().left).toBeGreaterThan(lastNumber.getBoundingClientRect().right);
+    };
+
+    preview.render(rendered);
+    checkAlignment();
+    preview.render({
+      mode: "a4",
+      pages: [makePage(rendered.html)],
+      defaultPageStyle: DEFAULT_PAGE_STYLE,
+      defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE,
+    });
+    await vi.waitFor(checkAlignment);
+  } finally {
+    preview.dispose();
+  }
+});
+
+test("A4 TOC page numbers start at the same left edge for one and two digits", async () => {
+  const toc = `<nav class="kmark-toc"><ol class="kmark-toc__list">${Array.from({ length: 10 }, (_, index) =>
+    `<li class="kmark-toc__item"><a class="kmark-toc__link" href="#section-${index}">Section ${index}</a></li>`).join("")}</ol></nav>`;
+  const preview = mountPreview();
+  try {
+    preview.render({
+      mode: "a4",
+      pages: [makePage(toc), ...Array.from({ length: 10 }, (_, index) => makePage(`<h1 id="section-${index}">Section ${index}</h1>`))],
+      defaultPageStyle: DEFAULT_PAGE_STYLE,
+      defaultTextStyle: DEFAULT_PREVIEW_TEXT_STYLE,
+    });
+    await vi.waitFor(() => expect(preview.host.querySelectorAll(".kmark-toc__page")).toHaveLength(10));
+    const pages = Array.from(preview.host.querySelectorAll<HTMLElement>(".kmark-toc__page"));
+    expect(pages[0].textContent).toBe("2");
+    expect(pages[9].textContent).toBe("11");
+    expect(getComputedStyle(pages[0]).textAlign).toBe("left");
+    expect(Math.abs(pages[0].getBoundingClientRect().left - pages[9].getBoundingClientRect().left)).toBeLessThan(1);
+  } finally {
+    preview.dispose();
+  }
+});
+
+test.each(["standard", "a4"] as const)("%s preview follows a Markdown heading link without TOC", async (mode) => {
+  const separator = mode === "a4"
+    ? "<!-- --- -->"
+    : Array.from({ length: 20 }, (_, index) => `Paragraph ${index} with enough text to fill the preview area.`).join("\n\n");
+  const markdown = `[文面](#リンク先見出し名称)\n\n${separator}\n\n## リンク先見出し名称`;
+  const rendered = await renderMarkdownPreview(markdown, null, mode, {
+    revision: 1,
+    documentKey: crypto.randomUUID(),
+    plantumlRenderEpoch: 0,
+    plantumlHttpsHosts: [],
+  });
+  const preview = mountPreview();
+  preview.host.style.height = "400px";
+  preview.host.style.width = "800px";
+  try {
+    preview.render(rendered);
+    const viewport = preview.host.querySelector<HTMLElement>(".preview-section__body")!;
+    const link = preview.host.querySelector<HTMLAnchorElement>('a[href="#リンク先見出し名称"]')!;
+    const heading = preview.host.querySelector<HTMLElement>('h2[id="リンク先見出し名称"]')!;
+    expect(link).not.toBeNull();
+    expect(heading).not.toBeNull();
+    expect(heading.getBoundingClientRect().top).toBeGreaterThan(viewport.getBoundingClientRect().bottom);
+    link.click();
+    expect(viewport.scrollTop).toBeGreaterThan(0);
+    expect(heading.getBoundingClientRect().top).toBeLessThan(viewport.getBoundingClientRect().bottom);
   } finally {
     preview.dispose();
   }

@@ -130,15 +130,21 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
 
       if (saveTarget.kind === "external-path") {
         if (isTauri()) {
+          if (source.expectedDiskVersion === undefined) {
+            throw new Error("保存前のディスク版を確認できていません。");
+          }
           const result = await overwriteEditorSessionMarkdownDocumentAtPath(
             saveTarget.filePath,
             source.sessionId,
             source.revision,
+            source.expectedDiskVersion,
+            source.overwriteExpectedVersion,
           );
           return {
             fileName: result.fileName,
             filePath: result.filePath,
             sessionRevision: source.revision,
+            diskVersion: result.diskVersion,
           };
         }
 
@@ -168,6 +174,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
           fileName: result.fileName,
           filePath: result.filePath,
           sessionRevision: source.revision,
+          diskVersion: result.diskVersion,
         };
       }
 
@@ -204,6 +211,7 @@ export function createBrowserMarkdownDocumentGateway(): MarkdownDocumentGateway 
           fileName: result.fileName,
           filePath: result.filePath,
           sessionRevision: source.revision,
+          diskVersion: result.diskVersion,
         };
       }
 

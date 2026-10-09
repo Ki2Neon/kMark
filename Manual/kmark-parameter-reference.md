@@ -463,7 +463,7 @@ flowchart TD
 - 対象: TOC directive より後の heading
 - page break跨ぎ: 対象
 - explicit heading id: `{#manual}` を優先
-- generated heading id: link有効時に自動生成
+- generated heading id: 目次の有無に関係なく見出し名から自動生成。TOCは同じIDを参照
 - heading_number有効時: 目次labelへ同一番号を表示
 - 用紙preview: heading実pageから page番号列を補完
 
