@@ -13,6 +13,7 @@ pub mod file_open;
 pub mod generated_svg;
 pub mod markdown_render;
 pub mod preview_preferences;
+pub mod print;
 pub mod recent_files;
 pub mod state_recovery;
 pub mod sub_window;

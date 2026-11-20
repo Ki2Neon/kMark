@@ -9,6 +9,7 @@ import { createBrowserRecentFileStore } from "../../adapters/browser/browserRece
 import { createEditorDocumentGateway } from "../../adapters/editor/createEditorDocumentGateway";
 import { EditorMutationQueue } from "../../adapters/editor/editorMutationQueue";
 import { createTauriExternalDocumentSessionGateway } from "../../adapters/tauri/tauriExternalDocumentSessionGateway";
+import { createTauriMarkdownDocumentPrinter } from "../../adapters/tauri/tauriMarkdownDocumentPrinter";
 import {
   type EditorDocumentSessionSnapshot,
   type EditorTransaction,
@@ -114,7 +115,7 @@ export function useMarkdownEditor(
       },
       draftStore: createBrowserDraftStore(),
       documentGateway: createBrowserMarkdownDocumentGateway(),
-      printer: createBrowserMarkdownDocumentPrinter(),
+      printer: isTauri() ? createTauriMarkdownDocumentPrinter() : createBrowserMarkdownDocumentPrinter(),
       recentFileStore: createBrowserRecentFileStore(),
       renderer: createBrowserMarkdownRenderer(),
       rules: rulesRef.current,

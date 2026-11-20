@@ -36,11 +36,11 @@ type PrintMarkdownDocumentOptions =
   | A4PrintMarkdownDocumentOptions;
 type PrintMarkdownDocumentRuntimeOptions = {
   readonly preparePrintWindow?: (printWindow: Window) => Promise<(() => void) | void> | (() => void) | void;
+  /** Platform printer owns the dialog lifetime and resolves after dismissal. */
+  readonly printWindow?: (printWindow: Window) => Promise<void>;
 };
 
 const PRINT_DOCUMENT_LOAD_TIMEOUT_MS = 3000;
-const PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 2000;
-const A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS = 60000;
 const KMARK_PRINT_ROOT_ID = "kmark-print-root";
 const PRINT_DOCUMENT_ROOT_ATTRIBUTE_NAMES = ["data-app-theme", "data-preview-colors"] as const;
 
@@ -1326,16 +1326,11 @@ async function printA4MarkdownDocument(
 
     let isSettled = false;
     let loadTimeoutId: number | null = null;
-    let fallbackTimeoutId: number | null = null;
     let printWindowCleanup: (() => void) | null = null;
 
     const cleanup = () => {
       if (loadTimeoutId !== null) {
         window.clearTimeout(loadTimeoutId);
-      }
-
-      if (fallbackTimeoutId !== null) {
-        window.clearTimeout(fallbackTimeoutId);
       }
 
       printWindowCleanup?.();
@@ -1377,6 +1372,11 @@ async function printA4MarkdownDocument(
           printWindowCleanup = await runtimeOptions.preparePrintWindow?.(printWindow) ?? null;
           await printWindow.document.fonts?.ready;
           syncA4PageLayout(printWindow.document);
+          if (runtimeOptions.printWindow !== undefined) {
+            await runtimeOptions.printWindow(printWindow);
+            finish(resolve);
+            return;
+          }
         } catch (error) {
           finish(() => reject(error instanceof Error ? error : new Error("A4印刷画面の準備に失敗しました。")));
           return;
@@ -1388,7 +1388,6 @@ async function printA4MarkdownDocument(
         };
 
         printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
-        fallbackTimeoutId = window.setTimeout(finalizeSuccess, A4_PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
 
         try {
           printWindow.focus();
@@ -1429,18 +1428,36 @@ function createPrintDocumentMarkup(options: StandardPrintMarkdownDocumentOptions
 </html>`;
 }
 
-export function printMarkdownDocument(
+let printDocumentInProgress = false;
+
+export async function printMarkdownDocument(
   options: PrintMarkdownDocumentOptions,
   runtimeOptions: PrintMarkdownDocumentRuntimeOptions = {},
 ): Promise<void> {
   if (typeof window === "undefined" || typeof document === "undefined") {
-    return Promise.reject(new Error("この環境では印刷できません。"));
+    throw new Error("この環境では印刷できません。");
   }
 
-  if (options.displayMode === "a4") {
-    return printA4MarkdownDocument(options, runtimeOptions);
+  if (printDocumentInProgress) {
+    throw new Error("印刷画面を閉じてから再度印刷してください。");
   }
 
+  printDocumentInProgress = true;
+  try {
+    if (options.displayMode === "a4") {
+      await printA4MarkdownDocument(options, runtimeOptions);
+    } else {
+      await printStandardMarkdownDocument(options, runtimeOptions);
+    }
+  } finally {
+    printDocumentInProgress = false;
+  }
+}
+
+function printStandardMarkdownDocument(
+  options: StandardPrintMarkdownDocumentOptions,
+  runtimeOptions: PrintMarkdownDocumentRuntimeOptions,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -1457,16 +1474,11 @@ export function printMarkdownDocument(
 
     let isSettled = false;
     let loadTimeoutId: number | null = null;
-    let fallbackTimeoutId: number | null = null;
     let printWindowCleanup: (() => void) | null = null;
 
     const cleanup = () => {
       if (loadTimeoutId !== null) {
         window.clearTimeout(loadTimeoutId);
-      }
-
-      if (fallbackTimeoutId !== null) {
-        window.clearTimeout(fallbackTimeoutId);
       }
 
       printWindowCleanup?.();
@@ -1506,17 +1518,23 @@ export function printMarkdownDocument(
       const prepareAndPrint = async () => {
         try {
           printWindowCleanup = await runtimeOptions.preparePrintWindow?.(printWindow) ?? null;
+          await printWindow.document.fonts?.ready;
+          if (runtimeOptions.printWindow !== undefined) {
+            await runtimeOptions.printWindow(printWindow);
+            finish(resolve);
+            return;
+          }
         } catch (error) {
           finish(() => reject(error instanceof Error ? error : new Error("印刷画面の準備に失敗しました。")));
           return;
         }
 
         const finalizeSuccess = () => {
+          printWindow.removeEventListener("afterprint", finalizeSuccess);
           finish(resolve);
         };
 
         printWindow.addEventListener("afterprint", finalizeSuccess, { once: true });
-        fallbackTimeoutId = window.setTimeout(finalizeSuccess, PRINT_DIALOG_FALLBACK_TIMEOUT_MS);
 
         try {
           printWindow.focus();

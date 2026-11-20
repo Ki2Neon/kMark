@@ -803,6 +803,7 @@ pub fn run() {
             commands::markdown_render::render_editor_session_preview,
             commands::preview_preferences::get_preview_preferences,
             commands::preview_preferences::set_preview_preferences,
+            commands::print::show_print_dialog,
             commands::recent_files::get_recent_files,
             commands::recent_files::record_recent_file,
             commands::state_recovery::take_state_recovery_notices,

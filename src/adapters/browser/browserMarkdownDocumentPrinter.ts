@@ -12,12 +12,19 @@ const PRINT_MODEL_VIEWER_SELECTOR = ".kmark-model-viewer[data-kmark-model-displa
 const PRINT_MODEL_CANVAS_ROOT_SELECTOR = ".kmark-model-canvas";
 const PRINT_MODEL_CANVAS_SELECTOR = ".kmark-model-canvas > canvas";
 
-export function createBrowserMarkdownDocumentPrinter(): MarkdownDocumentPrinter {
+type BrowserMarkdownDocumentPrinterOptions = {
+  readonly printWindow?: (printWindow: Window) => Promise<void>;
+};
+
+export function createBrowserMarkdownDocumentPrinter(
+  options: BrowserMarkdownDocumentPrinterOptions = {},
+): MarkdownDocumentPrinter {
   return {
     async print(request) {
       const title = resolveDocumentFileStem(request.sourceFileName);
       const runtimeOptions = {
         preparePrintWindow: preparePrintWindowModelViewers,
+        printWindow: options.printWindow,
       };
 
       if (request.displayMode === "a4") {
